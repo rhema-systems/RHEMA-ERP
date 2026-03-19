@@ -161,6 +161,7 @@ builder.Services.AddErpSystemCors(builder.Configuration);
 builder.Services.AddErpSystemRateLimiting();
 builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
 builder.Services.AddDevelopmentServices(builder.Environment);
 
 // Add Quality Certificate Service

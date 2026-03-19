@@ -20,7 +20,7 @@ namespace ErpSystem.Core.Entities.Finance
         [Required]
         public DateTime PaymentDate { get; set; }
 
-        public PaymentMethod PaymentMethod { get; set; }
+        public InvoicePaymentMethod PaymentMethod { get; set; }
 
         [MaxLength(100)]
         public string? Reference { get; set; }
@@ -46,7 +46,7 @@ namespace ErpSystem.Core.Entities.Finance
         public string? TransactionId { get; set; }
     }
 
-    public enum PaymentMethod
+    public enum InvoicePaymentMethod
     {
         Cash = 1,
         Check = 2,

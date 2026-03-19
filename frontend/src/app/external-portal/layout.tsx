@@ -29,15 +29,22 @@ export default function ExternalPortalLayout({
       return;
     }
 
-    // Redirect internal users (LDAP) to main ERP system
-    if (user.authenticationProvider !== 'Local') {
-      console.log('User is not Local authentication, redirecting to dashboard');
+    // Check if user has admin privileges
+    const isSuperAdmin = user.roles?.includes('SuperAdmin');
+    const isAdministrator = user.roles?.includes('Administrator');
+    const username = user.username?.toLowerCase() || '';
+    const isAdminUser = username === 'admin';
+    const hasAdminPrivileges = isSuperAdmin || isAdministrator || isAdminUser;
+
+    // Redirect internal users (LDAP) OR admin users to main ERP system
+    if (user.authenticationProvider !== 'Local' || hasAdminPrivileges) {
+      console.log('User is internal or has admin privileges, redirecting to dashboard');
       router.push('/dashboard');
       setIsValidating(false);
       return;
     }
 
-    // User is authorized
+    // User is authorized for external portal (Local auth without admin privileges)
     setIsAuthorized(true);
     setIsValidating(false);
   }, [router]);

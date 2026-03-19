@@ -1,7 +1,8 @@
-using ErpSystem.Core.Interfaces;
+
+using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
 using ErpSystem.Data.Extensions;
-using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Interfaces;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace ErpSystem.Api.Extensions
@@ -17,7 +18,7 @@ namespace ErpSystem.Api.Extensions
         /// Supports: SqlServer, PostgreSQL, MySQL, Oracle, SQLite
         /// </summary>
         public static IServiceCollection AddConfigurableDatabase(
-            this IServiceCollection services,
+            this IServiceCollection services, 
             IConfiguration configuration)
         {
             var provider = configuration.GetValue<string>("Database:Provider") ?? "SqlServer";
@@ -31,19 +32,27 @@ namespace ErpSystem.Api.Extensions
                 services.AddAuditLogging(configuration);
             }
 
-            services.AddDbContext<ApplicationDbContext>(options =>
+            services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
             {
                 ConfigureDatabase(options, provider, connectionString);
+                
+                // Add audit interceptor if enabled
+                if (auditEnabled)
+                {
+                    options.AddAuditInterceptor(serviceProvider);
+                }
+            });
 
-                // Enable lazy loading proxies for better navigation property handling
-                // Temporarily commented out due to build errors
-                // options.UseLazyLoadingProxies();
-
-                // NOTE: Audit interceptor requires service provider in DbContext constructor
-                // which causes issues with tenant filtering during authentication.
-                // Keeping audit disabled for now - can be re-enabled if needed by:
-                // 1. Fixing the ApplicationDbContext constructor to not access ICurrentUserProvider
-                // 2. Or implementing a different approach for tenant filtering
+            // Register ReportingDbContext with the same configuration
+            services.AddDbContext<ReportingDbContext>((serviceProvider, options) =>
+            {
+                ConfigureDatabase(options, provider, connectionString);
+                
+                // Add audit interceptor if enabled
+                if (auditEnabled)
+                {
+                    options.AddAuditInterceptor(serviceProvider);
+                }
             });
 
             return services;
@@ -56,44 +65,44 @@ namespace ErpSystem.Api.Extensions
                 case "sqlserver":
                     ConfigureSqlServer(options, connectionString);
                     break;
-
+                    
                 case "postgresql":
                 case "postgres":
                     ConfigurePostgreSQL(options, connectionString);
                     break;
-
+                    
                 case "mysql":
                 case "mariadb":
                     ConfigureMySQL(options, connectionString);
                     break;
-
+                    
                 case "oracle":
                     ConfigureOracle(options, connectionString);
                     break;
-
+                    
                 case "sqlite":
                     ConfigureSQLite(options, connectionString);
                     break;
-
+                    
                 case "db2":
                 case "ibm":
                     ConfigureDB2(options, connectionString);
                     break;
-
+                    
                 case "firebird":
                     ConfigureFirebird(options, connectionString);
                     break;
-
+                    
                 case "cosmosdb":
                 case "cosmos":
                     ConfigureCosmosDB(options, connectionString);
                     break;
-
+                    
                 case "inmemory":
                 case "memory":
                     ConfigureInMemory(options, connectionString);
                     break;
-
+                    
                 default:
                     throw new InvalidOperationException($"Unsupported database provider: {provider}. " +
                         $"Supported providers: SqlServer, PostgreSQL, MySQL, Oracle, SQLite, DB2, Firebird, CosmosDB, InMemory");
@@ -125,13 +134,13 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using PostgreSQL and add the NuGet package:
             // Npgsql.EntityFrameworkCore.PostgreSQL
-
+            
             throw new NotImplementedException(
                 "PostgreSQL support is commented out. To enable:\n" +
                 "1. Uncomment the Npgsql.EntityFrameworkCore.PostgreSQL package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'PostgreSQL' in appsettings.json");
-
+            
             /*
             options.UseNpgsql(connectionString, npgsqlOptions =>
             {
@@ -150,13 +159,13 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using MySQL and add the NuGet package:
             // Pomelo.EntityFrameworkCore.MySql
-
+            
             throw new NotImplementedException(
                 "MySQL support is commented out. To enable:\n" +
                 "1. Uncomment the Pomelo.EntityFrameworkCore.MySql package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'MySQL' in appsettings.json");
-
+            
             /*
             var serverVersion = ServerVersion.AutoDetect(connectionString);
             options.UseMySql(connectionString, serverVersion, mysqlOptions =>
@@ -176,13 +185,13 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using Oracle and add the NuGet package:
             // Oracle.EntityFrameworkCore
-
+            
             throw new NotImplementedException(
                 "Oracle support is commented out. To enable:\n" +
                 "1. Uncomment the Oracle.EntityFrameworkCore package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'Oracle' in appsettings.json");
-
+            
             /*
             options.UseOracle(connectionString, oracleOptions =>
             {
@@ -199,13 +208,13 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using SQLite and add the NuGet package:
             // Microsoft.EntityFrameworkCore.Sqlite
-
+            
             throw new NotImplementedException(
                 "SQLite support is commented out. To enable:\n" +
                 "1. Uncomment the Microsoft.EntityFrameworkCore.Sqlite package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'SQLite' in appsettings.json");
-
+            
             /*
             options.UseSqlite(connectionString, sqliteOptions =>
             {
@@ -221,13 +230,13 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using IBM DB2 and add the NuGet package:
             // IBM.EntityFrameworkCore
-
+            
             throw new NotImplementedException(
                 "IBM DB2 support is commented out. To enable:\n" +
                 "1. Uncomment the IBM.EntityFrameworkCore package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'DB2' in appsettings.json");
-
+            
             /*
             options.UseDb2(connectionString, db2Options =>
             {
@@ -243,13 +252,13 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using Firebird and add the NuGet package:
             // FirebirdSql.EntityFrameworkCore.Firebird
-
+            
             throw new NotImplementedException(
                 "Firebird support is commented out. To enable:\n" +
                 "1. Uncomment the FirebirdSql.EntityFrameworkCore.Firebird package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'Firebird' in appsettings.json");
-
+            
             /*
             options.UseFirebird(connectionString, firebirdOptions =>
             {
@@ -265,14 +274,14 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using Azure Cosmos DB and add the NuGet package:
             // Microsoft.EntityFrameworkCore.Cosmos
-
+            
             throw new NotImplementedException(
                 "Azure Cosmos DB support is commented out. To enable:\n" +
                 "1. Uncomment the Microsoft.EntityFrameworkCore.Cosmos package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'CosmosDB' in appsettings.json\n" +
                 "4. Note: Cosmos DB has different data modeling requirements");
-
+            
             /*
             // Connection string format: "AccountEndpoint=https://...; AccountKey=...; DatabaseName=..."
             var parts = connectionString.Split(';');
@@ -290,14 +299,14 @@ namespace ErpSystem.Api.Extensions
         {
             // Uncomment when using In-Memory database and add the NuGet package:
             // Microsoft.EntityFrameworkCore.InMemory
-
+            
             throw new NotImplementedException(
                 "In-Memory Database support is commented out. To enable:\n" +
                 "1. Uncomment the Microsoft.EntityFrameworkCore.InMemory package in .csproj\n" +
                 "2. Uncomment the code below\n" +
                 "3. Set Database:Provider = 'InMemory' in appsettings.json\n" +
                 "4. Note: In-Memory is for testing only - data is not persisted");
-
+            
             /*
             // connectionString can be used as database name for InMemory
             var databaseName = string.IsNullOrEmpty(connectionString) ? "TestDatabase" : connectionString;
@@ -313,7 +322,7 @@ namespace ErpSystem.Api.Extensions
         {
             var provider = configuration.GetValue<string>("Database:Provider") ?? "SqlServer";
             var connectionString = configuration.GetConnectionString("DefaultConnection") ?? "";
-
+            
             return new DatabaseProviderInfo
             {
                 Provider = provider,

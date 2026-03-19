@@ -1,0 +1,941 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Data;
+
+namespace ErpSystem.Api.Services.Finance.Taxation
+{
+    /// <summary>
+    /// Tax configuration service implementation
+    /// Manages taxes, tax groups, and components
+    /// </summary>
+    public class TaxConfigurationService : ITaxConfigurationService
+    {
+        private readonly ApplicationDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly ILogger<TaxConfigurationService> _logger;
+
+        public TaxConfigurationService(
+            ApplicationDbContext context,
+            ICurrentUserService currentUserService,
+            ILogger<TaxConfigurationService> logger)
+        {
+            _context = context;
+            _currentUserService = currentUserService;
+            _logger = logger;
+        }
+
+        private Guid TenantId => _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+        private string UserName => _currentUserService.UserName ?? "system";
+
+        #region Taxes
+
+        public async Task<IReadOnlyList<TaxDto>> GetAllTaxesAsync(CancellationToken cancellationToken = default)
+        {
+            var taxes = await _context.Set<Tax>()
+                .Where(t => t.TenantId == TenantId && !t.IsDeleted)
+                .OrderBy(t => t.Code)
+                .ToListAsync(cancellationToken);
+
+            return taxes.Select(MapToTaxDto).ToList();
+        }
+
+        public async Task<IReadOnlyList<TaxDto>> GetActiveTaxesAsync(TaxApplicability? applicability = null, CancellationToken cancellationToken = default)
+        {
+            var query = _context.Set<Tax>()
+                .Where(t => t.TenantId == TenantId && t.IsActive && !t.IsDeleted);
+
+            if (applicability.HasValue)
+            {
+                query = query.Where(t => t.Applicability == applicability.Value || t.Applicability == TaxApplicability.Both);
+            }
+
+            var taxes = await query.OrderBy(t => t.Code).ToListAsync(cancellationToken);
+            return taxes.Select(MapToTaxDto).ToList();
+        }
+
+        public async Task<TaxDto?> GetTaxByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var tax = await _context.Set<Tax>()
+                .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == TenantId && !t.IsDeleted, cancellationToken);
+
+            return tax == null ? null : MapToTaxDto(tax);
+        }
+
+        public async Task<TaxDto?> GetTaxByCodeAsync(string code, CancellationToken cancellationToken = default)
+        {
+            var tax = await _context.Set<Tax>()
+                .FirstOrDefaultAsync(t => t.Code == code && t.TenantId == TenantId && !t.IsDeleted, cancellationToken);
+
+            return tax == null ? null : MapToTaxDto(tax);
+        }
+
+        public async Task<TaxDto> CreateTaxAsync(CreateTaxDto dto, CancellationToken cancellationToken = default)
+        {
+            // Validate unique code
+            var existing = await _context.Set<Tax>()
+                .FirstOrDefaultAsync(t => t.Code == dto.Code && t.TenantId == TenantId && !t.IsDeleted, cancellationToken);
+
+            if (existing != null)
+                throw new InvalidOperationException($"Tax with code '{dto.Code}' already exists.");
+
+            var tax = new Tax
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = dto.Code,
+                Name = dto.Name,
+                Description = dto.Description,
+                Rate = dto.Rate,
+                EffectiveFrom = dto.EffectiveFrom ?? DateTime.UtcNow,
+                Applicability = dto.Applicability,
+                Category = dto.Category,
+                IsActive = true,
+                IsInputTaxDeductible = dto.IsInputTaxDeductible,
+                ThresholdAmount = dto.ThresholdAmount,
+                TaxPayableAccountId = dto.TaxPayableAccountId,
+                TaxReceivableAccountId = dto.TaxReceivableAccountId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+
+            await _context.Set<Tax>().AddAsync(tax, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Created tax: {Code} - {Name} @ {Rate}%", tax.Code, tax.Name, tax.Rate);
+
+            return MapToTaxDto(tax);
+        }
+
+        public async Task<TaxDto> UpdateTaxAsync(Guid id, UpdateTaxDto dto, CancellationToken cancellationToken = default)
+        {
+            var tax = await _context.Set<Tax>()
+                .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == TenantId && !t.IsDeleted, cancellationToken);
+
+            if (tax == null)
+                throw new InvalidOperationException("Tax not found.");
+
+            // Track rate changes for history
+            if (dto.Rate.HasValue && dto.Rate.Value != tax.Rate)
+            {
+                await AddRateHistoryAsync(tax, cancellationToken);
+                tax.Rate = dto.Rate.Value;
+                tax.EffectiveFrom = DateTime.UtcNow;
+            }
+
+            if (dto.Name != null) tax.Name = dto.Name;
+            if (dto.Description != null) tax.Description = dto.Description;
+            if (dto.Applicability.HasValue) tax.Applicability = dto.Applicability.Value;
+            if (dto.Category.HasValue) tax.Category = dto.Category.Value;
+            if (dto.IsActive.HasValue) tax.IsActive = dto.IsActive.Value;
+            if (dto.IsInputTaxDeductible.HasValue) tax.IsInputTaxDeductible = dto.IsInputTaxDeductible.Value;
+            if (dto.ThresholdAmount.HasValue) tax.ThresholdAmount = dto.ThresholdAmount;
+            if (dto.TaxPayableAccountId.HasValue) tax.TaxPayableAccountId = dto.TaxPayableAccountId;
+            if (dto.TaxReceivableAccountId.HasValue) tax.TaxReceivableAccountId = dto.TaxReceivableAccountId;
+
+            tax.UpdatedAt = DateTime.UtcNow;
+            tax.UpdatedBy = UserName;
+
+            _context.Set<Tax>().Update(tax);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Updated tax: {Code}", tax.Code);
+
+            return MapToTaxDto(tax);
+        }
+
+        public async Task DeleteTaxAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var tax = await _context.Set<Tax>()
+                .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == TenantId && !t.IsDeleted, cancellationToken);
+
+            if (tax == null)
+                throw new InvalidOperationException("Tax not found.");
+
+            // Check for usage in groups
+            var usedInGroups = await _context.Set<TaxGroupComponent>()
+                .AnyAsync(c => c.TaxId == id && c.TenantId == TenantId && !c.IsDeleted, cancellationToken);
+
+            if (usedInGroups)
+                throw new InvalidOperationException("Cannot delete tax used in tax groups. Deactivate instead.");
+
+            tax.IsDeleted = true;
+            tax.UpdatedAt = DateTime.UtcNow;
+            tax.UpdatedBy = UserName;
+
+            _context.Set<Tax>().Update(tax);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Deleted tax: {Code}", tax.Code);
+        }
+
+        private async Task AddRateHistoryAsync(Tax tax, CancellationToken cancellationToken)
+        {
+            var history = new TaxRateHistory
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TaxId = tax.Id,
+                Rate = tax.Rate,
+                EffectiveFrom = tax.EffectiveFrom,
+                EffectiveTo = DateTime.UtcNow,
+                Notes = $"Rate changed from {tax.Rate}%",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+
+            await _context.Set<TaxRateHistory>().AddAsync(history, cancellationToken);
+        }
+
+        #endregion
+
+        #region Tax Rate History
+
+        public async Task<IReadOnlyList<TaxRateHistoryDto>> GetTaxRateHistoryAsync(Guid taxId, CancellationToken cancellationToken = default)
+        {
+            var history = await _context.Set<TaxRateHistory>()
+                .Where(h => h.TaxId == taxId && h.TenantId == TenantId && !h.IsDeleted)
+                .OrderByDescending(h => h.EffectiveFrom)
+                .ToListAsync(cancellationToken);
+
+            return history.Select(h => new TaxRateHistoryDto
+            {
+                Id = h.Id,
+                TaxId = h.TaxId,
+                Rate = h.Rate,
+                EffectiveFrom = h.EffectiveFrom,
+                EffectiveTo = h.EffectiveTo,
+                Notes = h.Notes,
+                CreatedBy = h.CreatedBy,
+                CreatedAt = h.CreatedAt
+            }).ToList();
+        }
+
+        #endregion
+
+        #region Tax Groups
+
+        public async Task<IReadOnlyList<TaxGroupDto>> GetAllTaxGroupsAsync(CancellationToken cancellationToken = default)
+        {
+            var groups = await _context.Set<TaxGroup>()
+                .Where(g => g.TenantId == TenantId && !g.IsDeleted)
+                .Include(g => g.Components.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.Tax)
+                .OrderBy(g => g.Code)
+                .ToListAsync(cancellationToken);
+
+            return groups.Select(MapToTaxGroupDto).ToList();
+        }
+
+        public async Task<IReadOnlyList<TaxGroupDto>> GetActiveTaxGroupsAsync(TaxApplicability? applicability = null, CancellationToken cancellationToken = default)
+        {
+            var query = _context.Set<TaxGroup>()
+                .Where(g => g.TenantId == TenantId && g.IsActive && !g.IsDeleted);
+
+            if (applicability.HasValue)
+            {
+                query = query.Where(g => g.Applicability == applicability.Value || g.Applicability == TaxApplicability.Both);
+            }
+
+            var groups = await query
+                .Include(g => g.Components.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.Tax)
+                .OrderBy(g => g.Code)
+                .ToListAsync(cancellationToken);
+
+            return groups.Select(MapToTaxGroupDto).ToList();
+        }
+
+        public async Task<TaxGroupDto?> GetTaxGroupByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var group = await _context.Set<TaxGroup>()
+                .Include(g => g.Components.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.Tax)
+                .FirstOrDefaultAsync(g => g.Id == id && g.TenantId == TenantId && !g.IsDeleted, cancellationToken);
+
+            return group == null ? null : MapToTaxGroupDto(group);
+        }
+
+        public async Task<TaxGroupDto?> GetTaxGroupByCodeAsync(string code, CancellationToken cancellationToken = default)
+        {
+            var group = await _context.Set<TaxGroup>()
+                .Include(g => g.Components.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.Tax)
+                .FirstOrDefaultAsync(g => g.Code == code && g.TenantId == TenantId && !g.IsDeleted, cancellationToken);
+
+            return group == null ? null : MapToTaxGroupDto(group);
+        }
+
+        public async Task<TaxGroupDto> CreateTaxGroupAsync(CreateTaxGroupDto dto, CancellationToken cancellationToken = default)
+        {
+            // Validate unique code
+            var existing = await _context.Set<TaxGroup>()
+                .FirstOrDefaultAsync(g => g.Code == dto.Code && g.TenantId == TenantId && !g.IsDeleted, cancellationToken);
+
+            if (existing != null)
+                throw new InvalidOperationException($"Tax group with code '{dto.Code}' already exists.");
+
+            // If setting as default, unset other defaults
+            if (dto.IsDefault)
+            {
+                await UnsetDefaultGroupsAsync(dto.Applicability, cancellationToken);
+            }
+
+            var group = new TaxGroup
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = dto.Code,
+                Name = dto.Name,
+                Description = dto.Description,
+                Applicability = dto.Applicability,
+                IsDefault = dto.IsDefault,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+
+            await _context.Set<TaxGroup>().AddAsync(group, cancellationToken);
+
+            // Add components if provided
+            if (dto.Components != null && dto.Components.Any())
+            {
+                foreach (var compDto in dto.Components)
+                {
+                    var component = new TaxGroupComponent
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        TaxGroupId = group.Id,
+                        TaxId = compDto.TaxId,
+                        CalculationOrder = compDto.CalculationOrder,
+                        CompoundBasis = compDto.CompoundBasis,
+                        AppliesOnTaxCodes = compDto.AppliesOnTaxCodes != null ? string.Join(",", compDto.AppliesOnTaxCodes) : null,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = UserName
+                    };
+                    await _context.Set<TaxGroupComponent>().AddAsync(component, cancellationToken);
+                }
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Created tax group: {Code} - {Name}", group.Code, group.Name);
+
+            // Reload with components
+            return (await GetTaxGroupByIdAsync(group.Id, cancellationToken))!;
+        }
+
+        public async Task<TaxGroupDto> UpdateTaxGroupAsync(Guid id, UpdateTaxGroupDto dto, CancellationToken cancellationToken = default)
+        {
+            var group = await _context.Set<TaxGroup>()
+                .FirstOrDefaultAsync(g => g.Id == id && g.TenantId == TenantId && !g.IsDeleted, cancellationToken);
+
+            if (group == null)
+                throw new InvalidOperationException("Tax group not found.");
+
+            // If setting as default, unset other defaults
+            if (dto.IsDefault == true && !group.IsDefault)
+            {
+                await UnsetDefaultGroupsAsync(dto.Applicability ?? group.Applicability, cancellationToken);
+            }
+
+            if (dto.Name != null) group.Name = dto.Name;
+            if (dto.Description != null) group.Description = dto.Description;
+            if (dto.Applicability.HasValue) group.Applicability = dto.Applicability.Value;
+            if (dto.IsDefault.HasValue) group.IsDefault = dto.IsDefault.Value;
+            if (dto.IsActive.HasValue) group.IsActive = dto.IsActive.Value;
+
+            group.UpdatedAt = DateTime.UtcNow;
+            group.UpdatedBy = UserName;
+
+            _context.Set<TaxGroup>().Update(group);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Updated tax group: {Code}", group.Code);
+
+            return (await GetTaxGroupByIdAsync(group.Id, cancellationToken))!;
+        }
+
+        public async Task DeleteTaxGroupAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var group = await _context.Set<TaxGroup>()
+                .FirstOrDefaultAsync(g => g.Id == id && g.TenantId == TenantId && !g.IsDeleted, cancellationToken);
+
+            if (group == null)
+                throw new InvalidOperationException("Tax group not found.");
+
+            // Check for usage
+            var hasCalculations = await _context.Set<TaxCalculation>()
+                .AnyAsync(c => c.TaxGroupId == id && c.TenantId == TenantId && !c.IsDeleted, cancellationToken);
+
+            if (hasCalculations)
+                throw new InvalidOperationException("Cannot delete tax group with existing calculations. Deactivate instead.");
+
+            group.IsDeleted = true;
+            group.UpdatedAt = DateTime.UtcNow;
+            group.UpdatedBy = UserName;
+
+            _context.Set<TaxGroup>().Update(group);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Deleted tax group: {Code}", group.Code);
+        }
+
+        private async Task UnsetDefaultGroupsAsync(TaxApplicability applicability, CancellationToken cancellationToken)
+        {
+            var defaults = await _context.Set<TaxGroup>()
+                .Where(g => g.TenantId == TenantId && g.IsDefault && !g.IsDeleted 
+                    && (g.Applicability == applicability || g.Applicability == TaxApplicability.Both))
+                .ToListAsync(cancellationToken);
+
+            foreach (var g in defaults)
+            {
+                g.IsDefault = false;
+                g.UpdatedAt = DateTime.UtcNow;
+                g.UpdatedBy = UserName;
+            }
+        }
+
+        #endregion
+
+        #region Tax Group Components
+
+        public async Task<TaxGroupComponentDto> AddComponentToGroupAsync(Guid groupId, AddTaxGroupComponentDto dto, CancellationToken cancellationToken = default)
+        {
+            var group = await _context.Set<TaxGroup>()
+                .Include(g => g.Components.Where(c => !c.IsDeleted))
+                .FirstOrDefaultAsync(g => g.Id == groupId && g.TenantId == TenantId && !g.IsDeleted, cancellationToken);
+
+            if (group == null)
+                throw new InvalidOperationException("Tax group not found.");
+
+            var tax = await _context.Set<Tax>()
+                .FirstOrDefaultAsync(t => t.Id == dto.TaxId && t.TenantId == TenantId && !t.IsDeleted, cancellationToken);
+
+            if (tax == null)
+                throw new InvalidOperationException("Tax not found.");
+
+            // Check if already in group
+            if (group.Components.Any(c => c.TaxId == dto.TaxId))
+                throw new InvalidOperationException("Tax is already in this group.");
+
+            var order = dto.CalculationOrder ?? (group.Components.Any() ? group.Components.Max(c => c.CalculationOrder) + 1 : 1);
+
+            var component = new TaxGroupComponent
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TaxGroupId = groupId,
+                TaxId = dto.TaxId,
+                CalculationOrder = order,
+                CompoundBasis = dto.CompoundBasis,
+                AppliesOnTaxCodes = dto.AppliesOnTaxCodes != null ? string.Join(",", dto.AppliesOnTaxCodes) : null,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+
+            await _context.Set<TaxGroupComponent>().AddAsync(component, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Added {TaxCode} to group {GroupCode}", tax.Code, group.Code);
+
+            return new TaxGroupComponentDto
+            {
+                Id = component.Id,
+                TaxId = tax.Id,
+                TaxCode = tax.Code,
+                TaxName = tax.Name,
+                TaxRate = tax.Rate,
+                TaxCategory = tax.Category,
+                CalculationOrder = component.CalculationOrder,
+                CompoundBasis = component.CompoundBasis,
+                AppliesOnTaxCodes = dto.AppliesOnTaxCodes
+            };
+        }
+
+        public async Task<TaxGroupComponentDto> UpdateComponentAsync(Guid componentId, UpdateTaxGroupComponentDto dto, CancellationToken cancellationToken = default)
+        {
+            var component = await _context.Set<TaxGroupComponent>()
+                .Include(c => c.Tax)
+                .FirstOrDefaultAsync(c => c.Id == componentId && c.TenantId == TenantId && !c.IsDeleted, cancellationToken);
+
+            if (component == null)
+                throw new InvalidOperationException("Component not found.");
+
+            if (dto.CalculationOrder.HasValue) component.CalculationOrder = dto.CalculationOrder.Value;
+            if (dto.CompoundBasis.HasValue) component.CompoundBasis = dto.CompoundBasis.Value;
+            if (dto.AppliesOnTaxCodes != null) component.AppliesOnTaxCodes = string.Join(",", dto.AppliesOnTaxCodes);
+
+            component.UpdatedAt = DateTime.UtcNow;
+            component.UpdatedBy = UserName;
+
+            _context.Set<TaxGroupComponent>().Update(component);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return new TaxGroupComponentDto
+            {
+                Id = component.Id,
+                TaxId = component.TaxId,
+                TaxCode = component.Tax.Code,
+                TaxName = component.Tax.Name,
+                TaxRate = component.Tax.Rate,
+                TaxCategory = component.Tax.Category,
+                CalculationOrder = component.CalculationOrder,
+                CompoundBasis = component.CompoundBasis,
+                AppliesOnTaxCodes = string.IsNullOrWhiteSpace(component.AppliesOnTaxCodes) 
+                    ? null 
+                    : component.AppliesOnTaxCodes.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
+            };
+        }
+
+        public async Task RemoveComponentFromGroupAsync(Guid componentId, CancellationToken cancellationToken = default)
+        {
+            var component = await _context.Set<TaxGroupComponent>()
+                .FirstOrDefaultAsync(c => c.Id == componentId && c.TenantId == TenantId && !c.IsDeleted, cancellationToken);
+
+            if (component == null)
+                throw new InvalidOperationException("Component not found.");
+
+            component.IsDeleted = true;
+            component.UpdatedAt = DateTime.UtcNow;
+            component.UpdatedBy = UserName;
+
+            _context.Set<TaxGroupComponent>().Update(component);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Removed component {Id} from group", componentId);
+        }
+
+        public async Task ReorderComponentsAsync(Guid groupId, List<Guid> orderedComponentIds, CancellationToken cancellationToken = default)
+        {
+            var components = await _context.Set<TaxGroupComponent>()
+                .Where(c => c.TaxGroupId == groupId && c.TenantId == TenantId && !c.IsDeleted)
+                .ToListAsync(cancellationToken);
+
+            for (int i = 0; i < orderedComponentIds.Count; i++)
+            {
+                var component = components.FirstOrDefault(c => c.Id == orderedComponentIds[i]);
+                if (component != null)
+                {
+                    component.CalculationOrder = i + 1;
+                    component.UpdatedAt = DateTime.UtcNow;
+                    component.UpdatedBy = UserName;
+                }
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Reordered components in group {GroupId}", groupId);
+        }
+
+        #endregion
+
+        #region Seeding
+
+        public async Task SeedGhanaTaxesAsync(CancellationToken cancellationToken = default)
+        {
+            _logger.LogInformation("Seeding Ghana taxes for tenant {TenantId}", TenantId);
+
+            // Check if already seeded
+            var existing = await _context.Set<Tax>()
+                .AnyAsync(t => t.TenantId == TenantId && t.Code == "VAT" && !t.IsDeleted, cancellationToken);
+
+            if (existing)
+            {
+                _logger.LogInformation("Ghana taxes already seeded for tenant {TenantId}", TenantId);
+                // Even if taxes exist, we should check if rules exist and seed them if missing? 
+                // Separate method for rules.
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            var effectiveFrom = new DateTime(2024, 1, 1);
+
+            // Create individual taxes
+            var nhil = new Tax
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "NHIL",
+                Name = "National Health Insurance Levy",
+                Description = "Ghana NHIL at 2.5%",
+                Rate = 2.50m,
+                EffectiveFrom = effectiveFrom,
+                Applicability = TaxApplicability.Both,
+                Category = TaxCategory.Levy,
+                IsActive = true,
+                IsInputTaxDeductible = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var getfl = new Tax
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "GETFL",
+                Name = "Ghana Education Trust Fund Levy",
+                Description = "Ghana GETFL at 2.5%",
+                Rate = 2.50m,
+                EffectiveFrom = effectiveFrom,
+                Applicability = TaxApplicability.Both,
+                Category = TaxCategory.Levy,
+                IsActive = true,
+                IsInputTaxDeductible = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var covid = new Tax
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "COVID",
+                Name = "COVID-19 Health Recovery Levy",
+                Description = "Ghana COVID-19 levy at 1%",
+                Rate = 1.00m,
+                EffectiveFrom = effectiveFrom,
+                Applicability = TaxApplicability.Both,
+                Category = TaxCategory.Levy,
+                IsActive = true,
+                IsInputTaxDeductible = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var vat = new Tax
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "VAT",
+                Name = "Value Added Tax",
+                Description = "Ghana VAT at 15% (compound on NHIL, GETFL, COVID)",
+                Rate = 15.00m,
+                EffectiveFrom = effectiveFrom,
+                Applicability = TaxApplicability.Both,
+                Category = TaxCategory.Standard,
+                IsActive = true,
+                IsInputTaxDeductible = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var whtSvc = new Tax
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "WHT-SVC",
+                Name = "Withholding Tax - Services",
+                Description = "WHT on services at 7.5% (threshold: GHS 2,000)",
+                Rate = 7.50m,
+                EffectiveFrom = effectiveFrom,
+                Applicability = TaxApplicability.Purchases,
+                Category = TaxCategory.Withholding,
+                IsActive = true,
+                IsInputTaxDeductible = false,
+                ThresholdAmount = 2000m,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var whtGen = new Tax
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "WHT-GEN",
+                Name = "Withholding Tax - General",
+                Description = "WHT on goods at 3% (threshold: GHS 2,000)",
+                Rate = 3.00m,
+                EffectiveFrom = effectiveFrom,
+                Applicability = TaxApplicability.Purchases,
+                Category = TaxCategory.Withholding,
+                IsActive = true,
+                IsInputTaxDeductible = false,
+                ThresholdAmount = 2000m,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            await _context.Set<Tax>().AddRangeAsync(new[] { nhil, getfl, covid, vat, whtSvc, whtGen }, cancellationToken);
+
+            // Create tax groups
+            var salesGroup = new TaxGroup
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "GH-SALES-STD",
+                Name = "Ghana Standard Sales Tax",
+                Description = "NHIL + GETFL + COVID + VAT (compound)",
+                Applicability = TaxApplicability.Sales,
+                IsDefault = true,
+                IsActive = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var purchaseGroup = new TaxGroup
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "GH-PURCH-STD",
+                Name = "Ghana Standard Purchase Tax",
+                Description = "NHIL + GETFL + COVID + VAT (compound)",
+                Applicability = TaxApplicability.Purchases,
+                IsDefault = true,
+                IsActive = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var whtSvcGroup = new TaxGroup
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "GH-WHT-SVC",
+                Name = "Ghana WHT - Services",
+                Description = "Withholding Tax on services (7.5%)",
+                Applicability = TaxApplicability.Purchases,
+                IsDefault = false,
+                IsActive = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            var whtGenGroup = new TaxGroup
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Code = "GH-WHT-GEN",
+                Name = "Ghana WHT - General",
+                Description = "Withholding Tax on goods (3%)",
+                Applicability = TaxApplicability.Purchases,
+                IsDefault = false,
+                IsActive = true,
+                CreatedAt = now,
+                CreatedBy = "system"
+            };
+
+            await _context.Set<TaxGroup>().AddRangeAsync(new[] { salesGroup, purchaseGroup, whtSvcGroup, whtGenGroup }, cancellationToken);
+
+            // Create components for sales group
+            await _context.Set<TaxGroupComponent>().AddRangeAsync(new[]
+            {
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = salesGroup.Id, TaxId = nhil.Id,
+                    CalculationOrder = 1, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+                },
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = salesGroup.Id, TaxId = getfl.Id,
+                    CalculationOrder = 2, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+                },
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = salesGroup.Id, TaxId = covid.Id,
+                    CalculationOrder = 3, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+                },
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = salesGroup.Id, TaxId = vat.Id,
+                    CalculationOrder = 4, CompoundBasis = CompoundBasis.Specific, AppliesOnTaxCodes = "NHIL,GETFL,COVID",
+                    CreatedAt = now, CreatedBy = "system"
+                }
+            }, cancellationToken);
+
+            // Create components for purchase group (same structure)
+            await _context.Set<TaxGroupComponent>().AddRangeAsync(new[]
+            {
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = purchaseGroup.Id, TaxId = nhil.Id,
+                    CalculationOrder = 1, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+                },
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = purchaseGroup.Id, TaxId = getfl.Id,
+                    CalculationOrder = 2, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+                },
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = purchaseGroup.Id, TaxId = covid.Id,
+                    CalculationOrder = 3, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+                },
+                new TaxGroupComponent
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = purchaseGroup.Id, TaxId = vat.Id,
+                    CalculationOrder = 4, CompoundBasis = CompoundBasis.Specific, AppliesOnTaxCodes = "NHIL,GETFL,COVID",
+                    CreatedAt = now, CreatedBy = "system"
+                }
+            }, cancellationToken);
+
+            // WHT groups
+            await _context.Set<TaxGroupComponent>().AddAsync(new TaxGroupComponent
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = whtSvcGroup.Id, TaxId = whtSvc.Id,
+                CalculationOrder = 1, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+            }, cancellationToken);
+
+            await _context.Set<TaxGroupComponent>().AddAsync(new TaxGroupComponent
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = whtGenGroup.Id, TaxId = whtGen.Id,
+                CalculationOrder = 1, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
+            }, cancellationToken);
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Successfully seeded Ghana taxes: 6 taxes, 4 groups");
+        }
+
+        public async Task SeedTaxRulesAsync(CancellationToken cancellationToken = default)
+        {
+            _logger.LogInformation("Seeding tax rules for tenant {TenantId}", TenantId);
+
+            if (await _context.TaxRules.AnyAsync(r => r.TenantId == TenantId, cancellationToken))
+            {
+                _logger.LogInformation("Tax rules already seeded for tenant {TenantId}", TenantId);
+                return;
+            }
+
+            var salesGroup = await _context.Set<TaxGroup>().FirstOrDefaultAsync(g => g.Code == "GH-SALES-STD" && g.TenantId == TenantId, cancellationToken);
+            var whtSvcGroup = await _context.Set<TaxGroup>().FirstOrDefaultAsync(g => g.Code == "GH-WHT-SVC" && g.TenantId == TenantId, cancellationToken);
+
+            if (salesGroup == null)
+            {
+                 _logger.LogWarning("Cannot seed rules: Required tax groups not found.");
+                 return;
+            }
+
+            var rules = new List<TaxRule>();
+            var now = DateTime.UtcNow;
+
+            // 1. Corporate Sales Rule
+            rules.Add(new TaxRule
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Name = "Corporate Sales GST",
+                Description = "Standard GST for Corporate Customers",
+                Priority = 1,
+                TaxGroupId = salesGroup.Id,
+                TransactionType = "SaleOfGoods",
+                CustomerType = "Corporate",
+                IsActive = true,
+                CreatedAt = now
+            });
+
+            // 2. Individual Sales Rule
+            rules.Add(new TaxRule
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                Name = "Individual Sales GST",
+                Description = "Standard GST for Individual Customers",
+                Priority = 2,
+                TaxGroupId = salesGroup.Id,
+                TransactionType = "SaleOfGoods",
+                CustomerType = "Individual",
+                IsActive = true,
+                CreatedAt = now
+            });
+
+            // 3. WHT Services Rule
+            if (whtSvcGroup != null)
+            {
+                rules.Add(new TaxRule
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    Name = "Service WHT",
+                    Description = "Withholding Tax for Purchase of Services",
+                    Priority = 1,
+                    TaxGroupId = whtSvcGroup.Id,
+                    TransactionType = "PurchaseOfServices",
+                    IsActive = true,
+                    CreatedAt = now
+                });
+            }
+
+            await _context.TaxRules.AddRangeAsync(rules, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Seeded {Count} tax rules", rules.Count);
+        }
+
+        #endregion
+
+        #region Private Helper Methods
+
+        private static TaxDto MapToTaxDto(Tax tax)
+        {
+            return new TaxDto
+            {
+                Id = tax.Id,
+                TenantId = tax.TenantId,
+                Code = tax.Code,
+                Name = tax.Name,
+                Description = tax.Description,
+                Rate = tax.Rate,
+                EffectiveFrom = tax.EffectiveFrom,
+                Applicability = tax.Applicability,
+                Category = tax.Category,
+                IsActive = tax.IsActive,
+                IsInputTaxDeductible = tax.IsInputTaxDeductible,
+                ThresholdAmount = tax.ThresholdAmount,
+                TaxPayableAccountId = tax.TaxPayableAccountId,
+                TaxReceivableAccountId = tax.TaxReceivableAccountId,
+                CreatedBy = tax.CreatedBy,
+                CreatedAt = tax.CreatedAt,
+                UpdatedBy = tax.UpdatedBy,
+                UpdatedAt = tax.UpdatedAt
+            };
+        }
+
+        private static TaxGroupDto MapToTaxGroupDto(TaxGroup group)
+        {
+            return new TaxGroupDto
+            {
+                Id = group.Id,
+                TenantId = group.TenantId,
+                Code = group.Code,
+                Name = group.Name,
+                Description = group.Description,
+                Applicability = group.Applicability,
+                IsDefault = group.IsDefault,
+                IsActive = group.IsActive,
+                Components = group.Components
+                    .Where(c => !c.IsDeleted && c.Tax != null)
+                    .OrderBy(c => c.CalculationOrder)
+                    .Select(c => new TaxGroupComponentDto
+                    {
+                        Id = c.Id,
+                        TaxId = c.TaxId,
+                        TaxCode = c.Tax.Code,
+                        TaxName = c.Tax.Name,
+                        TaxRate = c.Tax.Rate,
+                        TaxCategory = c.Tax.Category,
+                        CalculationOrder = c.CalculationOrder,
+                        CompoundBasis = c.CompoundBasis,
+                        AppliesOnTaxCodes = string.IsNullOrWhiteSpace(c.AppliesOnTaxCodes)
+                            ? null
+                            : c.AppliesOnTaxCodes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
+                    }).ToList(),
+                CreatedBy = group.CreatedBy,
+                CreatedAt = group.CreatedAt,
+                UpdatedBy = group.UpdatedBy,
+                UpdatedAt = group.UpdatedAt
+            };
+        }
+
+        #endregion
+    }
+}

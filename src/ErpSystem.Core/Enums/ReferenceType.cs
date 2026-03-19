@@ -58,5 +58,15 @@ public enum ReferenceType
     /// <summary>
     /// Inventory Requisition - internal request for materials
     /// </summary>
-    Requisition = 11
+    Requisition = 11,
+
+    /// <summary>
+    /// Vendor Invoice - AP invoice with inventory lines
+    /// </summary>
+    VendorInvoice = 12,
+
+    /// <summary>
+    /// Sales Invoice - AR invoice with inventory lines
+    /// </summary>
+    SalesInvoice = 13
 }

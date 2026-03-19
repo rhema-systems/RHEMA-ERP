@@ -272,7 +272,8 @@ export default function ProjectProgramsPage() {
                   <div>
                     <div className="font-semibold">{item.title}</div>
                     <div className="text-sm text-muted-foreground">
-                      {item.sourceProjectCode} to {item.targetProjectCode}
+                      {/* NOTE: The '>' in '->' must be escaped in JSX as {'->'}  */}
+                      {item.sourceProjectCode} {'->'}  {item.targetProjectCode}
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -396,7 +397,8 @@ export default function ProjectProgramsPage() {
                     <Badge variant="outline">{item.dependencyType}</Badge>
                     <Badge>{item.status}</Badge>
                   </div>
-                  <div className="mt-1 text-sm text-muted-foreground">{getProjectLabel(item.sourceProjectId)} to {getProjectLabel(item.targetProjectId)}</div>
+                  {/* NOTE: The '>' in '->' must be escaped in JSX as {'->'}  */}
+                  <div className="mt-1 text-sm text-muted-foreground">{getProjectLabel(item.sourceProjectId)} {'->'}  {getProjectLabel(item.targetProjectId)}</div>
                   <div className="mt-2 text-sm text-muted-foreground">
                     Impact {item.impactLevel}{item.dueDate ? ` | Due ${new Date(item.dueDate).toLocaleDateString()}` : ''}{item.description ? ` | ${item.description}` : ''}
                   </div>

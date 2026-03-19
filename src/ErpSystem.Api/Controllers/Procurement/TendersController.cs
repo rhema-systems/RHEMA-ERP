@@ -302,7 +302,7 @@ public class TendersController : ControllerBase
     /// </summary>
     [HttpPost("{id}/close")]
     [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public ActionResult<TenderDto> CloseTender(Guid id)
+    public async Task<ActionResult<TenderDto>> CloseTender(Guid id)
     {
         try
         {
@@ -310,6 +310,7 @@ public class TendersController : ControllerBase
             // Commenting out until the method is implemented
             // var tender = await _tenderService.CloseTenderAsync(id);
             // return Ok(tender);
+            await Task.CompletedTask;
             return StatusCode(501, "Close tender functionality not yet implemented");
         }
         catch (InvalidOperationException ex)

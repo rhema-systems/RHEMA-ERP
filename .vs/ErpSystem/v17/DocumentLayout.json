@@ -1,0 +1,310 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{E4C8B12F-9A48-4D6E-8F5E-1B2C3D4E5F67}|src\\ErpSystem.Api\\ErpSystem.Api.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.api\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E4C8B12F-9A48-4D6E-8F5E-1B2C3D4E5F67}|src\\ErpSystem.Api\\ErpSystem.Api.csproj|solutionrelative:src\\erpsystem.api\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\entities\\finance\\journalentry.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\entities\\finance\\journalentry.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{E4C8B12F-9A48-4D6E-8F5E-1B2C3D4E5F67}|src\\ErpSystem.Api\\ErpSystem.Api.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.api\\services\\finance\\accountservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E4C8B12F-9A48-4D6E-8F5E-1B2C3D4E5F67}|src\\ErpSystem.Api\\ErpSystem.Api.csproj|solutionrelative:src\\erpsystem.api\\services\\finance\\accountservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.data\\repositories\\finance\\accountrepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|solutionrelative:src\\erpsystem.data\\repositories\\finance\\accountrepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\interfaces\\finance\\iaccountrepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\interfaces\\finance\\iaccountrepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.data\\unitofwork.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|solutionrelative:src\\erpsystem.data\\unitofwork.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\interfaces\\iunitofwork.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\interfaces\\iunitofwork.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.data\\repositories\\finance\\segmentlookupvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|solutionrelative:src\\erpsystem.data\\repositories\\finance\\segmentlookupvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\entities\\finance\\segmentlookupvalue.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\entities\\finance\\segmentlookupvalue.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.data\\repositories\\finance\\accountsegmentvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|solutionrelative:src\\erpsystem.data\\repositories\\finance\\accountsegmentvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.data\\repositories\\finance\\accountsegmentstructurerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|solutionrelative:src\\erpsystem.data\\repositories\\finance\\accountsegmentstructurerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\interfaces\\finance\\isegmentlookupvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\interfaces\\finance\\isegmentlookupvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\interfaces\\finance\\iaccountsegmentvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\interfaces\\finance\\iaccountsegmentvaluerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\interfaces\\finance\\iaccountsegmentstructurerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\interfaces\\finance\\iaccountsegmentstructurerepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.data\\repositories\\genericrepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|solutionrelative:src\\erpsystem.data\\repositories\\genericrepository.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.core\\services\\maintenance\\assetdowntimeservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{96AC6E75-9C7B-4C08-92CE-CCC06B423C30}|src\\ErpSystem.Core\\ErpSystem.Core.csproj|solutionrelative:src\\erpsystem.core\\services\\maintenance\\assetdowntimeservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{E4C8B12F-9A48-4D6E-8F5E-1B2C3D4E5F67}|src\\ErpSystem.Api\\ErpSystem.Api.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.api\\controllers\\maintenance\\assetanalyticscontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E4C8B12F-9A48-4D6E-8F5E-1B2C3D4E5F67}|src\\ErpSystem.Api\\ErpSystem.Api.csproj|solutionrelative:src\\erpsystem.api\\controllers\\maintenance\\assetanalyticscontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|c:\\users\\akwas\\documents\\dev work\\rhema erp\\rhema-erp\\src\\erpsystem.data\\applicationdbcontext.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F93944C1-F87E-448B-8570-B64FC3299425}|src\\ErpSystem.Data\\ErpSystem.Data.csproj|solutionrelative:src\\erpsystem.data\\applicationdbcontext.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Program.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Api\\Program.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Api\\Program.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Api\\Program.cs",
+              "RelativeToolTip": "src\\ErpSystem.Api\\Program.cs",
+              "ViewState": "AgIAADAAAAAAAAAAAAAWwD4AAAAvAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-25T11:13:08.518Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "JournalEntry.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Entities\\Finance\\JournalEntry.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Entities\\Finance\\JournalEntry.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Entities\\Finance\\JournalEntry.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Entities\\Finance\\JournalEntry.cs",
+              "ViewState": "AgIAAIEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T14:59:25.028Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "AccountService.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Api\\Services\\Finance\\AccountService.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Api\\Services\\Finance\\AccountService.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Api\\Services\\Finance\\AccountService.cs",
+              "RelativeToolTip": "src\\ErpSystem.Api\\Services\\Finance\\AccountService.cs",
+              "ViewState": "AgIAAEEBAAAAAAAAAAAUwEYBAAAuAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:57:58.454Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "IUnitOfWork.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\IUnitOfWork.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Interfaces\\IUnitOfWork.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\IUnitOfWork.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Interfaces\\IUnitOfWork.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:54:22.171Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "SegmentLookupValueRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\SegmentLookupValueRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Data\\Repositories\\Finance\\SegmentLookupValueRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\SegmentLookupValueRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Data\\Repositories\\Finance\\SegmentLookupValueRepository.cs",
+              "ViewState": "AgIAAA8AAAAAAAAAAAAnwBoAAAAwAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:52:30.543Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "AccountRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\AccountRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Data\\Repositories\\Finance\\AccountRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\AccountRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Data\\Repositories\\Finance\\AccountRepository.cs",
+              "ViewState": "AgIAAAIAAAAAAAAAAAArwA4AAABBAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:50:56.741Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "UnitOfWork.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\UnitOfWork.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Data\\UnitOfWork.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\UnitOfWork.cs",
+              "RelativeToolTip": "src\\ErpSystem.Data\\UnitOfWork.cs",
+              "ViewState": "AgIAABEAAAAAAAAAAAAowCgAAABVAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:04:45.18Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "IAccountRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountRepository.cs",
+              "ViewState": "AgIAAAcAAAAAAAAAAAAAABIAAAAVAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:48:14.451Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "SegmentLookupValue.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Entities\\Finance\\SegmentLookupValue.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Entities\\Finance\\SegmentLookupValue.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Entities\\Finance\\SegmentLookupValue.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Entities\\Finance\\SegmentLookupValue.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAuwA8AAAAmAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T14:30:23.306Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "AccountSegmentValueRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentValueRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentValueRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentValueRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentValueRepository.cs",
+              "ViewState": "AgIAAAcAAAAAAAAAAAAswB8AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:52:09.467Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "AccountSegmentStructureRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentStructureRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentStructureRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentStructureRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Data\\Repositories\\Finance\\AccountSegmentStructureRepository.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:51:45.296Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "ISegmentLookupValueRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\ISegmentLookupValueRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Interfaces\\Finance\\ISegmentLookupValueRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\ISegmentLookupValueRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Interfaces\\Finance\\ISegmentLookupValueRepository.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABIAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:50:05.197Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "IAccountSegmentValueRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentValueRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentValueRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentValueRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentValueRepository.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABIAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:49:41.583Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 13,
+              "Title": "IAccountSegmentStructureRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentStructureRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentStructureRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentStructureRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Interfaces\\Finance\\IAccountSegmentStructureRepository.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T13:49:08.808Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 14,
+              "Title": "GenericRepository.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\GenericRepository.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Data\\Repositories\\GenericRepository.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\Repositories\\GenericRepository.cs",
+              "RelativeToolTip": "src\\ErpSystem.Data\\Repositories\\GenericRepository.cs",
+              "ViewState": "AgIAAAMAAAAAAAAAAAAAAA0AAAA5AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T12:58:05.651Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 15,
+              "Title": "AssetDowntimeService.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Services\\Maintenance\\AssetDowntimeService.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Core\\Services\\Maintenance\\AssetDowntimeService.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Core\\Services\\Maintenance\\AssetDowntimeService.cs",
+              "RelativeToolTip": "src\\ErpSystem.Core\\Services\\Maintenance\\AssetDowntimeService.cs",
+              "ViewState": "AgIAAAIAAAAAAAAAAAAAABIAAAA7AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T12:47:56.015Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 16,
+              "Title": "AssetAnalyticsController.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Api\\Controllers\\Maintenance\\AssetAnalyticsController.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Api\\Controllers\\Maintenance\\AssetAnalyticsController.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Api\\Controllers\\Maintenance\\AssetAnalyticsController.cs",
+              "RelativeToolTip": "src\\ErpSystem.Api\\Controllers\\Maintenance\\AssetAnalyticsController.cs",
+              "ViewState": "AgIAABcAAAAAAAAAAAAAAB4AAAAbAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T12:45:31.179Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 17,
+              "Title": "ApplicationDbContext.cs",
+              "DocumentMoniker": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\ApplicationDbContext.cs",
+              "RelativeDocumentMoniker": "src\\ErpSystem.Data\\ApplicationDbContext.cs",
+              "ToolTip": "C:\\Users\\Akwas\\Documents\\DEV WORK\\RHEMA ERP\\RHEMA-ERP\\src\\ErpSystem.Data\\ApplicationDbContext.cs",
+              "RelativeToolTip": "src\\ErpSystem.Data\\ApplicationDbContext.cs",
+              "ViewState": "AgIAABgAAAAAAAAAAAAIwCIAAAAsAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-21T12:45:12.65Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

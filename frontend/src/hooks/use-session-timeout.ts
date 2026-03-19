@@ -5,7 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { settingsService } from '../services/settings';
 import { tokenRefreshService } from '../services/token-refresh.service';
 import { authService } from '../services/auth';
-import { buildLoginRedirectUrl, getCurrentRelativeUrl } from '../lib/auth-redirect';
 
 export interface SessionTimeoutState {
   isActive: boolean;
@@ -15,32 +14,15 @@ export interface SessionTimeoutState {
   lastActivity: number;
 }
 
-type SessionSettingsDto = Awaited<ReturnType<typeof settingsService.getSessionSettings>>;
-
-const UNINITIALIZED_SESSION_TIMEOUT = 0;
+const DEFAULT_SESSION_TIMEOUT = 30; // 30 minutes
 const WARNING_TIME = 120; // Show warning 2 minutes (120 seconds) before timeout
-const SESSION_ACTIVITY_STORAGE_KEY = 'erp-session-last-activity';
-
-const readStoredSessionActivity = (): number | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const rawValue = localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY);
-  if (!rawValue) {
-    return null;
-  }
-
-  const parsedValue = Number.parseInt(rawValue, 10);
-  return Number.isFinite(parsedValue) ? parsedValue : null;
-};
 
 export function useSessionTimeout() {
   const [sessionState, setSessionState] = useState<SessionTimeoutState>({
     isActive: true,
     showWarning: false,
     remainingSeconds: WARNING_TIME,
-    sessionTimeoutMinutes: UNINITIALIZED_SESSION_TIMEOUT,
+    sessionTimeoutMinutes: DEFAULT_SESSION_TIMEOUT,
     lastActivity: Date.now(),
   });
 
@@ -48,10 +30,10 @@ export function useSessionTimeout() {
   const warningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const activityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch persisted session settings for the authenticated tenant.
-  const { data: sessionSettings, isLoading: isLoadingSettings } = useQuery<SessionSettingsDto>({
-    queryKey: ['sessionSettings'],
-    queryFn: async (): Promise<SessionSettingsDto> => settingsService.getSessionSettings(),
+  // Fetch session timeout settings from security settings - only if authenticated
+  const { data: securitySettings, isLoading: isLoadingSettings } = useQuery({
+    queryKey: ['securitySettings'],
+    queryFn: () => settingsService.getSecuritySettings(),
     refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes to get updated settings
     enabled: typeof window !== 'undefined' && authService.isAuthenticated(),
     retry: (failureCount, error: any) => {
@@ -63,22 +45,60 @@ export function useSessionTimeout() {
     },
   });
 
-  const resolvedSessionSettings = sessionSettings as SessionSettingsDto | undefined;
-  const sessionTimeoutMinutes = resolvedSessionSettings?.sessionTimeoutMinutes ?? UNINITIALIZED_SESSION_TIMEOUT;
-  const shouldInitializeTimers = !isLoadingSettings && sessionTimeoutMinutes > 0;
+  // Use the actual session timeout from settings, or default if still loading
+  const sessionTimeoutMinutes = securitySettings?.sessionTimeoutMinutes || DEFAULT_SESSION_TIMEOUT;
+  const shouldInitializeTimers = !isLoadingSettings || securitySettings?.sessionTimeoutMinutes;
   const sessionTimeoutMs = sessionTimeoutMinutes * 60 * 1000;
   const warningTimeMs = WARNING_TIME * 1000;
 
-  const clearTimers = useCallback(() => {
+  const resetActivity = useCallback(() => {
+    const now = Date.now();
+    setSessionState(prev => ({
+      ...prev,
+      lastActivity: now,
+      showWarning: false,
+      sessionTimeoutMinutes: sessionTimeoutMinutes, // Update state with current timeout
+    }));
+
+    // Clear existing timers
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
     if (activityTimeoutRef.current) clearTimeout(activityTimeoutRef.current);
-  }, []);
 
-  const handleSessionTimeout = useCallback(async (preserveRedirect: boolean = true) => {
+    // Don't initialize timers until we have the actual settings loaded
+    if (!shouldInitializeTimers) {
+      console.log('⏳ Waiting for security settings before initializing session timeout...');
+      return;
+    }
+
+    console.log(`🔄 Activity reset - session timeout in ${sessionTimeoutMinutes} minutes`);
+
+    // Set warning timer (show warning 2 minutes before timeout)
+    warningTimeoutRef.current = setTimeout(() => {
+      console.log('⚠️ Showing session timeout warning');
+      setSessionState(prev => ({
+        ...prev,
+        showWarning: true,
+        remainingSeconds: WARNING_TIME,
+      }));
+
+      // Set final timeout timer
+      timeoutRef.current = setTimeout(() => {
+        console.log('⏰ Session timeout - logging out');
+        handleSessionTimeout();
+      }, warningTimeMs);
+
+    }, sessionTimeoutMs - warningTimeMs);
+
+  }, [sessionTimeoutMinutes, sessionTimeoutMs, warningTimeMs, shouldInitializeTimers]);
+
+  const handleSessionTimeout = useCallback(async () => {
     console.log('🚪 Session expired - calling backend logout and clearing tokens');
     
-    clearTimers();
+    // Clear all timers
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+    if (activityTimeoutRef.current) clearTimeout(activityTimeoutRef.current);
 
     // Update state immediately
     setSessionState(prev => ({
@@ -97,91 +117,9 @@ export function useSessionTimeout() {
       tokenRefreshService.clearTokens();
     }
 
-    const redirectTarget = preserveRedirect ? getCurrentRelativeUrl() : null;
-
     // Redirect to login
-    window.location.href = buildLoginRedirectUrl(redirectTarget);
-  }, [clearTimers]);
-
-  const showWarningAndScheduleTimeout = useCallback((activityTimestamp: number) => {
-    const elapsedMs = Math.max(0, Date.now() - activityTimestamp);
-    const remainingTimeoutMs = Math.max(0, sessionTimeoutMs - elapsedMs);
-
-    if (remainingTimeoutMs <= 0) {
-      void handleSessionTimeout();
-      return;
-    }
-
-    console.log('⚠️ Showing session timeout warning');
-    setSessionState(prev => ({
-      ...prev,
-      showWarning: true,
-      remainingSeconds: Math.max(1, Math.ceil(remainingTimeoutMs / 1000)),
-      sessionTimeoutMinutes,
-    }));
-
-    timeoutRef.current = setTimeout(() => {
-      console.log('⏰ Session timeout - logging out');
-      void handleSessionTimeout();
-    }, remainingTimeoutMs);
-  }, [handleSessionTimeout, sessionTimeoutMinutes, sessionTimeoutMs]);
-
-  const syncActivity = useCallback((activityTimestamp: number, persistToStorage: boolean) => {
-    const normalizedTimestamp = Number.isFinite(activityTimestamp) ? activityTimestamp : Date.now();
-
-    setSessionState(prev => ({
-      ...prev,
-      isActive: true,
-      lastActivity: normalizedTimestamp,
-      showWarning: false,
-      remainingSeconds: WARNING_TIME,
-      sessionTimeoutMinutes,
-    }));
-
-    clearTimers();
-
-    if (persistToStorage && typeof window !== 'undefined') {
-      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, normalizedTimestamp.toString());
-    }
-
-    if (!shouldInitializeTimers) {
-      console.log('⏳ Waiting for persisted session settings before initializing session timeout...');
-      return;
-    }
-
-    console.log(`🔄 Activity synchronized - session timeout in ${sessionTimeoutMinutes} minutes`);
-
-    const elapsedMs = Math.max(0, Date.now() - normalizedTimestamp);
-    const remainingTimeoutMs = sessionTimeoutMs - elapsedMs;
-
-    if (remainingTimeoutMs <= 0) {
-      void handleSessionTimeout();
-      return;
-    }
-
-    const remainingWarningDelayMs = remainingTimeoutMs - warningTimeMs;
-
-    if (remainingWarningDelayMs <= 0) {
-      showWarningAndScheduleTimeout(normalizedTimestamp);
-      return;
-    }
-
-    warningTimeoutRef.current = setTimeout(() => {
-      showWarningAndScheduleTimeout(normalizedTimestamp);
-    }, remainingWarningDelayMs);
-  }, [
-    clearTimers,
-    handleSessionTimeout,
-    sessionTimeoutMinutes,
-    sessionTimeoutMs,
-    shouldInitializeTimers,
-    showWarningAndScheduleTimeout,
-    warningTimeMs,
-  ]);
-
-  const resetActivity = useCallback(() => {
-    syncActivity(Date.now(), true);
-  }, [syncActivity]);
+    window.location.href = '/login';
+  }, []);
 
   const extendSession = useCallback(async () => {
     console.log('🔄 Extending session...');
@@ -203,7 +141,7 @@ export function useSessionTimeout() {
 
   const logout = useCallback(async () => {
     console.log('🚪 Manual logout requested');
-    await handleSessionTimeout(false);
+    await handleSessionTimeout();
   }, [handleSessionTimeout]);
 
   // Activity event handlers
@@ -238,21 +176,8 @@ export function useSessionTimeout() {
       document.addEventListener(event, handleActivity, { passive: true });
     });
 
-    const storedActivityTimestamp = readStoredSessionActivity();
-    const initialActivityTimestamp = storedActivityTimestamp ?? Date.now();
-
-    syncActivity(initialActivityTimestamp, !storedActivityTimestamp);
-
-    const handleStorageEvent = (event: StorageEvent) => {
-      if (event.key === SESSION_ACTIVITY_STORAGE_KEY && event.newValue) {
-        const activityTimestamp = Number.parseInt(event.newValue, 10);
-        if (Number.isFinite(activityTimestamp) && activityTimestamp > sessionState.lastActivity) {
-          syncActivity(activityTimestamp, false);
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageEvent);
+    // Initial activity reset
+    resetActivity();
 
     return () => {
       // Cleanup event listeners
@@ -260,46 +185,48 @@ export function useSessionTimeout() {
         document.removeEventListener(event, handleActivity);
       });
 
-      window.removeEventListener('storage', handleStorageEvent);
-      clearTimers();
+      // Clear timers
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+      if (activityTimeoutRef.current) clearTimeout(activityTimeoutRef.current);
     };
-  }, [clearTimers, handleActivity, sessionState.lastActivity, sessionTimeoutMs, syncActivity]);
+  }, [handleActivity, resetActivity]);
 
-  // Initialize session timeout when the persisted tenant settings are first loaded.
+  // Initialize session timeout when security settings are first loaded
   useEffect(() => {
-    if (resolvedSessionSettings?.sessionTimeoutMinutes && shouldInitializeTimers) {
-      console.log(`\u2699\ufe0f Session settings loaded - session timeout: ${resolvedSessionSettings.sessionTimeoutMinutes} minutes`);
+    // Only initialize if we have settings and haven't initialized yet
+    if (securitySettings?.sessionTimeoutMinutes && shouldInitializeTimers) {
+      console.log(`\u2699\ufe0f Security settings loaded - session timeout: ${securitySettings.sessionTimeoutMinutes} minutes`);
       setSessionState(prev => ({
         ...prev,
-        sessionTimeoutMinutes: resolvedSessionSettings.sessionTimeoutMinutes,
+        sessionTimeoutMinutes: securitySettings.sessionTimeoutMinutes,
       }));
       
       // Initialize timers with the correct timeout
-      const storedActivityTimestamp = readStoredSessionActivity() ?? Date.now();
-      syncActivity(storedActivityTimestamp, false);
+      resetActivity();
     }
-  }, [resolvedSessionSettings?.sessionTimeoutMinutes, shouldInitializeTimers, syncActivity]);
+  }, [securitySettings?.sessionTimeoutMinutes, shouldInitializeTimers, resetActivity]);
 
-  // Update session timeout when the persisted tenant settings change.
+  // Update session timeout when security settings change (after initial load)
   useEffect(() => {
-    if (resolvedSessionSettings?.sessionTimeoutMinutes && !isLoadingSettings) {
-      console.log(`\ud83d\udd04 Session settings updated - new session timeout: ${resolvedSessionSettings.sessionTimeoutMinutes} minutes`);
+    if (securitySettings?.sessionTimeoutMinutes && !isLoadingSettings) {
+      console.log(`\ud83d\udd04 Security settings updated - new session timeout: ${securitySettings.sessionTimeoutMinutes} minutes`);
       setSessionState(prev => ({
         ...prev,
-        sessionTimeoutMinutes: resolvedSessionSettings.sessionTimeoutMinutes,
+        sessionTimeoutMinutes: securitySettings.sessionTimeoutMinutes,
       }));
       
       // Reset activity to apply new timeout
-      const storedActivityTimestamp = readStoredSessionActivity() ?? Date.now();
-      syncActivity(storedActivityTimestamp, false);
+      resetActivity();
     }
-  }, [resolvedSessionSettings?.sessionTimeoutMinutes, isLoadingSettings, syncActivity]);
+  }, [securitySettings?.sessionTimeoutMinutes, isLoadingSettings, resetActivity]);
 
   // Update remaining seconds countdown when warning is shown
   useEffect(() => {
-    if (!sessionState.showWarning || sessionState.remainingSeconds <= 0) return;
+    if (!sessionState.showWarning) return;
 
-    let remainingTime = sessionState.remainingSeconds;
+    let countdownInterval: ReturnType<typeof setInterval>;
+    let remainingTime = WARNING_TIME;
 
     const updateCountdown = () => {
       remainingTime -= 1;
@@ -314,12 +241,14 @@ export function useSessionTimeout() {
       }
     };
 
-    const countdownInterval = setInterval(updateCountdown, 1000);
+    countdownInterval = setInterval(updateCountdown, 1000);
 
     return () => {
-      clearInterval(countdownInterval);
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+      }
     };
-  }, [sessionState.remainingSeconds, sessionState.showWarning]);
+  }, [sessionState.showWarning]);
 
   return {
     sessionState,

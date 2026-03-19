@@ -1,0 +1,78 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.Sales;
+
+namespace ErpSystem.Core.Entities.Finance;
+
+/// <summary>
+/// Represents a payment received from a customer (AR receipt)
+/// A single payment can be allocated to multiple invoices
+/// </summary>
+public class CustomerPayment : BusinessEntity
+{
+    [Required]
+    [MaxLength(50)]
+    public string PaymentNumber { get; set; } = string.Empty;
+
+    [Required]
+    public Guid CustomerId { get; set; }
+    public virtual Customer Customer { get; set; } = null!;
+
+    [Required]
+    public DateTime PaymentDate { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TotalAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal AllocatedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
+
+    [Required]
+    [MaxLength(50)]
+    public string PaymentMethod { get; set; } = "Cash"; // Cash, Check, BankTransfer, CreditCard, DebitCard, MobileMoney, Online
+
+    [MaxLength(3)]
+    public string CurrencyCode { get; set; } = "USD";
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal ExchangeRate { get; set; } = 1.0m;
+
+    // Bank/Payment Details
+    public Guid? BankAccountId { get; set; }
+    public virtual BankAccount? BankAccount { get; set; }
+
+    [MaxLength(100)]
+    public string? CheckNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? TransactionReference { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string Status { get; set; } = "Pending"; // Pending, Cleared, Bounced, Cancelled
+
+    public DateTime? ClearedDate { get; set; }
+
+    // Credit Note handling
+    public bool IsCreditNote { get; set; } = false;
+    public Guid? CreditNoteId { get; set; }
+
+    // GL Posting
+    public Guid? JournalEntryId { get; set; }
+
+    // Multi-tenant
+
+
+    // Navigation properties
+    public virtual ICollection<PaymentAllocation> Allocations { get; set; } = new List<PaymentAllocation>();
+}

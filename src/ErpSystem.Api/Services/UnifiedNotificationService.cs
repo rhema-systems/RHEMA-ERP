@@ -1492,18 +1492,31 @@ WHERE [Id] = {notificationId}
             _logger.LogInformation("Cleaning up expired notifications older than {Days} days", olderThanDays);
 
             var cutoffDate = DateTime.UtcNow.AddDays(-olderThanDays);
-            var expiredNotifications = await _unitOfWork.Repository<Notification>()
-                .FindAsync(n => n.CreatedAt < cutoffDate && (n.IsRead || n.Status == "Dismissed" || n.Status == "Archived"));
 
-            var notificationsToDelete = expiredNotifications.ToList();
+            // --------------------------------------------------------------------------------------------------
+            // OPTIMIZATION NOTE (2026-02-15):
+            // Replaced the previous fetch-into-memory-and-delete loop with ExecuteUpdateAsync.
+            //
+            // Previous Implementation:
+            //   fetched all expired records (potentially thousands) -> FindAsync()
+            //   loaded them into application memory
+            //   deleted them one-by-one (or in batches via EF Change Tracker)
+            //   Result: System.ComponentModel.Win32Exception (Timeout) when volume was high.
+            //
+            // New Implementation:
+            //   Issued a single SQL UPDATE command to soft-delete records directly on the database server.
+            //   Bypasses the Change Tracker for performance.
+            //   Eliminates network latency of pulling dead records just to mark them valid.
+            // --------------------------------------------------------------------------------------------------
+            var count = await _dbContext.Notifications
+                .Where(n => n.CreatedAt < cutoffDate && 
+                           (n.IsRead || n.Status == "Dismissed" || n.Status == "Archived") &&
+                           !n.IsDeleted) // Ensure we don't update already deleted ones
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(n => n.IsDeleted, true)
+                    .SetProperty(n => n.DeletedAt, DateTime.UtcNow));
 
-            if (notificationsToDelete.Count > 0)
-            {
-                await _unitOfWork.Repository<Notification>().DeleteRangeAsync(notificationsToDelete);
-                await _unitOfWork.SaveChangesAsync();
-            }
-
-            _logger.LogInformation("Deleted {Count} expired notifications", notificationsToDelete.Count);
+            _logger.LogInformation("Deleted {Count} expired notifications", count);
         }
         catch (Exception ex)
         {

@@ -54,6 +54,11 @@ import {
   BookOpen,
   MessageSquare,
   Smartphone,
+  RotateCcw,
+  CalendarClock,
+  Phone,
+  Swords,
+  BookTemplate,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -80,11 +85,135 @@ const navigationItems: NavItem[] = [
     href: '/finance',
     icon: CreditCard,
     children: [
-      { title: 'Accounts', href: '/finance/accounts', icon: CreditCard },
-      { title: 'Invoices', href: '/finance/invoices', icon: CreditCard },
+      { title: 'Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
+      {
+        title: 'General Ledger',
+        href: '/finance/general-ledger',
+        icon: FileText,
+        children: [
+          { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
+          { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
+        ],
+      },
+      {
+        title: 'Segmented Accounts',
+        href: '/finance/segmented-accounts',
+        icon: FolderTree,
+        children: [
+          { title: 'Segment Structure', href: '/finance/settings/segments', icon: FolderTree },
+          { title: 'Segment Values', href: '/finance/settings/segments?tab=values', icon: Database },
+          { title: 'Account Generator', href: '/finance/accounts/generate', icon: FileText },
+        ],
+      },
+      {
+        title: 'Fiscal Management',
+        href: '/finance/fiscal',
+        icon: Calendar,
+        children: [
+          { title: 'Fiscal Years', href: '/finance/fiscal-years', icon: Calendar },
+          { title: 'Fiscal Periods', href: '/finance/fiscal-periods', icon: Calendar },
+        ],
+      },
+      {
+        title: 'Fixed Assets',
+        href: '/finance/fixed-assets',
+        icon: Package,
+        children: [
+          { title: 'Dashboard', href: '/finance/fixed-assets/dashboard', icon: LayoutDashboard },
+          { title: 'Asset Register', href: '/finance/fixed-assets/register', icon: FileText },
+          { title: 'Categories', href: '/finance/fixed-assets/categories', icon: FolderTree },
+          { title: 'Depreciation', href: '/finance/fixed-assets/depreciation', icon: TrendingUp },
+          { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: BarChart3 },
+          { title: 'Transfers', href: '/finance/fixed-assets/transfers', icon: Activity },
+          { title: 'Disposals', href: '/finance/fixed-assets/disposals', icon: FileText },
+          { title: 'Verification', href: '/finance/fixed-assets/verification', icon: ClipboardCheck },
+          { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: TrendingUp },
+          { title: 'Capital Projects', href: '/finance/fixed-assets/capital-projects', icon: Briefcase },
+          { title: 'Leases (IFRS 16)', href: '/finance/fixed-assets/leases', icon: FileText },
+          { title: 'Import', href: '/finance/fixed-assets/import', icon: FileText },
+          { title: 'Reports', href: '/finance/fixed-assets/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Accounts Payable',
+        href: '/finance/ap',
+        icon: FileText,
+        children: [
+          { title: 'Dashboard', href: '/finance/ap/dashboard', icon: LayoutDashboard },
+          { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
+          { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
+          { title: 'Reports', href: '/finance/ap/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Accounts Receivable',
+        href: '/finance/ar',
+        icon: Users,
+        children: [
+          { title: 'Dashboard', href: '/finance/ar/dashboard', icon: LayoutDashboard },
+          { title: 'Customers', href: '/finance/ar/customers', icon: Users },
+          { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
+          { title: 'Payments', href: '/finance/ar/payments', icon: CreditCard },
+          { title: 'Reports', href: '/finance/ar/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Cash Management',
+        href: '/finance/cash',
+        icon: CreditCard,
+        children: [
+          { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building },
+          { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
+          { title: 'Bank Reconciliation', href: '/finance/cash/reconciliation', icon: ClipboardCheck },
+          { title: 'Cash Reports', href: '/finance/cash/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Budgeting',
+        href: '/finance/budgeting',
+        icon: BarChart3,
+        children: [
+          { title: 'Scenarios', href: '/finance/budgeting/scenarios', icon: BarChart3 },
+          { title: 'My Returns', href: '/finance/budgeting/my-returns', icon: FileText },
+        ],
+      },
+      {
+        title: 'Unit Accounting',
+        href: '/finance/unit-accounting',
+        icon: BarChart3,
+        children: [
+          { title: 'Unit Types', href: '/finance/unit-types', icon: FileText },
+          { title: 'Unit Accounts', href: '/finance/unit-accounts', icon: BarChart3 },
+          { title: 'Unit Journal Entries', href: '/finance/unit-journal-entries', icon: FileText },
+          { title: 'Ratio Definitions', href: '/finance/ratio-definitions', icon: BarChart3 },
+          { title: 'Unit Budgets', href: '/finance/unit-budgets', icon: BarChart3 },
+          { title: 'Allocations', href: '/finance/allocations', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Multi-Currency',
+        href: '/finance/multi-currency',
+        icon: CreditCard,
+        children: [
+          { title: 'Currencies', href: '/finance/currencies', icon: CreditCard },
+          { title: 'Exchange Rates', href: '/finance/exchange-rates', icon: BarChart3 },
+          { title: 'Revaluation', href: '/finance/revaluation', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Taxation',
+        href: '/finance/tax',
+        icon: BarChart3,
+        children: [
+          { title: 'Tax Configuration', href: '/finance/tax/configuration', icon: Settings },
+          { title: 'Taxes', href: '/finance/tax/configuration/taxes', icon: FileText },
+          { title: 'Tax Groups', href: '/finance/tax/configuration/groups', icon: FileText },
+          { title: 'Tax Calculator', href: '/finance/tax/calculator', icon: BarChart3 },
+          { title: 'Tax Reports', href: '/finance/tax/reports', icon: FileText },
+        ],
+      },
       { title: 'Financial Reports', href: '/finance/reports', icon: BarChart3 },
-      { title: 'Budgets', href: '/finance/budgets', icon: CreditCard },
-      { title: 'Transactions', href: '/finance/transactions', icon: CreditCard },
+      { title: 'Settings', href: '/finance/settings', icon: Settings },
     ],
   },
   {
@@ -282,11 +411,37 @@ const navigationItems: NavItem[] = [
     href: '/sales',
     icon: ShoppingCart,
     children: [
-      { title: 'Customers', href: '/sales/customers', icon: Users },
-      { title: 'Orders', href: '/sales/orders', icon: ShoppingCart },
-      { title: 'Quotes', href: '/sales/quotes', icon: FileText },
-      { title: 'Invoicing', href: '/sales/invoicing', icon: CreditCard },
-      { title: 'Sales Pipeline', href: '/sales/pipeline', icon: BarChart3 },
+      { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
+      { title: 'Delivery Notes', href: '/sales/deliveries', icon: Truck },
+      { title: 'Sales Agreements', href: '/sales/agreements', icon: FileText },
+      {
+        title: 'CRM',
+        href: '/sales/crm',
+        icon: Users,
+        children: [
+          { title: 'Leads', href: '/sales/crm/leads', icon: Users },
+          { title: 'Opportunities', href: '/sales/crm/opportunities', icon: Target },
+          { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
+          { title: 'Activities', href: '/sales/crm/activities', icon: Activity },
+        ],
+      },
+      { title: 'Return Orders', href: '/sales/return-orders', icon: RotateCcw },
+      { title: 'Credit Notes', href: '/sales/credit-notes', icon: CreditCard },
+      { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
+      {
+        title: 'Collections',
+        href: '/sales/collections',
+        icon: Phone,
+        children: [
+          { title: 'Activities', href: '/sales/collections', icon: Phone },
+          { title: 'Payment Plans', href: '/sales/collections/plans', icon: CalendarClock },
+        ],
+      },
+      { title: 'Commissions', href: '/sales/commissions', icon: Award },
+      { title: 'Forecasts', href: '/sales/forecasts', icon: TrendingUp },
+      { title: 'Competitors', href: '/sales/competitors', icon: Swords },
+      { title: 'Reports', href: '/sales/reports', icon: BarChart3 },
+      { title: 'Journal Templates', href: '/sales/journal-templates', icon: BookTemplate },
     ],
   },
   {
@@ -295,8 +450,8 @@ const navigationItems: NavItem[] = [
     icon: Megaphone,
     children: [
       { title: 'Campaigns', href: '/marketing/campaigns', icon: Megaphone },
-      { title: 'Leads', href: '/marketing/leads', icon: Users },
-      { title: 'Contacts', href: '/marketing/contacts', icon: Users },
+      { title: 'Products', href: '/marketing/products', icon: Package },
+      { title: 'Leads', href: '/sales/crm/leads', icon: Users },
       { title: 'Analytics', href: '/marketing/analytics', icon: BarChart3 },
     ],
   },
@@ -746,6 +901,7 @@ export function Sidebar({ className }: SidebarProps) {
   };
 
   const openMainItemMenu = (itemTitle: string, event: React.MouseEvent) => {
+    if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     
     // Estimate menu height based on number of children
@@ -775,6 +931,7 @@ export function Sidebar({ className }: SidebarProps) {
   };
 
   const openChildItemMenu = (parentTitle: string, childTitle: string, event: React.MouseEvent) => {
+    if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}`;
     
@@ -806,6 +963,7 @@ export function Sidebar({ className }: SidebarProps) {
   };
 
   const openGrandChildItemMenu = (parentTitle: string, childTitle: string, grandChildTitle: string, event: React.MouseEvent) => {
+    if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}-${grandChildTitle}`;
     

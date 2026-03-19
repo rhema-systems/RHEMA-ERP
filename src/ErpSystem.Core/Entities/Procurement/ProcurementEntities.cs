@@ -106,6 +106,13 @@ public class Supplier : TenantEntity
     public DateTime? ContractStartDate { get; set; }
     public DateTime? ContractEndDate { get; set; }
 
+    // Finance/GL Integration
+    public Guid? DefaultApAccountId { get; set; }
+    public Guid? DefaultArAccountId { get; set; }
+    public Guid? DefaultExpenseAccountId { get; set; }
+    public Guid? PaymentTermId { get; set; }
+    public virtual ErpSystem.Core.Entities.Finance.PaymentTerm? PaymentTerm { get; set; }
+
     // Navigation Properties
     public virtual ICollection<PurchaseOrder> PurchaseOrders { get; set; } = new List<PurchaseOrder>();
     public virtual ICollection<SupplierContact> Contacts { get; set; } = new List<SupplierContact>();

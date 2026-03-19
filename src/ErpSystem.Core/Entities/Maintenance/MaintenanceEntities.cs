@@ -1404,8 +1404,9 @@ public class WorkOrderLabor : TenantEntity
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
 
-    // NOTE: Technicians are now Employee-driven. We intentionally do not maintain an EF FK relationship here
-    // to allow a clean transition from previously user-based TechnicianId values.
+    [ForeignKey("TechnicianId")]
+    public virtual Employee? Technician { get; set; }
+
 }
 
 public class WorkOrderDocument : TenantEntity
