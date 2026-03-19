@@ -6,6 +6,9 @@ import {
   Area,
   BarChart,
   Bar,
+  FunnelChart,
+  Funnel,
+  LabelList,
   LineChart,
   Line,
   PieChart,
@@ -49,6 +52,7 @@ interface BaseChartProps {
   description?: string;
   loading?: boolean;
   error?: string;
+  compact?: boolean;
 }
 
 interface ChartContainerProps extends BaseChartProps {
@@ -67,17 +71,18 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
   height = 300,
   loading = false,
   error,
+  compact = false,
 }) => {
   if (loading) {
     return (
       <Card className={cn('w-full', className)}>
         {(title || description) && (
-          <CardHeader>
-            {title && <CardTitle>{title}</CardTitle>}
-            {description && <CardDescription>{description}</CardDescription>}
+          <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
+            {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
+            {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
           </CardHeader>
         )}
-        <CardContent>
+        <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
           <div className="flex items-center justify-center" style={{ height }}>
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
@@ -90,12 +95,12 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
     return (
       <Card className={cn('w-full', className)}>
         {(title || description) && (
-          <CardHeader>
-            {title && <CardTitle>{title}</CardTitle>}
-            {description && <CardDescription>{description}</CardDescription>}
+          <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
+            {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
+            {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
           </CardHeader>
         )}
-        <CardContent>
+        <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
           <div className="flex items-center justify-center" style={{ height }}>
             <div className="text-center">
               <div className="text-red-500 mb-2">⚠️</div>
@@ -110,12 +115,12 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
   return (
     <Card className={cn('w-full', className)}>
       {(title || description) && (
-        <CardHeader>
-          {title && <CardTitle>{title}</CardTitle>}
-          {description && <CardDescription>{description}</CardDescription>}
+        <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
+          {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
+          {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
         </CardHeader>
       )}
-      <CardContent>
+      <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
         <ResponsiveContainer width="100%" height={height}>
           {children}
         </ResponsiveContainer>
@@ -199,6 +204,7 @@ export const BaseLineChart: React.FC<LineChartProps> = ({
   description,
   loading,
   error,
+  compact,
 }) => {
   return (
     <ChartContainer
@@ -209,6 +215,7 @@ export const BaseLineChart: React.FC<LineChartProps> = ({
       loading={loading}
       error={error}
       data={data}
+      compact={compact}
     >
       <LineChart data={data}>
         {showGrid && <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />}
@@ -272,6 +279,7 @@ export const BaseAreaChart: React.FC<AreaChartProps> = ({
   description,
   loading,
   error,
+  compact,
 }) => {
   return (
     <ChartContainer
@@ -282,6 +290,7 @@ export const BaseAreaChart: React.FC<AreaChartProps> = ({
       loading={loading}
       error={error}
       data={data}
+      compact={compact}
     >
       <AreaChart data={data}>
         {showGrid && <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />}
@@ -346,6 +355,7 @@ export const BaseBarChart: React.FC<BarChartProps> = ({
   description,
   loading,
   error,
+  compact,
 }) => {
   return (
     <ChartContainer
@@ -356,6 +366,7 @@ export const BaseBarChart: React.FC<BarChartProps> = ({
       loading={loading}
       error={error}
       data={data}
+      compact={compact}
     >
       <BarChart data={data} layout={orientation === 'horizontal' ? 'horizontal' : 'vertical'}>
         {showGrid && <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />}
@@ -413,6 +424,7 @@ export const BasePieChart: React.FC<PieChartProps> = ({
   description,
   loading,
   error,
+  compact,
 }) => {
   return (
     <ChartContainer
@@ -423,6 +435,7 @@ export const BasePieChart: React.FC<PieChartProps> = ({
       loading={loading}
       error={error}
       data={data}
+      compact={compact}
     >
       <PieChart>
         <Pie
@@ -472,6 +485,7 @@ export const BaseRadialBarChart: React.FC<RadialBarChartProps> = ({
   description,
   loading,
   error,
+  compact,
 }) => {
   return (
     <ChartContainer
@@ -482,6 +496,7 @@ export const BaseRadialBarChart: React.FC<RadialBarChartProps> = ({
       loading={loading}
       error={error}
       data={data}
+      compact={compact}
     >
       <RadialBarChart cx="50%" cy="50%" innerRadius={innerRadius} outerRadius={outerRadius} data={data}>
         <RadialBar
@@ -492,6 +507,57 @@ export const BaseRadialBarChart: React.FC<RadialBarChartProps> = ({
         />
         <Tooltip />
       </RadialBarChart>
+    </ChartContainer>
+  );
+};
+
+// #endregion
+
+// #region Funnel Chart Component
+
+interface FunnelChartProps extends BaseChartProps {
+  dataKey: string;
+  nameKey: string;
+  colors?: string[];
+  showLabels?: boolean;
+  formatValue?: (value: any, name: string) => string;
+}
+
+export const BaseFunnelChart: React.FC<FunnelChartProps> = ({
+  data,
+  dataKey,
+  nameKey,
+  colors = CHART_COLORS.primary,
+  showLabels = true,
+  formatValue,
+  className,
+  height,
+  title,
+  description,
+  loading,
+  error,
+  compact,
+}) => {
+  return (
+    <ChartContainer
+      className={className}
+      height={height}
+      title={title}
+      description={description}
+      loading={loading}
+      error={error}
+      data={data}
+      compact={compact}
+    >
+      <FunnelChart>
+        <Tooltip content={<CustomTooltip formatValue={formatValue} />} />
+        <Funnel data={data} dataKey={dataKey} nameKey={nameKey} isAnimationActive>
+          {data.map((_, index) => (
+            <Cell key={`funnel-cell-${index}`} fill={colors[index % colors.length]} />
+          ))}
+          {showLabels ? <LabelList position="right" fill="currentColor" stroke="none" dataKey={nameKey} /> : null}
+        </Funnel>
+      </FunnelChart>
     </ChartContainer>
   );
 };
