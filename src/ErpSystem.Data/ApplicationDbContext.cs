@@ -96,9 +96,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<AssetDisposal> AssetDisposals { get; set; }
     public DbSet<AssetTransfer> AssetTransfers { get; set; }
     public DbSet<AssetTransaction> AssetTransactions { get; set; }
+    public DbSet<AssetValuation> AssetValuations { get; set; }
     public DbSet<AssetDepreciationSchedule> AssetDepreciationSchedules { get; set; }
     public DbSet<AssetVerificationSession> AssetVerificationSessions { get; set; }
     public DbSet<AssetVerificationItem> AssetVerificationItems { get; set; }
+
+    // Capital Projects (AUC) entities
+    public DbSet<CapitalProject> CapitalProjects { get; set; }
+    public DbSet<ProjectCostLine> ProjectCostLines { get; set; }
+    public DbSet<ProjectSettlementRule> ProjectSettlementRules { get; set; }
+
+    // Lease Accounting (IFRS 16) entities
+    public DbSet<LeaseContract> LeaseContracts { get; set; }
+    public DbSet<LeaseScheduleLine> LeaseScheduleLines { get; set; }
     public DbSet<JournalEntry> JournalEntries { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
@@ -110,6 +120,47 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Invoice> Invoices { get; set; }
     public DbSet<VendorInvoice> VendorInvoices { get; set; }
     public DbSet<Customer> Customers { get; set; }
+
+    // Sales Order Management entities
+    public DbSet<SalesOrder> SalesOrders { get; set; }
+    public DbSet<SalesOrderLine> SalesOrderLines { get; set; }
+    public DbSet<SalesOrderStatusHistory> SalesOrderStatusHistories { get; set; }
+    public DbSet<DeliveryNote> DeliveryNotes { get; set; }
+    public DbSet<DeliveryNoteLine> DeliveryNoteLines { get; set; }
+
+    // Sales Agreement Management entities
+    public DbSet<SalesAgreement> SalesAgreements { get; set; }
+    public DbSet<SalesAgreementLine> SalesAgreementLines { get; set; }
+    public DbSet<SalesAgreementMilestone> SalesAgreementMilestones { get; set; }
+    public DbSet<SalesAgreementRenewal> SalesAgreementRenewals { get; set; }
+    public DbSet<SalesAgreementDocument> SalesAgreementDocuments { get; set; }
+
+    // CRM entities
+    public DbSet<Lead> Leads { get; set; }
+    public DbSet<Opportunity> Opportunities { get; set; }
+    public DbSet<Quote> Quotes { get; set; }
+    public DbSet<QuoteLineItem> QuoteLineItems { get; set; }
+    public DbSet<Activity> CrmActivities { get; set; }
+    public DbSet<Campaign> Campaigns { get; set; }
+    public DbSet<CampaignMember> CampaignMembers { get; set; }
+    public DbSet<Product> SalesProducts { get; set; }
+
+    // Competitor Intelligence entities
+    public DbSet<Competitor> Competitors { get; set; }
+    public DbSet<CompetitorDeal> CompetitorDeals { get; set; }
+
+    // Return Order / Credit Note / Refund entities
+    public DbSet<ReturnOrder> ReturnOrders { get; set; }
+    public DbSet<ReturnOrderLine> ReturnOrderLines { get; set; }
+    public DbSet<CreditNote> CreditNotes { get; set; }
+    public DbSet<CreditNoteLine> CreditNoteLines { get; set; }
+    public DbSet<Refund> Refunds { get; set; }
+
+    // Collections & Debt Management entities
+    public DbSet<CollectionActivity> CollectionActivities { get; set; }
+    public DbSet<PaymentPlan> PaymentPlans { get; set; }
+    public DbSet<PaymentPlanInstallment> PaymentPlanInstallments { get; set; }
+
     public DbSet<TenantModule> TenantModules { get; set; }
     public DbSet<UserTenant> UserTenants { get; set; }
 
@@ -441,15 +492,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<BusinessPartnerFinancial> BusinessPartnerFinancials { get; set; }
     public DbSet<BusinessPartnerRegistration> BusinessPartnerRegistrations { get; set; }
 
-    // Sales / CRM entities
-    public DbSet<Campaign> Campaigns { get; set; }
-    public DbSet<CampaignMember> CampaignMembers { get; set; }
-    public DbSet<Lead> Leads { get; set; }
-    public DbSet<Opportunity> Opportunities { get; set; }
-    public DbSet<Quote> Quotes { get; set; }
-    public DbSet<QuoteLineItem> QuoteLineItems { get; set; }
-    public DbSet<Activity> Activities { get; set; }
-
     // Tender Management
     public DbSet<Tender> Tenders { get; set; }
     public DbSet<TenderLot> TenderLots { get; set; }
@@ -717,6 +759,320 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
 
+        // ─── CRM Entity FK Configurations (prevent cascade cycles) ───
+
+        builder.Entity<Lead>(entity =>
+        {
+            entity.ToTable("Leads");
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ConvertedCustomer)
+                .WithMany()
+                .HasForeignKey(e => e.ConvertedCustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Opportunity>(entity =>
+        {
+            entity.ToTable("Opportunities");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Lead)
+                .WithMany(l => l.Opportunities)
+                .HasForeignKey(e => e.LeadId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Quote>(entity =>
+        {
+            entity.ToTable("Quotes");
+            entity.HasOne(e => e.Opportunity)
+                .WithMany(o => o.Quotes)
+                .HasForeignKey(e => e.OpportunityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ConvertedInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.ConvertedInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<QuoteLineItem>(entity =>
+        {
+            entity.ToTable("QuoteLineItems");
+            entity.HasOne(e => e.Quote)
+                .WithMany(q => q.LineItems)
+                .HasForeignKey(e => e.QuoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Ignore computed property
+            entity.Ignore(e => e.LineTotal);
+        });
+
+        builder.Entity<Activity>(entity =>
+        {
+            entity.ToTable("CrmActivities");
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Lead)
+                .WithMany(l => l.Activities)
+                .HasForeignKey(e => e.LeadId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Opportunity)
+                .WithMany(o => o.Activities)
+                .HasForeignKey(e => e.OpportunityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Campaign>(entity =>
+        {
+            entity.ToTable("Campaigns");
+            entity.Ignore(e => e.ResponseRate);
+            entity.HasOne(e => e.Manager)
+                .WithMany()
+                .HasForeignKey(e => e.ManagerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CampaignMember>(entity =>
+        {
+            entity.ToTable("CampaignMembers");
+            entity.HasOne(e => e.Campaign)
+                .WithMany(c => c.CampaignMembers)
+                .HasForeignKey(e => e.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Lead)
+                .WithMany()
+                .HasForeignKey(e => e.LeadId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Product>(entity =>
+        {
+            entity.ToTable("SalesProducts");
+            entity.Ignore(e => e.Margin);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── Return Order / Credit Note / Refund FK Configurations ───
+
+        builder.Entity<ReturnOrder>(entity =>
+        {
+            entity.ToTable("ReturnOrders");
+            entity.HasOne(e => e.SalesOrder)
+                .WithMany()
+                .HasForeignKey(e => e.SalesOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.DeliveryNote)
+                .WithMany()
+                .HasForeignKey(e => e.DeliveryNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InspectedBy)
+                .WithMany()
+                .HasForeignKey(e => e.InspectedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CreditNote)
+                .WithMany()
+                .HasForeignKey(e => e.CreditNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Refund)
+                .WithMany()
+                .HasForeignKey(e => e.RefundId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ReturnOrderLine>(entity =>
+        {
+            entity.ToTable("ReturnOrderLines");
+            entity.HasOne(e => e.ReturnOrder)
+                .WithMany(r => r.Lines)
+                .HasForeignKey(e => e.ReturnOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.SalesOrderLine)
+                .WithMany()
+                .HasForeignKey(e => e.SalesOrderLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Ignore(e => e.LineTotal);
+        });
+
+        builder.Entity<CreditNote>(entity =>
+        {
+            entity.ToTable("CreditNotes");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReturnOrder)
+                .WithMany()
+                .HasForeignKey(e => e.ReturnOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CreditNoteLine>(entity =>
+        {
+            entity.ToTable("CreditNoteLines");
+            entity.HasOne(e => e.CreditNote)
+                .WithMany(c => c.Lines)
+                .HasForeignKey(e => e.CreditNoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Ignore(e => e.LineTotal);
+        });
+
+        builder.Entity<Refund>(entity =>
+        {
+            entity.ToTable("Refunds");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CreditNote)
+                .WithMany()
+                .HasForeignKey(e => e.CreditNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReturnOrder)
+                .WithMany()
+                .HasForeignKey(e => e.ReturnOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ProcessedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ProcessedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── Collections & Debt Management FK Configurations ───
+
+        builder.Entity<CollectionActivity>(entity =>
+        {
+            entity.ToTable("CollectionActivities");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Invoice)
+                .WithMany()
+                .HasForeignKey(e => e.InvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentPlan>(entity =>
+        {
+            entity.ToTable("PaymentPlans");
+            entity.Ignore(e => e.RemainingBalance);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ApprovedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentPlanInstallment>(entity =>
+        {
+            entity.ToTable("PaymentPlanInstallments");
+            entity.Ignore(e => e.Balance);
+            entity.HasOne(e => e.PaymentPlan)
+                .WithMany(p => p.Installments)
+                .HasForeignKey(e => e.PaymentPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<MaintenanceAttachmentAccess>(entity =>
         {
             entity.ToTable("MaintenanceAttachmentAccessLogs");
@@ -738,6 +1094,80 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(e => e.StockMovement)
                 .WithMany()
                 .HasForeignKey(e => e.StockMovementId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure FixedAssetCategory → Account relationships (prevent cascade cycles with multiple FKs)
+        builder.Entity<FixedAssetCategory>(entity =>
+        {
+            entity.HasOne(c => c.AssetAccount)
+                .WithMany()
+                .HasForeignKey(c => c.AssetAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.AccumulatedDepreciationAccount)
+                .WithMany()
+                .HasForeignKey(c => c.AccumulatedDepreciationAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.DepreciationExpenseAccount)
+                .WithMany()
+                .HasForeignKey(c => c.DepreciationExpenseAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.GainOnDisposalAccount)
+                .WithMany()
+                .HasForeignKey(c => c.GainOnDisposalAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.LossOnDisposalAccount)
+                .WithMany()
+                .HasForeignKey(c => c.LossOnDisposalAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.RevaluationSurplusAccount)
+                .WithMany()
+                .HasForeignKey(c => c.RevaluationSurplusAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.AucAccount)
+                .WithMany()
+                .HasForeignKey(c => c.AucAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure CashTransaction → BankAccount relationships (disambiguate two FKs)
+        builder.Entity<CashTransaction>(entity =>
+        {
+            entity.HasOne(ct => ct.BankAccount)
+                .WithMany(ba => ba.Transactions)
+                .HasForeignKey(ct => ct.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(ct => ct.ToBankAccount)
+                .WithMany()
+                .HasForeignKey(ct => ct.ToBankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // 1:1 with Cheque — Cheque is the dependent (has CashTransactionId FK)
+            entity.HasOne(ct => ct.Cheque)
+                .WithOne(c => c.CashTransaction)
+                .HasForeignKey<Cheque>(c => c.CashTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Reconciliation link
+            entity.HasOne(ct => ct.Reconciliation)
+                .WithMany(r => r.ReconciledTransactions)
+                .HasForeignKey(ct => ct.ReconciliationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure ReconciliationMatch → BankStatementLine 1:1 (ReconciliationMatch is dependent)
+        builder.Entity<ReconciliationMatch>(entity =>
+        {
+            entity.HasOne(rm => rm.BankStatementLine)
+                .WithOne(bsl => bsl.ReconciliationMatch)
+                .HasForeignKey<ReconciliationMatch>(rm => rm.BankStatementLineId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -7074,5 +7504,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
+
+        // ── Global: default all FKs to Restrict to prevent cascade-cycle errors on SQL Server ──
+        foreach (var relationship in builder.Model.GetEntityTypes()
+            .SelectMany(e => e.GetForeignKeys()))
+        {
+            if (relationship.DeleteBehavior == DeleteBehavior.Cascade)
+                relationship.DeleteBehavior = DeleteBehavior.Restrict;
+        }
     }
 }

@@ -302,7 +302,7 @@ public class TendersController : ControllerBase
     /// </summary>
     [HttpPost("{id}/close")]
     [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public ActionResult<TenderDto> CloseTender(Guid id)
+    public async Task<ActionResult<TenderDto>> CloseTender(Guid id)
     {
         try
         {

@@ -272,7 +272,8 @@ export default function ProjectPortfoliosPage() {
                   <div>
                     <div className="font-semibold">{item.title}</div>
                     <div className="text-sm text-muted-foreground">
-                      {item.sourceProjectCode} to {item.targetProjectCode}
+                      {/* NOTE: The '>' in '->' must be escaped in JSX as {'->'}  */}
+                      {item.sourceProjectCode} {'->'}  {item.targetProjectCode}
                     </div>
                   </div>
                   <div className="flex gap-2">

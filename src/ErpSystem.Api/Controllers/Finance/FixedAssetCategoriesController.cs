@@ -87,6 +87,23 @@ public class FixedAssetCategoriesController : ControllerBase
             .Where(a => a.AccountName.Contains("Depreci", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        var equityAccounts = accounts
+            .Where(a => a.AccountType == AccountType.Equity.ToString())
+            .ToList();
+
+        var revaluationSurplusAccounts = equityAccounts
+            .Where(a =>
+                (a.AccountName ?? string.Empty).Contains("Revaluation", StringComparison.OrdinalIgnoreCase) ||
+                (a.AccountName ?? string.Empty).Contains("Surplus", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var aucAccounts = assetAccounts
+            .Where(a =>
+                (a.AccountName ?? string.Empty).Contains("Construction", StringComparison.OrdinalIgnoreCase) ||
+                (a.AccountName ?? string.Empty).Contains("AUC", StringComparison.OrdinalIgnoreCase) ||
+                (a.AccountName ?? string.Empty).Contains("CIP", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
         var result = new FixedAssetGlAccountOptionsDto
         {
             AssetAccounts = (fixedAssetAccounts.Count > 0 ? fixedAssetAccounts : assetAccounts)
@@ -102,6 +119,12 @@ public class FixedAssetCategoriesController : ControllerBase
                 .OrderBy(a => a.AccountNumber)
                 .ToList(),
             LossOnDisposalAccounts = expenseAccounts
+                .OrderBy(a => a.AccountNumber)
+                .ToList(),
+            RevaluationSurplusAccounts = (revaluationSurplusAccounts.Count > 0 ? revaluationSurplusAccounts : equityAccounts)
+                .OrderBy(a => a.AccountNumber)
+                .ToList(),
+            AucAccounts = (aucAccounts.Count > 0 ? aucAccounts : assetAccounts)
                 .OrderBy(a => a.AccountNumber)
                 .ToList()
         };

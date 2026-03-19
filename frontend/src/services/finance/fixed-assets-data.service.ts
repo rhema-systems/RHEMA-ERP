@@ -23,6 +23,11 @@ import type {
   CreateAssetVerificationSessionDto,
   AssetVerificationItem,
   VerifyAssetDto,
+  CreateAssetValuationDto,
+  CreateBulkAssetValuationDto,
+  AssetValuation,
+  BulkOperationResult,
+  RequestBulkAssetDisposalDto,
 } from '@/types/fixed-assets';
 import {
   FixedAssetReportQuery,
@@ -252,6 +257,50 @@ class FixedAssetsDataService {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(downloadUrl);
+  }
+
+  // ===== VALUATIONS / IMPAIRMENT =====
+
+  async createValuation(dto: CreateAssetValuationDto): Promise<AssetValuation> {
+    return apiService.post<AssetValuation>('/finance/fixed-assets/valuations', dto);
+  }
+
+  async createBulkValuation(dto: CreateBulkAssetValuationDto): Promise<BulkOperationResult<AssetValuation>> {
+    return apiService.post<BulkOperationResult<AssetValuation>>('/finance/fixed-assets/valuations/bulk', dto);
+  }
+
+  async getAssetValuations(assetId: string): Promise<AssetValuation[]> {
+    return apiService.get<AssetValuation[]>(`/finance/fixed-assets/${assetId}/valuations`);
+  }
+
+  async postValuationToGL(valuationId: string): Promise<AssetValuation> {
+    return apiService.post<AssetValuation>(`/finance/fixed-assets/valuations/${valuationId}/post-to-gl`);
+  }
+
+  // ===== LIFECYCLE MANAGEMENT =====
+
+  async activateAsset(id: string, placedInServiceDate?: string): Promise<FixedAsset> {
+    const qs = placedInServiceDate ? `?placedInServiceDate=${placedInServiceDate}` : '';
+    return apiService.post<FixedAsset>(`/finance/fixed-assets/${id}/activate${qs}`);
+  }
+
+  async holdAsset(id: string, reason?: string): Promise<FixedAsset> {
+    const qs = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+    return apiService.post<FixedAsset>(`/finance/fixed-assets/${id}/hold${qs}`);
+  }
+
+  async resumeAsset(id: string): Promise<FixedAsset> {
+    return apiService.post<FixedAsset>(`/finance/fixed-assets/${id}/resume`);
+  }
+
+  // ===== BULK / COMPLETE DISPOSALS =====
+
+  async requestBulkDisposal(dto: RequestBulkAssetDisposalDto): Promise<BulkOperationResult<AssetDisposal>> {
+    return apiService.post<BulkOperationResult<AssetDisposal>>('/finance/fixed-assets/disposals/bulk', dto);
+  }
+
+  async completeDisposal(disposalId: string): Promise<AssetDisposal> {
+    return apiService.post<AssetDisposal>(`/finance/fixed-assets/disposals/${disposalId}/complete`);
   }
 }
 

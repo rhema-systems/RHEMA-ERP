@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -12,13 +13,16 @@ public class AssetDisposalService : IAssetDisposalService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IJournalEntryService _journalEntryService;
 
     public AssetDisposalService(
         ApplicationDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IJournalEntryService journalEntryService)
     {
         _context = context;
         _currentUser = currentUser;
+        _journalEntryService = journalEntryService;
     }
 
     private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
@@ -105,32 +109,153 @@ public class AssetDisposalService : IAssetDisposalService
         disposal.UpdatedAt = DateTime.UtcNow;
         disposal.UpdatedBy = UserName;
 
-        // Finalize disposal on approval
-        disposal.Status = AssetDisposalStatus.Completed;
-        disposal.FixedAsset.Status = FixedAssetStatus.Disposed;
-        disposal.FixedAsset.DisposalDate = disposal.DisposalDate;
-        disposal.FixedAsset.UpdatedAt = DateTime.UtcNow;
-        disposal.FixedAsset.UpdatedBy = UserName;
+        await _context.SaveChangesAsync();
 
-        var assetTransaction = new AssetTransaction
+        return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to approve disposal.");
+    }
+
+    public async Task<AssetDisposalDto> CompleteDisposalAsync(Guid disposalId)
+    {
+        var disposal = await _context.AssetDisposals
+            .Include(d => d.FixedAsset)
+                .ThenInclude(a => a.Category)
+            .FirstOrDefaultAsync(d => d.TenantId == TenantId && d.Id == disposalId)
+            ?? throw new KeyNotFoundException("Disposal request not found.");
+
+        if (disposal.Status != AssetDisposalStatus.Approved)
+            throw new InvalidOperationException("Only approved disposals can be completed.");
+
+        var asset = disposal.FixedAsset;
+        var category = asset.Category;
+
+        // == GL Journal Entry ==
+        var journalNumber = await _journalEntryService.GenerateJournalEntryNumberAsync();
+        var reference = $"DSP-{asset.AssetCode}-{disposal.DisposalDate:yyyyMMdd}";
+        var netProceeds = disposal.SaleProceeds - disposal.DisposalCost;
+        var gainOrLoss = netProceeds - asset.NetBookValue;
+        var accumulatedDepr = asset.AcquisitionCost - asset.NetBookValue;
+
+        var transactions = new List<CreateAccountTransactionDto>();
+        int line = 1;
+
+        // Dr Accumulated Depreciation (clear)
+        if (accumulatedDepr > 0)
+        {
+            transactions.Add(new CreateAccountTransactionDto
+            {
+                AccountId = category.AccumulatedDepreciationAccountId,
+                Amount = accumulatedDepr,
+                TransactionType = "Debit",
+                Description = "Clear accumulated depreciation",
+                Reference = reference,
+                LineNumber = line++
+            });
+        }
+
+        // Cr Asset Account (original cost)
+        if (category.AssetAccountId != Guid.Empty)
+        {
+            transactions.Add(new CreateAccountTransactionDto
+            {
+                AccountId = category.AssetAccountId,
+                Amount = asset.AcquisitionCost,
+                TransactionType = "Credit",
+                Description = "Remove asset from books",
+                Reference = reference,
+                LineNumber = line++
+            });
+        }
+
+        // Dr/Cr Gain or Loss
+        if (gainOrLoss > 0 && category.GainOnDisposalAccountId.HasValue)
+        {
+            // Net Credit: Gain on Disposal
+            transactions.Add(new CreateAccountTransactionDto
+            {
+                AccountId = category.GainOnDisposalAccountId.Value,
+                Amount = Math.Abs(gainOrLoss),
+                TransactionType = "Credit",
+                Description = "Gain on disposal",
+                Reference = reference,
+                LineNumber = line++
+            });
+        }
+        else if (gainOrLoss < 0 && category.LossOnDisposalAccountId.HasValue)
+        {
+            // Net Debit: Loss on Disposal
+            transactions.Add(new CreateAccountTransactionDto
+            {
+                AccountId = category.LossOnDisposalAccountId.Value,
+                Amount = Math.Abs(gainOrLoss),
+                TransactionType = "Debit",
+                Description = "Loss on disposal",
+                Reference = reference,
+                LineNumber = line++
+            });
+        }
+
+        // Dr Cash/AR for net sale proceeds
+        if (netProceeds > 0)
+        {
+            // Use the Asset Account as placeholder; ideally this would be a Cash/AR account
+            transactions.Add(new CreateAccountTransactionDto
+            {
+                AccountId = category.AssetAccountId,
+                Amount = netProceeds,
+                TransactionType = "Debit",
+                Description = "Sale proceeds receivable",
+                Reference = reference,
+                LineNumber = line++
+            });
+        }
+
+        if (transactions.Count >= 2)
+        {
+            var entry = new CreateJournalEntryDto
+            {
+                JournalNumber = journalNumber,
+                TransactionDate = disposal.DisposalDate,
+                Description = $"Disposal of {asset.AssetCode} — {asset.Name} ({disposal.DisposalType})",
+                Reference = reference,
+                SourceModule = "FixedAssets",
+                Transactions = transactions
+            };
+
+            var created = await _journalEntryService.CreateJournalEntryAsync(entry);
+            await _journalEntryService.PostJournalEntryAsync(created.Id);
+        }
+
+        // == Finalize Disposal ==
+        disposal.Status = AssetDisposalStatus.Completed;
+        disposal.GainOrLoss = gainOrLoss;
+        disposal.UpdatedAt = DateTime.UtcNow;
+        disposal.UpdatedBy = UserName;
+
+        asset.Status = FixedAssetStatus.Disposed;
+        asset.DisposalDate = disposal.DisposalDate;
+        asset.NetBookValue = 0;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+
+        // Log audit trail
+        _context.AssetTransactions.Add(new AssetTransaction
         {
             TenantId = TenantId,
             FixedAssetId = disposal.FixedAssetId,
-            TransactionDate = DateTime.UtcNow,
+            TransactionDate = disposal.DisposalDate,
             TransactionType = "Disposal",
-            Description = $"Disposal ({disposal.DisposalType}) to {disposal.BuyerName}. Gain/Loss: {disposal.GainOrLoss}",
-            Amount = disposal.SaleProceeds - disposal.DisposalCost,
+            Description = $"Disposal ({disposal.DisposalType}) to {disposal.BuyerName}. Proceeds: {netProceeds:N2}, Gain/Loss: {gainOrLoss:N2}",
+            Amount = netProceeds,
             ResultingBookValue = 0,
             RelatedEntityId = disposal.Id,
             PerformedByUserId = CurrentUserId,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = UserName
-        };
+        });
 
-        _context.AssetTransactions.Add(assetTransaction);
         await _context.SaveChangesAsync();
 
-        return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to approve disposal.");
+        return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to complete disposal.");
     }
 
     public async Task<AssetDisposalDto> RejectDisposalAsync(Guid disposalId, Guid rejectedById, string comments)
@@ -147,6 +272,57 @@ public class AssetDisposalService : IAssetDisposalService
         await _context.SaveChangesAsync();
 
         return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to reject disposal.");
+    }
+
+    public async Task<BulkOperationResultDto<AssetDisposalDto>> RequestBulkDisposalAsync(
+        RequestBulkAssetDisposalDto dto, Guid requestedById)
+    {
+        var result = new BulkOperationResultDto<AssetDisposalDto>
+        {
+            TotalCount = dto.FixedAssetIds.Count
+        };
+
+        using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            foreach (var assetId in dto.FixedAssetIds)
+            {
+                try
+                {
+                    var singleDto = new RequestAssetDisposalDto
+                    {
+                        FixedAssetId = assetId,
+                        DisposalDate = dto.DisposalDate,
+                        DisposalType = dto.DisposalType,
+                        Reason = dto.Reason,
+                        BuyerName = dto.BuyerName,
+                        SaleProceeds = dto.SaleProceeds,
+                        DisposalCost = dto.DisposalCost
+                    };
+
+                    var disposal = await RequestDisposalAsync(singleDto, requestedById);
+                    result.SuccessfulItems.Add(disposal);
+                    result.SuccessCount++;
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add($"Asset {assetId}: {ex.Message}");
+                    result.FailureCount++;
+                }
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            result.Errors.Add($"Bulk operation failed: {ex.Message}");
+            result.SuccessCount = 0;
+            result.FailureCount = result.TotalCount;
+            result.SuccessfulItems.Clear();
+        }
+
+        return result;
     }
 
     private static AssetDisposalDto MapToDto(AssetDisposal d)

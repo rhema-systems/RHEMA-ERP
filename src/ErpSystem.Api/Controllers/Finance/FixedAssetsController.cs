@@ -17,6 +17,7 @@ public class FixedAssetsController : ControllerBase
     private readonly IAssetDisposalService _disposalService;
     private readonly IAssetVerificationService _verificationService;
     private readonly IFixedAssetReportsService _reportsService;
+    private readonly IAssetValuationService _valuationService;
     private readonly ICurrentUserService _currentUser;
 
     public FixedAssetsController(
@@ -26,6 +27,7 @@ public class FixedAssetsController : ControllerBase
         IAssetDisposalService disposalService,
         IAssetVerificationService verificationService,
         IFixedAssetReportsService reportsService,
+        IAssetValuationService valuationService,
         ICurrentUserService currentUser)
     {
         _fixedAssetService = fixedAssetService;
@@ -34,6 +36,7 @@ public class FixedAssetsController : ControllerBase
         _disposalService = disposalService;
         _verificationService = verificationService;
         _reportsService = reportsService;
+        _valuationService = valuationService;
         _currentUser = currentUser;
     }
 
@@ -387,6 +390,185 @@ public class FixedAssetsController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, new { error = "An error occurred while generating the template.", details = ex.Message });
+        }
+    }
+
+    // ========== Valuations ==========
+
+    [HttpPost("valuations")]
+    public async Task<IActionResult> CreateValuation([FromBody] CreateAssetValuationDto dto)
+    {
+        try
+        {
+            var userId = Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
+            var result = await _valuationService.CreateValuationAsync(dto, userId);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("valuations/bulk")]
+    public async Task<IActionResult> CreateBulkValuation([FromBody] CreateBulkAssetValuationDto dto)
+    {
+        try
+        {
+            var userId = Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
+            var result = await _valuationService.CreateBulkValuationAsync(dto, userId);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("{assetId}/valuations")]
+    public async Task<IActionResult> GetValuationsByAsset(Guid assetId)
+    {
+        var result = await _valuationService.GetValuationsByAssetAsync(assetId);
+        return Ok(result);
+    }
+
+    [HttpPost("valuations/{valuationId}/post-to-gl")]
+    public async Task<IActionResult> PostValuationToGL(Guid valuationId)
+    {
+        try
+        {
+            var result = await _valuationService.PostValuationToGLAsync(valuationId);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    // ========== Disposal Complete ==========
+
+    [HttpPost("disposals/{disposalId}/complete")]
+    public async Task<IActionResult> CompleteDisposal(Guid disposalId)
+    {
+        try
+        {
+            var result = await _disposalService.CompleteDisposalAsync(disposalId);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    // ========== Bulk Disposals ==========
+
+    [HttpPost("disposals/bulk")]
+    public async Task<IActionResult> RequestBulkDisposal([FromBody] RequestBulkAssetDisposalDto dto)
+    {
+        try
+        {
+            var userId = Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
+            var result = await _disposalService.RequestBulkDisposalAsync(dto, userId);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // ========== Lifecycle Management ==========
+
+    [HttpPost("{id}/activate")]
+    public async Task<IActionResult> ActivateAsset(Guid id, [FromQuery] DateTime? placedInServiceDate)
+    {
+        try
+        {
+            var result = await _fixedAssetService.ActivateAsync(id, placedInServiceDate);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/hold")]
+    public async Task<IActionResult> PutOnHold(Guid id, [FromQuery] string reason = "")
+    {
+        try
+        {
+            var result = await _fixedAssetService.PutOnHoldAsync(id, reason);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/resume")]
+    public async Task<IActionResult> ResumeAsset(Guid id)
+    {
+        try
+        {
+            var result = await _fixedAssetService.ResumeAsync(id);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    // ========== Dashboard ==========
+
+    [HttpGet("dashboard")]
+    public async Task<IActionResult> GetDashboard()
+    {
+        var result = await _fixedAssetService.GetDashboardAsync();
+        return Ok(result);
+    }
+
+    // ========== Asset Code Generation ==========
+
+    [HttpGet("generate-code")]
+    public async Task<IActionResult> GenerateAssetCode([FromQuery] Guid categoryId)
+    {
+        try
+        {
+            var code = await _fixedAssetService.GenerateAssetCodeAsync(categoryId);
+            return Ok(new { code });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
         }
     }
 }

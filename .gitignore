@@ -216,6 +216,7 @@ Thumbs.db
 docs/_site/
 docs/.sass-cache/
 docs/.jekyll-metadata
+comp/
 
 # IDE files
 *.swp

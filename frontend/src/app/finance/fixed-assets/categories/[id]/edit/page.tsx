@@ -23,6 +23,8 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
   const [depreciationExpenseOptions, setDepreciationExpenseOptions] = useState<FixedAssetGlAccountOption[]>([]);
   const [gainOnDisposalOptions, setGainOnDisposalOptions] = useState<FixedAssetGlAccountOption[]>([]);
   const [lossOnDisposalOptions, setLossOnDisposalOptions] = useState<FixedAssetGlAccountOption[]>([]);
+  const [revaluationSurplusOptions, setRevaluationSurplusOptions] = useState<FixedAssetGlAccountOption[]>([]);
+  const [aucAccountOptions, setAucAccountOptions] = useState<FixedAssetGlAccountOption[]>([]);
   const [formData, setFormData] = useState<UpdateFixedAssetCategoryDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,6 +42,8 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
         setDepreciationExpenseOptions(glAccounts.depreciationExpenseAccounts);
         setGainOnDisposalOptions(glAccounts.gainOnDisposalAccounts);
         setLossOnDisposalOptions(glAccounts.lossOnDisposalAccounts);
+        setRevaluationSurplusOptions(glAccounts.revaluationSurplusAccounts || []);
+        setAucAccountOptions(glAccounts.aucAccounts || []);
         setFormData({
           name: category.name,
           code: category.code,
@@ -52,6 +56,8 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
           depreciationExpenseAccountId: category.depreciationExpenseAccountId,
           gainOnDisposalAccountId: category.gainOnDisposalAccountId,
           lossOnDisposalAccountId: category.lossOnDisposalAccountId,
+          revaluationSurplusAccountId: category.revaluationSurplusAccountId,
+          aucAccountId: category.aucAccountId,
         });
       } catch (error) {
         console.error('Failed to load category:', error);
@@ -85,6 +91,8 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
         ...formData,
         gainOnDisposalAccountId: formData.gainOnDisposalAccountId || undefined,
         lossOnDisposalAccountId: formData.lossOnDisposalAccountId || undefined,
+        revaluationSurplusAccountId: formData.revaluationSurplusAccountId || undefined,
+        aucAccountId: formData.aucAccountId || undefined,
       });
       toast({
         title: 'Category updated',
@@ -292,6 +300,54 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
               <SelectContent>
                 <SelectItem value={NONE_VALUE}>No account</SelectItem>
                 {lossOnDisposalOptions.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.accountNumber} - {account.accountName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="revaluationSurplusAccountId">Revaluation Surplus Account (optional)</Label>
+            <Select
+              value={formData.revaluationSurplusAccountId || NONE_VALUE}
+              onValueChange={(value) =>
+                setFormData({
+                  ...formData,
+                  revaluationSurplusAccountId: value === NONE_VALUE ? undefined : value,
+                })
+              }
+            >
+              <SelectTrigger id="revaluationSurplusAccountId">
+                <SelectValue placeholder="Select revaluation surplus account" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>No account</SelectItem>
+                {revaluationSurplusOptions.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.accountNumber} - {account.accountName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="aucAccountId">AUC / CIP Account (optional)</Label>
+            <Select
+              value={formData.aucAccountId || NONE_VALUE}
+              onValueChange={(value) =>
+                setFormData({
+                  ...formData,
+                  aucAccountId: value === NONE_VALUE ? undefined : value,
+                })
+              }
+            >
+              <SelectTrigger id="aucAccountId">
+                <SelectValue placeholder="Select AUC account" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>No account</SelectItem>
+                {aucAccountOptions.map((account) => (
                   <SelectItem key={account.id} value={account.id}>
                     {account.accountNumber} - {account.accountName}
                   </SelectItem>

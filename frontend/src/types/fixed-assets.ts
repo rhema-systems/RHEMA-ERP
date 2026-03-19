@@ -34,6 +34,8 @@ export interface FixedAssetCategory {
   depreciationExpenseAccountId: string;
   gainOnDisposalAccountId?: string;
   lossOnDisposalAccountId?: string;
+  revaluationSurplusAccountId?: string;
+  aucAccountId?: string;
   createdAt: string;
   createdBy?: string;
 }
@@ -50,6 +52,8 @@ export interface CreateFixedAssetCategoryDto {
   depreciationExpenseAccountId: string;
   gainOnDisposalAccountId?: string;
   lossOnDisposalAccountId?: string;
+  revaluationSurplusAccountId?: string;
+  aucAccountId?: string;
 }
 
 export interface UpdateFixedAssetCategoryDto extends CreateFixedAssetCategoryDto { }
@@ -141,6 +145,8 @@ export interface FixedAssetGlAccountOptions {
   depreciationExpenseAccounts: FixedAssetGlAccountOption[];
   gainOnDisposalAccounts: FixedAssetGlAccountOption[];
   lossOnDisposalAccounts: FixedAssetGlAccountOption[];
+  revaluationSurplusAccounts: FixedAssetGlAccountOption[];
+  aucAccounts: FixedAssetGlAccountOption[];
 }
 
 export type AssetTransferStatus =
@@ -318,4 +324,79 @@ export interface BulkImportError {
   assetCode?: string;
   field: string;
   error: string;
+}
+
+// ===== VALUATIONS / IMPAIRMENT =====
+
+export type ValuationType = 'Revaluation' | 'Impairment' | 'ImpairmentReversal';
+
+export interface CreateAssetValuationDto {
+  fixedAssetId: string;
+  valuationDate: string;
+  valuationType: ValuationType;
+  fairValue: number;
+  revisedUsefulLifeMonths?: number;
+  valuerName?: string;
+  valuationMethod?: string;
+  valuationReportReference?: string;
+  reason?: string;
+  notes?: string;
+}
+
+export interface CreateBulkAssetValuationDto {
+  fixedAssetIds: string[];
+  valuationDate: string;
+  valuationType: ValuationType;
+  indexPercentage: number;
+  valuerName?: string;
+  valuationMethod?: string;
+  valuationReportReference?: string;
+  reason?: string;
+  notes?: string;
+}
+
+export interface AssetValuation {
+  id: string;
+  fixedAssetId: string;
+  assetCode?: string;
+  assetName?: string;
+  valuationDate: string;
+  valuationType: ValuationType;
+  carryingAmountBefore: number;
+  fairValue: number;
+  carryingAmountAfter: number;
+  revaluationSurplus: number;
+  revaluationDeficit: number;
+  impairmentLoss: number;
+  impairmentReversal: number;
+  revisedUsefulLifeMonths?: number;
+  valuerName?: string;
+  valuationMethod?: string;
+  valuationReportReference?: string;
+  reason?: string;
+  notes?: string;
+  isPostedToGL: boolean;
+  journalEntryId?: string;
+  postedDate?: string;
+  createdAt: string;
+}
+
+export interface BulkOperationResult<T> {
+  totalCount: number;
+  successCount: number;
+  failureCount: number;
+  successfulItems: T[];
+  errors: string[];
+}
+
+// ===== BULK DISPOSALS =====
+
+export interface RequestBulkAssetDisposalDto {
+  fixedAssetIds: string[];
+  disposalDate: string;
+  disposalType: DisposalType;
+  reason?: string;
+  saleProceeds?: number;
+  disposalCost?: number;
+  buyerName?: string;
 }

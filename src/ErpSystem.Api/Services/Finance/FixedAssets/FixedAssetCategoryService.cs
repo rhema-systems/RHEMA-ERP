@@ -58,6 +58,8 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             DepreciationExpenseAccountId = dto.DepreciationExpenseAccountId,
             GainOnDisposalAccountId = dto.GainOnDisposalAccountId,
             LossOnDisposalAccountId = dto.LossOnDisposalAccountId,
+            RevaluationSurplusAccountId = dto.RevaluationSurplusAccountId,
+            AucAccountId = dto.AucAccountId,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = UserName
         };
@@ -85,6 +87,8 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
         category.DepreciationExpenseAccountId = dto.DepreciationExpenseAccountId;
         category.GainOnDisposalAccountId = dto.GainOnDisposalAccountId;
         category.LossOnDisposalAccountId = dto.LossOnDisposalAccountId;
+        category.RevaluationSurplusAccountId = dto.RevaluationSurplusAccountId;
+        category.AucAccountId = dto.AucAccountId;
         category.UpdatedAt = DateTime.UtcNow;
         category.UpdatedBy = UserName;
 
@@ -126,6 +130,8 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             DepreciationExpenseAccountId = category.DepreciationExpenseAccountId,
             GainOnDisposalAccountId = category.GainOnDisposalAccountId,
             LossOnDisposalAccountId = category.LossOnDisposalAccountId,
+            RevaluationSurplusAccountId = category.RevaluationSurplusAccountId,
+            AucAccountId = category.AucAccountId,
             CreatedAt = category.CreatedAt,
             CreatedBy = category.CreatedBy
         };

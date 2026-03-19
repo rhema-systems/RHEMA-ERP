@@ -3,9 +3,10 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Save, Play, Pause, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -109,6 +110,38 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       });
     } finally {
       setSaving(false);
+    };
+  };
+
+  const handleActivate = async () => {
+    try {
+      await fixedAssetsDataService.activateAsset(id, formData?.placedInServiceDate || undefined);
+      toast({ title: 'Activated', description: 'Asset is now active and eligible for depreciation.' });
+      router.refresh();
+    } catch (error: unknown) {
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to activate.', variant: 'destructive' });
+    }
+  };
+
+  const handleHold = async () => {
+    const reason = prompt('Reason for putting on hold:');
+    if (reason === null) return;
+    try {
+      await fixedAssetsDataService.holdAsset(id, reason);
+      toast({ title: 'On Hold', description: 'Asset is now on hold. Depreciation is suspended.' });
+      router.refresh();
+    } catch (error: unknown) {
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed.', variant: 'destructive' });
+    }
+  };
+
+  const handleResume = async () => {
+    try {
+      await fixedAssetsDataService.resumeAsset(id);
+      toast({ title: 'Resumed', description: 'Asset is active again. Depreciation will resume.' });
+      router.refresh();
+    } catch (error: unknown) {
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed.', variant: 'destructive' });
     }
   };
 
@@ -340,6 +373,34 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               onChange={(e) => setFormData({ ...formData, residualValue: Number(e.target.value) })}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Lifecycle Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Lifecycle Actions</CardTitle>
+          <CardDescription>Current status: <Badge variant="outline">{formData.status}</Badge></CardDescription>
+        </CardHeader>
+        <CardContent className="flex gap-3">
+          {formData.status === 'Draft' && (
+            <Button onClick={handleActivate} className="bg-emerald-600 hover:bg-emerald-700">
+              <Play className="h-4 w-4 mr-2" />Activate Asset
+            </Button>
+          )}
+          {formData.status === 'Active' && (
+            <Button variant="outline" onClick={handleHold}>
+              <Pause className="h-4 w-4 mr-2" />Put on Hold
+            </Button>
+          )}
+          {formData.status === 'HeldForSale' && (
+            <Button onClick={handleResume} className="bg-blue-600 hover:bg-blue-700">
+              <RotateCcw className="h-4 w-4 mr-2" />Resume Asset
+            </Button>
+          )}
+          {(formData.status !== 'Draft' && formData.status !== 'Disposed' && formData.status !== 'WrittenOff') && formData.status !== 'HeldForSale' && formData.status !== 'Active' && (
+            <p className="text-sm text-muted-foreground">No lifecycle actions available for the current status.</p>
+          )}
         </CardContent>
       </Card>
     </div>

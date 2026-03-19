@@ -44,7 +44,10 @@ namespace ErpSystem.Core.Enums
         WrittenOff = 6,
 
         [Display(Name = "Under Construction")] // Asset in Progress (CIP)
-        UnderConstruction = 7
+        UnderConstruction = 7,
+
+        [Display(Name = "On Hold")]
+        OnHold = 8  // Temporarily paused (depreciation suspended)
     }
 
     public enum DepreciationConvention
@@ -167,33 +170,24 @@ namespace ErpSystem.Core.Enums
         Missing = 6
     }
 
+    /// <summary>
+    /// Type of asset valuation change (IAS 16 / IAS 36)
+    /// </summary>
     public enum ValuationType
     {
         [Display(Name = "Revaluation")]
-        Revaluation = 1,
+        Revaluation = 1,        // IAS 16 — increase in fair value
 
         [Display(Name = "Impairment")]
-        Impairment = 2,
+        Impairment = 2,         // IAS 36 — write-down due to impairment
 
         [Display(Name = "Impairment Reversal")]
-        ImpairmentReversal = 3
+        ImpairmentReversal = 3  // IAS 36 — reversal of prior impairment
     }
 
-    public enum PaymentFrequency
-    {
-        [Display(Name = "Monthly")]
-        Monthly = 1,
-
-        [Display(Name = "Quarterly")]
-        Quarterly = 2,
-
-        [Display(Name = "Semi-Annual")]
-        SemiAnnual = 3,
-
-        [Display(Name = "Annual")]
-        Annual = 4
-    }
-
+    /// <summary>
+    /// Status of a lease contract (IFRS 16 / ASC 842)
+    /// </summary>
     public enum LeaseStatus
     {
         [Display(Name = "Draft")]
@@ -202,13 +196,28 @@ namespace ErpSystem.Core.Enums
         [Display(Name = "Active")]
         Active = 2,
 
-        [Display(Name = "Expired")]
-        Expired = 3,
-
         [Display(Name = "Terminated")]
-        Terminated = 4,
+        Terminated = 3,
 
-        [Display(Name = "Cancelled")]
-        Cancelled = 5
+        [Display(Name = "Completed")]
+        Completed = 4
+    }
+
+    /// <summary>
+    /// Lease payment frequency — value equals months per period
+    /// </summary>
+    public enum PaymentFrequency
+    {
+        [Display(Name = "Monthly")]
+        Monthly = 1,
+
+        [Display(Name = "Quarterly")]
+        Quarterly = 3,
+
+        [Display(Name = "Semi-Annually")]
+        SemiAnnually = 6,
+
+        [Display(Name = "Annually")]
+        Annually = 12
     }
 }

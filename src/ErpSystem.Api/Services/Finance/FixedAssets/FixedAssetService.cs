@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -400,6 +401,197 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         return int.TryParse(value, out var number) ? number : null;
+    }
+
+    // ========== Lifecycle Management ==========
+
+    public async Task<FixedAssetDto> ActivateAsync(Guid id, DateTime? placedInServiceDate)
+    {
+        var asset = await _context.FixedAssets
+            .Include(a => a.Category)
+            .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == id)
+            ?? throw new KeyNotFoundException("Fixed asset not found.");
+
+        if (asset.Status != FixedAssetStatus.Draft)
+            throw new InvalidOperationException($"Cannot activate an asset in '{asset.Status}' status. Only Draft assets can be activated.");
+
+        asset.Status = FixedAssetStatus.Active;
+        asset.PlacedInServiceDate = placedInServiceDate ?? DateTime.UtcNow;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+
+        _context.AssetTransactions.Add(new AssetTransaction
+        {
+            TenantId = TenantId,
+            FixedAssetId = id,
+            TransactionDate = DateTime.UtcNow,
+            TransactionType = "Activation",
+            Description = $"Asset activated and placed in service on {asset.PlacedInServiceDate:yyyy-MM-dd}",
+            Amount = 0,
+            ResultingBookValue = asset.NetBookValue,
+            PerformedByUserId = Guid.TryParse(_currentUser.UserId, out var uid) ? uid : Guid.Empty,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync();
+        return MapToDto(asset);
+    }
+
+    public async Task<FixedAssetDto> PutOnHoldAsync(Guid id, string reason)
+    {
+        var asset = await _context.FixedAssets
+            .Include(a => a.Category)
+            .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == id)
+            ?? throw new KeyNotFoundException("Fixed asset not found.");
+
+        if (asset.Status != FixedAssetStatus.Active)
+            throw new InvalidOperationException($"Cannot put on hold an asset in '{asset.Status}' status. Only Active assets can be held.");
+
+        asset.Status = FixedAssetStatus.OnHold;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+
+        _context.AssetTransactions.Add(new AssetTransaction
+        {
+            TenantId = TenantId,
+            FixedAssetId = id,
+            TransactionDate = DateTime.UtcNow,
+            TransactionType = "Hold",
+            Description = $"Asset put on hold: {reason}",
+            Amount = 0,
+            ResultingBookValue = asset.NetBookValue,
+            PerformedByUserId = Guid.TryParse(_currentUser.UserId, out var uid) ? uid : Guid.Empty,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync();
+        return MapToDto(asset);
+    }
+
+    public async Task<FixedAssetDto> ResumeAsync(Guid id)
+    {
+        var asset = await _context.FixedAssets
+            .Include(a => a.Category)
+            .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == id)
+            ?? throw new KeyNotFoundException("Fixed asset not found.");
+
+        if (asset.Status != FixedAssetStatus.OnHold)
+            throw new InvalidOperationException($"Cannot resume an asset in '{asset.Status}' status. Only OnHold assets can be resumed.");
+
+        asset.Status = FixedAssetStatus.Active;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+
+        _context.AssetTransactions.Add(new AssetTransaction
+        {
+            TenantId = TenantId,
+            FixedAssetId = id,
+            TransactionDate = DateTime.UtcNow,
+            TransactionType = "Resume",
+            Description = "Asset resumed from hold — depreciation resumes",
+            Amount = 0,
+            ResultingBookValue = asset.NetBookValue,
+            PerformedByUserId = Guid.TryParse(_currentUser.UserId, out var uid) ? uid : Guid.Empty,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync();
+        return MapToDto(asset);
+    }
+
+    // ========== Dashboard ==========
+
+    public async Task<FixedAssetDashboardDto> GetDashboardAsync()
+    {
+        var assets = await _context.FixedAssets
+            .Where(a => a.TenantId == TenantId)
+            .Include(a => a.Category)
+            .ToListAsync();
+
+        var dashboard = new FixedAssetDashboardDto
+        {
+            TotalAssets = assets.Count,
+            ActiveAssets = assets.Count(a => a.Status == FixedAssetStatus.Active),
+            DisposedAssets = assets.Count(a => a.Status == FixedAssetStatus.Disposed),
+            OnHoldAssets = assets.Count(a => a.Status == FixedAssetStatus.OnHold),
+            DraftAssets = assets.Count(a => a.Status == FixedAssetStatus.Draft),
+            TotalAcquisitionCost = assets.Sum(a => a.AcquisitionCost),
+            TotalNetBookValue = assets.Sum(a => a.NetBookValue),
+            TotalAccumulatedDepreciation = assets.Sum(a => a.AcquisitionCost - a.NetBookValue),
+        };
+
+        // Category breakdown
+        dashboard.CategoryBreakdown = assets
+            .GroupBy(a => new { a.FixedAssetCategoryId, CategoryName = a.Category?.Name ?? "Uncategorized" })
+            .Select(g => new AssetCategorySummaryDto
+            {
+                CategoryId = g.Key.FixedAssetCategoryId,
+                CategoryName = g.Key.CategoryName,
+                AssetCount = g.Count(),
+                TotalCost = g.Sum(a => a.AcquisitionCost),
+                TotalNbv = g.Sum(a => a.NetBookValue)
+            })
+            .OrderByDescending(c => c.TotalCost)
+            .ToList();
+
+        // Recent activity (last 10 transactions)
+        dashboard.RecentActivity = await _context.AssetTransactions
+            .Where(t => t.TenantId == TenantId)
+            .Include(t => t.FixedAsset)
+            .OrderByDescending(t => t.TransactionDate)
+            .Take(10)
+            .Select(t => new AssetActivityItemDto
+            {
+                Date = t.TransactionDate,
+                Type = t.TransactionType,
+                Description = t.Description ?? "",
+                AssetCode = t.FixedAsset != null ? t.FixedAsset.AssetCode : null,
+                Amount = t.Amount
+            })
+            .ToListAsync();
+
+        // Pending actions
+        dashboard.PendingTransfers = await _context.AssetTransfers
+            .CountAsync(t => t.TenantId == TenantId && t.Status == AssetTransferStatus.PendingApproval);
+        dashboard.PendingDisposals = await _context.AssetDisposals
+            .CountAsync(d => d.TenantId == TenantId && d.Status == AssetDisposalStatus.PendingApproval);
+        dashboard.PendingVerifications = await _context.AssetVerificationSessions
+            .CountAsync(v => v.TenantId == TenantId && v.Status == VerificationSessionStatus.InProgress);
+
+        return dashboard;
+    }
+
+    // ========== Asset Code Generation ==========
+
+    public async Task<string> GenerateAssetCodeAsync(Guid categoryId)
+    {
+        var category = await _context.FixedAssetCategories
+            .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == categoryId)
+            ?? throw new KeyNotFoundException("Category not found.");
+
+        // Generate: FA-{CategoryCodePrefix}-{Year}-{Sequence}
+        var prefix = category.Code?.Length >= 3 ? category.Code[..3].ToUpper() : (category.Code ?? "GEN").ToUpper();
+        var year = DateTime.UtcNow.Year;
+        var pattern = $"FA-{prefix}-{year}-";
+
+        // Find highest existing sequence
+        var existingCodes = await _context.FixedAssets
+            .Where(a => a.TenantId == TenantId && a.AssetCode != null && a.AssetCode.StartsWith(pattern))
+            .Select(a => a.AssetCode)
+            .ToListAsync();
+
+        var maxSequence = existingCodes
+            .Select(code =>
+            {
+                var parts = code?.Split('-');
+                if (parts != null && parts.Length >= 4 && int.TryParse(parts[^1], out var seq))
+                    return seq;
+                return 0;
+            })
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{pattern}{(maxSequence + 1):D4}";
     }
     }
 }

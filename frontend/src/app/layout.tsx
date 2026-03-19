@@ -36,6 +36,10 @@ export const viewport: Viewport = {
   themeColor: "#000000",
 };
 
+// Force dynamic rendering for all pages — this ERP app requires authentication
+// and cannot be statically pre-rendered at build time.
+export const dynamic = 'force-dynamic';
+
 export default function RootLayout({
   children,
 }: Readonly<{

@@ -684,6 +684,9 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
+// Default export added for backward compatibility — some files use `import apiService from '...'`
+// instead of `import { apiService } from '...'`. Both patterns now work.
+export default apiService;
 
 // Helper function to get stored token for SignalR
 export function getStoredToken(): string | null {

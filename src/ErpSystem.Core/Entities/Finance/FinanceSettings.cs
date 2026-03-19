@@ -97,5 +97,25 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual Account? ControlAccountGRVAccrual { get; set; }
 
         public Guid? DefaultBankAccountId { get; set; }
+
+        // ── Lease Accounting (IFRS 16) GL Defaults ──────────────────────
+
+        /// <summary>
+        /// Default ROU Asset account for lease activation journals
+        /// </summary>
+        public Guid? LeaseRouAssetAccountId { get; set; }
+        public virtual Account? LeaseRouAssetAccount { get; set; }
+
+        /// <summary>
+        /// Default Lease Liability account for lease activation / period journals
+        /// </summary>
+        public Guid? LeaseLiabilityAccountId { get; set; }
+        public virtual Account? LeaseLiabilityAccount { get; set; }
+
+        /// <summary>
+        /// Default Interest Expense account for lease period journals
+        /// </summary>
+        public Guid? LeaseInterestExpenseAccountId { get; set; }
+        public virtual Account? LeaseInterestExpenseAccount { get; set; }
     }
 }

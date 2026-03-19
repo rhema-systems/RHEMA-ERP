@@ -16,6 +16,8 @@ public class FixedAssetCategoryDto
     public Guid DepreciationExpenseAccountId { get; set; }
     public Guid? GainOnDisposalAccountId { get; set; }
     public Guid? LossOnDisposalAccountId { get; set; }
+    public Guid? RevaluationSurplusAccountId { get; set; }
+    public Guid? AucAccountId { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
 }
@@ -33,6 +35,8 @@ public class CreateFixedAssetCategoryDto
     public Guid DepreciationExpenseAccountId { get; set; }
     public Guid? GainOnDisposalAccountId { get; set; }
     public Guid? LossOnDisposalAccountId { get; set; }
+    public Guid? RevaluationSurplusAccountId { get; set; }
+    public Guid? AucAccountId { get; set; }
 }
 
 public class UpdateFixedAssetCategoryDto
@@ -48,6 +52,8 @@ public class UpdateFixedAssetCategoryDto
     public Guid DepreciationExpenseAccountId { get; set; }
     public Guid? GainOnDisposalAccountId { get; set; }
     public Guid? LossOnDisposalAccountId { get; set; }
+    public Guid? RevaluationSurplusAccountId { get; set; }
+    public Guid? AucAccountId { get; set; }
 }
 
 public class FixedAssetDto
@@ -160,6 +166,8 @@ public class FixedAssetGlAccountOptionsDto
     public List<FixedAssetGlAccountOptionDto> DepreciationExpenseAccounts { get; set; } = new();
     public List<FixedAssetGlAccountOptionDto> GainOnDisposalAccounts { get; set; } = new();
     public List<FixedAssetGlAccountOptionDto> LossOnDisposalAccounts { get; set; } = new();
+    public List<FixedAssetGlAccountOptionDto> RevaluationSurplusAccounts { get; set; } = new();
+    public List<FixedAssetGlAccountOptionDto> AucAccounts { get; set; } = new();
 }
 
 public class AssetTransferDto

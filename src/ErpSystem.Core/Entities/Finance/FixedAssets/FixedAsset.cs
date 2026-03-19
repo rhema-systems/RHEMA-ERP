@@ -85,5 +85,6 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         // --- Navigation ---
         public virtual ICollection<AssetDepreciationSchedule> DepreciationSchedules { get; set; } = new List<AssetDepreciationSchedule>();
         public virtual ICollection<AssetTransaction> Transactions { get; set; } = new List<AssetTransaction>();
+        public virtual ICollection<AssetValuation> Valuations { get; set; } = new List<AssetValuation>();
     }
 }

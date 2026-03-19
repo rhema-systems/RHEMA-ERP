@@ -134,6 +134,24 @@ export default function AssetDisposalsPage() {
         }
     };
 
+    const handleComplete = async (id: string) => {
+        try {
+            await fixedAssetsDataService.completeDisposal(id);
+            toast({
+                title: "Completed",
+                description: "Disposal has been completed and GL entries posted.",
+            });
+            loadData();
+        } catch (error) {
+            console.error('Failed to complete disposal:', error);
+            toast({
+                title: "Error",
+                description: "Failed to complete disposal.",
+                variant: "destructive",
+            });
+        }
+    };
+
     const filteredDisposals = useMemo(() => {
         return (disposals || []).filter(d =>
             d.referenceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -434,6 +452,8 @@ export default function AssetDisposalsPage() {
                                                     <Button variant="ghost" size="sm" className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 h-8 font-semibold" onClick={() => handleApprove(disposal.id)}>Approve</Button>
                                                     <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 font-semibold" onClick={() => handleReject(disposal.id)}>Reject</Button>
                                                 </div>
+                                            ) : disposal.status === 'Approved' ? (
+                                                <Button variant="outline" size="sm" className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-8 font-semibold" onClick={() => handleComplete(disposal.id)}>Complete</Button>
                                             ) : (
                                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400">
                                                     <Info className="h-4 w-4" />

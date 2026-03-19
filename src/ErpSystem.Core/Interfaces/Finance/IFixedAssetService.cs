@@ -13,4 +13,15 @@ public interface IFixedAssetService
     // Bulk Import
     Task<BulkImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName);
     Task<byte[]> GenerateImportTemplateAsync();
+
+    // Lifecycle Management
+    Task<FixedAssetDto> ActivateAsync(Guid id, DateTime? placedInServiceDate);
+    Task<FixedAssetDto> PutOnHoldAsync(Guid id, string reason);
+    Task<FixedAssetDto> ResumeAsync(Guid id);
+
+    // Dashboard
+    Task<FixedAssetDashboardDto> GetDashboardAsync();
+
+    // Asset Code Generation
+    Task<string> GenerateAssetCodeAsync(Guid categoryId);
 }
