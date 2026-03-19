@@ -1121,14 +1121,16 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             var redisConnectionString = configuration.GetConnectionString("Redis");
             if (!string.IsNullOrEmpty(redisConnectionString))
             {
+                var redisConfigurationOptions = BuildRedisConfigurationOptions(redisConnectionString, configuration);
+
                 // Add Redis connection multiplexer for advanced operations
                 services.AddSingleton<IConnectionMultiplexer>(sp =>
-                    ConnectionMultiplexer.Connect(redisConnectionString));
+                    ConnectionMultiplexer.Connect(redisConfigurationOptions));
 
                 // Add StackExchange Redis cache
                 services.AddStackExchangeRedisCache(options =>
                 {
-                    options.Configuration = redisConnectionString;
+                    options.ConfigurationOptions = redisConfigurationOptions;
                     options.InstanceName = "ErpSystem";
                 });
 
@@ -1158,6 +1160,29 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             });
 
             return services;
+        }
+
+        private static ConfigurationOptions BuildRedisConfigurationOptions(string connectionString, IConfiguration configuration)
+        {
+            var options = ConfigurationOptions.Parse(connectionString, ignoreUnknown: true);
+            var environmentName =
+                Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ??
+                configuration["Application:EnvironmentName"] ??
+                configuration["Application:Environment"] ??
+                Environments.Production;
+
+            var isDevelopment = string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase);
+
+            if (isDevelopment)
+            {
+                // Let local startup continue even if Redis is not installed or not running yet.
+                options.AbortOnConnectFail = false;
+                options.ConnectRetry = Math.Max(options.ConnectRetry, 3);
+                options.ReconnectRetryPolicy ??= new ExponentialRetry(5000);
+            }
+
+            return options;
         }
 
         public static IServiceCollection AddErpSystemWebFarm(this IServiceCollection services, IConfiguration configuration)
