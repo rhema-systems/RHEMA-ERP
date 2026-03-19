@@ -78,7 +78,7 @@ public class AdvancedResponseCachingMiddleware
         return true;
     }
 
-    private async Task HandleConditionalRequests(HttpContext context)
+    private Task HandleConditionalRequests(HttpContext context)
     {
         var request = context.Request;
         var response = context.Response;
@@ -94,7 +94,7 @@ public class AdvancedResponseCachingMiddleware
                 response.StatusCode = 304; // Not Modified
                 response.Headers[HeaderNames.ETag] = etag;
                 _logger.LogDebug("Returning 304 Not Modified for ETag: {ETag}", etag);
-                return;
+                return Task.CompletedTask;
             }
         }
 
@@ -108,10 +108,12 @@ public class AdvancedResponseCachingMiddleware
                 {
                     response.StatusCode = 304; // Not Modified
                     _logger.LogDebug("Returning 304 Not Modified for If-Modified-Since: {Date}", modifiedSince);
-                    return;
+                    return Task.CompletedTask;
                 }
             }
         }
+
+        return Task.CompletedTask;
     }
 
     private void SetCacheHeaders(HttpContext context)

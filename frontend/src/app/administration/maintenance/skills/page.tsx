@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import {
+import { 
   Search,
   Eye,
   MoreHorizontal,
@@ -52,6 +52,24 @@ interface Skill {
   averageRating?: number;
 }
 
+interface TechnicalSkillFormData {
+  name: string;
+  code: string;
+  description: string;
+  category: string;
+  skillLevel: string;
+  isActive: boolean;
+  prerequisites: string[];
+  certifications: string[];
+  estimatedLearningHours: number;
+  complexity: string;
+  riskLevel: string;
+  toolsRequired: string[];
+  safetyRequirements: string;
+  competencyAreas: string[];
+  relatedMaintenanceTypes: string[];
+}
+
 export default function TechnicalSkillsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -65,7 +83,7 @@ export default function TechnicalSkillsPage() {
   const [filteredData, setFilteredData] = useState<Skill[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
+  
   // Fetch skills from API
   const fetchSkills = async () => {
     try {
@@ -78,11 +96,11 @@ export default function TechnicalSkillsPage() {
           'Content-Type': 'application/json'
         }
       });
-
+      
       if (!response.ok) {
         throw new Error('Failed to fetch skills');
       }
-
+      
       const data = await response.json();
       setSkillsData(data.data || data || []);
     } catch (error) {
@@ -93,28 +111,28 @@ export default function TechnicalSkillsPage() {
       setIsLoading(false);
     }
   };
-
+  
   useEffect(() => {
     fetchSkills();
   }, []);
-
+  
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<TechnicalSkillFormData>({
     name: '',
     code: '',
     description: '',
     category: 'Electrical',
     skillLevel: 'Basic',
     isActive: true,
-    prerequisites: [] as string[],
-    certifications: [] as string[],
+    prerequisites: [],
+    certifications: [],
     estimatedLearningHours: 40,
     complexity: 'Low',
     riskLevel: 'Low',
-    toolsRequired: [] as string[],
+    toolsRequired: [],
     safetyRequirements: '',
-    competencyAreas: [] as string[],
-    relatedMaintenanceTypes: [] as string[]
+    competencyAreas: [],
+    relatedMaintenanceTypes: []
   });
 
   useEffect(() => {
@@ -130,7 +148,7 @@ export default function TechnicalSkillsPage() {
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(item =>
+      filtered = filtered.filter(item => 
         statusFilter === 'active' ? item.isActive : !item.isActive
       );
     }
@@ -157,11 +175,11 @@ export default function TechnicalSkillsPage() {
         },
         body: JSON.stringify(formData)
       });
-
+      
       if (!response.ok) {
         throw new Error('Failed to create skill');
       }
-
+      
       // Refresh the list
       await fetchSkills();
       setIsCreateDialogOpen(false);
@@ -196,7 +214,7 @@ export default function TechnicalSkillsPage() {
 
   const handleUpdate = async () => {
     if (!selectedSkill?.id) return;
-
+    
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`http://localhost:5000/api/maintenance/technical-skills/${selectedSkill.id}`, {
@@ -207,11 +225,11 @@ export default function TechnicalSkillsPage() {
         },
         body: JSON.stringify(formData)
       });
-
+      
       if (!response.ok) {
         throw new Error('Failed to update skill');
       }
-
+      
       // Refresh the list
       await fetchSkills();
       setIsEditDialogOpen(false);
@@ -222,14 +240,14 @@ export default function TechnicalSkillsPage() {
     }
   };
 
-  const handleView = (skill: any) => {
+  const handleView = (skill: Skill) => {
     setSelectedSkill(skill);
     setIsViewDialogOpen(true);
   };
 
   const handleDelete = async (id: string | number) => {
     if (!confirm('Are you sure you want to delete this skill?')) return;
-
+    
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`http://localhost:5000/api/maintenance/technical-skills/${id}`, {
@@ -239,11 +257,11 @@ export default function TechnicalSkillsPage() {
           'Content-Type': 'application/json'
         }
       });
-
+      
       if (!response.ok) {
         throw new Error('Failed to delete skill');
       }
-
+      
       // Refresh the list
       await fetchSkills();
     } catch (error) {
@@ -260,15 +278,15 @@ export default function TechnicalSkillsPage() {
       category: 'Electrical',
       skillLevel: 'Basic',
       isActive: true,
-      prerequisites: [] as string[],
-      certifications: [] as string[],
+      prerequisites: [],
+      certifications: [],
       estimatedLearningHours: 40,
       complexity: 'Low',
       riskLevel: 'Low',
-      toolsRequired: [] as string[],
+      toolsRequired: [],
       safetyRequirements: '',
-      competencyAreas: [] as string[],
-      relatedMaintenanceTypes: [] as string[]
+      competencyAreas: [],
+      relatedMaintenanceTypes: []
     });
     setSelectedSkill(null);
   };
@@ -333,7 +351,7 @@ export default function TechnicalSkillsPage() {
                   <Input
                     id="name"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
                     placeholder="e.g., Electrical Systems"
                   />
                 </div>
@@ -342,27 +360,27 @@ export default function TechnicalSkillsPage() {
                   <Input
                     id="code"
                     value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                    onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
                     placeholder="e.g., ELEC-001"
                   />
                 </div>
               </div>
-
+              
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
                   value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
                   placeholder="Description of the skill..."
                   rows={3}
                 />
               </div>
-
+              
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="category">Category</Label>
-                  <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
+                  <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
@@ -377,7 +395,7 @@ export default function TechnicalSkillsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="skillLevel">Skill Level</Label>
-                  <Select value={formData.skillLevel} onValueChange={(value) => setFormData({ ...formData, skillLevel: value })}>
+                  <Select value={formData.skillLevel} onValueChange={(value) => setFormData({...formData, skillLevel: value})}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select level" />
                     </SelectTrigger>
@@ -395,16 +413,16 @@ export default function TechnicalSkillsPage() {
                     id="hours"
                     type="number"
                     value={formData.estimatedLearningHours}
-                    onChange={(e) => setFormData({ ...formData, estimatedLearningHours: parseInt(e.target.value) })}
+                    onChange={(e) => setFormData({...formData, estimatedLearningHours: parseInt(e.target.value)})}
                   />
                 </div>
               </div>
-
+              
               <div className="flex items-center space-x-2">
                 <Switch
                   id="active"
                   checked={formData.isActive}
-                  onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
+                  onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
                 />
                 <Label htmlFor="active">Active</Label>
               </div>
@@ -420,7 +438,7 @@ export default function TechnicalSkillsPage() {
           </DialogContent>
         </Dialog>
       </div>
-
+      
       {/* HR Skills Integration Notice */}
       <Card className="border-blue-200 bg-blue-50">
         <CardContent className="pt-6">
@@ -429,9 +447,9 @@ export default function TechnicalSkillsPage() {
             <div>
               <h3 className="font-semibold text-blue-900">HR Skills Module Integration</h3>
               <p className="text-sm text-blue-800 mt-1">
-                Technical skills data is synchronized from the HR Skills module. To add, modify, or manage
-                skill definitions, certifications, and competency requirements, please use the
-                <strong> HR Skills Management</strong> section. Changes made there will automatically
+                Technical skills data is synchronized from the HR Skills module. To add, modify, or manage 
+                skill definitions, certifications, and competency requirements, please use the 
+                <strong> HR Skills Management</strong> section. Changes made there will automatically 
                 appear here within a few minutes.
               </p>
               <div className="mt-2">
@@ -444,7 +462,7 @@ export default function TechnicalSkillsPage() {
           </div>
         </CardContent>
       </Card>
-
+      
       {isLoading && (
         <Card>
           <CardContent className="pt-6">
@@ -490,7 +508,7 @@ export default function TechnicalSkillsPage() {
             </div>
           </CardContent>
         </Card>
-
+        
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -504,13 +522,13 @@ export default function TechnicalSkillsPage() {
             </div>
           </CardContent>
         </Card>
-
+        
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold">
-                  {filteredData.reduce((sum, s) => sum + s.techniciansCount, 0)}
+                  {filteredData.reduce((sum, s) => sum + (s.techniciansCount ?? 0), 0)}
                 </p>
                 <p className="text-sm text-muted-foreground">Skilled Technicians</p>
               </div>
@@ -518,13 +536,13 @@ export default function TechnicalSkillsPage() {
             </div>
           </CardContent>
         </Card>
-
+        
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold">
-                  {Math.round((filteredData.reduce((sum, s) => sum + s.averageRating, 0) / filteredData.length) * 10) / 10 || 0}
+                  {Math.round((filteredData.reduce((sum, s) => sum + (s.averageRating ?? 0), 0) / filteredData.length) * 10) / 10 || 0}
                 </p>
                 <p className="text-sm text-muted-foreground">Avg Rating</p>
               </div>
@@ -550,7 +568,7 @@ export default function TechnicalSkillsPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-
+            
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Status" />
@@ -608,86 +626,86 @@ export default function TechnicalSkillsPage() {
           ) : filteredData.length === 0 ? (
             <div className="text-center py-4 text-muted-foreground">No skills found</div>
           ) : (
-            <div className="space-y-4">
-              {filteredData.map((skill) => (
-                <div key={skill.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-3 flex-1">
-                      <div className="flex items-center space-x-3">
-                        <Award className="h-5 w-5 text-blue-500" />
-                        <h3 className="font-semibold">{skill.name}</h3>
-                        <Badge variant="outline">{skill.code}</Badge>
-                        <Badge className={getSkillLevelColor(skill.skillLevel)}>
-                          {skill.skillLevel}
-                        </Badge>
-                        <Badge className={getComplexityColor(skill.complexity)}>
-                          {skill.complexity} Complexity
-                        </Badge>
-                        <Badge className={getRiskColor(skill.riskLevel)}>
-                          {skill.riskLevel} Risk
-                        </Badge>
-                        <Badge className={skill.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                          {skill.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
-                        <div>
-                          <span className="font-medium">Category:</span> {skill.category}
-                        </div>
-                        <div>
-                          <span className="font-medium">Learning Hours:</span> {skill.estimatedLearningHours}h
-                        </div>
-                        <div>
-                          <span className="font-medium">Technicians:</span> {skill.techniciansCount}
-                        </div>
-                        <div>
-                          <span className="font-medium">Rating:</span> {skill.averageRating}/5.0 ⭐
-                        </div>
-                        <div>
-                          <span className="font-medium">Prerequisites:</span> {skill.prerequisites.length}
-                        </div>
-                        <div>
-                          <span className="font-medium">Certifications:</span> {skill.certifications.length}
-                        </div>
-                        <div>
-                          <span className="font-medium">Tools:</span> {skill.toolsRequired.length}
-                        </div>
-                        <div>
-                          <span className="font-medium">Competencies:</span> {skill.competencyAreas.length}
-                        </div>
-                      </div>
-
-                      <p className="text-sm text-muted-foreground">{skill.description}</p>
-
-                      {skill.safetyRequirements && (
-                        <div className="text-sm">
-                          <span className="font-medium text-red-600">Safety Requirements:</span>
-                          <p className="text-muted-foreground mt-1">{skill.safetyRequirements}</p>
-                        </div>
-                      )}
+          <div className="space-y-4">
+            {filteredData.map((skill) => (
+              <div key={skill.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-3 flex-1">
+                    <div className="flex items-center space-x-3">
+                      <Award className="h-5 w-5 text-blue-500" />
+                      <h3 className="font-semibold">{skill.name}</h3>
+                      <Badge variant="outline">{skill.code}</Badge>
+                      <Badge className={getSkillLevelColor(skill.skillLevel)}>
+                        {skill.skillLevel}
+                      </Badge>
+                      <Badge className={getComplexityColor(skill.complexity ?? 'Low')}>
+                        {(skill.complexity ?? 'Low')} Complexity
+                      </Badge>
+                      <Badge className={getRiskColor(skill.riskLevel ?? 'Low')}>
+                        {(skill.riskLevel ?? 'Low')} Risk
+                      </Badge>
+                      <Badge className={skill.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                        {skill.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
                     </div>
-
-                    <div className="flex items-center space-x-2">
-                      <Button size="sm" variant="outline" onClick={() => handleView(skill)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleEdit(skill)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-red-600 hover:text-red-700"
-                        onClick={() => handleDelete(skill.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
+                      <div>
+                        <span className="font-medium">Category:</span> {skill.category}
+                      </div>
+                      <div>
+                        <span className="font-medium">Learning Hours:</span> {skill.estimatedLearningHours}h
+                      </div>
+                      <div>
+                        <span className="font-medium">Technicians:</span> {skill.techniciansCount ?? 0}
+                      </div>
+                      <div>
+                        <span className="font-medium">Rating:</span> {skill.averageRating ?? 0}/5.0 ⭐
+                      </div>
+                      <div>
+                        <span className="font-medium">Prerequisites:</span> {skill.prerequisites?.length ?? 0}
+                      </div>
+                      <div>
+                        <span className="font-medium">Certifications:</span> {skill.certifications?.length ?? 0}
+                      </div>
+                      <div>
+                        <span className="font-medium">Tools:</span> {skill.toolsRequired?.length ?? 0}
+                      </div>
+                      <div>
+                        <span className="font-medium">Competencies:</span> {skill.competencyAreas?.length ?? 0}
+                      </div>
                     </div>
+                    
+                    <p className="text-sm text-muted-foreground">{skill.description}</p>
+                    
+                    {skill.safetyRequirements && (
+                      <div className="text-sm">
+                        <span className="font-medium text-red-600">Safety Requirements:</span>
+                        <p className="text-muted-foreground mt-1">{skill.safetyRequirements}</p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <Button size="sm" variant="outline" onClick={() => handleView(skill)}>
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleEdit(skill)}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="text-red-600 hover:text-red-700"
+                      onClick={() => handleDelete(skill.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
+          </div>
           )}
         </CardContent>
       </Card>
@@ -708,7 +726,7 @@ export default function TechnicalSkillsPage() {
                 <Input
                   id="edit-name"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
                   placeholder="e.g., Electrical Systems"
                 />
               </div>
@@ -717,27 +735,27 @@ export default function TechnicalSkillsPage() {
                 <Input
                   id="edit-code"
                   value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
                   placeholder="e.g., ELEC-001"
                 />
               </div>
             </div>
-
+            
             <div className="space-y-2">
               <Label htmlFor="edit-description">Description</Label>
               <Textarea
                 id="edit-description"
                 value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
                 placeholder="Description of the skill..."
                 rows={3}
               />
             </div>
-
+            
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-category">Category</Label>
-                <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
+                <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
@@ -752,7 +770,7 @@ export default function TechnicalSkillsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-skillLevel">Skill Level</Label>
-                <Select value={formData.skillLevel} onValueChange={(value) => setFormData({ ...formData, skillLevel: value })}>
+                <Select value={formData.skillLevel} onValueChange={(value) => setFormData({...formData, skillLevel: value})}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select level" />
                   </SelectTrigger>
@@ -770,16 +788,16 @@ export default function TechnicalSkillsPage() {
                   id="edit-hours"
                   type="number"
                   value={formData.estimatedLearningHours}
-                  onChange={(e) => setFormData({ ...formData, estimatedLearningHours: parseInt(e.target.value) })}
+                  onChange={(e) => setFormData({...formData, estimatedLearningHours: parseInt(e.target.value)})}
                 />
               </div>
             </div>
-
+            
             <div className="flex items-center space-x-2">
               <Switch
                 id="edit-active"
                 checked={formData.isActive}
-                onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
+                onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
               />
               <Label htmlFor="edit-active">Active</Label>
             </div>
@@ -826,16 +844,16 @@ export default function TechnicalSkillsPage() {
                   <p className="text-sm text-muted-foreground">{selectedSkill.estimatedLearningHours}h</p>
                 </div>
               </div>
-
+              
               <div>
                 <Label>Description</Label>
                 <p className="text-sm text-muted-foreground">{selectedSkill.description}</p>
               </div>
 
               <div>
-                <Label>Prerequisites ({selectedSkill.prerequisites.length})</Label>
+                <Label>Prerequisites ({selectedSkill.prerequisites?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.prerequisites.map((prereq, index) => (
+                  {(selectedSkill.prerequisites ?? []).map((prereq, index) => (
                     <Badge key={index} variant="outline" className="text-xs">
                       {prereq}
                     </Badge>
@@ -844,9 +862,9 @@ export default function TechnicalSkillsPage() {
               </div>
 
               <div>
-                <Label>Certifications ({selectedSkill.certifications.length})</Label>
+                <Label>Certifications ({selectedSkill.certifications?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.certifications.map((cert, index) => (
+                  {(selectedSkill.certifications ?? []).map((cert, index) => (
                     <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700">
                       {cert}
                     </Badge>
@@ -855,9 +873,9 @@ export default function TechnicalSkillsPage() {
               </div>
 
               <div>
-                <Label>Tools Required ({selectedSkill.toolsRequired.length})</Label>
+                <Label>Tools Required ({selectedSkill.toolsRequired?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.toolsRequired.map((tool, index) => (
+                  {(selectedSkill.toolsRequired ?? []).map((tool, index) => (
                     <Badge key={index} variant="secondary" className="text-xs">
                       {tool}
                     </Badge>
@@ -866,9 +884,9 @@ export default function TechnicalSkillsPage() {
               </div>
 
               <div>
-                <Label>Competency Areas ({selectedSkill.competencyAreas.length})</Label>
+                <Label>Competency Areas ({selectedSkill.competencyAreas?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.competencyAreas.map((area, index) => (
+                  {(selectedSkill.competencyAreas ?? []).map((area, index) => (
                     <Badge key={index} variant="outline" className="text-xs bg-green-50 text-green-700">
                       {area}
                     </Badge>

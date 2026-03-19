@@ -160,10 +160,10 @@ export default function AssetAdmissionManagement() {
 
   // Apply initial query-parameter-based filters and form defaults
   useEffect(() => {
-    const assetId = searchParams.get('assetId') || undefined;
-    const workOrderId = searchParams.get('workOrderId') || undefined;
-    const jobCardId = searchParams.get('jobCardId') || undefined;
-    const view = searchParams.get('view');
+    const assetId = searchParams?.get('assetId') || undefined;
+    const workOrderId = searchParams?.get('workOrderId') || undefined;
+    const jobCardId = searchParams?.get('jobCardId') || undefined;
+    const view = searchParams?.get('view');
 
     // Pre-select view mode if provided
     if (view === 'discharges') {

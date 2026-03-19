@@ -78,7 +78,8 @@ const bulkUpdateSchema = z.object({
   notificationMessage: z.string().optional(),
 });
 
-type BulkUpdateFormData = z.infer<typeof bulkUpdateSchema>;
+type BulkUpdateFormValues = z.input<typeof bulkUpdateSchema>;
+type BulkUpdateFormData = z.output<typeof bulkUpdateSchema>;
 
 const emailSchema = z.object({
   subject: z.string().min(1, 'Subject is required'),
@@ -86,7 +87,8 @@ const emailSchema = z.object({
   includeUsernames: z.boolean().default(true),
 });
 
-type EmailFormData = z.infer<typeof emailSchema>;
+type EmailFormValues = z.input<typeof emailSchema>;
+type EmailFormData = z.output<typeof emailSchema>;
 
 export function BulkUserActions({
   selectedUserIds,
@@ -100,7 +102,7 @@ export function BulkUserActions({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const updateForm = useForm<BulkUpdateFormData>({
+  const updateForm = useForm<BulkUpdateFormValues, any, BulkUpdateFormData>({
     resolver: zodResolver(bulkUpdateSchema),
     defaultValues: {
       action: 'activate',
@@ -108,7 +110,7 @@ export function BulkUserActions({
     },
   });
 
-  const emailForm = useForm<EmailFormData>({
+  const emailForm = useForm<EmailFormValues, any, EmailFormData>({
     resolver: zodResolver(emailSchema),
     defaultValues: {
       subject: '',

@@ -65,7 +65,7 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
-        public override async Task<Tenant> GetByIdAsync(Guid id)
+        public override async Task<Tenant?> GetByIdAsync(Guid id)
         {
             return await _dbSet
                 .Include(t => t.TenantModules)

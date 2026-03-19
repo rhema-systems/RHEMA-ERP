@@ -319,6 +319,7 @@ public class Project : TenantEntity
     public virtual ICollection<ProjectBaseline> Baselines { get; set; } = new List<ProjectBaseline>();
     public virtual ICollection<ProjectTimesheetEntry> TimesheetEntries { get; set; } = new List<ProjectTimesheetEntry>();
     public virtual ICollection<ProjectExpense> Expenses { get; set; } = new List<ProjectExpense>();
+    public virtual ICollection<ProjectMaterialCostEntry> MaterialCostEntries { get; set; } = new List<ProjectMaterialCostEntry>();
     public virtual ICollection<ProjectRevenueRecognition> RevenueRecognitions { get; set; } = new List<ProjectRevenueRecognition>();
     public virtual ICollection<ProjectBudgetRevision> BudgetRevisions { get; set; } = new List<ProjectBudgetRevision>();
     public virtual ICollection<ProjectForecastVersion> ForecastVersions { get; set; } = new List<ProjectForecastVersion>();
@@ -488,6 +489,15 @@ public class ProjectResourceAllocation : TenantEntity
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    [MaxLength(4000)]
+    public string? RequiredSkillsJson { get; set; }
+
+    [MaxLength(4000)]
+    public string? RequiredCertificationsJson { get; set; }
+
+    [MaxLength(30)]
+    public string RoutingPolicy { get; set; } = "Balanced";
 
     public Guid? SourceAllocationId { get; set; }
     public Guid? ReplacementAllocationId { get; set; }
@@ -877,6 +887,42 @@ public class ProjectDeliverable : TenantEntity
 
     [ForeignKey(nameof(SubmittedDocumentId))]
     public virtual ProjectDocument? SubmittedDocument { get; set; }
+
+    public virtual ICollection<ProjectDeliverableExternalReview> ExternalReviews { get; set; } = new List<ProjectDeliverableExternalReview>();
+}
+
+public class ProjectDeliverableExternalReview : TenantEntity
+{
+    [Required]
+    public Guid ProjectId { get; set; }
+
+    [Required]
+    public Guid DeliverableId { get; set; }
+
+    public DateTime ReviewDate { get; set; } = DateTime.UtcNow;
+
+    public Guid? ReviewedById { get; set; }
+
+    public Guid? SubmittedDocumentId { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string Decision { get; set; } = "Submitted";
+
+    [MaxLength(30)]
+    public string? StatusSnapshot { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(DeliverableId))]
+    public virtual ProjectDeliverable Deliverable { get; set; } = null!;
+
+    [ForeignKey(nameof(SubmittedDocumentId))]
+    public virtual ProjectDocument? SubmittedDocument { get; set; }
 }
 
 public class ProjectTaskDependency : TenantEntity
@@ -1046,6 +1092,70 @@ public class ProjectExpense : TenantEntity
 
     [ForeignKey(nameof(ReceiptDocumentId))]
     public virtual ProjectDocument? ReceiptDocument { get; set; }
+}
+
+public class ProjectMaterialCostEntry : TenantEntity
+{
+    [Required]
+    public Guid ProjectId { get; set; }
+
+    public DateTime EntryDate { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    [MaxLength(50)]
+    public string EntryType { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(30)]
+    public string PostingState { get; set; } = "Posted";
+
+    public bool AffectsActualCost { get; set; }
+    public bool IsReversed { get; set; }
+
+    [MaxLength(50)]
+    public string? SourceDocumentType { get; set; }
+
+    public Guid? SourceDocumentId { get; set; }
+
+    [MaxLength(100)]
+    public string? SourceDocumentNumber { get; set; }
+
+    [MaxLength(50)]
+    public string? SourceTransactionType { get; set; }
+
+    public Guid? SourceTransactionId { get; set; }
+
+    public Guid? InventoryItemId { get; set; }
+
+    [MaxLength(100)]
+    public string? InventoryItemCode { get; set; }
+
+    [MaxLength(200)]
+    public string? InventoryItemName { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal Quantity { get; set; }
+
+    [MaxLength(20)]
+    public string? UnitOfMeasure { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal UnitCost { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Amount { get; set; }
+
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    public bool HasMissingSourceLink { get; set; }
+    public bool HasReversalGap { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
 }
 
 public class ProjectRevenueRecognition : TenantEntity

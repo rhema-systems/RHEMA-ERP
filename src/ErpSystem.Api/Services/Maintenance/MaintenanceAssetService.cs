@@ -191,9 +191,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         try
         {
             var asset = await _assetRepository.GetByIdAsync(id,
-                a => a.AssetCategory,
-                a => a.ParentAsset,
-                a => a.ChildAssets);
+                a => a.AssetCategory!,
+                a => a.ParentAsset!,
+                a => a.ChildAssets!);
 
             return asset != null ? _mapper.Map<MaintenanceAssetDto>(asset) : null;
         }

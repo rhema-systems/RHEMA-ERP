@@ -1782,7 +1782,7 @@ public class WorkflowController : ControllerBase
     /// </summary>
     [HttpGet("administration/summary")]
     [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager")]
-    public async Task<ActionResult<WorkflowSummaryDto>> GetWorkflowSummary()
+    public ActionResult<WorkflowSummaryDto> GetWorkflowSummary()
     {
         try
         {

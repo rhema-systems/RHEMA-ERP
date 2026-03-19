@@ -290,7 +290,7 @@ export default function CompliancePage() {
             <Clock className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{complianceDashboard.upcomingDeadlines}</div>
+            <div className="text-2xl font-bold text-yellow-600">{complianceDashboard.upcomingDeadlines.length}</div>
             <p className="text-xs text-muted-foreground">Next 30 days</p>
           </CardContent>
         </Card>
@@ -555,7 +555,7 @@ export default function CompliancePage() {
                         {new Date(report.periodStart).toLocaleDateString()} - {new Date(report.periodEnd).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
-                        <Badge className={report.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
+                        <Badge className={report.status === 'Compliant' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
                           {report.status}
                         </Badge>
                       </TableCell>

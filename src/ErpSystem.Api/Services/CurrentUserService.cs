@@ -2,20 +2,25 @@ using System.Security.Claims;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services;
 
-public class CurrentUserService : ICurrentUserService, ICurrentUserProvider, ITenantContext
+public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
 {
     private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly UserManager<ApplicationUser> _userManager;
 
-    public CurrentUserService(IHttpContextAccessor httpContextAccessor)
+    public CurrentUserService(
+        IHttpContextAccessor httpContextAccessor,
+        UserManager<ApplicationUser> userManager)
     {
         _httpContextAccessor = httpContextAccessor;
+        _userManager = userManager;
     }
 
     public string? UserId
@@ -183,11 +188,7 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider, ITe
     {
         get
         {
-            var authProvider = _httpContextAccessor.HttpContext?.User?.FindFirst("auth_provider")?.Value;
-
-            // External users use Local authentication
-            // Internal users use LDAP authentication
-            return authProvider == "Local";
+            return _httpContextAccessor.HttpContext?.User?.IsInRole(Constants.Roles.ExternalUser) == true;
         }
     }
 
@@ -197,33 +198,5 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider, ITe
         {
             return _httpContextAccessor.HttpContext?.User?.FindFirst("auth_provider")?.Value ?? "Local";
         }
-    }
-    private Guid? _overriddenTenantId;
-
-    public Guid GetCurrentTenantId()
-    {
-        return _overriddenTenantId ?? TenantId ?? Guid.Empty;
-    }
-
-    public void SetCurrentTenant(Guid tenantId)
-    {
-        _overriddenTenantId = tenantId;
-    }
-
-    public async Task<Tenant?> GetCurrentTenantAsync()
-    {
-        var tenantId = GetCurrentTenantId();
-        if (tenantId == Guid.Empty) return null;
-
-        var repo = _httpContextAccessor.HttpContext?.RequestServices.GetService<ITenantRepository>();
-        if (repo == null) return null;
-
-        return await repo.GetByIdAsync(tenantId);
-    }
-
-    public bool HasCurrentTenant()
-    {
-        return (_overriddenTenantId.HasValue && _overriddenTenantId.Value != Guid.Empty) || 
-               (TenantId.HasValue && TenantId.Value != Guid.Empty);
     }
 }

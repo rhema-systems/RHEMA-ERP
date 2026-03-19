@@ -1,109 +1,227 @@
-import type { 
-  DashboardStats, 
-  SalesData, 
-  RevenueByCategory, 
-  TopProduct, 
-  RecentOrder, 
-  ActivityItem, 
-  PerformanceMetric 
-} from '../types/dashboard';
+import { apiService } from './api.service'
+import { crmService, type CrmOverviewDto, type CrmReportingDto } from './crmService'
+import { inventoryRequisitionService, type InventoryRequisitionDto } from './inventoryRequisitionService'
+import { projectService, type ProjectDashboardDto } from './projectService'
+import { purchasingService, type PurchaseOrderSummaryDto, type PurchaseRequisitionSummaryDto } from './purchasingService'
+import { tenderService, type TenderDto } from './tenderService'
+import { workOrderService, type WorkOrderMetrics } from './workOrderService'
 
-export class DashboardService {
-  async getDashboardStats(): Promise<DashboardStats> {
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
+export interface DashboardModuleStatus {
+  module: string
+  available: boolean
+  error?: string
+}
+
+export interface MaintenanceDashboardOverviewSummary {
+  totalAssets?: number
+  totalWorkOrders?: number
+  activeWorkOrders?: number
+  overdueWorkOrders?: number
+  availableTechnicians?: number
+  completedWorkOrders?: number
+}
+
+export interface MaintenanceDashboardOverview {
+  summary?: MaintenanceDashboardOverviewSummary
+  workOrdersByStatus?: Record<string, number>
+}
+
+export interface TrendDataPointDto {
+  date: string
+  value: number
+  metricType: string
+}
+
+export interface WorkOrderTrendsDto {
+  startDate: string
+  endDate: string
+  creationTrend: TrendDataPointDto[]
+  completionTrend: TrendDataPointDto[]
+  costTrend: TrendDataPointDto[]
+}
+
+export interface MaintenanceScheduleDto {
+  id: string
+  assetName: string
+  maintenanceTypeName?: string
+  maintenanceType?: string
+  name?: string
+  nextDue?: string
+  nextDueDate?: string
+  nextScheduledDate?: string
+  assignedTechnicianName?: string
+}
+
+export interface EnterpriseDashboardData {
+  crmOverview: CrmOverviewDto | null
+  crmReporting: CrmReportingDto | null
+  projectDashboard: ProjectDashboardDto | null
+  pendingPurchaseRequisitions: PurchaseRequisitionSummaryDto[]
+  openPurchaseOrders: PurchaseOrderSummaryDto[]
+  pendingInventoryApprovals: InventoryRequisitionDto[]
+  pendingInventoryIssues: InventoryRequisitionDto[]
+  maintenanceOverview: MaintenanceDashboardOverview | null
+  maintenanceMetrics: WorkOrderMetrics | null
+  maintenanceTrends: WorkOrderTrendsDto | null
+  upcomingMaintenance: MaintenanceScheduleDto[]
+  tenders: TenderDto[]
+  moduleStatus: DashboardModuleStatus[]
+  lastUpdated: string
+}
+
+class DashboardService {
+  private toErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message) {
+      return error.message
+    }
+
+    return fallback
+  }
+
+  private async loadModule<T>(
+    module: string,
+    action: () => Promise<T>,
+    fallback: T,
+    fallbackMessage: string
+  ): Promise<{ data: T; status: DashboardModuleStatus }> {
+    try {
+      const data = await action()
+      return {
+        data,
+        status: {
+          module,
+          available: true,
+        },
+      }
+    } catch (error) {
+      return {
+        data: fallback,
+        status: {
+          module,
+          available: false,
+          error: this.toErrorMessage(error, fallbackMessage),
+        },
+      }
+    }
+  }
+
+  async getEnterpriseDashboard(): Promise<EnterpriseDashboardData> {
+    const endDate = new Date()
+    const startDate = new Date()
+    startDate.setMonth(endDate.getMonth() - 5)
+
+    const [
+      crmOverviewResult,
+      crmReportingResult,
+      projectDashboardResult,
+      purchaseRequisitionsResult,
+      purchaseOrdersResult,
+      inventoryApprovalResult,
+      inventoryIssueResult,
+      maintenanceOverviewResult,
+      maintenanceMetricsResult,
+      maintenanceTrendsResult,
+      upcomingMaintenanceResult,
+      tendersResult,
+    ] = await Promise.all([
+      this.loadModule('CRM Overview', () => crmService.getOverview(8), null, 'CRM overview is unavailable'),
+      this.loadModule('CRM Reporting', () => crmService.getReporting(8), null, 'CRM reporting is unavailable'),
+      this.loadModule('Projects', () => projectService.getDashboard(), null, 'Project dashboard is unavailable'),
+      this.loadModule(
+        'Purchase Requisitions',
+        () => purchasingService.getPendingApprovalRequisitions(),
+        [] as PurchaseRequisitionSummaryDto[],
+        'Pending purchase requisitions are unavailable'
+      ),
+      this.loadModule(
+        'Purchase Orders',
+        async () => {
+          const response = await purchasingService.getPurchaseOrders({ page: 1, pageSize: 25 })
+          return response.items.filter((order) => !['completed', 'cancelled', 'closed'].includes(order.status.toLowerCase()))
+        },
+        [] as PurchaseOrderSummaryDto[],
+        'Purchase order data is unavailable'
+      ),
+      this.loadModule(
+        'Inventory Approval Queue',
+        () => inventoryRequisitionService.getPendingApproval(),
+        [] as InventoryRequisitionDto[],
+        'Pending inventory approvals are unavailable'
+      ),
+      this.loadModule(
+        'Inventory Issue Queue',
+        () => inventoryRequisitionService.getPendingIssue(),
+        [] as InventoryRequisitionDto[],
+        'Pending inventory issues are unavailable'
+      ),
+      this.loadModule(
+        'Maintenance Overview',
+        () => apiService.get<MaintenanceDashboardOverview>('/maintenance/dashboard/overview'),
+        null,
+        'Maintenance overview is unavailable'
+      ),
+      this.loadModule(
+        'Maintenance Metrics',
+        () => workOrderService.getWorkOrderMetrics(),
+        null,
+        'Maintenance work order metrics are unavailable'
+      ),
+      this.loadModule(
+        'Maintenance Trends',
+        () =>
+          apiService.get<WorkOrderTrendsDto>(
+            `/maintenance/dashboard/work-order-trends?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`,
+          ),
+        null,
+        'Maintenance trends are unavailable'
+      ),
+      this.loadModule(
+        'Upcoming Maintenance',
+        () => apiService.get<MaintenanceScheduleDto[]>('/maintenance/schedules/due-in-days/14'),
+        [] as MaintenanceScheduleDto[],
+        'Upcoming maintenance is unavailable'
+      ),
+      this.loadModule(
+        'Tenders',
+        async () => {
+          const response = await tenderService.getTenders({ page: 1, pageSize: 50 })
+          return response.items
+        },
+        [] as TenderDto[],
+        'Tender data is unavailable'
+      ),
+    ])
+
     return {
-      totalRevenue: 2847690,
-      totalOrders: 1284,
-      totalCustomers: 8934,
-      totalProducts: 456,
-      revenueGrowth: 12.5,
-      ordersGrowth: 8.2,
-      customersGrowth: 15.3,
-      productsGrowth: 4.7,
-    };
-  }
-
-  async getSalesData(): Promise<SalesData[]> {
-    await new Promise(resolve => setTimeout(resolve, 600));
-    
-    return [
-      { month: 'Jan', revenue: 185000, orders: 120, target: 180000 },
-      { month: 'Feb', revenue: 195000, orders: 135, target: 190000 },
-      { month: 'Mar', revenue: 215000, orders: 150, target: 200000 },
-      { month: 'Apr', revenue: 245000, orders: 165, target: 220000 },
-      { month: 'May', revenue: 285000, orders: 180, target: 250000 },
-      { month: 'Jun', revenue: 295000, orders: 195, target: 280000 },
-      { month: 'Jul', revenue: 315000, orders: 210, target: 300000 },
-      { month: 'Aug', revenue: 325000, orders: 225, target: 320000 },
-      { month: 'Sep', revenue: 345000, orders: 240, target: 340000 },
-      { month: 'Oct', revenue: 365000, orders: 255, target: 360000 },
-      { month: 'Nov', revenue: 385000, orders: 270, target: 380000 },
-      { month: 'Dec', revenue: 425000, orders: 285, target: 400000 },
-    ];
-  }
-
-  async getRevenueByCategory(): Promise<RevenueByCategory[]> {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    return [
-      { category: 'Electronics', amount: 1250000, percentage: 35.2, color: '#3b82f6' },
-      { category: 'Clothing', amount: 890000, percentage: 25.1, color: '#10b981' },
-      { category: 'Home & Garden', amount: 567000, percentage: 16.0, color: '#f59e0b' },
-      { category: 'Sports', amount: 445000, percentage: 12.5, color: '#ef4444' },
-      { category: 'Books', amount: 289000, percentage: 8.1, color: '#8b5cf6' },
-      { category: 'Other', amount: 109000, percentage: 3.1, color: '#6b7280' },
-    ];
-  }
-
-  async getTopProducts(): Promise<TopProduct[]> {
-    await new Promise(resolve => setTimeout(resolve, 400));
-    
-    return [
-      { id: '1', name: 'MacBook Pro 14"', sales: 156, revenue: 312000, growth: 15.2 },
-      { id: '2', name: 'iPhone 15 Pro', sales: 234, revenue: 280800, growth: 8.7 },
-      { id: '3', name: 'Samsung Galaxy S24', sales: 189, revenue: 189000, growth: 12.3 },
-      { id: '4', name: 'Dell XPS 13', sales: 98, revenue: 147000, growth: -2.1 },
-      { id: '5', name: 'iPad Pro', sales: 145, revenue: 145000, growth: 6.8 },
-    ];
-  }
-
-  async getRecentOrders(): Promise<RecentOrder[]> {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    
-    return [
-      { id: 'ORD-001', customer: 'John Smith', amount: 1250, status: 'completed', date: '2025-01-18T10:30:00Z' },
-      { id: 'ORD-002', customer: 'Sarah Johnson', amount: 890, status: 'pending', date: '2025-01-18T09:45:00Z' },
-      { id: 'ORD-003', customer: 'Mike Davis', amount: 2100, status: 'completed', date: '2025-01-18T08:20:00Z' },
-      { id: 'ORD-004', customer: 'Emily Brown', amount: 450, status: 'cancelled', date: '2025-01-17T16:15:00Z' },
-      { id: 'ORD-005', customer: 'David Wilson', amount: 1680, status: 'pending', date: '2025-01-17T14:30:00Z' },
-    ];
-  }
-
-  async getRecentActivity(): Promise<ActivityItem[]> {
-    await new Promise(resolve => setTimeout(resolve, 350));
-    
-    return [
-      { id: '1', type: 'order', description: 'New order #ORD-001 received', timestamp: '2025-01-18T10:30:00Z', user: 'System' },
-      { id: '2', type: 'customer', description: 'New customer registered: John Doe', timestamp: '2025-01-18T09:15:00Z', user: 'Registration' },
-      { id: '3', type: 'product', description: 'iPhone 15 Pro stock updated', timestamp: '2025-01-18T08:45:00Z', user: 'Admin' },
-      { id: '4', type: 'payment', description: 'Payment received for order #ORD-003', timestamp: '2025-01-18T08:20:00Z', user: 'PaymentGateway' },
-      { id: '5', type: 'order', description: 'Order #ORD-002 status updated', timestamp: '2025-01-17T17:30:00Z', user: 'Manager' },
-    ];
-  }
-
-  async getPerformanceMetrics(): Promise<PerformanceMetric[]> {
-    await new Promise(resolve => setTimeout(resolve, 450));
-    
-    return [
-      { name: 'Sales Conversion', value: 3.2, target: 3.5, unit: '%', trend: 'up' },
-      { name: 'Customer Satisfaction', value: 4.7, target: 4.5, unit: '/5', trend: 'up' },
-      { name: 'Order Fulfillment', value: 98.5, target: 95.0, unit: '%', trend: 'up' },
-      { name: 'Return Rate', value: 2.1, target: 3.0, unit: '%', trend: 'down' },
-      { name: 'Inventory Turnover', value: 8.3, target: 8.0, unit: 'x', trend: 'stable' },
-    ];
+      crmOverview: crmOverviewResult.data,
+      crmReporting: crmReportingResult.data,
+      projectDashboard: projectDashboardResult.data,
+      pendingPurchaseRequisitions: purchaseRequisitionsResult.data,
+      openPurchaseOrders: purchaseOrdersResult.data,
+      pendingInventoryApprovals: inventoryApprovalResult.data,
+      pendingInventoryIssues: inventoryIssueResult.data,
+      maintenanceOverview: maintenanceOverviewResult.data,
+      maintenanceMetrics: maintenanceMetricsResult.data,
+      maintenanceTrends: maintenanceTrendsResult.data,
+      upcomingMaintenance: upcomingMaintenanceResult.data,
+      tenders: tendersResult.data,
+      moduleStatus: [
+        crmOverviewResult.status,
+        crmReportingResult.status,
+        projectDashboardResult.status,
+        purchaseRequisitionsResult.status,
+        purchaseOrdersResult.status,
+        inventoryApprovalResult.status,
+        inventoryIssueResult.status,
+        maintenanceOverviewResult.status,
+        maintenanceMetricsResult.status,
+        maintenanceTrendsResult.status,
+        upcomingMaintenanceResult.status,
+        tendersResult.status,
+      ],
+      lastUpdated: new Date().toISOString(),
+    }
   }
 }
 
-export const dashboardService = new DashboardService();
+export const dashboardService = new DashboardService()

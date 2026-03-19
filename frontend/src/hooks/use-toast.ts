@@ -11,6 +11,7 @@ type ToasterToast = {
   description?: React.ReactNode
   action?: React.ReactElement
   variant?: "default" | "destructive" | "success" | null | undefined
+  className?: string
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }

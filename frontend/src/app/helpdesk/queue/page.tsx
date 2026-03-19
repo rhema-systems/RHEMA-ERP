@@ -55,7 +55,6 @@ const tryReadJson = <T,>(raw: string | null): T | null => {
 
 const getUuid = () => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return (crypto as any).randomUUID() as string;
   } catch {
     // ignore
@@ -79,7 +78,8 @@ const buildCategoryOptions = (flat: EhcAdminCategory[]) => {
   for (const c of flat) byId.set(c.id, { ...c, children: [] });
   const roots: CategoryNode[] = [];
   for (const c of byId.values()) {
-    if (c.parentCategoryId && byId.has(c.parentCategoryId)) byId.get(c.parentCategoryId)!.children!.push(c);
+    const parent = c.parentCategoryId ? byId.get(c.parentCategoryId) : undefined;
+    if (parent?.children) parent.children.push(c);
     else roots.push(c);
   }
   const sortRec = (nodes: CategoryNode[]) => {
@@ -127,13 +127,19 @@ const priorityBadgeClassName = (p: EhcTicketPriority) => {
   }
 };
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 export default function HelpdeskQueuePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const queueViewsStorageKey = `ehc.helpdesk.queue.views.${scopeConfig.scope}.v1`;
   const queueDefaultViewStorageKey = `ehc.helpdesk.queue.defaultViewId.${scopeConfig.scope}.v1`;
@@ -391,7 +397,7 @@ export default function HelpdeskQueuePage() {
         id: 'ticketNumber',
         header: 'Ticket #',
         accessorKey: 'ticketNumber',
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => (
           <button
             className="text-blue-600 hover:underline"
             onClick={() => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, row.original.id))}
@@ -407,20 +413,20 @@ export default function HelpdeskQueuePage() {
         id: 'status',
         header: 'Status',
         accessorKey: 'status',
-        cell: ({ row }) => <Badge className={statusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => <Badge className={statusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
       },
       {
         id: 'priority',
         header: 'Priority',
         accessorKey: 'priority',
-        cell: ({ row }) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
       },
       { id: 'source', header: 'Channel', accessorKey: 'source' },
       {
         id: 'createdAt',
         header: 'Created',
         accessorKey: 'createdAt',
-        cell: ({ row }) => <span className="text-slate-700">{formatCreatedAt(row.original.createdAt)}</span>,
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => <span className="text-slate-700">{formatCreatedAt(row.original.createdAt)}</span>,
       },
       { id: 'requesterName', header: 'Requester', accessorKey: 'requesterName' },
     ];

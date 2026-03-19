@@ -80,15 +80,15 @@ public class InspectionController : ControllerBase
                 {
                     checklistItems = string.IsNullOrEmpty(qc.Checklist?.ChecklistItems) || qc.Checklist.ChecklistItems == "[]"
                         ? new List<System.Text.Json.JsonElement>()
-                        : System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(qc.Checklist.ChecklistItems);
+                        : System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(qc.Checklist.ChecklistItems ?? "[]");
                 }
                 catch
                 {
                     checklistItems = new List<System.Text.Json.JsonElement>();
                 }
 
-                var completedItems = checkResults.Count;
-                var totalItems = checklistItems.Count;
+                var completedItems = checkResults?.Count ?? 0;
+                var totalItems = checklistItems?.Count ?? 0;
                 var progress = totalItems > 0 ? (completedItems * 100 / totalItems) : 0;
 
                 return new

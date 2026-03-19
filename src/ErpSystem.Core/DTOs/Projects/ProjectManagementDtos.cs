@@ -35,7 +35,9 @@ public class ProjectDto
     public Guid? ProgramId { get; set; }
     public string? ProgramName { get; set; }
     public Guid? ProjectManagerId { get; set; }
+    public string? ProjectManagerDisplayName { get; set; }
     public Guid? SponsorId { get; set; }
+    public string? SponsorDisplayName { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? TargetEndDate { get; set; }
     public decimal? EstimatedBudget { get; set; }
@@ -78,8 +80,8 @@ public class ProjectDetailDto : ProjectDto
     public string? ExpectedBenefits { get; set; }
     public string? FundingSource { get; set; }
     public string? StatusRemarks { get; set; }
-    public bool ExternalPortalAccessEnabled { get; set; }
-    public bool ExternalCollaborationEnabled { get; set; }
+    public new bool ExternalPortalAccessEnabled { get; set; }
+    public new bool ExternalCollaborationEnabled { get; set; }
     public Guid? ActiveBaselineId { get; set; }
     public string? ActiveBaselineName { get; set; }
     public DateTime? ActiveBaselineCreatedOn { get; set; }
@@ -100,6 +102,7 @@ public class ProjectDetailDto : ProjectDto
     public List<ProjectBaselineDto> Baselines { get; set; } = new();
     public List<ProjectTimesheetEntryDto> TimesheetEntries { get; set; } = new();
     public List<ProjectExpenseDto> Expenses { get; set; } = new();
+    public List<ProjectMaterialCostEntryDto> MaterialCostEntries { get; set; } = new();
     public List<ProjectRevenueRecognitionDto> RevenueRecognitions { get; set; } = new();
     public List<ProjectAssetLinkDto> AssetLinks { get; set; } = new();
     public List<ProjectExternalAccessPolicyDto> ExternalAccessPolicies { get; set; } = new();
@@ -172,6 +175,7 @@ public class ProjectMemberDto
 {
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
+    public string? UserDisplayName { get; set; }
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; }
     public DateTime JoinedAt { get; set; }
@@ -198,6 +202,7 @@ public class ProjectWorkItemDto
     public string Priority { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public Guid? AssignedToUserId { get; set; }
+    public string? AssignedToUserDisplayName { get; set; }
     public DateTime? PlannedStartDate { get; set; }
     public DateTime? PlannedEndDate { get; set; }
     public DateTime? ActualStartDate { get; set; }
@@ -272,6 +277,7 @@ public class ProjectResourceAllocationDto
     public Guid ProjectId { get; set; }
     public Guid? WorkItemId { get; set; }
     public Guid UserId { get; set; }
+    public string? UserDisplayName { get; set; }
     public string AllocationRole { get; set; } = string.Empty;
     public string AllocationType { get; set; } = string.Empty;
     public decimal AllocationValue { get; set; }
@@ -281,12 +287,22 @@ public class ProjectResourceAllocationDto
     public string BookingType { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string? Notes { get; set; }
+    public List<string> RequiredSkills { get; set; } = new();
+    public List<string> RequiredCertifications { get; set; } = new();
+    public string RoutingPolicy { get; set; } = "Balanced";
     public Guid? SourceAllocationId { get; set; }
     public Guid? ReplacementAllocationId { get; set; }
     public string? SubstitutionReason { get; set; }
     public bool CanSubstitute { get; set; }
     public bool HasConflict { get; set; }
     public decimal CapacityUtilizationPercent { get; set; }
+    public decimal QualificationMatchPercent { get; set; }
+    public string QualificationRisk { get; set; } = "NotEvaluated";
+    public List<string> MissingSkills { get; set; } = new();
+    public List<string> MissingCertifications { get; set; } = new();
+    public Guid? RecommendedUserId { get; set; }
+    public string? RecommendedUserDisplayName { get; set; }
+    public string? RoutingRecommendation { get; set; }
 }
 
 public class CreateProjectResourceAllocationDto
@@ -304,6 +320,9 @@ public class CreateProjectResourceAllocationDto
     public string BookingType { get; set; } = "Soft";
     public string Status { get; set; } = "Requested";
     public string? Notes { get; set; }
+    public List<string> RequiredSkills { get; set; } = new();
+    public List<string> RequiredCertifications { get; set; } = new();
+    public string RoutingPolicy { get; set; } = "Balanced";
 }
 
 public class SubstituteProjectResourceAllocationDto
@@ -412,6 +431,7 @@ public class ProjectRiskDto
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public Guid? OwnerId { get; set; }
+    public string? OwnerDisplayName { get; set; }
     public string Status { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public int Probability { get; set; }
@@ -443,6 +463,7 @@ public class ProjectIssueDto
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public Guid? OwnerId { get; set; }
+    public string? OwnerDisplayName { get; set; }
     public string Status { get; set; } = string.Empty;
     public string Severity { get; set; } = string.Empty;
     public DateTime? TargetResolutionDate { get; set; }
@@ -470,6 +491,7 @@ public class ProjectQualityCheckpointDto
     public Guid? WorkItemId { get; set; }
     public Guid? DeliverableId { get; set; }
     public Guid? QaOwnerId { get; set; }
+    public string? QaOwnerDisplayName { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string Status { get; set; } = string.Empty;
@@ -477,6 +499,7 @@ public class ProjectQualityCheckpointDto
     public bool RequiresQaSignOff { get; set; }
     public DateTime? SignedOffAt { get; set; }
     public Guid? SignedOffById { get; set; }
+    public string? SignedOffByDisplayName { get; set; }
     public string? SignOffNotes { get; set; }
 }
 
@@ -500,6 +523,7 @@ public class ProjectNonConformanceDto
     public Guid? QualityCheckpointId { get; set; }
     public Guid? DeliverableId { get; set; }
     public Guid? OwnerId { get; set; }
+    public string? OwnerDisplayName { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string Severity { get; set; } = string.Empty;
@@ -631,6 +655,7 @@ public class ProjectDeliverableDto
     public string? ExternalApprovalNotes { get; set; }
     public bool CanExternalSubmit { get; set; }
     public bool CanExternalApprove { get; set; }
+    public List<ProjectDeliverableExternalReviewDto> ExternalReviews { get; set; } = new();
 }
 
 public class CreateProjectDeliverableDto
@@ -650,6 +675,20 @@ public class CreateProjectDeliverableDto
 public class SubmitProjectDeliverableDto
 {
     public Guid? SubmittedDocumentId { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class ProjectDeliverableExternalReviewDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid DeliverableId { get; set; }
+    public DateTime ReviewDate { get; set; }
+    public Guid? ReviewedById { get; set; }
+    public Guid? SubmittedDocumentId { get; set; }
+    public string? SubmittedDocumentName { get; set; }
+    public string Decision { get; set; } = string.Empty;
+    public string? StatusSnapshot { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -787,6 +826,7 @@ public class ProjectTimesheetEntryDto
     public Guid? WorkItemId { get; set; }
     public string? WorkItemTitle { get; set; }
     public Guid UserId { get; set; }
+    public string? UserDisplayName { get; set; }
     public DateTime EntryDate { get; set; }
     public decimal Hours { get; set; }
     public bool IsBillable { get; set; }
@@ -796,6 +836,7 @@ public class ProjectTimesheetEntryDto
     public string? Notes { get; set; }
     public string Status { get; set; } = string.Empty;
     public Guid? ApprovedById { get; set; }
+    public string? ApprovedByDisplayName { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public bool CanEdit { get; set; }
     public bool CanDelete { get; set; }
@@ -824,6 +865,7 @@ public class ProjectExpenseDto
     public Guid? WorkItemId { get; set; }
     public string? WorkItemTitle { get; set; }
     public Guid UserId { get; set; }
+    public string? UserDisplayName { get; set; }
     public DateTime ExpenseDate { get; set; }
     public string Category { get; set; } = string.Empty;
     public string Currency { get; set; } = string.Empty;
@@ -834,6 +876,7 @@ public class ProjectExpenseDto
     public Guid? ReceiptDocumentId { get; set; }
     public string? Notes { get; set; }
     public Guid? ApprovedById { get; set; }
+    public string? ApprovedByDisplayName { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public bool CanEdit { get; set; }
     public bool CanDelete { get; set; }
@@ -983,6 +1026,7 @@ public class ProjectDecisionDto
     public string Title { get; set; } = string.Empty;
     public DateTime DecisionDate { get; set; }
     public Guid? ApproverId { get; set; }
+    public string? ApproverDisplayName { get; set; }
     public string? Rationale { get; set; }
     public string? AlternativesConsidered { get; set; }
     public string? ImpactSummary { get; set; }
@@ -1009,6 +1053,7 @@ public class ProjectMeetingMinuteDto
     public string Title { get; set; } = string.Empty;
     public DateTime MeetingDate { get; set; }
     public Guid? FacilitatorId { get; set; }
+    public string? FacilitatorDisplayName { get; set; }
     public string MeetingType { get; set; } = string.Empty;
     public string? Minutes { get; set; }
     public string? AttendeesJson { get; set; }
@@ -1034,6 +1079,7 @@ public class ProjectActionItemDto
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public Guid? OwnerId { get; set; }
+    public string? OwnerDisplayName { get; set; }
     public DateTime? DueDate { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string Status { get; set; } = string.Empty;
@@ -1761,6 +1807,9 @@ public class ProjectMaterialReconciliationReportItemDto
     public decimal NetIssuedValue { get; set; }
     public decimal TrackedMaterialCost { get; set; }
     public decimal MaterialCostVariance { get; set; }
+    public int MaterialLedgerEntryCount { get; set; }
+    public int MissingSourceLinkCount { get; set; }
+    public int ReversalGapCount { get; set; }
     public string ReconciliationStatus { get; set; } = string.Empty;
 }
 
@@ -1780,12 +1829,45 @@ public class ProjectProcurementReconciliationReportItemDto
     public decimal ReceivedAmount { get; set; }
     public decimal AcceptedReceiptAmount { get; set; }
     public decimal PendingInspectionAmount { get; set; }
+    public decimal SupplierReturnAmount { get; set; }
     public decimal IssuedInventoryValue { get; set; }
     public decimal NetIssuedInventoryValue { get; set; }
     public decimal PostedMaterialCost { get; set; }
     public decimal ReceiptToIssueVariance { get; set; }
     public decimal IssueToPostingVariance { get; set; }
+    public int ProcurementLedgerEntryCount { get; set; }
+    public int MissingSourceLinkCount { get; set; }
+    public int ReversalGapCount { get; set; }
     public string ReconciliationStatus { get; set; } = string.Empty;
+}
+
+public class ProjectMaterialCostEntryDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public string ProjectCode { get; set; } = string.Empty;
+    public string ProjectTitle { get; set; } = string.Empty;
+    public DateTime EntryDate { get; set; }
+    public string EntryType { get; set; } = string.Empty;
+    public string PostingState { get; set; } = string.Empty;
+    public bool AffectsActualCost { get; set; }
+    public bool IsReversed { get; set; }
+    public string? SourceDocumentType { get; set; }
+    public Guid? SourceDocumentId { get; set; }
+    public string? SourceDocumentNumber { get; set; }
+    public string? SourceTransactionType { get; set; }
+    public Guid? SourceTransactionId { get; set; }
+    public Guid? InventoryItemId { get; set; }
+    public string? InventoryItemCode { get; set; }
+    public string? InventoryItemName { get; set; }
+    public decimal Quantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "USD";
+    public bool HasMissingSourceLink { get; set; }
+    public bool HasReversalGap { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class ProjectBudgetRevisionDto

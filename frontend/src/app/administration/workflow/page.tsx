@@ -73,9 +73,9 @@ function WorkflowAdministrationPageInner() {
   useEffect(() => {
     if (initializedFromQuery) return;
 
-    const q = searchParams.get('q');
-    const et = searchParams.get('entityType');
-    const designId = searchParams.get('designWorkflowId');
+    const q = searchParams?.get('q');
+    const et = searchParams?.get('entityType');
+    const designId = searchParams?.get('designWorkflowId');
 
     if (q) setSearchQuery(q);
     if (et) setEntityTypeFilter(et);

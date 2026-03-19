@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import {
+import { 
   Plus,
   Search,
   Edit,
@@ -21,7 +21,6 @@ import {
   Settings,
   Tag
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 // Asset categories interface
 interface AssetCategory {
@@ -47,6 +46,36 @@ interface AssetCategory {
   secondaryMaintenanceUnit?: string;
 }
 
+type MaintenanceType = 'Time' | 'Distance' | 'Usage' | 'Cycles';
+
+interface AssetCategoryFormData {
+  name: string;
+  code: string;
+  description: string;
+  parentCategory: string | null;
+  isActive: boolean;
+  autoGenerateSchedules: boolean;
+  assetType: string;
+  maintenanceScheduleType: string;
+  maintenanceType: string;
+  maintenanceFrequency: string;
+  maintenanceValue: string;
+  maintenanceUnit: string;
+  secondaryMaintenanceType: string;
+  secondaryMaintenanceFrequency: string;
+  secondaryMaintenanceValue: string;
+  secondaryMaintenanceUnit: string;
+  color: string;
+  icon: string;
+}
+
+const maintenanceDefaults: Record<MaintenanceType, { unit: string; value: string }> = {
+  Time: { unit: 'months', value: '' },
+  Distance: { unit: 'km', value: '' },
+  Usage: { unit: 'hours', value: '' },
+  Cycles: { unit: 'cycles', value: '' }
+};
+
 export default function AssetCategoriesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -58,13 +87,13 @@ export default function AssetCategoriesPage() {
   const [filteredData, setFilteredData] = useState<AssetCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
+  
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<AssetCategoryFormData>({
     name: '',
     code: '',
     description: '',
-    parentCategory: '',
+    parentCategory: null,
     isActive: true,
     autoGenerateSchedules: true,
     assetType: 'Equipment', // Default asset type
@@ -82,18 +111,26 @@ export default function AssetCategoriesPage() {
     icon: 'package'
   });
 
+  const buildHeaders = (token: string | null): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  });
+
+  const getMaintenanceTypeDefaults = (type: string, fallbackUnit: string) =>
+    maintenanceDefaults[type as MaintenanceType] ?? { unit: fallbackUnit, value: '' };
+
   // Fetch asset categories from API
   const fetchAssetCategories = async () => {
     try {
       setLoading(true);
       setError(null);
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-
+      
       console.log('🔄 Fetching asset categories...');
       console.log('Token available:', !!token);
       console.log('Token preview:', token ? `${token.substring(0, 20)}...` : 'None');
       console.log('API URL:', 'http://localhost:5000/api/maintenance/asset-categories');
-
+      
       // For now, we'll proceed without authentication since the API endpoint allows anonymous access
       // TODO: Restore authentication requirement when proper auth is implemented
       // if (!token) {
@@ -101,23 +138,16 @@ export default function AssetCategoriesPage() {
       //   setError('Authentication required. Please log in to access this page.');
       //   return;
       // }
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-
-      // Only add Authorization header if token exists
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      
+      const headers = buildHeaders(token);
 
       const response = await fetch('http://localhost:5000/api/maintenance/asset-categories?pageSize=1000', {
         headers
       });
-
+      
       console.log('Response status:', response.status);
       console.log('Response ok:', response.ok);
-
+      
       if (!response.ok) {
         const errorText = await response.text();
         console.error('API Error Response:', {
@@ -125,7 +155,7 @@ export default function AssetCategoriesPage() {
           statusText: response.statusText,
           body: errorText
         });
-
+        
         if (response.status === 401) {
           setError('Authentication failed. Please log in again or check your credentials.');
           // Optionally redirect to login
@@ -137,24 +167,24 @@ export default function AssetCategoriesPage() {
         }
         return;
       }
-
+      
       const result = await response.json();
       console.log('✅ API Response received:', result);
-
+      
       const categories = result.data || result.items || result || [];
       console.log('Processed categories count:', categories.length);
-
+      
       setAssetCategoriesData(categories);
     } catch (error) {
       console.error('❌ Error fetching asset categories:', error);
-
+      
       // Check if it's a network error
       if (error instanceof TypeError && error.message.includes('fetch')) {
         setError('Unable to connect to the server. Please check if the API is running on http://localhost:5000');
       } else {
-        setError(`Failed to load asset categories: ${error.message}`);
+        setError(`Failed to load asset categories: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
-
+      
       setAssetCategoriesData([]);
     } finally {
       setLoading(false);
@@ -177,7 +207,7 @@ export default function AssetCategoriesPage() {
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(item =>
+      filtered = filtered.filter(item => 
         statusFilter === 'active' ? item.isActive : !item.isActive
       );
     }
@@ -220,13 +250,7 @@ export default function AssetCategoriesPage() {
 
       console.log('Sending create request:', createDto);
 
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const headers = buildHeaders(token);
 
       const response = await fetch('http://localhost:5000/api/maintenance/asset-categories', {
         method: 'POST',
@@ -249,7 +273,7 @@ export default function AssetCategoriesPage() {
     }
   };
 
-  const handleEdit = (category: AssetCategory) => {
+  const handleEdit = (category: any) => {
     setSelectedCategory(category);
     setFormData({
       name: category.name || '',
@@ -303,13 +327,7 @@ export default function AssetCategoriesPage() {
 
       console.log('Sending update request:', updateDto);
 
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const headers = buildHeaders(token);
 
       const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${selectedCategory.id}`, {
         method: 'PUT',
@@ -319,7 +337,7 @@ export default function AssetCategoriesPage() {
 
       if (response.ok) {
         const updatedCategory = await response.json();
-        setAssetCategoriesData(prev =>
+        setAssetCategoriesData(prev => 
           prev.map(item => item.id === selectedCategory.id ? updatedCategory : item)
         );
         setIsEditDialogOpen(false);
@@ -341,13 +359,7 @@ export default function AssetCategoriesPage() {
 
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const headers = buildHeaders(token);
 
       const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${id}`, {
         method: 'DELETE',
@@ -371,7 +383,7 @@ export default function AssetCategoriesPage() {
       name: '',
       code: '',
       description: '',
-      parentCategory: '',
+      parentCategory: null,
       isActive: true,
       autoGenerateSchedules: true,
       assetType: 'Equipment',
@@ -390,9 +402,9 @@ export default function AssetCategoriesPage() {
     setSelectedCategory(null);
   };
 
-  const getParentCategoryName = (parentId: number | null) => {
+  const getParentCategoryName = (parentId: AssetCategory['parentCategory']) => {
     if (!parentId) return 'Root Category';
-    const parent = assetCategoriesData.find(cat => cat.id === parentId);
+    const parent = assetCategoriesData.find(cat => String(cat.id) === String(parentId));
     return parent ? parent.name : 'Unknown';
   };
 
@@ -410,9 +422,9 @@ export default function AssetCategoriesPage() {
     }
   };
 
-  const getMaintenanceScheduleDisplay = (category: Partial<AssetCategory>) => {
+  const getMaintenanceScheduleDisplay = (category: any) => {
     const scheduleType = category.maintenanceScheduleType || 'single';
-
+    
     if (scheduleType === 'multi') {
       const primary = formatSingleCriteria(
         category.maintenanceType || 'Time',
@@ -428,7 +440,7 @@ export default function AssetCategoriesPage() {
       );
       return `Every ${primary} OR ${secondary} (whichever comes first)`;
     }
-
+    
     // Single criteria (original logic)
     const formatted = formatSingleCriteria(
       category.maintenanceType || 'Time',
@@ -456,7 +468,7 @@ export default function AssetCategoriesPage() {
               Add Category
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[900px]">
+<DialogContent className="sm:max-w-[900px]">
             <DialogHeader>
               <DialogTitle>Add Asset Category</DialogTitle>
               <DialogDescription>
@@ -465,123 +477,212 @@ export default function AssetCategoriesPage() {
             </DialogHeader>
             <div className="max-h-[70vh] overflow-y-auto pr-2">
               <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Category Name</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="Enter category name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="code">Category Code</Label>
-                    <Input
-                      id="code"
-                      value={formData.code}
-                      onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                      placeholder="e.g., HVAC, ELEC"
-                    />
-                  </div>
-                </div>
-
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    placeholder="Describe this category..."
-                    rows={3}
+                  <Label htmlFor="name">Category Name</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    placeholder="Enter category name"
                   />
                 </div>
-
+                <div className="space-y-2">
+                  <Label htmlFor="code">Category Code</Label>
+                  <Input
+                    id="code"
+                    value={formData.code}
+                    onChange={(e) => setFormData({...formData, code: e.target.value})}
+                    placeholder="e.g., HVAC, ELEC"
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="description">Description</Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  placeholder="Describe this category..."
+                  rows={3}
+                />
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="parent">Parent Category</Label>
+                  <Select value={formData.parentCategory ?? 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="None (root level)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None (root level)</SelectItem>
+                      {assetCategoriesData.filter(cat => !cat.parentCategory).map((cat) => (
+                        <SelectItem key={cat.id} value={cat.id.toString()}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="assetType">Asset Type</Label>
+                  <Select value={formData.assetType} onValueChange={(value) => setFormData({...formData, assetType: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select asset type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Equipment">Equipment</SelectItem>
+                      <SelectItem value="Vehicle">Vehicle</SelectItem>
+                      <SelectItem value="Building">Building</SelectItem>
+                      <SelectItem value="Infrastructure">Infrastructure</SelectItem>
+                      <SelectItem value="ITAsset">IT Asset</SelectItem>
+                      <SelectItem value="Furniture">Furniture</SelectItem>
+                      <SelectItem value="Tool">Tool</SelectItem>
+                      <SelectItem value="Safety">Safety</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="icon">Icon</Label>
+                  <Input
+                    id="icon"
+                    value={formData.icon}
+                    onChange={(e) => setFormData({...formData, icon: e.target.value})}
+                    placeholder="Icon name or emoji"
+                  />
+                </div>
+              </div>
+              
+              {/* Maintenance Schedule Type Selection */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-base font-medium">Maintenance Schedule</Label>
+                  <Select value={formData.maintenanceScheduleType} onValueChange={(value) => setFormData({...formData, maintenanceScheduleType: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select schedule type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single">Single Criteria (e.g., Every 6 months)</SelectItem>
+                      <SelectItem value="multi">Multiple Criteria (e.g., Every 6 months OR 10,000 km)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              {/* Primary Maintenance Criteria */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Label className="text-base font-medium">
+                    {formData.maintenanceScheduleType === 'multi' ? 'Primary Criteria' : 'Maintenance Criteria'}
+                  </Label>
+                  {formData.maintenanceScheduleType === 'multi' && (
+                    <span className="text-sm text-muted-foreground">(First condition)</span>
+                  )}
+                </div>
+                
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="parent">Parent Category</Label>
-                    <Select value={formData.parentCategory || 'none'} onValueChange={(value) => setFormData({ ...formData, parentCategory: value === 'none' ? null : value })}>
+                    <Label htmlFor="maintenanceType">Type</Label>
+                    <Select value={formData.maintenanceType} onValueChange={(value) => {
+                      const defaults = getMaintenanceTypeDefaults(value, 'months');
+                      setFormData({...formData, maintenanceType: value, maintenanceUnit: defaults.unit, maintenanceValue: defaults.value});
+                    }}>
                       <SelectTrigger>
-                        <SelectValue placeholder="None (root level)" />
+                        <SelectValue placeholder="Select type" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">None (root level)</SelectItem>
-                        {assetCategoriesData.filter(cat => !cat.parentCategory).map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id.toString()}>
-                            {cat.name}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="Time">Time-based</SelectItem>
+                        <SelectItem value="Distance">Distance/Mileage</SelectItem>
+                        <SelectItem value="Usage">Usage/Hours</SelectItem>
+                        <SelectItem value="Cycles">Cycles/Operations</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="assetType">Asset Type</Label>
-                    <Select value={formData.assetType} onValueChange={(value) => setFormData({ ...formData, assetType: value })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select asset type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Equipment">Equipment</SelectItem>
-                        <SelectItem value="Vehicle">Vehicle</SelectItem>
-                        <SelectItem value="Building">Building</SelectItem>
-                        <SelectItem value="Infrastructure">Infrastructure</SelectItem>
-                        <SelectItem value="ITAsset">IT Asset</SelectItem>
-                        <SelectItem value="Furniture">Furniture</SelectItem>
-                        <SelectItem value="Tool">Tool</SelectItem>
-                        <SelectItem value="Safety">Safety</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="icon">Icon</Label>
-                    <Input
-                      id="icon"
-                      value={formData.icon}
-                      onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-                      placeholder="Icon name or emoji"
-                    />
-                  </div>
+                  
+                  {formData.maintenanceType !== 'Time' && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="maintenanceValue">Value</Label>
+                        <Input
+                          id="maintenanceValue"
+                          type="number"
+                          value={formData.maintenanceValue}
+                          onChange={(e) => setFormData({...formData, maintenanceValue: e.target.value})}
+                          placeholder="1000"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="maintenanceUnit">Unit</Label>
+                        <Select value={formData.maintenanceUnit} onValueChange={(value) => setFormData({...formData, maintenanceUnit: value})}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {formData.maintenanceType === 'Distance' && (
+                              <>
+                                <SelectItem value="km">Kilometers</SelectItem>
+                                <SelectItem value="miles">Miles</SelectItem>
+                              </>
+                            )}
+                            {formData.maintenanceType === 'Usage' && (
+                              <>
+                                <SelectItem value="hours">Operating Hours</SelectItem>
+                                <SelectItem value="runtime">Runtime Hours</SelectItem>
+                              </>
+                            )}
+                            {formData.maintenanceType === 'Cycles' && (
+                              <>
+                                <SelectItem value="cycles">Cycles</SelectItem>
+                                <SelectItem value="operations">Operations</SelectItem>
+                                <SelectItem value="starts">Starts</SelectItem>
+                              </>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+                  
+                  {formData.maintenanceType === 'Time' && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="frequency">Frequency</Label>
+                        <Select value={formData.maintenanceFrequency} onValueChange={(value) => setFormData({...formData, maintenanceFrequency: value})}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select frequency" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Weekly">Weekly</SelectItem>
+                            <SelectItem value="Monthly">Monthly</SelectItem>
+                            <SelectItem value="Quarterly">Quarterly</SelectItem>
+                            <SelectItem value="Semi-Annual">Semi-Annual</SelectItem>
+                            <SelectItem value="Annual">Annual</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-1"></div>
+                    </>
+                  )}
                 </div>
-
-                {/* Maintenance Schedule Type Selection */}
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label className="text-base font-medium">Maintenance Schedule</Label>
-                    <Select value={formData.maintenanceScheduleType} onValueChange={(value) => setFormData({ ...formData, maintenanceScheduleType: value })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select schedule type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="single">Single Criteria (e.g., Every 6 months)</SelectItem>
-                        <SelectItem value="multi">Multiple Criteria (e.g., Every 6 months OR 10,000 km)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Primary Maintenance Criteria */}
+              </div>
+              
+              {/* Secondary Criteria for Multi-schedule */}
+              {formData.maintenanceScheduleType === 'multi' && (
                 <div className="space-y-4">
                   <div className="flex items-center space-x-2">
-                    <Label className="text-base font-medium">
-                      {formData.maintenanceScheduleType === 'multi' ? 'Primary Criteria' : 'Maintenance Criteria'}
-                    </Label>
-                    {formData.maintenanceScheduleType === 'multi' && (
-                      <span className="text-sm text-muted-foreground">(First condition)</span>
-                    )}
+                    <Label className="text-base font-medium">Secondary Criteria</Label>
+                    <span className="text-sm text-muted-foreground">(Alternative condition - OR logic)</span>
                   </div>
-
+                  
                   <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="maintenanceType">Type</Label>
-                      <Select value={formData.maintenanceType} onValueChange={(value) => {
-                        const defaults: Record<string, { unit: string; value: string }> = {
-                          'Time': { unit: 'months', value: '' },
-                          'Distance': { unit: 'km', value: '' },
-                          'Usage': { unit: 'hours', value: '' },
-                          'Cycles': { unit: 'cycles', value: '' }
-                        };
-                        setFormData({ ...formData, maintenanceType: value, maintenanceUnit: defaults[value]?.unit || 'months', maintenanceValue: defaults[value]?.value || '' });
+                      <Label htmlFor="secondaryMaintenanceType">Type</Label>
+                      <Select value={formData.secondaryMaintenanceType} onValueChange={(value) => {
+                        const defaults = getMaintenanceTypeDefaults(value, 'km');
+                        setFormData({...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults.unit, secondaryMaintenanceValue: defaults.value});
                       }}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select type" />
@@ -594,39 +695,39 @@ export default function AssetCategoriesPage() {
                         </SelectContent>
                       </Select>
                     </div>
-
-                    {formData.maintenanceType !== 'Time' && (
+                    
+                    {formData.secondaryMaintenanceType !== 'Time' && (
                       <>
                         <div className="space-y-2">
-                          <Label htmlFor="maintenanceValue">Value</Label>
+                          <Label htmlFor="secondaryMaintenanceValue">Value</Label>
                           <Input
-                            id="maintenanceValue"
+                            id="secondaryMaintenanceValue"
                             type="number"
-                            value={formData.maintenanceValue}
-                            onChange={(e) => setFormData({ ...formData, maintenanceValue: e.target.value })}
-                            placeholder="1000"
+                            value={formData.secondaryMaintenanceValue}
+                            onChange={(e) => setFormData({...formData, secondaryMaintenanceValue: e.target.value})}
+                            placeholder="10000"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="maintenanceUnit">Unit</Label>
-                          <Select value={formData.maintenanceUnit} onValueChange={(value) => setFormData({ ...formData, maintenanceUnit: value })}>
+                          <Label htmlFor="secondaryMaintenanceUnit">Unit</Label>
+                          <Select value={formData.secondaryMaintenanceUnit} onValueChange={(value) => setFormData({...formData, secondaryMaintenanceUnit: value})}>
                             <SelectTrigger>
                               <SelectValue placeholder="Select unit" />
                             </SelectTrigger>
                             <SelectContent>
-                              {formData.maintenanceType === 'Distance' && (
+                              {formData.secondaryMaintenanceType === 'Distance' && (
                                 <>
                                   <SelectItem value="km">Kilometers</SelectItem>
                                   <SelectItem value="miles">Miles</SelectItem>
                                 </>
                               )}
-                              {formData.maintenanceType === 'Usage' && (
+                              {formData.secondaryMaintenanceType === 'Usage' && (
                                 <>
                                   <SelectItem value="hours">Operating Hours</SelectItem>
                                   <SelectItem value="runtime">Runtime Hours</SelectItem>
                                 </>
                               )}
-                              {formData.maintenanceType === 'Cycles' && (
+                              {formData.secondaryMaintenanceType === 'Cycles' && (
                                 <>
                                   <SelectItem value="cycles">Cycles</SelectItem>
                                   <SelectItem value="operations">Operations</SelectItem>
@@ -638,12 +739,12 @@ export default function AssetCategoriesPage() {
                         </div>
                       </>
                     )}
-
-                    {formData.maintenanceType === 'Time' && (
+                    
+                    {formData.secondaryMaintenanceType === 'Time' && (
                       <>
                         <div className="space-y-2">
-                          <Label htmlFor="frequency">Frequency</Label>
-                          <Select value={formData.maintenanceFrequency} onValueChange={(value) => setFormData({ ...formData, maintenanceFrequency: value })}>
+                          <Label htmlFor="secondaryFrequency">Frequency</Label>
+                          <Select value={formData.secondaryMaintenanceFrequency} onValueChange={(value) => setFormData({...formData, secondaryMaintenanceFrequency: value})}>
                             <SelectTrigger>
                               <SelectValue placeholder="Select frequency" />
                             </SelectTrigger>
@@ -660,153 +761,54 @@ export default function AssetCategoriesPage() {
                       </>
                     )}
                   </div>
+                  
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <p className="text-sm text-blue-800">
+                      <strong>Preview:</strong> {getMaintenanceScheduleDisplay(formData)}
+                    </p>
+                  </div>
                 </div>
-
-                {/* Secondary Criteria for Multi-schedule */}
-                {formData.maintenanceScheduleType === 'multi' && (
-                  <div className="space-y-4">
-                    <div className="flex items-center space-x-2">
-                      <Label className="text-base font-medium">Secondary Criteria</Label>
-                      <span className="text-sm text-muted-foreground">(Alternative condition - OR logic)</span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="secondaryMaintenanceType">Type</Label>
-                        <Select value={formData.secondaryMaintenanceType} onValueChange={(value) => {
-                          const defaults: Record<string, { unit: string; value: string }> = {
-                            'Time': { unit: 'months', value: '' },
-                            'Distance': { unit: 'km', value: '' },
-                            'Usage': { unit: 'hours', value: '' },
-                            'Cycles': { unit: 'cycles', value: '' }
-                          };
-                          setFormData({ ...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults[value]?.unit || 'km', secondaryMaintenanceValue: defaults[value]?.value || '' });
-                        }}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Time">Time-based</SelectItem>
-                            <SelectItem value="Distance">Distance/Mileage</SelectItem>
-                            <SelectItem value="Usage">Usage/Hours</SelectItem>
-                            <SelectItem value="Cycles">Cycles/Operations</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {formData.secondaryMaintenanceType !== 'Time' && (
-                        <>
-                          <div className="space-y-2">
-                            <Label htmlFor="secondaryMaintenanceValue">Value</Label>
-                            <Input
-                              id="secondaryMaintenanceValue"
-                              type="number"
-                              value={formData.secondaryMaintenanceValue}
-                              onChange={(e) => setFormData({ ...formData, secondaryMaintenanceValue: e.target.value })}
-                              placeholder="10000"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="secondaryMaintenanceUnit">Unit</Label>
-                            <Select value={formData.secondaryMaintenanceUnit} onValueChange={(value) => setFormData({ ...formData, secondaryMaintenanceUnit: value })}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select unit" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {formData.secondaryMaintenanceType === 'Distance' && (
-                                  <>
-                                    <SelectItem value="km">Kilometers</SelectItem>
-                                    <SelectItem value="miles">Miles</SelectItem>
-                                  </>
-                                )}
-                                {formData.secondaryMaintenanceType === 'Usage' && (
-                                  <>
-                                    <SelectItem value="hours">Operating Hours</SelectItem>
-                                    <SelectItem value="runtime">Runtime Hours</SelectItem>
-                                  </>
-                                )}
-                                {formData.secondaryMaintenanceType === 'Cycles' && (
-                                  <>
-                                    <SelectItem value="cycles">Cycles</SelectItem>
-                                    <SelectItem value="operations">Operations</SelectItem>
-                                    <SelectItem value="starts">Starts</SelectItem>
-                                  </>
-                                )}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </>
-                      )}
-
-                      {formData.secondaryMaintenanceType === 'Time' && (
-                        <>
-                          <div className="space-y-2">
-                            <Label htmlFor="secondaryFrequency">Frequency</Label>
-                            <Select value={formData.secondaryMaintenanceFrequency} onValueChange={(value) => setFormData({ ...formData, secondaryMaintenanceFrequency: value })}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select frequency" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Weekly">Weekly</SelectItem>
-                                <SelectItem value="Monthly">Monthly</SelectItem>
-                                <SelectItem value="Quarterly">Quarterly</SelectItem>
-                                <SelectItem value="Semi-Annual">Semi-Annual</SelectItem>
-                                <SelectItem value="Annual">Annual</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="col-span-1"></div>
-                        </>
-                      )}
-                    </div>
-
-                    <div className="bg-blue-50 p-3 rounded-lg">
-                      <p className="text-sm text-blue-800">
-                        <strong>Preview:</strong> {getMaintenanceScheduleDisplay(formData)}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-3 gap-6 items-center">
-                  <div className="space-y-2">
-                    <Label htmlFor="color">Category Color</Label>
-                    <div className="flex items-center space-x-2">
-                      <Input
-                        id="color"
-                        type="color"
-                        value={formData.color}
-                        onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        className="w-16 h-10"
-                      />
-                      <Input
-                        value={formData.color}
-                        onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        placeholder="#000000"
-                        className="w-24"
-                      />
-                    </div>
-                  </div>
+              )}
+              
+              <div className="grid grid-cols-3 gap-6 items-center">
+                <div className="space-y-2">
+                  <Label htmlFor="color">Category Color</Label>
                   <div className="flex items-center space-x-2">
-                    <Label className="text-sm font-medium">Active</Label>
-                    <input
-                      type="checkbox"
-                      checked={formData.isActive}
-                      onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                      className="rounded border-gray-300"
+                    <Input
+                      id="color"
+                      type="color"
+                      value={formData.color}
+                      onChange={(e) => setFormData({...formData, color: e.target.value})}
+                      className="w-16 h-10"
+                    />
+                    <Input
+                      value={formData.color}
+                      onChange={(e) => setFormData({...formData, color: e.target.value})}
+                      placeholder="#000000"
+                      className="w-24"
                     />
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Label className="text-sm font-medium">Auto-generate schedules</Label>
-                    <input
-                      type="checkbox"
-                      checked={formData.autoGenerateSchedules}
-                      onChange={(e) => setFormData({ ...formData, autoGenerateSchedules: e.target.checked })}
-                      className="rounded border-gray-300"
-                    />
-                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Label className="text-sm font-medium">Active</Label>
+                  <input
+                    type="checkbox"
+                    checked={formData.isActive}
+                    onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
+                    className="rounded border-gray-300"
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Label className="text-sm font-medium">Auto-generate schedules</Label>
+                  <input
+                    type="checkbox"
+                    checked={formData.autoGenerateSchedules}
+                    onChange={(e) => setFormData({...formData, autoGenerateSchedules: e.target.checked})}
+                    className="rounded border-gray-300"
+                  />
                 </div>
               </div>
+            </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -854,7 +856,7 @@ export default function AssetCategoriesPage() {
             </div>
           </CardContent>
         </Card>
-
+        
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -868,7 +870,7 @@ export default function AssetCategoriesPage() {
             </div>
           </CardContent>
         </Card>
-
+        
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -882,13 +884,13 @@ export default function AssetCategoriesPage() {
             </div>
           </CardContent>
         </Card>
-
+        
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold">
-                  {filteredData.reduce((sum, cat) => sum + (cat.assetCount || 0), 0)}
+                  {filteredData.reduce((sum, cat) => sum + (cat.assetCount ?? 0), 0)}
                 </p>
                 <p className="text-sm text-muted-foreground">Total Assets</p>
               </div>
@@ -914,7 +916,7 @@ export default function AssetCategoriesPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-
+            
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Status" />
@@ -954,13 +956,13 @@ export default function AssetCategoriesPage() {
               <div className="text-muted-foreground">Loading asset categories...</div>
             </div>
           )}
-
+          
           {error && (
             <div className="flex items-center justify-center py-8">
               <div className="text-red-600">{error}</div>
             </div>
           )}
-
+          
           {!loading && !error && (
             <div className="space-y-4">
               {filteredData.length === 0 ? (
@@ -969,80 +971,80 @@ export default function AssetCategoriesPage() {
                 </div>
               ) : (
                 filteredData.map((category) => (
-                  <div key={category.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-3 flex-1">
-                        <div className="flex items-center space-x-3">
-                          <div
-                            className="w-4 h-4 rounded-full"
-                            style={{ backgroundColor: category.color }}
-                          />
-                          <h3 className="font-semibold">{category.name}</h3>
-                          <Badge variant="outline">{category.code}</Badge>
-                          <Badge className={category.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                            {category.isActive ? 'Active' : 'Inactive'}
-                          </Badge>
-                          {category.assetType && (
-                            <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                              {category.assetType}
-                            </Badge>
-                          )}
-                          {category.parentCategory && (
-                            <Badge variant="secondary">Sub-category</Badge>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 text-sm text-muted-foreground">
-                          <div>
-                            <span className="font-medium">Parent:</span> {getParentCategoryName(category.parentCategory)}
-                          </div>
-                          <div>
-                            <span className="font-medium">Type:</span> {category.assetType || 'Not specified'}
-                          </div>
-                          <div>
-                            <span className="font-medium">Maintenance:</span> {getMaintenanceScheduleDisplay(category)}
-                          </div>
-                          <div>
-                            <a
-                              href={`/maintenance/assets?category=${encodeURIComponent(category.name)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline font-medium"
-                            >
-                              <span className="font-medium">Assets:</span>{' '}
-                              {typeof category.assetCount === 'number' ? category.assetCount : 0}
-                            </a>
-                          </div>
-                          <div>
-                            <span className="font-medium">Icon:</span> {category.icon}
-                          </div>
-                          <div>
-                            <span className="font-medium">Auto-Scheduling:</span>{' '}
-                            {category.autoGenerateSchedules === false ? 'Disabled' : 'Enabled'}
-                          </div>
-                        </div>
-
-                        <p className="text-sm text-muted-foreground">{category.description}</p>
+              <div key={category.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-3 flex-1">
+                    <div className="flex items-center space-x-3">
+                      <div 
+                        className="w-4 h-4 rounded-full" 
+                        style={{ backgroundColor: category.color }}
+                      />
+                      <h3 className="font-semibold">{category.name}</h3>
+                      <Badge variant="outline">{category.code}</Badge>
+                      <Badge className={category.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                        {category.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                      {category.assetType && (
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                          {category.assetType}
+                        </Badge>
+                      )}
+                      {category.parentCategory && (
+                        <Badge variant="secondary">Sub-category</Badge>
+                      )}
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 text-sm text-muted-foreground">
+                      <div>
+                        <span className="font-medium">Parent:</span> {getParentCategoryName(category.parentCategory)}
                       </div>
-
-                      <div className="flex items-center space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => handleEdit(category)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleDelete(category.id)}
-                          className="text-red-600 hover:text-red-700"
+                      <div>
+                        <span className="font-medium">Type:</span> {category.assetType || 'Not specified'}
+                      </div>
+                      <div>
+                        <span className="font-medium">Maintenance:</span> {getMaintenanceScheduleDisplay(category)}
+                      </div>
+                      <div>
+                        <a
+                          href={`/maintenance/assets?category=${encodeURIComponent(category.name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline font-medium"
                         >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
+                          <span className="font-medium">Assets:</span>{' '}
+                          {typeof category.assetCount === 'number' ? category.assetCount : 0}
+                        </a>
+                      </div>
+                      <div>
+                        <span className="font-medium">Icon:</span> {category.icon}
+                      </div>
+                      <div>
+                        <span className="font-medium">Auto-Scheduling:</span>{' '}
+                        {category.autoGenerateSchedules === false ? 'Disabled' : 'Enabled'}
                       </div>
                     </div>
+                    
+                    <p className="text-sm text-muted-foreground">{category.description}</p>
                   </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <Button size="sm" variant="outline" onClick={() => handleEdit(category)}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => handleDelete(category.id)}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
                 ))
               )}
             </div>
@@ -1053,7 +1055,7 @@ export default function AssetCategoriesPage() {
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[900px]">
+<DialogContent className="sm:max-w-[900px]">
           <DialogHeader>
             <DialogTitle>Edit Asset Category</DialogTitle>
             <DialogDescription>
@@ -1062,123 +1064,212 @@ export default function AssetCategoriesPage() {
           </DialogHeader>
           <div className="max-h-[70vh] overflow-y-auto pr-2">
             <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-name">Category Name</Label>
-                  <Input
-                    id="edit-name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g., HVAC Systems"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-code">Category Code</Label>
-                  <Input
-                    id="edit-code"
-                    value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                    placeholder="e.g., HVAC"
-                  />
-                </div>
-              </div>
-
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-description">Description</Label>
-                <Textarea
-                  id="edit-description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Description of the asset category..."
-                  rows={3}
+                <Label htmlFor="edit-name">Category Name</Label>
+                <Input
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  placeholder="e.g., HVAC Systems"
                 />
               </div>
-
+              <div className="space-y-2">
+                <Label htmlFor="edit-code">Category Code</Label>
+                <Input
+                  id="edit-code"
+                  value={formData.code}
+                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                  placeholder="e.g., HVAC"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                placeholder="Description of the asset category..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-parent">Parent Category</Label>
+                <Select value={formData.parentCategory ?? 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select parent (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Root Category</SelectItem>
+                    {assetCategoriesData.filter(cat => !cat.parentCategory && cat.id !== selectedCategory?.id).map(cat => (
+                      <SelectItem key={cat.id} value={cat.id.toString()}>
+                        {cat.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-assetType">Asset Type</Label>
+                <Select value={formData.assetType} onValueChange={(value) => setFormData({...formData, assetType: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select asset type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Equipment">Equipment</SelectItem>
+                    <SelectItem value="Vehicle">Vehicle</SelectItem>
+                    <SelectItem value="Building">Building</SelectItem>
+                    <SelectItem value="Infrastructure">Infrastructure</SelectItem>
+                    <SelectItem value="ITAsset">IT Asset</SelectItem>
+                    <SelectItem value="Furniture">Furniture</SelectItem>
+                    <SelectItem value="Tool">Tool</SelectItem>
+                    <SelectItem value="Safety">Safety</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-icon">Icon Name</Label>
+                <Input
+                  id="edit-icon"
+                  value={formData.icon}
+                  onChange={(e) => setFormData({...formData, icon: e.target.value})}
+                  placeholder="e.g., package, wrench, settings"
+                />
+              </div>
+            </div>
+            
+            {/* Edit Maintenance Schedule Type Selection */}
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-base font-medium">Maintenance Schedule</Label>
+                <Select value={formData.maintenanceScheduleType} onValueChange={(value) => setFormData({...formData, maintenanceScheduleType: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select schedule type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">Single Criteria (e.g., Every 6 months)</SelectItem>
+                    <SelectItem value="multi">Multiple Criteria (e.g., Every 6 months OR 10,000 km)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            {/* Edit Primary Maintenance Criteria */}
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Label className="text-base font-medium">
+                  {formData.maintenanceScheduleType === 'multi' ? 'Primary Criteria' : 'Maintenance Criteria'}
+                </Label>
+                {formData.maintenanceScheduleType === 'multi' && (
+                  <span className="text-sm text-muted-foreground">(First condition)</span>
+                )}
+              </div>
+              
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="edit-parent">Parent Category</Label>
-                  <Select value={formData.parentCategory || 'none'} onValueChange={(value) => setFormData({ ...formData, parentCategory: value === 'none' ? null : value })}>
+                  <Label htmlFor="edit-maintenanceType">Type</Label>
+                  <Select value={formData.maintenanceType} onValueChange={(value) => {
+                    const defaults = getMaintenanceTypeDefaults(value, 'months');
+                    setFormData({...formData, maintenanceType: value, maintenanceUnit: defaults.unit, maintenanceValue: defaults.value});
+                  }}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select parent (optional)" />
+                      <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Root Category</SelectItem>
-                      {assetCategoriesData.filter(cat => !cat.parentCategory && cat.id !== selectedCategory?.id).map(cat => (
-                        <SelectItem key={cat.id} value={cat.id.toString()}>
-                          {cat.name}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="Time">Time-based</SelectItem>
+                      <SelectItem value="Distance">Distance/Mileage</SelectItem>
+                      <SelectItem value="Usage">Usage/Hours</SelectItem>
+                      <SelectItem value="Cycles">Cycles/Operations</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-assetType">Asset Type</Label>
-                  <Select value={formData.assetType} onValueChange={(value) => setFormData({ ...formData, assetType: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select asset type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Equipment">Equipment</SelectItem>
-                      <SelectItem value="Vehicle">Vehicle</SelectItem>
-                      <SelectItem value="Building">Building</SelectItem>
-                      <SelectItem value="Infrastructure">Infrastructure</SelectItem>
-                      <SelectItem value="ITAsset">IT Asset</SelectItem>
-                      <SelectItem value="Furniture">Furniture</SelectItem>
-                      <SelectItem value="Tool">Tool</SelectItem>
-                      <SelectItem value="Safety">Safety</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-icon">Icon Name</Label>
-                  <Input
-                    id="edit-icon"
-                    value={formData.icon}
-                    onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-                    placeholder="e.g., package, wrench, settings"
-                  />
-                </div>
+                
+                {formData.maintenanceType !== 'Time' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-maintenanceValue">Value</Label>
+                      <Input
+                        id="edit-maintenanceValue"
+                        type="number"
+                        value={formData.maintenanceValue}
+                        onChange={(e) => setFormData({...formData, maintenanceValue: e.target.value})}
+                        placeholder="1000"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-maintenanceUnit">Unit</Label>
+                      <Select value={formData.maintenanceUnit} onValueChange={(value) => setFormData({...formData, maintenanceUnit: value})}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {formData.maintenanceType === 'Distance' && (
+                            <>
+                              <SelectItem value="km">Kilometers</SelectItem>
+                              <SelectItem value="miles">Miles</SelectItem>
+                            </>
+                          )}
+                          {formData.maintenanceType === 'Usage' && (
+                            <>
+                              <SelectItem value="hours">Operating Hours</SelectItem>
+                              <SelectItem value="runtime">Runtime Hours</SelectItem>
+                            </>
+                          )}
+                          {formData.maintenanceType === 'Cycles' && (
+                            <>
+                              <SelectItem value="cycles">Cycles</SelectItem>
+                              <SelectItem value="operations">Operations</SelectItem>
+                              <SelectItem value="starts">Starts</SelectItem>
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+                
+                {formData.maintenanceType === 'Time' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-frequency">Frequency</Label>
+                      <Select value={formData.maintenanceFrequency} onValueChange={(value) => setFormData({...formData, maintenanceFrequency: value})}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select frequency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Weekly">Weekly</SelectItem>
+                          <SelectItem value="Monthly">Monthly</SelectItem>
+                          <SelectItem value="Quarterly">Quarterly</SelectItem>
+                          <SelectItem value="Semi-Annual">Semi-Annual</SelectItem>
+                          <SelectItem value="Annual">Annual</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-1"></div>
+                  </>
+                )}
               </div>
-
-              {/* Edit Maintenance Schedule Type Selection */}
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-base font-medium">Maintenance Schedule</Label>
-                  <Select value={formData.maintenanceScheduleType} onValueChange={(value) => setFormData({ ...formData, maintenanceScheduleType: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select schedule type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="single">Single Criteria (e.g., Every 6 months)</SelectItem>
-                      <SelectItem value="multi">Multiple Criteria (e.g., Every 6 months OR 10,000 km)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Edit Primary Maintenance Criteria */}
+            </div>
+            
+            {/* Edit Secondary Criteria for Multi-schedule */}
+            {formData.maintenanceScheduleType === 'multi' && (
               <div className="space-y-4">
                 <div className="flex items-center space-x-2">
-                  <Label className="text-base font-medium">
-                    {formData.maintenanceScheduleType === 'multi' ? 'Primary Criteria' : 'Maintenance Criteria'}
-                  </Label>
-                  {formData.maintenanceScheduleType === 'multi' && (
-                    <span className="text-sm text-muted-foreground">(First condition)</span>
-                  )}
+                  <Label className="text-base font-medium">Secondary Criteria</Label>
+                  <span className="text-sm text-muted-foreground">(Alternative condition - OR logic)</span>
                 </div>
-
+                
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="edit-maintenanceType">Type</Label>
-                    <Select value={formData.maintenanceType} onValueChange={(value) => {
-                      const defaults: Record<string, { unit: string; value: string }> = {
-                        'Time': { unit: 'months', value: '' },
-                        'Distance': { unit: 'km', value: '' },
-                        'Usage': { unit: 'hours', value: '' },
-                        'Cycles': { unit: 'cycles', value: '' }
-                      };
-                      setFormData({ ...formData, maintenanceType: value, maintenanceUnit: defaults[value]?.unit || 'months', maintenanceValue: defaults[value]?.value || '' });
+                    <Label htmlFor="edit-secondaryMaintenanceType">Type</Label>
+                    <Select value={formData.secondaryMaintenanceType} onValueChange={(value) => {
+                      const defaults = getMaintenanceTypeDefaults(value, 'km');
+                      setFormData({...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults.unit, secondaryMaintenanceValue: defaults.value});
                     }}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select type" />
@@ -1191,39 +1282,39 @@ export default function AssetCategoriesPage() {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  {formData.maintenanceType !== 'Time' && (
+                  
+                  {formData.secondaryMaintenanceType !== 'Time' && (
                     <>
                       <div className="space-y-2">
-                        <Label htmlFor="edit-maintenanceValue">Value</Label>
+                        <Label htmlFor="edit-secondaryMaintenanceValue">Value</Label>
                         <Input
-                          id="edit-maintenanceValue"
+                          id="edit-secondaryMaintenanceValue"
                           type="number"
-                          value={formData.maintenanceValue}
-                          onChange={(e) => setFormData({ ...formData, maintenanceValue: e.target.value })}
-                          placeholder="1000"
+                          value={formData.secondaryMaintenanceValue}
+                          onChange={(e) => setFormData({...formData, secondaryMaintenanceValue: e.target.value})}
+                          placeholder="10000"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="edit-maintenanceUnit">Unit</Label>
-                        <Select value={formData.maintenanceUnit} onValueChange={(value) => setFormData({ ...formData, maintenanceUnit: value })}>
+                        <Label htmlFor="edit-secondaryMaintenanceUnit">Unit</Label>
+                        <Select value={formData.secondaryMaintenanceUnit} onValueChange={(value) => setFormData({...formData, secondaryMaintenanceUnit: value})}>
                           <SelectTrigger>
                             <SelectValue placeholder="Select unit" />
                           </SelectTrigger>
                           <SelectContent>
-                            {formData.maintenanceType === 'Distance' && (
+                            {formData.secondaryMaintenanceType === 'Distance' && (
                               <>
                                 <SelectItem value="km">Kilometers</SelectItem>
                                 <SelectItem value="miles">Miles</SelectItem>
                               </>
                             )}
-                            {formData.maintenanceType === 'Usage' && (
+                            {formData.secondaryMaintenanceType === 'Usage' && (
                               <>
                                 <SelectItem value="hours">Operating Hours</SelectItem>
                                 <SelectItem value="runtime">Runtime Hours</SelectItem>
                               </>
                             )}
-                            {formData.maintenanceType === 'Cycles' && (
+                            {formData.secondaryMaintenanceType === 'Cycles' && (
                               <>
                                 <SelectItem value="cycles">Cycles</SelectItem>
                                 <SelectItem value="operations">Operations</SelectItem>
@@ -1235,12 +1326,12 @@ export default function AssetCategoriesPage() {
                       </div>
                     </>
                   )}
-
-                  {formData.maintenanceType === 'Time' && (
+                  
+                  {formData.secondaryMaintenanceType === 'Time' && (
                     <>
                       <div className="space-y-2">
-                        <Label htmlFor="edit-frequency">Frequency</Label>
-                        <Select value={formData.maintenanceFrequency} onValueChange={(value) => setFormData({ ...formData, maintenanceFrequency: value })}>
+                        <Label htmlFor="edit-secondaryFrequency">Frequency</Label>
+                        <Select value={formData.secondaryMaintenanceFrequency} onValueChange={(value) => setFormData({...formData, secondaryMaintenanceFrequency: value})}>
                           <SelectTrigger>
                             <SelectValue placeholder="Select frequency" />
                           </SelectTrigger>
@@ -1257,143 +1348,44 @@ export default function AssetCategoriesPage() {
                     </>
                   )}
                 </div>
+                
+                <div className="bg-blue-50 p-3 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    <strong>Preview:</strong> {getMaintenanceScheduleDisplay(formData)}
+                  </p>
+                </div>
               </div>
-
-              {/* Edit Secondary Criteria for Multi-schedule */}
-              {formData.maintenanceScheduleType === 'multi' && (
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <Label className="text-base font-medium">Secondary Criteria</Label>
-                    <span className="text-sm text-muted-foreground">(Alternative condition - OR logic)</span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="edit-secondaryMaintenanceType">Type</Label>
-                      <Select value={formData.secondaryMaintenanceType} onValueChange={(value) => {
-                        const defaults: Record<string, { unit: string; value: string }> = {
-                          'Time': { unit: 'months', value: '' },
-                          'Distance': { unit: 'km', value: '' },
-                          'Usage': { unit: 'hours', value: '' },
-                          'Cycles': { unit: 'cycles', value: '' }
-                        };
-                        setFormData({ ...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults[value]?.unit || 'km', secondaryMaintenanceValue: defaults[value]?.value || '' });
-                      }}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Time">Time-based</SelectItem>
-                          <SelectItem value="Distance">Distance/Mileage</SelectItem>
-                          <SelectItem value="Usage">Usage/Hours</SelectItem>
-                          <SelectItem value="Cycles">Cycles/Operations</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {formData.secondaryMaintenanceType !== 'Time' && (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="edit-secondaryMaintenanceValue">Value</Label>
-                          <Input
-                            id="edit-secondaryMaintenanceValue"
-                            type="number"
-                            value={formData.secondaryMaintenanceValue}
-                            onChange={(e) => setFormData({ ...formData, secondaryMaintenanceValue: e.target.value })}
-                            placeholder="10000"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="edit-secondaryMaintenanceUnit">Unit</Label>
-                          <Select value={formData.secondaryMaintenanceUnit} onValueChange={(value) => setFormData({ ...formData, secondaryMaintenanceUnit: value })}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select unit" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {formData.secondaryMaintenanceType === 'Distance' && (
-                                <>
-                                  <SelectItem value="km">Kilometers</SelectItem>
-                                  <SelectItem value="miles">Miles</SelectItem>
-                                </>
-                              )}
-                              {formData.secondaryMaintenanceType === 'Usage' && (
-                                <>
-                                  <SelectItem value="hours">Operating Hours</SelectItem>
-                                  <SelectItem value="runtime">Runtime Hours</SelectItem>
-                                </>
-                              )}
-                              {formData.secondaryMaintenanceType === 'Cycles' && (
-                                <>
-                                  <SelectItem value="cycles">Cycles</SelectItem>
-                                  <SelectItem value="operations">Operations</SelectItem>
-                                  <SelectItem value="starts">Starts</SelectItem>
-                                </>
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </>
-                    )}
-
-                    {formData.secondaryMaintenanceType === 'Time' && (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="edit-secondaryFrequency">Frequency</Label>
-                          <Select value={formData.secondaryMaintenanceFrequency} onValueChange={(value) => setFormData({ ...formData, secondaryMaintenanceFrequency: value })}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select frequency" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Weekly">Weekly</SelectItem>
-                              <SelectItem value="Monthly">Monthly</SelectItem>
-                              <SelectItem value="Quarterly">Quarterly</SelectItem>
-                              <SelectItem value="Semi-Annual">Semi-Annual</SelectItem>
-                              <SelectItem value="Annual">Annual</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="col-span-1"></div>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="bg-blue-50 p-3 rounded-lg">
-                    <p className="text-sm text-blue-800">
-                      <strong>Preview:</strong> {getMaintenanceScheduleDisplay(formData)}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-3 gap-6 items-center">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-color">Category Color</Label>
-                  <Input
-                    id="edit-color"
-                    type="color"
-                    value={formData.color}
-                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                    className="w-16 h-10"
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Label className="text-sm font-medium" htmlFor="edit-active">Active</Label>
-                  <Switch
-                    id="edit-active"
-                    checked={formData.isActive}
-                    onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Label className="text-sm font-medium" htmlFor="edit-auto-generate">Auto-generate schedules</Label>
-                  <Switch
-                    id="edit-auto-generate"
-                    checked={formData.autoGenerateSchedules}
-                    onCheckedChange={(checked) => setFormData({ ...formData, autoGenerateSchedules: checked })}
-                  />
-                </div>
+            )}
+            
+            <div className="grid grid-cols-3 gap-6 items-center">
+              <div className="space-y-2">
+                <Label htmlFor="edit-color">Category Color</Label>
+                <Input
+                  id="edit-color"
+                  type="color"
+                  value={formData.color}
+                  onChange={(e) => setFormData({...formData, color: e.target.value})}
+                  className="w-16 h-10"
+                />
+              </div>
+              <div className="flex items-center space-x-2">
+                <Label className="text-sm font-medium" htmlFor="edit-active">Active</Label>
+                <Switch
+                  id="edit-active"
+                  checked={formData.isActive}
+                  onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+                />
+              </div>
+              <div className="flex items-center space-x-2">
+                <Label className="text-sm font-medium" htmlFor="edit-auto-generate">Auto-generate schedules</Label>
+                <Switch
+                  id="edit-auto-generate"
+                  checked={formData.autoGenerateSchedules}
+                  onCheckedChange={(checked) => setFormData({...formData, autoGenerateSchedules: checked})}
+                />
               </div>
             </div>
+          </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>

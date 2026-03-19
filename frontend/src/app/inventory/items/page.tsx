@@ -1722,7 +1722,7 @@ export default function InventoryItemsPage() {
                       {s.isPreferred && <Badge className="bg-yellow-100 text-yellow-800">Preferred</Badge>}
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      Code: {s.supplierItemCode || '-'} • Cost: ${(s.unitCost ?? 0).toFixed(2)} • Lead: {s.leadTimeDays ?? 0} days
+                      Code: {s.supplierItemCode || '-'} • Cost: ${(s.unitPrice ?? 0).toFixed(2)} • Lead: {s.leadTimeDays ?? 0} days
                     </p>
                   </div>
                 </div>

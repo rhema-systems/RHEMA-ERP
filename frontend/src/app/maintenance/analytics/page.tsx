@@ -27,7 +27,7 @@ import {
   DollarSign,
   Clock
 } from 'lucide-react';
-import analyticsApiService, { AnalyticsData } from '@/services/analytics-api.service';
+import analyticsApiService from '@/services/analytics-api.service';
 
 // Analytics Components
 import {
@@ -332,7 +332,7 @@ function AssetAnalyticsDashboardOriginal() {
               <PerformanceTrendChart
                 data={displayData.performanceData}
                 loading={dashboardState.loading}
-                error={dashboardState.error}
+                error={dashboardState.error ?? undefined}
               />
             </TabsContent>
 
@@ -386,7 +386,7 @@ function AssetAnalyticsDashboardOriginal() {
               <PerformanceTrendChart
                 data={displayData.performanceData}
                 loading={dashboardState.loading}
-                error={dashboardState.error}
+                error={dashboardState.error ?? undefined}
               />
             </TabsContent>
 
@@ -416,7 +416,7 @@ function AssetAnalyticsDashboardOriginal() {
               <ReliabilityMetricsChart
                 data={displayData.reliabilityData}
                 loading={dashboardState.loading}
-                error={dashboardState.error}
+                error={dashboardState.error ?? undefined}
               />
             </TabsContent>
 
@@ -426,7 +426,7 @@ function AssetAnalyticsDashboardOriginal() {
                 data={displayData.costData}
                 totalCost={128000}
                 loading={dashboardState.loading}
-                error={dashboardState.error}
+                error={dashboardState.error ?? undefined}
               />
               
               <Card>
@@ -492,7 +492,7 @@ function AssetAnalyticsDashboardOriginal() {
               <EnergyPerformanceChart
                 data={displayData.energyData}
                 loading={dashboardState.loading}
-                error={dashboardState.error}
+                error={dashboardState.error ?? undefined}
               />
             </TabsContent>
           </Tabs>

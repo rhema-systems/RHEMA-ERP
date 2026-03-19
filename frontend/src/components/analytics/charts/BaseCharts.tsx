@@ -52,7 +52,7 @@ interface BaseChartProps {
 }
 
 interface ChartContainerProps extends BaseChartProps {
-  children: React.ReactNode;
+  children: React.ReactElement;
 }
 
 // #endregion
@@ -128,7 +128,20 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
 
 // #region Custom Tooltip Component
 
-const CustomTooltip: React.FC<TooltipProps<any, any> & { formatValue?: (value: any, name: string) => string }> = ({
+interface CustomTooltipEntry {
+  color?: string;
+  name?: string;
+  value?: string | number;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: CustomTooltipEntry[];
+  label?: string | number;
+  formatValue?: (value: any, name: string) => string;
+}
+
+const CustomTooltip: React.FC<CustomTooltipProps> = ({
   active,
   payload,
   label,
@@ -138,7 +151,7 @@ const CustomTooltip: React.FC<TooltipProps<any, any> & { formatValue?: (value: a
     return (
       <div className="bg-background border border-border rounded-lg shadow-lg p-3">
         <p className="font-medium text-sm mb-2">{label}</p>
-        {payload.map((entry, index) => (
+        {payload.map((entry: CustomTooltipEntry, index: number) => (
           <div key={index} className="flex items-center gap-2 text-sm">
             <div
               className="w-3 h-3 rounded-full"
@@ -484,3 +497,5 @@ export const BaseRadialBarChart: React.FC<RadialBarChartProps> = ({
 };
 
 // #endregion
+
+export const BaseTreeChart = BaseBarChart;

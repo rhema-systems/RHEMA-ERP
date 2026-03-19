@@ -21,13 +21,20 @@ import type { EhcTicketPriority } from '@/services/ehcTicketService';
 
 type CategoryNode = EhcAdminCategory & { children?: CategoryNode[] };
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 const buildTree = (flat: EhcAdminCategory[]): CategoryNode[] => {
   const byId = new Map<string, CategoryNode>();
   for (const c of flat) byId.set(c.id, { ...c, children: [] });
   const roots: CategoryNode[] = [];
   for (const c of byId.values()) {
-    if (c.parentCategoryId && byId.has(c.parentCategoryId)) {
-      byId.get(c.parentCategoryId)!.children!.push(c);
+    const parent = c.parentCategoryId ? byId.get(c.parentCategoryId) : undefined;
+    if (parent?.children) {
+      parent.children.push(c);
     } else {
       roots.push(c);
     }
@@ -71,7 +78,7 @@ export default function HelpdeskProblemsPage() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const [q, setQ] = useState('');
@@ -142,7 +149,7 @@ export default function HelpdeskProblemsPage() {
         id: 'problemNumber',
         header: 'Problem #',
         accessorKey: 'problemNumber',
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcProblemListItem>) => (
           <button
             className="text-blue-600 hover:underline"
             onClick={() => router.push(scopeParam ? `/helpdesk/problems/${row.original.id}?scope=${scopeParam}` : `/helpdesk/problems/${row.original.id}`)}
@@ -157,13 +164,13 @@ export default function HelpdeskProblemsPage() {
         id: 'status',
         header: 'Status',
         accessorKey: 'status',
-        cell: ({ row }) => <Badge className={problemStatusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
+        cell: ({ row }: TableCellProps<EhcProblemListItem>) => <Badge className={problemStatusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
       },
       {
         id: 'priority',
         header: 'Priority',
         accessorKey: 'priority',
-        cell: ({ row }) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
+        cell: ({ row }: TableCellProps<EhcProblemListItem>) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
       },
       { id: 'departmentName', header: 'Department', accessorKey: 'departmentName' },
       { id: 'ownerName', header: 'Owner', accessorKey: 'ownerName' },
@@ -172,7 +179,7 @@ export default function HelpdeskProblemsPage() {
         id: 'createdAt',
         header: 'Created',
         accessorKey: 'createdAt',
-        cell: ({ row }) => <span className="text-slate-700">{formatCreatedAt(row.original.createdAt)}</span>,
+        cell: ({ row }: TableCellProps<EhcProblemListItem>) => <span className="text-slate-700">{formatCreatedAt(row.original.createdAt)}</span>,
       },
     ];
   }, [formatCreatedAt, router]);

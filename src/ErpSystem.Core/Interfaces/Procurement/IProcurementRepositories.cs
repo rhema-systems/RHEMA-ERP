@@ -284,15 +284,15 @@ public interface IPerformanceReviewRepository : IGenericRepository<PerformanceRe
 /// </summary>
 public interface IBlacklistAppealRepository : IGenericRepository<BlacklistAppeal>
 {
-    Task<BlacklistAppeal?> GetByIdAsync(Guid id);
+    new Task<BlacklistAppeal?> GetByIdAsync(Guid id);
     Task<BlacklistAppeal?> GetByAppealNumberAsync(string appealNumber);
     Task<IEnumerable<BlacklistAppeal>> GetByBusinessPartnerAsync(Guid businessPartnerId);
     Task<IEnumerable<BlacklistAppeal>> GetByStatusAsync(string status);
     Task<IEnumerable<BlacklistAppeal>> GetPendingAppealsAsync();
     Task<string> GenerateAppealNumberAsync();
     Task<BlacklistAppeal> CreateAsync(BlacklistAppeal appeal);
-    Task<BlacklistAppeal> UpdateAsync(BlacklistAppeal appeal);
-    Task DeleteAsync(Guid id);
+    new Task<BlacklistAppeal> UpdateAsync(BlacklistAppeal appeal);
+    new Task DeleteAsync(Guid id);
 }
 
 /// <summary>

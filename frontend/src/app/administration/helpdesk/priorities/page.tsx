@@ -15,6 +15,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { ehcAdminService, type EhcTicketPriorityLevelAdmin, type UpdateEhcTicketPriorityLevelAdmin } from '@/services/ehcAdminService';
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 export default function AdminHelpdeskPrioritiesPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -64,14 +70,14 @@ export default function AdminHelpdeskPrioritiesPage() {
       { id: 'sortOrder', header: '#', accessorKey: 'sortOrder' },
       { id: 'priority', header: 'Priority', accessorKey: 'priority' },
       { id: 'displayName', header: 'Display Name', accessorKey: 'displayName' },
-      { id: 'isActive', header: 'Active', accessorKey: 'isActive', cell: ({ row }) => (row.original.isActive ? 'Yes' : 'No') },
-      { id: 'description', header: 'Description', accessorFn: (r) => r.description || '—' },
+      { id: 'isActive', header: 'Active', accessorKey: 'isActive', cell: ({ row }: TableCellProps<EhcTicketPriorityLevelAdmin>) => (row.original.isActive ? 'Yes' : 'No') },
+      { id: 'description', header: 'Description', accessorFn: (r: EhcTicketPriorityLevelAdmin) => r.description || '—' },
       {
         id: 'actions',
         header: '',
         accessorKey: 'priority',
         enableHiding: false,
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcTicketPriorityLevelAdmin>) => (
           <div className="flex justify-end">
             <Button
               variant="ghost"
@@ -183,4 +189,3 @@ export default function AdminHelpdeskPrioritiesPage() {
     </div>
   );
 }
-

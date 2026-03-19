@@ -1,47 +1,18 @@
 /**
  * Business Partner Service
  * Main API service for Business Partner (Supplier/Contractor/Customer) management
- *
- * @module services/businessPartnerService
- *
- * CHANGE LOG:
- * -----------
- * 2026-02-19 — REFACTORED to use centralized `apiService` (from api.service.ts)
- *
- * WHAT CHANGED:
- *   - Replaced standalone `fetch()` calls with `apiService.get/post/put/delete()`
- *   - Removed local `API_BASE_URL` constant and `getAuthHeaders()` helper
- *   - Added `import { apiService } from './api.service'`
- *
- * WHAT DID NOT CHANGE:
- *   - All interfaces (BusinessPartnerDto, CreateBusinessPartnerDto, etc.)
- *   - All method signatures and return types
- *   - All exported names (businessPartnerService, getPartners, getPartnerById, etc.)
- *   - Business logic (data cleaning, query param construction)
- *
- * WHY:
- *   The previous implementation used raw `fetch()` with a hardcoded fallback URL:
- *     `const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'`
- *
- *   This caused "Failed to fetch business partners" errors because:
- *   1. Port 5000 is occupied by a Windows system process (HTTP.sys/PID 4), NOT our API
- *   2. Our API actually runs on port 53485 (configured in launchSettings.json)
- *   3. When NEXT_PUBLIC_API_URL wasn't resolved, requests hit the wrong port → 404
- *
- *   The centralized `apiService` (api.service.ts) is already used by ~30 other services
- *   across Finance, Auth, Admin, EHC, Maintenance, Analytics, and more. It provides:
- *   - Single source of truth for the API base URL
- *   - Automatic JWT token management (no manual localStorage reads)
- *   - Automatic 401 → token refresh → retry cycle
- *   - Session blacklist event dispatch on auth failure
- *   - Consistent request/response logging
- *
- * PATTERN REFERENCE: See finance.service.ts for the canonical example of this pattern.
  */
 
-// Centralized API client — handles base URL, auth tokens, and error handling.
-// See api.service.ts for implementation details.
-import { apiService } from './api.service';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
+// Helper function to get auth headers
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  return {
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` })
+  };
+};
 
 // ============================================================================
 // BUSINESS PARTNER INTERFACES
@@ -78,113 +49,260 @@ export interface BusinessPartnerDto {
   customerType?: string;
   creditLimit?: number;
   outstandingBalance?: number;
+  isOnCreditHold?: boolean;
+
+  // Workflow display helpers (optional)
+  currentWorkflowStepName?: string;
+}
+
+export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
+  parentId?: string;
+  parentName?: string;
+  legalName?: string;
+  postalAddress?: string;
+  physicalState?: string;
+  physicalPostalCode?: string;
+  mailingAddress?: string;
+  mailingCity?: string;
+  mailingState?: string;
+  mailingCountry?: string;
+  mailingPostalCode?: string;
+  // Banking Information
+  bankName?: string;
+  bankBranch?: string;
+  accountNumber?: string;
+  accountName?: string;
+  swiftCode?: string;
+  iban?: string;
+  // Contact Person
+  contactPerson?: string;
+  contactTitle?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  // Classification
+  industryType?: string;
+  companySize?: string;
+  annualRevenue?: number;
+  geographicCoverage?: string;
+  // Other
   paymentTerms?: string;
+  currency?: string;
+  creditLimit?: number;
+  insuranceCoverageAmount?: number;
+  registrationDate?: string;
+  approvedDate?: string;
+  blacklistReason?: string;
+  blacklistDate?: string;
+  blacklistExpiryDate?: string;
+  notes?: string;
+  // Customer-Specific Fields (for Debtors/Sales)
+  customerAccountNumber?: string;
+  defaultDiscount?: number;
+  priceList?: string;
   salesRepresentativeId?: string;
   salesRepresentativeName?: string;
-  // Additional common fields
-  contactPerson?: string;
-  postalAddress?: string;
-  province?: string;
-  postalCode?: string;
-  bankName?: string;
-  bankAccountNumber?: string;
-  bankBranchCode?: string;
-  paymentMethod?: string;
-  notes?: string;
+  salesTerritory?: string;
+  isTaxExempt?: boolean;
+  taxExemptionNumber?: string;
+  taxExemptionExpiry?: string;
+  preferredShippingMethod?: string;
+  deliveryInstructions?: string;
+  customerSince?: string;
+  lastPurchaseDate?: string;
+  totalLifetimePurchases?: number;
+  averageOrderValue?: number;
+  loyaltyTier?: string;
+  loyaltyPoints?: number;
+  creditHoldReason?: string;
+  creditHoldDate?: string;
+  // Related Data
+  contacts?: BusinessPartnerContactDto[];
+  licenses?: BusinessPartnerLicenseDto[];
+  documents?: BusinessPartnerDocumentDto[];
+  financialRecords?: BusinessPartnerFinancialDto[];
+  financialInfo?: BusinessPartnerFinancialDto[]; // Alias for financialRecords
+  categories?: PartnerCategoryDto[];
+  specializations?: ContractorSpecializationDto[];
 }
 
 export interface BusinessPartnerContactDto {
   id: string;
-  partnerId: string;
-  contactName: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
+  contactName?: string;
+  name?: string; // Alias for contactName
+  firstName?: string;
+  lastName?: string;
   contactTitle?: string;
+  title?: string; // Alias for contactTitle
+  position?: string; // Alias for contactTitle
+  department?: string;
   email?: string;
   phone?: string;
   mobile?: string;
   isPrimary: boolean;
+}
+
+export interface CreateBusinessPartnerContactDto {
+  contactName: string;
+  title?: string;
   department?: string;
-  notes?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  isPrimary: boolean;
+}
+
+export interface BusinessPartnerDocumentDto {
+  id: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
+  documentType: string;
+  documentName: string;
+  filePath?: string;
+  documentPath?: string; // Alias
+  fileSize?: number;
+  mimeType?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  uploadedAt?: string;
+  isVerified: boolean;
+  verifiedBy?: string;
+  verifiedDate?: string;
+  verificationNotes?: string;
 }
 
 export interface BusinessPartnerLicenseDto {
   id: string;
-  partnerId: string;
-  licenseType: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
+  licenseTypeId: string;
+  licenseTypeName?: string;
   licenseNumber: string;
-  issuingAuthority?: string;
-  issueDate: string;
+  issueDate?: string;
   expiryDate?: string;
-  status: string;
-  notes?: string;
+  issuingAuthority?: string;
+  status: string; // Valid, Expired, Suspended, Active
+  filePath?: string;
+  documentPath?: string; // Alias
+  verificationNotes?: string;
+  isExpired?: boolean;
+  daysUntilExpiry?: number;
 }
 
-export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
-  contacts?: BusinessPartnerContactDto[];
-  licenses?: BusinessPartnerLicenseDto[];
-  // Extended customer fields
-  customerSince?: string;
-  lastOrderDate?: string;
-  totalOrders?: number;
-  totalRevenue?: number;
-  loyaltyTier?: string;
-  loyaltyPoints?: number;
-  preferredDeliveryMethod?: string;
-  preferredPaymentMethod?: string;
-  taxExempt?: boolean;
-  taxExemptionNumber?: string;
-  // Extended supplier fields
-  supplierSince?: string;
-  lastDeliveryDate?: string;
-  averageLeadTime?: number;
-  qualityRating?: number;
-  deliveryRating?: number;
-  priceCompetitiveness?: number;
+export interface BusinessPartnerFinancialDto {
+  id: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
+  fiscalYear?: number;
+  financialYear?: number; // Alias
+  annualRevenue?: number;
+  revenue?: number; // Alias
+  netProfit?: number;
+  profit?: number; // Alias
+  totalAssets?: number;
+  assets?: number; // Alias
+  totalLiabilities?: number;
+  liabilities?: number; // Alias
+  creditRating?: string;
+  financialStatementPath?: string;
+  isAudited?: boolean;
+  auditorName?: string;
+  auditDate?: string;
+  // Banking info (for compatibility)
+  bankName?: string;
+  bankAccountNumber?: string;
+}
+
+export interface PartnerCategoryDto {
+  id: string;
+  name: string;
+  code: string;
+  description?: string;
+  isActive: boolean;
+}
+
+export interface ContractorSpecializationDto {
+  id: string;
+  name: string;
+  code: string;
+  description?: string;
+  isActive: boolean;
+}
+
+export interface LicenseTypeDto {
+  id: string;
+  name: string;
+  code: string;
+  description?: string;
+  applicableTo: string; // Supplier, Contractor, Both
+  isMandatory: boolean;
+  validityPeriodMonths?: number;
+  isActive: boolean;
 }
 
 export interface CreateBusinessPartnerDto {
   partnerType: string;
   partnerName: string;
+  companyName?: string; // Alias for partnerName
   tradingName?: string;
   registrationNumber?: string;
   taxNumber?: string;
-  vatNumber?: string;
   email?: string;
   phone?: string;
-  alternatePhone?: string;
   website?: string;
   physicalAddress?: string;
   city?: string;
   country?: string;
-  status?: string;
-  parentId?: string;
-  contactPerson?: string;
-  postalAddress?: string;
-  province?: string;
   postalCode?: string;
   bankName?: string;
   bankAccountNumber?: string;
   bankBranchCode?: string;
-  paymentMethod?: string;
   paymentTerms?: string;
-  notes?: string;
-  // Customer-specific
-  customerType?: string;
+  currency?: string;
   creditLimit?: number;
+  notes?: string;
+  categoryIds?: string[];
+  specializationIds?: string[];
+  // Parent/Hierarchy
+  parentId?: string;
+  // Customer-Specific Fields
+  customerType?: string; // Retail, Wholesale, Corporate, Government
+  defaultDiscount?: number;
+  priceList?: string;
   salesRepresentativeId?: string;
-  preferredDeliveryMethod?: string;
-  preferredPaymentMethod?: string;
-  taxExempt?: boolean;
+  salesTerritory?: string;
+  isTaxExempt?: boolean;
   taxExemptionNumber?: string;
+  taxExemptionExpiry?: string;
+  preferredShippingMethod?: string;
+  deliveryInstructions?: string;
+  customerSince?: string;
+  loyaltyTier?: string;
 }
 
-export interface UpdateBusinessPartnerDto extends Partial<CreateBusinessPartnerDto> {
-  id?: string;
+export interface UpdateBusinessPartnerDto {
+  partnerName: string;
+  tradingName?: string;
+  registrationNumber?: string;
+  taxNumber?: string;
+  email?: string;
+  phone?: string;
+  physicalAddress?: string;
+  city?: string;
+  country?: string;
+  postalCode?: string;
+  website?: string;
+  status?: string;
+  isPreferred?: boolean;
+  notes?: string;
+  categoryIds?: string[];
+  specializationIds?: string[];
+  currency?: string;
+  paymentTerms?: string;
+  priceList?: string;
   parentId?: string;
 }
-
-// ============================================================================
-// RESPONSE INTERFACES
-// ============================================================================
 
 export interface PagedResult<T> {
   items: T[];
@@ -197,10 +315,6 @@ export interface PagedResult<T> {
 // ============================================================================
 // BUSINESS PARTNER API METHODS
 // ============================================================================
-
-// Base path is relative — apiService prepends the full API base URL automatically.
-// e.g. this becomes: http://localhost:53485/api/procurement/business-partners
-const BASE_PATH = '/procurement/business-partners';
 
 export const businessPartnerService = {
   // Get all partners with filtering and pagination
@@ -222,13 +336,22 @@ export const businessPartnerService = {
     if (params.approvalStatus) queryParams.append('approvalStatus', params.approvalStatus);
     if (params.categoryId) queryParams.append('categoryId', params.categoryId);
 
-    const query = queryParams.toString();
-    return apiService.get<PagedResult<BusinessPartnerDto>>(`${BASE_PATH}${query ? `?${query}` : ''}`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners?${queryParams}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch business partners');
+    return response.json();
   },
 
   // Get partner by ID
   async getPartnerById(id: string): Promise<BusinessPartnerDetailDto> {
-    return apiService.get<BusinessPartnerDetailDto>(`${BASE_PATH}/${id}`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch business partner');
+    return response.json();
   },
 
   // Alias for getPartnerById
@@ -238,25 +361,45 @@ export const businessPartnerService = {
 
   // Get partner by user ID
   async getPartnerByUserId(userId: string): Promise<BusinessPartnerDetailDto> {
-    return apiService.get<BusinessPartnerDetailDto>(`${BASE_PATH}/user/${userId}`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/user/${userId}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch business partner by user ID');
+    return response.json();
   },
 
   // Get active partners
   async getActivePartners(partnerType?: string): Promise<BusinessPartnerDto[]> {
     const queryParams = partnerType ? `?partnerType=${partnerType}` : '';
-    return apiService.get<BusinessPartnerDto[]>(`${BASE_PATH}/active${queryParams}`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/active${queryParams}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch active partners');
+    return response.json();
   },
 
   // Get all partners for dropdown (simple list)
   async getAllPartnersForDropdown(): Promise<BusinessPartnerDto[]> {
-    const result = await apiService.get<PagedResult<BusinessPartnerDto>>(`${BASE_PATH}?pageSize=1000`);
-    return result.items || (result as any);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners?pageSize=1000`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch partners for dropdown');
+    const result = await response.json();
+    return result.items || result;
   },
 
   // Get preferred partners
   async getPreferredPartners(partnerType?: string): Promise<BusinessPartnerDto[]> {
     const queryParams = partnerType ? `?partnerType=${partnerType}` : '';
-    return apiService.get<BusinessPartnerDto[]>(`${BASE_PATH}/preferred${queryParams}`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/preferred${queryParams}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch preferred partners');
+    return response.json();
   },
 
   // Create new partner
@@ -266,8 +409,15 @@ export const businessPartnerService = {
       ...data,
       parentId: data.parentId && data.parentId !== '' ? data.parentId : undefined,
     };
+    
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(cleanedData)
+    });
 
-    return apiService.post<BusinessPartnerDetailDto>(BASE_PATH, cleanedData);
+    if (!response.ok) throw new Error('Failed to create business partner');
+    return response.json();
   },
 
   // Update partner
@@ -277,61 +427,171 @@ export const businessPartnerService = {
       ...data,
       parentId: data.parentId && data.parentId !== '' ? data.parentId : undefined,
     };
+    
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(cleanedData)
+    });
 
-    return apiService.put<BusinessPartnerDetailDto>(`${BASE_PATH}/${id}`, cleanedData);
+    if (!response.ok) throw new Error('Failed to update business partner');
+    return response.json();
   },
 
   // Delete partner
   async deletePartner(id: string): Promise<void> {
-    return apiService.delete(`${BASE_PATH}/${id}`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to delete business partner');
   },
 
-  // Submit partner for approval
+  // Approve partner
   async submitPartnerForApproval(id: string): Promise<void> {
-    return apiService.post(`${BASE_PATH}/${id}/submit`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit business partner for approval');
+    }
   },
 
   // Approve partner (workflow)
   async approvePartner(id: string, notes?: string): Promise<void> {
-    return apiService.post(`${BASE_PATH}/${id}/approve`, { notes: notes || undefined });
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ notes: notes || undefined })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve business partner');
+    }
   },
 
   // Reject partner
   async rejectPartner(id: string, reason: string): Promise<void> {
-    return apiService.post(`${BASE_PATH}/${id}/reject`, { rejectionReason: reason });
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ rejectionReason: reason })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject business partner');
+    }
   },
 
   // Suspend partner
   async suspendPartner(id: string, reason?: string): Promise<void> {
-    return apiService.post(`${BASE_PATH}/${id}/suspend`, { suspensionReason: reason });
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/suspend`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ suspensionReason: reason })
+    });
+
+    if (!response.ok) throw new Error('Failed to suspend business partner');
   },
 
   // Activate partner
   async activatePartner(id: string): Promise<void> {
-    return apiService.post(`${BASE_PATH}/${id}/activate`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/activate`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to activate business partner');
   },
 
   // Blacklist partner
   async blacklistPartner(id: string, reason: string, blacklistUntil?: string): Promise<void> {
-    return apiService.post(`/procurement/partner-blacklist/partners/${id}/blacklist`, {
-      reason,
-      blacklistUntil: blacklistUntil || null
+    const response = await fetch(`${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/blacklist`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        reason,
+        blacklistUntil: blacklistUntil || null
+      })
     });
+
+    if (!response.ok) throw new Error('Failed to blacklist business partner');
   },
 
   // Remove from blacklist
   async removeFromBlacklist(id: string): Promise<void> {
-    return apiService.post(`/procurement/partner-blacklist/partners/${id}/remove-from-blacklist`);
+    const response = await fetch(`${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/remove-from-blacklist`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to remove business partner from blacklist');
   },
 
   // Get partner contacts
   async getPartnerContacts(partnerId: string): Promise<BusinessPartnerContactDto[]> {
-    return apiService.get<BusinessPartnerContactDto[]>(`${BASE_PATH}/${partnerId}/contacts`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch partner contacts');
+    return response.json();
+  },
+
+  async createPartnerContact(partnerId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) throw new Error('Failed to create partner contact');
+    return response.json();
+  },
+
+  async updatePartnerContact(partnerId: string, contactId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) throw new Error('Failed to update partner contact');
+    return response.json();
+  },
+
+  async deletePartnerContact(partnerId: string, contactId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to delete partner contact');
+  },
+
+  async setPrimaryPartnerContact(partnerId: string, contactId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}/set-primary`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to set primary partner contact');
   },
 
   // Get partner licenses
   async getPartnerLicenses(partnerId: string): Promise<BusinessPartnerLicenseDto[]> {
-    return apiService.get<BusinessPartnerLicenseDto[]>(`${BASE_PATH}/${partnerId}/licenses`);
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/licenses`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch partner licenses');
+    return response.json();
   }
 };
 
@@ -339,3 +599,4 @@ export const businessPartnerService = {
 export const getPartnerByUserId = businessPartnerService.getPartnerByUserId.bind(businessPartnerService);
 export const getPartnerById = businessPartnerService.getPartnerById.bind(businessPartnerService);
 export const getPartners = businessPartnerService.getPartners.bind(businessPartnerService);
+

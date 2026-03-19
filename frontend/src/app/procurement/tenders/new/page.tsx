@@ -71,6 +71,10 @@ export interface TenderLotItemFormData {
   deliveryLocation?: string;
 }
 
+export interface TenderFormItem extends CreateTenderItemDto {
+  id?: string;
+}
+
 export interface TenderFormData {
   // Basic Information
   title: string;
@@ -105,7 +109,7 @@ export interface TenderFormData {
   lots: TenderLotFormData[];
 
   // Tender Items (for backward compatibility, items not in any LOT)
-  items: CreateTenderItemDto[];
+  items: TenderFormItem[];
 
   // Document Requirements (for bidders to upload)
   documentRequirements: DocumentRequirement[];
@@ -150,6 +154,8 @@ export interface TenderFormData {
     responseDate?: string;
     declineReason?: string;
   }>;
+  invitedBusinessPartnerIds?: string[];
+  sendNotifications?: boolean;
 }
 
 // Validation functions for each step
@@ -206,7 +212,7 @@ const validateStep6 = (formData: TenderFormData): string[] => {
 function NewTenderPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromRequisitionId = searchParams.get('fromRequisitionId');
+  const fromRequisitionId = searchParams?.get('fromRequisitionId');
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -219,7 +225,7 @@ function NewTenderPageContent() {
 
   // Load tenderId from URL query parameter if it exists
   useEffect(() => {
-    const tenderIdFromUrl = searchParams.get('tenderId');
+    const tenderIdFromUrl = searchParams?.get('tenderId');
     if (tenderIdFromUrl) {
       console.log('Loading tenderId from URL:', tenderIdFromUrl);
       setTenderId(tenderIdFromUrl);
@@ -421,6 +427,8 @@ function NewTenderPageContent() {
     documents: [],
     fees: [],
     invitations: [],
+    invitedBusinessPartnerIds: [],
+    sendNotifications: false,
   });
 
   const updateFormData = (data: Partial<TenderFormData>) => {

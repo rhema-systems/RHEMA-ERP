@@ -43,7 +43,7 @@ export default function HelpdeskServiceRequestDetailPage() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const id = String(params?.id || '');
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const [notes, setNotes] = useState('');

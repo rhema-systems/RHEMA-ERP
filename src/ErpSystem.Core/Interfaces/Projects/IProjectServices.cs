@@ -117,6 +117,12 @@ public interface IProjectService
     Task<ProjectExpenseDto> ApproveExpenseAsync(Guid expenseId, string? comments = null);
     Task<ProjectExpenseDto> RejectExpenseAsync(Guid expenseId, string? comments = null);
     Task DeleteExpenseAsync(Guid expenseId);
+    Task<IEnumerable<ProjectMaterialCostEntryDto>> GetMaterialCostEntriesAsync(Guid projectId);
+    Task<IEnumerable<ProjectMaterialCostEntryDto>> GetMaterialCostLedgerReportAsync(Guid? projectId = null, int take = 300, string? sourceDocumentType = null, string? postingState = null, bool? isReversed = null, bool? exceptionsOnly = null);
+    Task SyncProjectMaterialCostAsync(Guid projectId);
+    Task SyncInventoryRequisitionMaterialCostAsync(Guid requisitionId);
+    Task SyncPurchaseReceiptMaterialCostAsync(Guid receiptId);
+    Task SyncPurchaseReturnMaterialCostAsync(Guid purchaseReturnId);
 
     Task<IEnumerable<ProjectRevenueRecognitionDto>> GetRevenueRecognitionsAsync(Guid projectId);
     Task<IEnumerable<ProjectRevenueRecognitionDto>> GenerateRevenueRecognitionAsync(Guid projectId);
@@ -176,6 +182,7 @@ public interface IProjectService
     Task<ProjectWorkItemDto> UpdateExternalWorkItemProgressAsync(Guid projectId, Guid workItemId, UpdateProjectWorkItemProgressDto dto, Guid userId);
     Task<ProjectDeliverableDto> SubmitExternalDeliverableAsync(Guid projectId, Guid deliverableId, SubmitProjectDeliverableDto dto, Guid userId);
     Task<ProjectDeliverableDto> ApproveExternalDeliverableAsync(Guid projectId, Guid deliverableId, string? notes, Guid userId);
+    Task<ProjectDeliverableDto> RejectExternalDeliverableAsync(Guid projectId, Guid deliverableId, string? notes, Guid userId);
 
     Task<ProjectDashboardDto> GetDashboardAsync();
     Task<ProjectFinancialControlSummaryDto> GetFinancialControlSummaryAsync(Guid projectId);

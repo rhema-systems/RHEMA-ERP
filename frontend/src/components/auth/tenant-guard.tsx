@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../../services/auth';
 import { useTenant } from '../../contexts/TenantContext';
 import { Loader2 } from 'lucide-react';
+import {
+  buildLoginRedirectUrl,
+  buildTenantSelectRedirectUrl,
+  getCurrentRelativeUrl,
+} from '../../lib/auth-redirect';
 
 interface TenantGuardProps {
   children: ReactNode;
@@ -30,14 +35,20 @@ export function TenantGuard({
     // First check if user is authenticated
     if (!authService.isAuthenticated()) {
       console.log('TenantGuard: User not authenticated, redirecting to login');
-      router.push(redirectToLogin);
+      const loginTarget = redirectToLogin === '/login'
+        ? buildLoginRedirectUrl(getCurrentRelativeUrl())
+        : redirectToLogin;
+      router.push(loginTarget);
       return;
     }
 
     // If user is authenticated but tenant data is loaded and no tenant is selected
     if (!isLoadingTenants && !currentTenant) {
       console.log('TenantGuard: User authenticated but no tenant selected, redirecting to tenant selection');
-      router.push(redirectToTenantSelect);
+      const tenantSelectTarget = redirectToTenantSelect === '/tenant-select'
+        ? buildTenantSelectRedirectUrl(getCurrentRelativeUrl())
+        : redirectToTenantSelect;
+      router.push(tenantSelectTarget);
       return;
     }
   }, [router, currentTenant, isLoadingTenants, redirectToLogin, redirectToTenantSelect]);

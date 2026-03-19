@@ -9,7 +9,9 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Save, RefreshCw, Tag, Package, Settings } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { fieldLabelService, FieldLabels } from '@/services/fieldLabelService';
+import { fieldLabelService } from '@/services/fieldLabelService';
+
+type FieldLabels = Record<string, string>;
 
 interface ModuleLabels {
   module: string;

@@ -47,7 +47,7 @@ export default function CreateEvaluationPage() {
 function CreateEvaluationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const bidId = searchParams.get('bidId') as string;
+  const bidId = searchParams?.get('bidId') || '';
 
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [template, setTemplate] = useState<EvaluationTemplate | null>(null);
@@ -509,4 +509,3 @@ function CreateEvaluationContent() {
     </div>
   );
 }
-

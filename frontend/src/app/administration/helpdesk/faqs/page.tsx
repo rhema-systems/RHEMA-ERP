@@ -23,6 +23,11 @@ import {
 } from '@/services/ehcAdminService';
 
 type Mode = 'items' | 'categories';
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
 
 export default function AdminHelpdeskFaqsPage() {
   const qc = useQueryClient();
@@ -154,13 +159,13 @@ export default function AdminHelpdeskFaqsPage() {
     return [
       { id: 'code', header: 'Code', accessorKey: 'code' },
       { id: 'name', header: 'Name', accessorKey: 'name' },
-      { id: 'isActive', header: 'Active', accessorKey: 'isActive', cell: ({ row }) => (row.original.isActive ? 'Yes' : 'No') },
+      { id: 'isActive', header: 'Active', accessorKey: 'isActive', cell: ({ row }: TableCellProps<EhcFaqCategoryAdmin>) => (row.original.isActive ? 'Yes' : 'No') },
       {
         id: 'actions',
         header: '',
         accessorKey: 'id',
         enableHiding: false,
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcFaqCategoryAdmin>) => (
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
@@ -195,17 +200,17 @@ export default function AdminHelpdeskFaqsPage() {
       {
         id: 'categoryName',
         header: 'Category',
-        accessorFn: (r) => r.categoryName || (r.categoryId ? categoryLabelById.get(r.categoryId) : '') || '—',
+        accessorFn: (r: EhcFaqItemAdmin) => r.categoryName || (r.categoryId ? categoryLabelById.get(r.categoryId) : '') || '—',
       },
-      { id: 'isPublished', header: 'Published', accessorKey: 'isPublished', cell: ({ row }) => (row.original.isPublished ? 'Yes' : 'No') },
-      { id: 'isInternalOnly', header: 'Internal Only', accessorKey: 'isInternalOnly', cell: ({ row }) => (row.original.isInternalOnly ? 'Yes' : 'No') },
+      { id: 'isPublished', header: 'Published', accessorKey: 'isPublished', cell: ({ row }: TableCellProps<EhcFaqItemAdmin>) => (row.original.isPublished ? 'Yes' : 'No') },
+      { id: 'isInternalOnly', header: 'Internal Only', accessorKey: 'isInternalOnly', cell: ({ row }: TableCellProps<EhcFaqItemAdmin>) => (row.original.isInternalOnly ? 'Yes' : 'No') },
       { id: 'viewCount', header: 'Views', accessorKey: 'viewCount' },
       {
         id: 'actions',
         header: '',
         accessorKey: 'id',
         enableHiding: false,
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcFaqItemAdmin>) => (
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
@@ -411,4 +416,3 @@ export default function AdminHelpdeskFaqsPage() {
     </div>
   );
 }
-

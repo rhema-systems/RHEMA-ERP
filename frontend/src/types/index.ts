@@ -26,6 +26,13 @@ export interface User {
   profilePictureUrl?: string;
   twoFactorEnabled?: boolean;
   authenticationProvider?: 'Local' | 'LDAP';
+  accessibleTenants?: Array<{
+    tenantId: string;
+    tenantCode: string;
+    tenantName: string;
+    isDefault: boolean;
+    accessLevel: string;
+  }>;
 }
 
 // Authentication Types

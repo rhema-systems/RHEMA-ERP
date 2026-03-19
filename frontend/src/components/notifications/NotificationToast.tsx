@@ -38,6 +38,9 @@ export function NotificationToast({
         const toastId = `toast-${latestNotification.id}`;
         
         // Only show toast if it's recent (just received)
+        if (!latestNotification.createdAt) {
+          return;
+        }
         const createdTime = new Date(latestNotification.createdAt).getTime();
         const now = Date.now();
         if (now - createdTime < 2000) { // Show only if created in last 2 seconds

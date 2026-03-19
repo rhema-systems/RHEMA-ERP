@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -20,6 +20,11 @@ import { settingsService } from '../../services/settings';
 import { apiService } from '../../services/api.service';
 import { tenantService } from '../../services/tenant';
 import type { LoginRequest, LoginResponse, OtpChannel } from '../../types';
+import {
+  buildTenantSelectRedirectUrl,
+  getRedirectTargetFromSearchParams,
+  resolveRedirectTarget,
+} from '../../lib/auth-redirect';
 
 const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
@@ -51,12 +56,15 @@ function LoginFormWithSearchParams() {
   const [otpErrorMessage, setOtpErrorMessage] = useState('');
   const [otpRequiresTwoFactor, setOtpRequiresTwoFactor] = useState(false);
   const [otpTwoFactorCode, setOtpTwoFactorCode] = useState('');
+  const lastAutoSubmittedTwoFactorCodeRef = useRef<string | null>(null);
+  const lastAutoSubmittedOtpTwoFactorKeyRef = useRef<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const redirectTarget = getRedirectTargetFromSearchParams(searchParams);
 
   // Check for success message from URL parameters
   useEffect(() => {
-    const message = searchParams.get('message');
+    const message = searchParams?.get('message');
     if (message) {
       setSuccessMessage(decodeURIComponent(message));
       // Message will stay until user submits the form - no auto-clear
@@ -161,11 +169,13 @@ function LoginFormWithSearchParams() {
     },
   });
 
-  const redirectAfterLogin = async (response: LoginResponse) => {
+  const redirectAfterLogin = useCallback(async (response: LoginResponse) => {
     // After successful login, check authentication provider
     if (response.token) {
-      // If user is an external user (Local authentication), redirect to external portal
-      if (response.user?.authenticationProvider === 'Local') {
+      const isExternalUser = response.user?.roles?.includes('ExternalUser') ?? false;
+
+      // External portal users should land in the portal, while internal users continue to tenant selection.
+      if (isExternalUser) {
         // Try to auto-select the best tenant (host-driven or single-tenant) to avoid an extra tenant-select step.
         try {
           const tenants = response.user?.accessibleTenants || [];
@@ -179,12 +189,12 @@ function LoginFormWithSearchParams() {
           if (!preferredTenantCode) {
             const publicSettings = await settingsService.getPublicSecuritySettings();
             const hostTenantCode = (publicSettings as any)?.tenantCode as string | null | undefined;
-            const match = hostTenantCode ? tenants.find((t) => t.tenantCode === hostTenantCode) : null;
+            const match = hostTenantCode ? tenants.find((tenant) => tenant.tenantCode === hostTenantCode) : null;
             preferredTenantCode = match?.tenantCode ?? null;
           }
 
           if (!preferredTenantCode) {
-            const def = tenants.find((t) => t.isDefault) ?? null;
+            const def = tenants.find((tenant) => tenant.isDefault) ?? null;
             preferredTenantCode = def?.tenantCode ?? null;
           }
 
@@ -193,7 +203,7 @@ function LoginFormWithSearchParams() {
 
             const host = typeof window !== 'undefined' ? window.location.hostname : '';
             const isSupportHost = host.toLowerCase().startsWith('support.');
-            router.push(isSupportHost ? '/' : '/external-portal');
+            router.push(resolveRedirectTarget(redirectTarget, isSupportHost ? '/' : '/external-portal'));
             return;
           }
         } catch {
@@ -201,13 +211,27 @@ function LoginFormWithSearchParams() {
         }
 
         // Fallback: tenant selection page auto-selects when possible.
-        router.push('/tenant-select');
+        router.push(buildTenantSelectRedirectUrl(redirectTarget));
       } else {
-        // Internal users (LDAP or other) go to tenant selection
-        router.push('/tenant-select');
+        // Internal users go to tenant selection
+        router.push(buildTenantSelectRedirectUrl(redirectTarget));
       }
     }
-  };
+  }, [redirectTarget, router]);
+
+  useEffect(() => {
+    const storedToken = authService.getStoredToken();
+    const storedUser = authService.getStoredUser();
+
+    if (!storedToken || showTwoFactor) {
+      return;
+    }
+
+    void redirectAfterLogin({
+      token: storedToken,
+      user: storedUser as LoginResponse['user'],
+    });
+  }, [redirectAfterLogin, showTwoFactor]);
 
   const loginMutation = useMutation({
     mutationFn: (data: LoginRequest) => authService.login(data),
@@ -315,7 +339,7 @@ function LoginFormWithSearchParams() {
     const cleaned2fa = showTwoFactor ? twoFactorCode.replace(/\D/g, '') : undefined;
 
     // During 2FA step, only proceed if we have exactly 6 digits
-    if (showTwoFactor && cleaned2fa!.length !== 6) {
+    if (showTwoFactor && cleaned2fa?.length !== 6) {
       console.warn('🚫 2FA submission blocked: code not 6 digits', cleaned2fa);
       return; // Don't submit if 2FA code is not exactly 6 digits
     }
@@ -357,6 +381,66 @@ function LoginFormWithSearchParams() {
       handleSubmit(onSubmit)();
     }
   };
+
+  useEffect(() => {
+    const cleanedTwoFactorCode = twoFactorCode.replace(/\D/g, '');
+
+    if (!showTwoFactor || cleanedTwoFactorCode.length !== 6) {
+      lastAutoSubmittedTwoFactorCodeRef.current = null;
+      return;
+    }
+
+    if (loginMutation.isPending || !storedLoginData) {
+      return;
+    }
+
+    if (lastAutoSubmittedTwoFactorCodeRef.current === cleanedTwoFactorCode) {
+      return;
+    }
+
+    lastAutoSubmittedTwoFactorCodeRef.current = cleanedTwoFactorCode;
+    console.log('⚡ Auto-submitting password login 2FA code');
+    void handleSubmit(onSubmit)();
+  }, [handleSubmit, loginMutation.isPending, onSubmit, showTwoFactor, storedLoginData, twoFactorCode]);
+
+  useEffect(() => {
+    const cleanedOtpCode = otpCode.replace(/\D/g, '');
+    const cleanedOtpTwoFactorCode = otpTwoFactorCode.replace(/\D/g, '');
+
+    if (otpStage !== 'verify' || !otpRequiresTwoFactor || cleanedOtpCode.length !== 6 || cleanedOtpTwoFactorCode.length !== 6) {
+      lastAutoSubmittedOtpTwoFactorKeyRef.current = null;
+      return;
+    }
+
+    if (verifyOtpMutation.isPending) {
+      return;
+    }
+
+    const submissionKey = `${otpIdentifier}:${otpChannel}:${cleanedOtpCode}:${cleanedOtpTwoFactorCode}`;
+    if (lastAutoSubmittedOtpTwoFactorKeyRef.current === submissionKey) {
+      return;
+    }
+
+    lastAutoSubmittedOtpTwoFactorKeyRef.current = submissionKey;
+    setOtpErrorMessage('');
+    console.log('⚡ Auto-submitting OTP 2FA code');
+    verifyOtpMutation.mutate({
+      identifier: otpIdentifier,
+      channel: otpChannel,
+      otpCode: cleanedOtpCode,
+      twoFactorCode: cleanedOtpTwoFactorCode,
+      recaptchaToken: otpRecaptchaToken || undefined,
+    });
+  }, [
+    otpChannel,
+    otpCode,
+    otpIdentifier,
+    otpRecaptchaToken,
+    otpRequiresTwoFactor,
+    otpStage,
+    otpTwoFactorCode,
+    verifyOtpMutation,
+  ]);
 
   return (
     <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
@@ -544,9 +628,13 @@ function LoginFormWithSearchParams() {
                     </div>
                   </div>
                   <p className="text-xs text-center">
-                    {twoFactorCode.replace(/\D/g, '').length === 6 ? (
+                    {loginMutation.isPending ? (
+                      <span className="text-blue-600 font-medium">
+                        Verifying your code...
+                      </span>
+                    ) : twoFactorCode.replace(/\D/g, '').length === 6 ? (
                       <span className="text-green-600 font-medium">
-                        ✓ Code complete - click "Verify Code" or press Enter to submit
+                        ✓ Code complete - verifying automatically. If needed, you can still click "Verify Code".
                       </span>
                     ) : (
                       <span className="text-slate-500">
@@ -771,6 +859,21 @@ function LoginFormWithSearchParams() {
                       value={otpTwoFactorCode}
                       onChange={(e) => setOtpTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     />
+                    <p className="text-xs text-center">
+                      {verifyOtpMutation.isPending ? (
+                        <span className="text-blue-600 font-medium">
+                          Verifying your codes...
+                        </span>
+                      ) : otpCode.replace(/\D/g, '').length === 6 && otpTwoFactorCode.replace(/\D/g, '').length === 6 ? (
+                        <span className="text-green-600 font-medium">
+                          ✓ Codes complete - signing you in automatically.
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">
+                          Enter the 6-digit code from your authenticator app
+                        </span>
+                      )}
+                    </p>
                   </div>
                 )}
 

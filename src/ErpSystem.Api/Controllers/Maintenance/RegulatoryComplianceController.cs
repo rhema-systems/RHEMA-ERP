@@ -300,7 +300,7 @@ public class RegulatoryComplianceController : ControllerBase
                         {
                             type = "Fine",
                             amount = (int?)500,
-                            currency = "USD",
+                            currency = (string?)"USD",
                             description = "Fine for operating without valid safety inspection",
                             severity = "High"
                         }
@@ -332,7 +332,7 @@ public class RegulatoryComplianceController : ControllerBase
                         {
                             type = "Fine",
                             amount = (int?)2000,
-                            currency = "USD",
+                            currency = (string?)"USD",
                             description = "Fine for non-compliant fire safety systems",
                             severity = "Critical"
                         }
@@ -434,7 +434,7 @@ public class RegulatoryComplianceController : ControllerBase
                     nextDueDate = DateTime.Today.AddDays(320),
                     daysUntilDue = 320,
                     lastInspectionId = "inspection-hist-1",
-                    lastCertificationNumber = "CERT-2024-001",
+                    lastCertificationNumber = (string?)"CERT-2024-001",
                     certificateValidUntil = (DateTime?)DateTime.Today.AddDays(320),
                     responsiblePersonId = "person-1",
                     responsiblePersonName = "John Smith",
@@ -478,7 +478,7 @@ public class RegulatoryComplianceController : ControllerBase
                     nextDueDate = DateTime.Today.AddDays(305),
                     daysUntilDue = 305,
                     lastInspectionId = "inspection-hist-4",
-                    lastCertificationNumber = "FIRE-2024-003",
+                    lastCertificationNumber = (string?)"FIRE-2024-003",
                     certificateValidUntil = (DateTime?)DateTime.Today.AddDays(305),
                     responsiblePersonId = "person-2",
                     responsiblePersonName = "Fire Safety Inspector",
@@ -500,7 +500,7 @@ public class RegulatoryComplianceController : ControllerBase
                     nextDueDate = DateTime.Today.AddDays(15),
                     daysUntilDue = 15,
                     lastInspectionId = "inspection-hist-5",
-                    lastCertificationNumber = "GEN-2023-002",
+                    lastCertificationNumber = (string?)"GEN-2023-002",
                     certificateValidUntil = (DateTime?)DateTime.Today.AddDays(15),
                     responsiblePersonId = "person-3",
                     responsiblePersonName = "Generator Technician",

@@ -225,8 +225,8 @@ export async function getEvaluationsByBidId(bidId: string): Promise<TenderEvalua
 
 // Get my evaluations (for evaluators)
 export async function getMyEvaluations(): Promise<TenderEvaluationDto[]> {
-  const headers = getAuthHeaders();
-  console.log('🔐 getMyEvaluations - Authorization header present:', !!headers['Authorization']);
+  const headers = getAuthHeaders() as Record<string, string>;
+  console.log('🔐 getMyEvaluations - Authorization header present:', !!headers.Authorization);
   console.log('🔐 getMyEvaluations - Token in localStorage:', !!localStorage.getItem('authToken'));
 
   const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluations/my-evaluations`, {

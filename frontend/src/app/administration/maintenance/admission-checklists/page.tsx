@@ -273,7 +273,11 @@ export default function AdmissionChecklistsPage() {
         maxValue: item.maxValue,
         defaultValue: item.defaultValue || '',
         helpText: item.helpText || '',
-        requiresPhoto: item.requiresPhoto
+        requiresPhoto: item.requiresPhoto,
+        allowRepairReplacement: item.allowRepairReplacement,
+        defaultRepairReplacementAction: item.defaultRepairReplacementAction || 'None',
+        estimatedRepairHours: item.estimatedRepairHours,
+        estimatedReplacementHours: item.estimatedReplacementHours
       }))
     });
     setIsEditDialogOpen(true);
@@ -339,7 +343,11 @@ export default function AdmissionChecklistsPage() {
           maxValue: item.maxValue,
           defaultValue: item.defaultValue,
           helpText: item.helpText,
-          requiresPhoto: item.requiresPhoto
+          requiresPhoto: item.requiresPhoto,
+          allowRepairReplacement: item.allowRepairReplacement,
+          defaultRepairReplacementAction: item.defaultRepairReplacementAction || 'None',
+          estimatedRepairHours: item.estimatedRepairHours,
+          estimatedReplacementHours: item.estimatedReplacementHours
         }))
       };
       await assetConditionService.createTemplate(duplicateData);

@@ -10,11 +10,8 @@ namespace ErpSystem.Data.Repositories
     /// </summary>
     public class NotificationRepository : GenericRepository<Notification>, INotificationRepository
     {
-        private readonly ApplicationDbContext _context;
-
         public NotificationRepository(ApplicationDbContext context) : base(context)
         {
-            _context = context;
         }
 
         /// <summary>

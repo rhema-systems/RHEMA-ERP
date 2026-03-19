@@ -271,7 +271,7 @@ public class Activity : BusinessEntity
     public string ActivityStatus { get; set; } = "Planned"; // Planned, In Progress, Completed, Cancelled
 
     [Range(1, 4)]
-    public int Priority { get; set; } = 2; // 1 = High, 2 = Medium, 3 = Low, 4 = Very Low
+    public new int Priority { get; set; } = 2; // 1 = High, 2 = Medium, 3 = Low, 4 = Very Low
 
     // Duration in minutes
     public int? Duration { get; set; }
@@ -440,7 +440,7 @@ public class Product : BusinessEntity
     [Column(TypeName = "decimal(5,2)")]
     public decimal Margin => ListPrice > 0 ? (ListPrice - CostPrice) / ListPrice * 100 : 0;
 
-    public bool IsActive { get; set; } = true;
+    public new bool IsActive { get; set; } = true;
 
     [StringLength(50)]
     public string? TaxCode { get; set; }

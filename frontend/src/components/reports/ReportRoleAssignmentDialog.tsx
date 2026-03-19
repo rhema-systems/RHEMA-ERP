@@ -135,7 +135,7 @@ export default function ReportRoleAssignmentDialog({
   const queryClient = useQueryClient();
 
   // Fetch available roles
-  const { data: roles = [], isLoading: rolesLoading } = useQuery({
+  const { data: roles = [], isLoading: rolesLoading } = useQuery<Role[], Error>({
     queryKey: ['roles'],
     queryFn: () => adminApiService.getRoles(),
     enabled: open
@@ -146,24 +146,29 @@ export default function ReportRoleAssignmentDialog({
     data: assignments = [],
     isLoading: assignmentsLoading,
     refetch: refetchAssignments
-  } = useQuery({
+  } = useQuery<ReportRoleAssignment[], Error>({
     queryKey: ['report-role-assignments', reportId],
     queryFn: () => {
       console.log('🔍 Fetching role assignments for reportId:', reportId);
       return reportId ? reportsService.getReportRoleAssignments(reportId) : Promise.resolve([]);
     },
     enabled: open && !!reportId,
-    onSuccess: (data) => {
-      console.log('✅ Role assignments fetched successfully:', data);
-      console.log('📊 Assignment count:', data?.length || 0);
-      if (data?.length > 0) {
-        console.log('📋 First assignment details:', data[0]);
-      }
-    },
-    onError: (error) => {
-      console.error('❌ Error fetching role assignments:', error);
-    }
   });
+
+  useEffect(() => {
+    if (assignments.length > 0) {
+      console.log('✅ Role assignments fetched successfully:', assignments);
+      console.log('📊 Assignment count:', assignments.length);
+      console.log('📋 First assignment details:', assignments[0]);
+    }
+  }, [assignments]);
+
+  useEffect(() => {
+    if (open && reportId && assignments.length === 0 && !assignmentsLoading) {
+      console.log('✅ Role assignments fetched successfully: []');
+      console.log('📊 Assignment count: 0');
+    }
+  }, [assignments.length, assignmentsLoading, open, reportId]);
 
   // Reset form when dialog opens/closes or report changes
   useEffect(() => {
@@ -265,7 +270,7 @@ export default function ReportRoleAssignmentDialog({
     setPermissions(prev => ({ ...prev, roleId: role.id }));
   };
 
-  const handlePermissionChange = (permission: string, checked: boolean) => {
+  const handlePermissionChange = (permission: PermissionConfig['key'], checked: boolean) => {
     setPermissions(prev => ({
       ...prev,
       [permission]: checked

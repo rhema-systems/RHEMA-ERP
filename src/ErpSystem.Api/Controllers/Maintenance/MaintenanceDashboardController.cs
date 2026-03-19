@@ -497,7 +497,7 @@ public class MaintenanceDashboardController : ControllerBase
         };
     }
 
-    private static async Task<CriticalSystemStatusDto> GetCriticalSystemStatusAsync()
+    private static Task<CriticalSystemStatusDto> GetCriticalSystemStatusAsync()
     {
         // This would query for assets marked as critical systems
         var criticalSystems = new List<CriticalSystemDto>
@@ -508,14 +508,14 @@ public class MaintenanceDashboardController : ControllerBase
             new() { Name = "Water Treatment Plant", Status = "Online", LastCheck = DateTime.UtcNow.AddMinutes(-8) }
         };
 
-        return new CriticalSystemStatusDto
+        return Task.FromResult(new CriticalSystemStatusDto
         {
             Systems = criticalSystems,
             OnlineCount = criticalSystems.Count(s => s.Status == "Online"),
             WarningCount = criticalSystems.Count(s => s.Status == "Warning"),
             OfflineCount = criticalSystems.Count(s => s.Status == "Offline"),
             LastUpdated = DateTime.UtcNow
-        };
+        });
     }
 
     private async Task<MaintenanceBacklogDto> GetMaintenanceBacklogAsync()

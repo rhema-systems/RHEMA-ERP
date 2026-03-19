@@ -42,7 +42,7 @@ import { format } from 'date-fns';
 export default function BidDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const bidId = params.id as string;
+  const bidId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const performanceBondFileRef = useRef<HTMLInputElement>(null);
 
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);

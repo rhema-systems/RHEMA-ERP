@@ -270,10 +270,10 @@ public class NotificationMonitoringController : ControllerBase
                     IsHtml = emailPayload?.IsHtml ?? true,
                     Attachments = emailPayload?.Attachments?.Select(a => new ErpSystem.Core.Interfaces.Common.EmailAttachmentDto
                     {
-                        FileName = a.FileName,
-                        ContentType = a.ContentType,
+                        FileName = a.FileName ?? string.Empty,
+                        ContentType = a.ContentType ?? string.Empty,
                         Content = string.IsNullOrWhiteSpace(a.ContentBase64) ? Array.Empty<byte>() : Convert.FromBase64String(a.ContentBase64)
-                    }).Where(a => a.Content.Length > 0).ToList()
+                    }).Where(a => a.Content.Length > 0).ToList() ?? new List<ErpSystem.Core.Interfaces.Common.EmailAttachmentDto>()
                 };
 
                 await _emailService.SendEmailAsync(emailDto);

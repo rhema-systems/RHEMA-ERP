@@ -14,24 +14,33 @@ using Serilog;
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
 
     var tempApp = tempBuilder.Build();
 
-    // Run user seeding
-    await ErpSystem.Api.UserSeeder.SeedTestUsersAsync(tempApp.Services);
+    // Run user seeding through the shared database seeding service so roles/default tenant stay in sync.
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedTestUsersAsync();
+    }
+
     return;
 }
 
 // Check for maintenance workflow seeding command
 if (args.Length > 0 && args[0] == "seed-maintenance")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -56,7 +65,7 @@ if (args.Length > 0 && args[0] == "seed-maintenance")
 // Check for maintenance E2E test data seeding command
 if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -82,7 +91,7 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 // Check for full database seeding command (roles, workflows, modules, etc.)
 if (args.Length > 0 && args[0] == "seed-db")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -263,6 +272,20 @@ app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 
 var skipStartupInitialization = app.Environment.IsEnvironment("Testing")
     || app.Configuration.GetValue<bool>("SkipStartupInitialization");
+var databaseConnectionTimeout = TimeSpan.FromSeconds(Math.Max(
+    1,
+    app.Configuration.GetValue("StartupInitialization:DatabaseConnectionTimeoutSeconds", 5)));
+var migrationTimeout = TimeSpan.FromSeconds(Math.Max(
+    5,
+    app.Configuration.GetValue("StartupInitialization:MigrationTimeoutSeconds", 120)));
+var failFastOnDatabaseInitializationError = app.Configuration.GetValue(
+    "StartupInitialization:FailFastOnDatabaseInitializationError",
+    true);
+var seedDevelopmentData = app.Configuration.GetValue("StartupInitialization:SeedDevelopmentData", true);
+var failFastOnDevelopmentSeedError = app.Configuration.GetValue(
+    "StartupInitialization:FailFastOnDevelopmentSeedError",
+    false);
+var databaseInitializationSucceeded = false;
 
 if (!skipStartupInitialization)
 {
@@ -270,20 +293,41 @@ if (!skipStartupInitialization)
     app.Logger.LogInformation("Starting database initialization...");
     try
     {
-        await InitializeDatabaseAsync(app);
+        await InitializeDatabaseAsync(app, databaseConnectionTimeout, migrationTimeout);
+        databaseInitializationSucceeded = true;
         app.Logger.LogInformation("Database initialization completed");
     }
     catch (Exception ex)
     {
-        app.Logger.LogError(ex, "Database initialization failed");
+        app.Logger.LogCritical(ex, "Database initialization failed");
+        if (failFastOnDatabaseInitializationError)
+        {
+            throw;
+        }
     }
 
     // Seed demo/basic data in Development to make local testing easier.
-    if (app.Environment.IsDevelopment())
+    if (app.Environment.IsDevelopment() && seedDevelopmentData && databaseInitializationSucceeded)
     {
         app.Logger.LogInformation("Starting Development data seeding...");
-        await SeedDatabaseAsync(app);
-        app.Logger.LogInformation("Development data seeding completed");
+        try
+        {
+            await SeedDatabaseAsync(app);
+            app.Logger.LogInformation("Development data seeding completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Development data seeding failed");
+            if (failFastOnDevelopmentSeedError)
+            {
+                throw;
+            }
+        }
+    }
+    else if (app.Environment.IsDevelopment() && seedDevelopmentData)
+    {
+        app.Logger.LogWarning(
+            "Skipping Development data seeding because database initialization did not complete successfully.");
     }
 }
 else
@@ -295,107 +339,92 @@ else
 // Version: 2.0.0 - Full CI/CD Pipeline Integration
 app.Run();
 
-async Task InitializeDatabaseAsync(WebApplication app)
+async Task InitializeDatabaseAsync(
+    WebApplication app,
+    TimeSpan databaseConnectionTimeout,
+    TimeSpan migrationTimeout)
 {
     using var scope = app.Services.CreateScope();
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    try
+    logger.LogDebug("Testing database connection...");
+    var providerName = context.Database.ProviderName ?? "Unknown";
+    var connectionSummary = SummarizeConnectionTarget(context.Database.GetConnectionString());
+
+    using (var testCts = new CancellationTokenSource(databaseConnectionTimeout))
     {
-        logger.LogDebug("Testing database connection...");
-
-        // Test connection first with a longer timeout
-        using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var canConnect = await context.Database.CanConnectAsync(testCts.Token);
-
-        if (!canConnect)
-        {
-            Console.WriteLine("   ❌ Cannot connect to database (Timeout 30s) - Initialization aborted");
-            logger.LogError("Cannot connect to database - Initialization aborted");
-            return;
-        }
-
-        logger.LogInformation("Database connection successful. Running migrations...");
-
-        // ── TEMPORARY HOTFIX: Mark already-applied migrations & add missing columns ──
-        // The FixRuntimeSchemaIssues migration was deleted (it tried to drop non-existent FKs).
-        // The FixBusinessPartnerSchema columns already exist from an earlier SQL hotfix.
-        // Additional customer-specific columns are also missing from the database.
         try
         {
-            // 1. Mark migrations as applied
-            await context.Database.ExecuteSqlRawAsync(@"
-                IF NOT EXISTS (SELECT 1 FROM [__EFMigrationsHistory] WHERE [MigrationId] = '20260212203425_FixRuntimeSchemaIssues')
-                    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion]) VALUES ('20260212203425_FixRuntimeSchemaIssues', '8.0.0');
-                IF NOT EXISTS (SELECT 1 FROM [__EFMigrationsHistory] WHERE [MigrationId] = '20260215231931_FixBusinessPartnerSchema')
-                    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion]) VALUES ('20260215231931_FixBusinessPartnerSchema', '8.0.0');
-            ");
-
-            // 2. Add ALL missing BusinessPartner customer-specific columns
-            await context.Database.ExecuteSqlRawAsync(@"
-                IF COL_LENGTH('BusinessPartners','CustomerAccountNumber') IS NULL ALTER TABLE [BusinessPartners] ADD [CustomerAccountNumber] nvarchar(50) NULL;
-                IF COL_LENGTH('BusinessPartners','CustomerType') IS NULL ALTER TABLE [BusinessPartners] ADD [CustomerType] nvarchar(50) NULL;
-                IF COL_LENGTH('BusinessPartners','CreditLimit') IS NULL ALTER TABLE [BusinessPartners] ADD [CreditLimit] decimal(18,2) NULL;
-                IF COL_LENGTH('BusinessPartners','OutstandingBalance') IS NULL ALTER TABLE [BusinessPartners] ADD [OutstandingBalance] decimal(18,2) NULL;
-                IF COL_LENGTH('BusinessPartners','PaymentTerms') IS NULL ALTER TABLE [BusinessPartners] ADD [PaymentTerms] nvarchar(50) NULL;
-                IF COL_LENGTH('BusinessPartners','Currency') IS NULL ALTER TABLE [BusinessPartners] ADD [Currency] nvarchar(50) NULL;
-                IF COL_LENGTH('BusinessPartners','DefaultDiscount') IS NULL ALTER TABLE [BusinessPartners] ADD [DefaultDiscount] decimal(5,2) NULL;
-                IF COL_LENGTH('BusinessPartners','PriceList') IS NULL ALTER TABLE [BusinessPartners] ADD [PriceList] nvarchar(50) NULL;
-                IF COL_LENGTH('BusinessPartners','SalesRepresentativeId') IS NULL ALTER TABLE [BusinessPartners] ADD [SalesRepresentativeId] uniqueidentifier NULL;
-                IF COL_LENGTH('BusinessPartners','SalesTerritory') IS NULL ALTER TABLE [BusinessPartners] ADD [SalesTerritory] nvarchar(100) NULL;
-                IF COL_LENGTH('BusinessPartners','IsTaxExempt') IS NULL ALTER TABLE [BusinessPartners] ADD [IsTaxExempt] bit NOT NULL DEFAULT 0;
-                IF COL_LENGTH('BusinessPartners','TaxExemptionNumber') IS NULL ALTER TABLE [BusinessPartners] ADD [TaxExemptionNumber] nvarchar(100) NULL;
-                IF COL_LENGTH('BusinessPartners','TaxExemptionExpiry') IS NULL ALTER TABLE [BusinessPartners] ADD [TaxExemptionExpiry] datetime2 NULL;
-                IF COL_LENGTH('BusinessPartners','PreferredShippingMethod') IS NULL ALTER TABLE [BusinessPartners] ADD [PreferredShippingMethod] nvarchar(100) NULL;
-                IF COL_LENGTH('BusinessPartners','DeliveryInstructions') IS NULL ALTER TABLE [BusinessPartners] ADD [DeliveryInstructions] nvarchar(500) NULL;
-                IF COL_LENGTH('BusinessPartners','CustomerSince') IS NULL ALTER TABLE [BusinessPartners] ADD [CustomerSince] datetime2 NULL;
-                IF COL_LENGTH('BusinessPartners','LastPurchaseDate') IS NULL ALTER TABLE [BusinessPartners] ADD [LastPurchaseDate] datetime2 NULL;
-                IF COL_LENGTH('BusinessPartners','TotalLifetimePurchases') IS NULL ALTER TABLE [BusinessPartners] ADD [TotalLifetimePurchases] decimal(18,2) NULL;
-                IF COL_LENGTH('BusinessPartners','AverageOrderValue') IS NULL ALTER TABLE [BusinessPartners] ADD [AverageOrderValue] decimal(18,2) NULL;
-                IF COL_LENGTH('BusinessPartners','LoyaltyTier') IS NULL ALTER TABLE [BusinessPartners] ADD [LoyaltyTier] nvarchar(50) NULL;
-                IF COL_LENGTH('BusinessPartners','LoyaltyPoints') IS NULL ALTER TABLE [BusinessPartners] ADD [LoyaltyPoints] int NULL;
-                IF COL_LENGTH('BusinessPartners','IsOnCreditHold') IS NULL ALTER TABLE [BusinessPartners] ADD [IsOnCreditHold] bit NOT NULL DEFAULT 0;
-                IF COL_LENGTH('BusinessPartners','CreditHoldReason') IS NULL ALTER TABLE [BusinessPartners] ADD [CreditHoldReason] nvarchar(500) NULL;
-                IF COL_LENGTH('BusinessPartners','CreditHoldDate') IS NULL ALTER TABLE [BusinessPartners] ADD [CreditHoldDate] datetime2 NULL;
-                IF COL_LENGTH('BusinessPartners','ParentId') IS NULL ALTER TABLE [BusinessPartners] ADD [ParentId] uniqueidentifier NULL;
-                IF COL_LENGTH('BusinessPartners','UserId') IS NULL ALTER TABLE [BusinessPartners] ADD [UserId] uniqueidentifier NULL;
-            ");
-            Console.WriteLine("   ✅ Migration history records patched & missing columns added");
+            var canConnect = await context.Database.CanConnectAsync(testCts.Token);
+            if (!canConnect)
+            {
+                throw new InvalidOperationException(
+                    $"Database connection check failed for provider '{providerName}' using '{connectionSummary}'. Startup migrations cannot continue.");
+            }
         }
-        catch (Exception patchEx)
+        catch (OperationCanceledException ex)
         {
-            Console.WriteLine($"   ⚠️ Schema hotfix warning: {patchEx.Message}");
+            throw new TimeoutException(
+                $"Database connection timed out after {databaseConnectionTimeout.TotalSeconds:F0} seconds.",
+                ex);
         }
-        // ── END HOTFIX ──
+    }
 
-        // Add timeout to prevent hanging
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await context.Database.MigrateAsync(cts.Token);
+    logger.LogInformation("Database connection successful. Running migrations...");
 
-        logger.LogInformation("Database migration completed successfully");
+    using var migrationCts = new CancellationTokenSource(migrationTimeout);
+    try
+    {
+        await context.Database.MigrateAsync(migrationCts.Token);
     }
     catch (OperationCanceledException ex)
     {
-        logger.LogError(ex, "Database operation timed out. Check if SQL Server is running and reachable.");
+        throw new TimeoutException(
+            $"Database migration timed out after {migrationTimeout.TotalSeconds:F0} seconds.",
+            ex);
     }
-    catch (Exception ex)
+
+    logger.LogInformation("Database migration completed successfully");
+}
+
+static WebApplicationBuilder CreateSeedBuilder(string[] args)
+{
+    if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")))
     {
-        logger.LogError(ex, "An error occurred while migrating the database");
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
     }
+
+    return WebApplication.CreateBuilder(args);
 }
 
 async Task SeedDatabaseAsync(WebApplication app)
 {
-    try
+    await app.Services.SeedDatabaseAsync();
+}
+
+static string SummarizeConnectionTarget(string? connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
     {
-        await app.Services.SeedDatabaseAsync();
+        return "No connection string configured";
     }
-    catch (Exception ex)
-    {
-        var logger = app.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while seeding the database");
-    }
+
+    var parts = connectionString
+        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    var safeParts = parts
+        .Where(part =>
+            part.StartsWith("Server=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Host=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Database=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Initial Catalog=", StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+
+    return safeParts.Length == 0
+        ? "Configured connection string target unavailable"
+        : string.Join("; ", safeParts);
 }
 
 public partial class Program;

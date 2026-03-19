@@ -135,6 +135,9 @@ export interface EhcTicketDetail {
   assignedDepartmentName?: string | null;
   assignedToUserId?: string | null;
   assignedToName?: string | null;
+  requesterName?: string | null;
+  requesterAuthenticationProvider?: string | null;
+  requesterEmail?: string | null;
   relatedEntityType?: string | null;
   relatedEntityReference?: string | null;
 

@@ -28,7 +28,6 @@ import {
   Paper,
   Tabs,
   Tab,
-  Grid,
   Switch,
   FormControlLabel,
   Tooltip,
@@ -43,6 +42,7 @@ import {
   Alert,
   Snackbar
 } from '@mui/material';
+import Grid from '@mui/material/GridLegacy';
 import {
   Add as AddIcon,
   Edit as EditIcon,
@@ -467,7 +467,7 @@ const TaskTemplateManagement: React.FC = () => {
               fullWidth
               label="Estimated Hours"
               type="number"
-              step="0.25"
+              inputProps={{ step: 0.25 }}
               value={formData.estimatedHours}
               onChange={(e) => setFormData(prev => ({ ...prev, estimatedHours: parseFloat(e.target.value) || 0 }))}
               required
@@ -611,7 +611,11 @@ const TaskTemplateManagement: React.FC = () => {
                 <Tooltip title="Delete">
                   <IconButton 
                     size="small" 
-                    onClick={() => handleDeleteTemplate(template.id!, type)}
+                    onClick={() => {
+                      if (template.id) {
+                        handleDeleteTemplate(template.id, type);
+                      }
+                    }}
                   >
                     <DeleteIcon />
                   </IconButton>

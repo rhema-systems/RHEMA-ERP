@@ -466,9 +466,10 @@ export function useInvalidateAssetAnalytics() {
     // Invalidate all asset analytics queries
     queryClient.invalidateQueries({
       predicate: (query) => {
-        const queryKey = query.queryKey as string[];
+        const queryKey = query.queryKey.map((part) => String(part));
+        const analyticsKeys = Object.values(ASSET_ANALYTICS_QUERY_KEYS);
         return queryKey.length > 0 && 
-               Object.values(ASSET_ANALYTICS_QUERY_KEYS).some(key => 
+               analyticsKeys.some(key => 
                  queryKey[0] === key || queryKey.includes(key)
                );
       },
@@ -522,9 +523,7 @@ export function useAssetDashboardData(assetId: string, dateRange: { startDate: s
         request: {
           startDate: dateRange.startDate,
           endDate: dateRange.endDate,
-          includeDowntimeBreakdown: true,
-          includeQualityMetrics: true,
-          calculationMethod: 'Standard',
+          includeBreakdown: true,
         },
       }),
       reliabilityMetrics.mutateAsync({
@@ -532,8 +531,8 @@ export function useAssetDashboardData(assetId: string, dateRange: { startDate: s
         request: {
           startDate: dateRange.startDate,
           endDate: dateRange.endDate,
-          includePredictiveMetrics: true,
-          benchmarkComparison: true,
+          includeFailureModes: true,
+          includeTrends: true,
         },
       }),
       costAnalysis.mutateAsync({
@@ -541,10 +540,8 @@ export function useAssetDashboardData(assetId: string, dateRange: { startDate: s
         request: {
           startDate: dateRange.startDate,
           endDate: dateRange.endDate,
-          includeDepreciation: true,
-          includeOperationalCosts: true,
-          includeMaintenanceCosts: true,
-          currency: 'USD',
+          includeCostBreakdown: true,
+          includeAnnualizedCosts: true,
         },
       }),
       energyAnalysis.mutateAsync({
@@ -552,8 +549,8 @@ export function useAssetDashboardData(assetId: string, dateRange: { startDate: s
         request: {
           startDate: dateRange.startDate,
           endDate: dateRange.endDate,
-          includeEfficiencyMetrics: true,
-          includeCostAnalysis: true,
+          includeEfficiencyRating: true,
+          includeOptimizationRecommendations: true,
         },
       }),
     ];

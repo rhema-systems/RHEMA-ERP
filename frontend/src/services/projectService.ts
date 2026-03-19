@@ -48,7 +48,9 @@ export interface ProjectDto {
   programId?: string;
   programName?: string;
   projectManagerId?: string;
+  projectManagerDisplayName?: string;
   sponsorId?: string;
+  sponsorDisplayName?: string;
   startDate?: string;
   targetEndDate?: string;
   estimatedBudget?: number;
@@ -75,6 +77,7 @@ export interface ProjectInitiationVersionDto {
 export interface ProjectMemberDto {
   id: string;
   userId: string;
+  userDisplayName?: string;
   role: string;
   isActive: boolean;
   joinedAt: string;
@@ -91,6 +94,7 @@ export interface ProjectWorkItemDto {
   priority?: string;
   sortOrder: number;
   assignedToUserId?: string;
+  assignedToUserDisplayName?: string;
   plannedStartDate?: string;
   plannedEndDate?: string;
   actualStartDate?: string;
@@ -125,6 +129,7 @@ export interface ProjectResourceAllocationDto {
   projectId: string;
   workItemId?: string;
   userId: string;
+  userDisplayName?: string;
   allocationRole: string;
   allocationType: string;
   allocationValue: number;
@@ -134,12 +139,22 @@ export interface ProjectResourceAllocationDto {
   bookingType: string;
   status: string;
   notes?: string;
+  requiredSkills: string[];
+  requiredCertifications: string[];
+  routingPolicy: string;
   sourceAllocationId?: string;
   replacementAllocationId?: string;
   substitutionReason?: string;
   canSubstitute: boolean;
   hasConflict: boolean;
   capacityUtilizationPercent: number;
+  qualificationMatchPercent: number;
+  qualificationRisk: string;
+  missingSkills: string[];
+  missingCertifications: string[];
+  recommendedUserId?: string;
+  recommendedUserDisplayName?: string;
+  routingRecommendation?: string;
 }
 
 export interface ProjectRiskDto {
@@ -147,6 +162,7 @@ export interface ProjectRiskDto {
   title: string;
   description?: string;
   ownerId?: string;
+  ownerDisplayName?: string;
   status: string;
   category?: string;
   probability: number;
@@ -162,6 +178,7 @@ export interface ProjectIssueDto {
   title: string;
   description?: string;
   ownerId?: string;
+  ownerDisplayName?: string;
   status: string;
   severity?: string;
   targetResolutionDate?: string;
@@ -175,6 +192,7 @@ export interface ProjectQualityCheckpointDto {
   workItemId?: string;
   deliverableId?: string;
   qaOwnerId?: string;
+  qaOwnerDisplayName?: string;
   title: string;
   description?: string;
   status: string;
@@ -182,6 +200,7 @@ export interface ProjectQualityCheckpointDto {
   requiresQaSignOff: boolean;
   signedOffAt?: string;
   signedOffById?: string;
+  signedOffByDisplayName?: string;
   signOffNotes?: string;
 }
 
@@ -191,6 +210,7 @@ export interface ProjectNonConformanceDto {
   qualityCheckpointId?: string;
   deliverableId?: string;
   ownerId?: string;
+  ownerDisplayName?: string;
   title: string;
   description?: string;
   severity: string;
@@ -296,6 +316,7 @@ export interface ProjectDeliverableDto {
   externalApprovalNotes?: string;
   canExternalSubmit?: boolean;
   canExternalApprove?: boolean;
+  externalReviews: ProjectDeliverableExternalReviewDto[];
 }
 
 export interface CreateProjectDeliverableDto {
@@ -312,6 +333,19 @@ export interface CreateProjectDeliverableDto {
 
 export interface SubmitProjectDeliverableDto {
   submittedDocumentId?: string;
+  notes?: string;
+}
+
+export interface ProjectDeliverableExternalReviewDto {
+  id: string;
+  projectId: string;
+  deliverableId: string;
+  reviewDate: string;
+  reviewedById?: string;
+  submittedDocumentId?: string;
+  submittedDocumentName?: string;
+  decision: string;
+  statusSnapshot?: string;
   notes?: string;
 }
 
@@ -427,6 +461,7 @@ export interface ProjectTimesheetEntryDto {
   workItemId?: string;
   workItemTitle?: string;
   userId: string;
+  userDisplayName?: string;
   entryDate: string;
   hours: number;
   isBillable: boolean;
@@ -436,6 +471,7 @@ export interface ProjectTimesheetEntryDto {
   notes?: string;
   status: string;
   approvedById?: string;
+  approvedByDisplayName?: string;
   approvedAt?: string;
   canEdit: boolean;
   canDelete: boolean;
@@ -461,6 +497,7 @@ export interface ProjectExpenseDto {
   workItemId?: string;
   workItemTitle?: string;
   userId: string;
+  userDisplayName?: string;
   expenseDate: string;
   category: string;
   currency: string;
@@ -471,6 +508,7 @@ export interface ProjectExpenseDto {
   receiptDocumentId?: string;
   notes?: string;
   approvedById?: string;
+  approvedByDisplayName?: string;
   approvedAt?: string;
   canEdit: boolean;
   canDelete: boolean;
@@ -607,6 +645,7 @@ export interface ProjectDecisionDto {
   title: string;
   decisionDate: string;
   approverId?: string;
+  approverDisplayName?: string;
   rationale?: string;
   alternativesConsidered?: string;
   impactSummary?: string;
@@ -630,6 +669,7 @@ export interface ProjectMeetingMinuteDto {
   title: string;
   meetingDate: string;
   facilitatorId?: string;
+  facilitatorDisplayName?: string;
   meetingType: string;
   minutes?: string;
   attendeesJson?: string;
@@ -652,6 +692,7 @@ export interface ProjectActionItemDto {
   title: string;
   description?: string;
   ownerId?: string;
+  ownerDisplayName?: string;
   dueDate?: string;
   completedAt?: string;
   status: string;
@@ -827,6 +868,7 @@ export interface ProjectDetailDto extends ProjectDto {
   baselines: ProjectBaselineDto[];
   timesheetEntries: ProjectTimesheetEntryDto[];
   expenses: ProjectExpenseDto[];
+  materialCostEntries: ProjectMaterialCostEntryDto[];
   revenueRecognitions: ProjectRevenueRecognitionDto[];
   assetLinks: ProjectAssetLinkDto[];
   externalAccessPolicies: ProjectExternalAccessPolicyDto[];
@@ -939,6 +981,9 @@ export interface CreateProjectResourceAllocationDto {
   bookingType: string;
   status: string;
   notes?: string;
+  requiredSkills?: string[];
+  requiredCertifications?: string[];
+  routingPolicy?: string;
 }
 
 export interface SubstituteProjectResourceAllocationDto {
@@ -1604,6 +1649,9 @@ export interface ProjectMaterialReconciliationReportItemDto {
   netIssuedValue: number;
   trackedMaterialCost: number;
   materialCostVariance: number;
+  materialLedgerEntryCount: number;
+  missingSourceLinkCount: number;
+  reversalGapCount: number;
   reconciliationStatus: string;
 }
 
@@ -1622,12 +1670,44 @@ export interface ProjectProcurementReconciliationReportItemDto {
   receivedAmount: number;
   acceptedReceiptAmount: number;
   pendingInspectionAmount: number;
+  supplierReturnAmount: number;
   issuedInventoryValue: number;
   netIssuedInventoryValue: number;
   postedMaterialCost: number;
   receiptToIssueVariance: number;
   issueToPostingVariance: number;
+  procurementLedgerEntryCount: number;
+  missingSourceLinkCount: number;
+  reversalGapCount: number;
   reconciliationStatus: string;
+}
+
+export interface ProjectMaterialCostEntryDto {
+  id: string;
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  entryDate: string;
+  entryType: string;
+  postingState: string;
+  affectsActualCost: boolean;
+  isReversed: boolean;
+  sourceDocumentType?: string;
+  sourceDocumentId?: string;
+  sourceDocumentNumber?: string;
+  sourceTransactionType?: string;
+  sourceTransactionId?: string;
+  inventoryItemId?: string;
+  inventoryItemCode?: string;
+  inventoryItemName?: string;
+  quantity: number;
+  unitOfMeasure?: string;
+  unitCost: number;
+  amount: number;
+  currency: string;
+  hasMissingSourceLink: boolean;
+  hasReversalGap: boolean;
+  notes?: string;
 }
 
 export interface ProjectResourceCapacityReportItemDto {
@@ -2018,6 +2098,23 @@ class ProjectService {
     });
 
     if (!response.ok) throw new Error('Failed to fetch material reconciliation report');
+    return response.json();
+  }
+
+  async getMaterialCostLedgerReport(projectId?: string, take: number = 300, sourceDocumentType?: string, postingState?: string, isReversed?: boolean, exceptionsOnly?: boolean): Promise<ProjectMaterialCostEntryDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+    if (sourceDocumentType) params.set('sourceDocumentType', sourceDocumentType);
+    if (postingState) params.set('postingState', postingState);
+    if (typeof isReversed === 'boolean') params.set('isReversed', String(isReversed));
+    if (typeof exceptionsOnly === 'boolean') params.set('exceptionsOnly', String(exceptionsOnly));
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/material-cost-ledger?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch material cost ledger report');
     return response.json();
   }
 
@@ -3882,6 +3979,21 @@ class ProjectService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to approve external deliverable');
+    }
+
+    return response.json();
+  }
+
+  async rejectExternalDeliverable(projectId: string, deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject external deliverable');
     }
 
     return response.json();

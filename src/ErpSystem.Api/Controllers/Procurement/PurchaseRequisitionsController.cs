@@ -435,7 +435,7 @@ public class PurchaseRequisitionsController : ControllerBase
                         ["PurchaseRequisitionId"] = requisition.Id,
                         ["RequisitionNumber"] = requisition.RequisitionNumber ?? string.Empty,
                         ["Status"] = requisition.Status ?? string.Empty,
-                        ["WorkflowInstanceId"] = workflowResult.ExecutionResult.WorkflowInstanceId,
+                        ["WorkflowInstanceId"] = workflowResult.ExecutionResult.WorkflowInstanceId?.ToString() ?? string.Empty,
                         ["WorkflowOutcome"] = workflowResult.Outcome.ToString(),
                         ["Comments"] = comments ?? string.Empty,
                         ["RejectionReason"] = approvalDto.RejectionReason ?? string.Empty
@@ -523,7 +523,7 @@ public class PurchaseRequisitionsController : ControllerBase
                         ["PurchaseRequisitionId"] = requisition.Id,
                         ["RequisitionNumber"] = requisition.RequisitionNumber ?? string.Empty,
                         ["Status"] = requisition.Status ?? string.Empty,
-                        ["WorkflowInstanceId"] = workflowResult.ExecutionResult.WorkflowInstanceId,
+                        ["WorkflowInstanceId"] = workflowResult.ExecutionResult.WorkflowInstanceId?.ToString() ?? string.Empty,
                         ["WorkflowOutcome"] = workflowResult.Outcome.ToString()
                     }
                 });
@@ -748,7 +748,7 @@ public class PurchaseRequisitionsController : ControllerBase
             // Group items by preferred business partner
             var supplierGroups = items
                 .Where(i => i.PreferredBusinessPartnerId.HasValue)
-                .GroupBy(i => i.PreferredBusinessPartnerId.Value);
+                .GroupBy(i => i.PreferredBusinessPartnerId!.Value);
 
             var purchaseOrderDtos = new List<CreatePurchaseOrderDto>();
 

@@ -56,7 +56,7 @@ export default function HelpdeskTicketDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
-  const ticketId = params?.id;
+  const ticketId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -125,7 +125,7 @@ export default function HelpdeskTicketDetailPage() {
     enabled: Boolean(ticketId),
   });
 
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const effectiveScope = useMemo(
     () => scopeParam || (ticket ? inferHelpdeskScopeFromTicket(ticket.ticketType, ticket.source) : null),
     [scopeParam, ticket],
@@ -1845,7 +1845,6 @@ export default function HelpdeskTicketDetailPage() {
           {preview?.url ? (
             preview.kind === 'image' ? (
               <div className="rounded-md border bg-white p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={preview.url} alt={preview.name} className="max-h-[70vh] w-full object-contain" />
               </div>
             ) : preview.kind === 'pdf' ? (

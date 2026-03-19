@@ -76,8 +76,48 @@ interface MaintenanceHistory {
   cost: number;
 }
 
-const FUEL_TYPE_OPTIONS = ['Petrol', 'Diesel', 'Electric', 'Hybrid'] as const;
+type AssetFormState = {
+  name: string;
+  assetNumber: string;
+  description: string;
+  category: string;
+  location: string;
+  manufacturer: string;
+  model: string;
+  year: string;
+  ownershipType: string;
+  serialNumber: string;
+  licensePlate: string;
+  vin: string;
+  fuelType: string;
+  isFleetAsset: boolean;
+  purchaseDate: string;
+  warrantyExpiry: string;
+  criticality: Asset['criticality'];
+  value: number;
+};
 
+const FUEL_TYPE_OPTIONS = ['Petrol', 'Diesel', 'Electric', 'Hybrid'] as const;
+const createEmptyAssetForm = (category = ''): AssetFormState => ({
+  name: '',
+  assetNumber: '',
+  description: '',
+  category,
+  location: '',
+  manufacturer: '',
+  model: '',
+  year: '',
+  ownershipType: 'Owned',
+  serialNumber: '',
+  licensePlate: '',
+  vin: '',
+  fuelType: '',
+  isFleetAsset: false,
+  purchaseDate: '',
+  warrantyExpiry: '',
+  criticality: 'Medium',
+  value: 0,
+});
 
 function AssetsPageContent() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -100,26 +140,7 @@ function AssetsPageContent() {
   const [vehiclePicturesOpen, setVehiclePicturesOpen] = useState(false);
   const [assetViewTab, setAssetViewTab] = useState<string>('details');
 
-  const [newAsset, setNewAsset] = useState({
-    name: '',
-    assetNumber: '',
-    description: '',
-    category: '',
-    location: '',
-    manufacturer: '',
-    model: '',
-    year: '',
-    ownershipType: 'Owned',
-    serialNumber: '',
-    licensePlate: '',
-    vin: '',
-    fuelType: '',
-    isFleetAsset: false,
-    purchaseDate: '',
-    warrantyExpiry: '',
-    criticality: 'Medium' as const,
-    value: 0,
-  });
+  const [newAsset, setNewAsset] = useState<AssetFormState>(createEmptyAssetForm());
 
   // Helper function to format date for HTML input (YYYY-MM-DD)
   const formatDateForInput = (dateString: string | null | undefined): string => {
@@ -299,9 +320,9 @@ function AssetsPageContent() {
 
   // Handle opening asset from URL parameter and initial category filter
   useEffect(() => {
-    const assetId = searchParams.get('id');
-    const categoryParam = searchParams.get('category');
-    const editParam = (searchParams.get('edit') || '').trim().toLowerCase();
+    const assetId = searchParams?.get('id');
+    const categoryParam = searchParams?.get('category');
+    const editParam = (searchParams?.get('edit') || '').trim().toLowerCase();
     const shouldEdit = editParam === '1' || editParam === 'true';
 
     // If a specific asset ID is provided, open its details dialog once assets are loaded
@@ -332,12 +353,12 @@ function AssetsPageContent() {
   useEffect(() => {
     if (initialCreateHandledRef.current) return;
 
-    const createParam = (searchParams.get('create') || '').trim().toLowerCase();
+    const createParam = (searchParams?.get('create') || '').trim().toLowerCase();
     if (createParam !== '1' && createParam !== 'true') return;
     if (assetTypes.length === 0) return;
 
-    const assetTypeParam = (searchParams.get('assetType') || '').trim();
-    const addToFleetParam = (searchParams.get('addToFleet') || '').trim().toLowerCase();
+    const assetTypeParam = (searchParams?.get('assetType') || '').trim();
+    const addToFleetParam = (searchParams?.get('addToFleet') || '').trim().toLowerCase();
     const addToFleet = addToFleetParam === '1' || addToFleetParam === 'true';
     if (assetTypeParam) {
       const match = assetTypes.find((t) => (t.assetType || '').toLowerCase() === assetTypeParam.toLowerCase());
@@ -548,26 +569,7 @@ function AssetsPageContent() {
       }
 
       setIsCreateDialogOpen(false);
-      setNewAsset({
-        name: '',
-        assetNumber: '',
-        description: '',
-        category: assetTypes.length > 0 ? assetTypes[0].name : '',
-        location: '',
-        manufacturer: '',
-        model: '',
-        year: '',
-        ownershipType: 'Owned',
-        serialNumber: '',
-        licensePlate: '',
-        vin: '',
-        fuelType: '',
-        isFleetAsset: false,
-        purchaseDate: '',
-        warrantyExpiry: '',
-        criticality: 'Medium',
-        value: 0,
-      });
+      setNewAsset(createEmptyAssetForm(assetTypes[0]?.name ?? ''));
     } catch (error) {
       console.error('Error creating asset:', error);
     }
@@ -602,8 +604,8 @@ function AssetsPageContent() {
   useEffect(() => {
     if (initialEditHandledRef.current) return;
 
-    const assetId = (searchParams.get('id') || '').trim();
-    const editParam = (searchParams.get('edit') || '').trim().toLowerCase();
+    const assetId = (searchParams?.get('id') || '').trim();
+    const editParam = (searchParams?.get('edit') || '').trim().toLowerCase();
     const shouldEdit = editParam === '1' || editParam === 'true';
 
     if (!shouldEdit) return;
@@ -683,26 +685,7 @@ function AssetsPageContent() {
 
       setIsEditDialogOpen(false);
       setSelectedAsset(null);
-      setNewAsset({
-        name: '',
-        assetNumber: '',
-        description: '',
-        category: assetTypes.length > 0 ? assetTypes[0].name : '',
-        location: '',
-        manufacturer: '',
-        model: '',
-        year: '',
-        ownershipType: 'Owned',
-        serialNumber: '',
-        licensePlate: '',
-        vin: '',
-        fuelType: '',
-        isFleetAsset: false,
-        purchaseDate: '',
-        warrantyExpiry: '',
-        criticality: 'Medium',
-        value: 0,
-      });
+      setNewAsset(createEmptyAssetForm(assetTypes[0]?.name ?? ''));
     } catch (error) {
       console.error('Error updating asset:', error);
     }
@@ -914,7 +897,7 @@ function AssetsPageContent() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="criticality">Criticality</Label>
-                  <Select value={newAsset.criticality} onValueChange={(value: any) => setNewAsset(prev => ({ ...prev, criticality: value }))}>
+                  <Select value={newAsset.criticality} onValueChange={(value: Asset['criticality']) => setNewAsset(prev => ({ ...prev, criticality: value }))}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>

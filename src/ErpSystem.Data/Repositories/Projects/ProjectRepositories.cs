@@ -145,13 +145,13 @@ public class ProjectRepository : GenericRepository<Project>, IProjectRepository
         return project;
     }
 
-    public async Task<Project> UpdateAsync(Project project)
+    public new async Task<Project> UpdateAsync(Project project)
     {
         await base.UpdateAsync(project);
         return project;
     }
 
-    public async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
+    public override async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
 
     public async Task<string> GenerateProjectCodeAsync()
     {
@@ -185,13 +185,13 @@ public class ProjectTypeRepository : GenericRepository<ProjectType>, IProjectTyp
         return entity;
     }
 
-    public async Task<ProjectType> UpdateAsync(ProjectType entity)
+    public new async Task<ProjectType> UpdateAsync(ProjectType entity)
     {
         await base.UpdateAsync(entity);
         return entity;
     }
 
-    public async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
+    public override async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
 }
 
 public class ProjectPriorityRepository : GenericRepository<ProjectPriority>, IProjectPriorityRepository
@@ -218,13 +218,13 @@ public class ProjectPriorityRepository : GenericRepository<ProjectPriority>, IPr
         return entity;
     }
 
-    public async Task<ProjectPriority> UpdateAsync(ProjectPriority entity)
+    public new async Task<ProjectPriority> UpdateAsync(ProjectPriority entity)
     {
         await base.UpdateAsync(entity);
         return entity;
     }
 
-    public async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
+    public override async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
 }
 
 public class ProjectTemplateRepository : GenericRepository<ProjectTemplate>, IProjectTemplateRepository
@@ -254,13 +254,13 @@ public class ProjectTemplateRepository : GenericRepository<ProjectTemplate>, IPr
         return entity;
     }
 
-    public async Task<ProjectTemplate> UpdateAsync(ProjectTemplate entity)
+    public new async Task<ProjectTemplate> UpdateAsync(ProjectTemplate entity)
     {
         await base.UpdateAsync(entity);
         return entity;
     }
 
-    public async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
+    public override async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
 }
 
 public class ProjectPortfolioRepository : GenericRepository<ProjectPortfolio>, IProjectPortfolioRepository
@@ -298,13 +298,13 @@ public class ProjectPortfolioRepository : GenericRepository<ProjectPortfolio>, I
         return entity;
     }
 
-    public async Task<ProjectPortfolio> UpdateAsync(ProjectPortfolio entity)
+    public new async Task<ProjectPortfolio> UpdateAsync(ProjectPortfolio entity)
     {
         await base.UpdateAsync(entity);
         return entity;
     }
 
-    public async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
+    public override async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
 }
 
 public class ProjectProgramRepository : GenericRepository<ProjectProgram>, IProjectProgramRepository
@@ -350,13 +350,13 @@ public class ProjectProgramRepository : GenericRepository<ProjectProgram>, IProj
         return entity;
     }
 
-    public async Task<ProjectProgram> UpdateAsync(ProjectProgram entity)
+    public new async Task<ProjectProgram> UpdateAsync(ProjectProgram entity)
     {
         await base.UpdateAsync(entity);
         return entity;
     }
 
-    public async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
+    public override async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
 }
 
 public class ProjectManagementSettingsRepository : GenericRepository<ProjectManagementSettings>, IProjectManagementSettingsRepository
@@ -387,7 +387,7 @@ public class ProjectManagementSettingsRepository : GenericRepository<ProjectMana
         return settings;
     }
 
-    public async Task<ProjectManagementSettings> UpdateAsync(ProjectManagementSettings entity)
+    public new async Task<ProjectManagementSettings> UpdateAsync(ProjectManagementSettings entity)
     {
         await base.UpdateAsync(entity);
         return entity;
@@ -434,11 +434,11 @@ public class ProjectCatalogRepository : GenericRepository<ProjectCatalogEntry>, 
         return entity;
     }
 
-    public async Task<ProjectCatalogEntry> UpdateAsync(ProjectCatalogEntry entity)
+    public new async Task<ProjectCatalogEntry> UpdateAsync(ProjectCatalogEntry entity)
     {
         await base.UpdateAsync(entity);
         return entity;
     }
 
-    public async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
+    public override async Task DeleteAsync(Guid id) => await base.DeleteAsync(id);
 }

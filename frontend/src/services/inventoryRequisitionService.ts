@@ -34,6 +34,8 @@ export interface InventoryRequisitionDto {
   costCenter?: string;
   warehouseId: string;
   warehouseName: string;
+  locationId?: string;
+  locationName?: string;
   projectId?: string;
   projectCode?: string;
   status: number;

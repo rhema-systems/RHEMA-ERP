@@ -113,7 +113,7 @@ function MaintenancePageContent() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialView = (searchParams.get('view') ?? 'overview') as 'overview' | 'dashboard';
+  const initialView = (searchParams?.get('view') ?? 'overview') as 'overview' | 'dashboard';
   const [activeTab, setActiveTab] = useState<'overview' | 'dashboard'>(initialView);
 
   useEffect(() => {
@@ -165,7 +165,7 @@ function MaintenancePageContent() {
           const view = value as 'overview' | 'dashboard';
           setActiveTab(view);
 
-          const params = new URLSearchParams(Array.from(searchParams.entries()));
+          const params = new URLSearchParams(Array.from(searchParams?.entries() ?? []));
           params.set('view', view);
           const query = params.toString();
           router.push(query ? `/maintenance?${query}` : '/maintenance');

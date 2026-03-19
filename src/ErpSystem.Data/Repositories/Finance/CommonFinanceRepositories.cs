@@ -65,7 +65,7 @@ public class PaymentTermRepository : GenericRepository<PaymentTerm>, IPaymentTer
         return !await query.AnyAsync();
     }
 
-    public override async Task<PaymentTerm> GetByIdAsync(Guid id)
+    public override async Task<PaymentTerm?> GetByIdAsync(Guid id)
     {
         return await _dbSet.FirstOrDefaultAsync(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted);
     }
@@ -122,7 +122,7 @@ public class CurrencyRepository : GenericRepository<Currency>, ICurrencyReposito
         return !await query.AnyAsync();
     }
 
-    public override async Task<Currency> GetByIdAsync(Guid id)
+    public override async Task<Currency?> GetByIdAsync(Guid id)
     {
         return await _dbSet.FirstOrDefaultAsync(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted);
     }

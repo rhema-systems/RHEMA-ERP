@@ -113,6 +113,7 @@ export interface InventoryItemDto {
   listPrice: number;
   lastPurchaseCost: number;
   sellingPrice: number;
+  weight?: number;
   isSerialTracked: boolean;
   isLotTracked: boolean;
   isBatchTracked: boolean;

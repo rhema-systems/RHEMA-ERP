@@ -8,6 +8,7 @@ using ErpSystem.Core.Models;
 using ErpSystem.Core.Services;
 using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
+using ErpSystem.Shared;
 using ErpSystem.Web.Configuration;
 using ErpSystem.Web.HealthChecks;
 using ErpSystem.Web.Middleware;
@@ -773,6 +774,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPerformanceBondService, ErpSystem.Core.Services.Procurement.PerformanceBondService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderNegotiationService, ErpSystem.Core.Services.Procurement.TenderNegotiationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSettingsService, ErpSystem.Core.Services.Procurement.ProcurementSettingsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceSettingsService, ErpSystem.Core.Services.Maintenance.MaintenanceSettingsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectService, ErpSystem.Core.Services.Projects.ProjectService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectSetupService, ErpSystem.Core.Services.Projects.ProjectSetupService>();
@@ -847,7 +849,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 ErpSystem.Core.Services.Maintenance.DeadLetterNotificationService>();
 
             // Add AutoMapper - using assembly scanning approach
-            services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);
+            services.AddAutoMapper(
+                _ => { },
+                typeof(Program).Assembly,
+                typeof(ErpSystem.Core.Services.TenantService).Assembly,
+                typeof(ErpSystem.Data.ApplicationDbContext).Assembly);
 
             return services;
         }
@@ -866,11 +872,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 .AddPolicy("ExternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
-                        string.Equals(ctx.User.FindFirst("auth_provider")?.Value, "Local", StringComparison.OrdinalIgnoreCase)))
+                        ctx.User.IsInRole(Constants.Roles.ExternalUser)))
                 .AddPolicy("InternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
-                        !string.Equals(ctx.User.FindFirst("auth_provider")?.Value, "Local", StringComparison.OrdinalIgnoreCase)))
+                        !ctx.User.IsInRole(Constants.Roles.ExternalUser)))
                 .AddPolicy("Finance", policy =>
                     policy.RequireClaim("module", "Finance"))
                 .AddPolicy("HR", policy =>
@@ -1363,7 +1369,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     var user = context.User;
 
                     var isAuthenticated = user?.Identity?.IsAuthenticated == true;
-                    var authProvider = isAuthenticated ? user.FindFirst("auth_provider")?.Value : null;
+                    var authProvider = isAuthenticated ? user?.FindFirst("auth_provider")?.Value : null;
                     var isExternal = isAuthenticated && string.Equals(authProvider, "Local", StringComparison.OrdinalIgnoreCase);
 
                     // Anonymous traffic (public portal endpoints)

@@ -10,6 +10,7 @@ namespace ErpSystem.Core.Services.Procurement;
 public class BusinessPartnerService : IBusinessPartnerService
 {
     private readonly IBusinessPartnerRepository _partnerRepository;
+    private readonly IBusinessPartnerContactRepository _contactRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -17,12 +18,14 @@ public class BusinessPartnerService : IBusinessPartnerService
 
     public BusinessPartnerService(
         IBusinessPartnerRepository partnerRepository,
+        IBusinessPartnerContactRepository contactRepository,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<BusinessPartnerService> logger)
     {
         _partnerRepository = partnerRepository;
+        _contactRepository = contactRepository;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
@@ -374,50 +377,127 @@ public class BusinessPartnerService : IBusinessPartnerService
     }
     public async Task<IEnumerable<BusinessPartnerContactDto>> GetContactsAsync(Guid partnerId)
     {
-        var partner = await _partnerRepository.GetWithAllRelatedDataAsync(partnerId);
-        if (partner?.Contacts == null)
-        {
-            return Enumerable.Empty<BusinessPartnerContactDto>();
-        }
+        await GetPartnerEntityAsync(partnerId);
 
-        return partner.Contacts.Select(c => new BusinessPartnerContactDto
-        {
-            Id = c.Id,
-            BusinessPartnerId = c.BusinessPartnerId,
-            ContactName = c.ContactName,
-            Title = c.ContactTitle,
-            ContactTitle = c.ContactTitle,
-            Department = c.Department,
-            Email = c.Email,
-            Phone = c.Phone,
-            Mobile = c.Mobile,
-            IsPrimary = c.IsPrimary
-        });
+        var contacts = await _contactRepository.GetContactsByPartnerAsync(partnerId);
+        return contacts.Select(MapContactDto).ToList();
     }
 
     public async Task<BusinessPartnerContactDto> AddContactAsync(Guid partnerId, CreateBusinessPartnerContactDto dto)
     {
-        // This would need a contact repository - for now throw
-        await Task.CompletedTask;
-        throw new NotImplementedException("Contact repository not yet implemented");
+        var partner = await GetPartnerEntityAsync(partnerId);
+        var existingContacts = (await _contactRepository.GetContactsByPartnerAsync(partnerId)).ToList();
+
+        var contact = new BusinessPartnerContact
+        {
+            Id = Guid.NewGuid(),
+            TenantId = partner.TenantId,
+            BusinessPartnerId = partnerId,
+            ContactName = dto.ContactName.Trim(),
+            ContactTitle = CleanNullable(dto.Title),
+            Department = CleanNullable(dto.Department),
+            Email = CleanNullable(dto.Email),
+            Phone = CleanNullable(dto.Phone),
+            Mobile = CleanNullable(dto.Mobile),
+            IsPrimary = dto.IsPrimary || existingContacts.Count == 0
+        };
+
+        await _contactRepository.CreateAsync(contact);
+        await _contactRepository.SaveChangesAsync();
+
+        if (contact.IsPrimary)
+        {
+            await _contactRepository.SetPrimaryContactAsync(partnerId, contact.Id);
+        }
+
+        await SyncPrimaryContactSummaryAsync(partner);
+        return MapContactDto((await _contactRepository.GetByIdAsync(contact.Id))!);
     }
 
     public async Task<BusinessPartnerContactDto> UpdateContactAsync(Guid partnerId, Guid contactId, CreateBusinessPartnerContactDto dto)
     {
-        await Task.CompletedTask;
-        throw new NotImplementedException("Contact repository not yet implemented");
+        var partner = await GetPartnerEntityAsync(partnerId);
+        var contact = await _contactRepository.GetByIdAsync(contactId)
+            ?? throw new ArgumentException($"Contact {contactId} was not found.");
+
+        if (contact.BusinessPartnerId != partnerId || contact.TenantId != partner.TenantId)
+        {
+            throw new ArgumentException($"Contact {contactId} was not found for this business partner.");
+        }
+
+        var wasPrimary = contact.IsPrimary;
+
+        contact.ContactName = dto.ContactName.Trim();
+        contact.ContactTitle = CleanNullable(dto.Title);
+        contact.Department = CleanNullable(dto.Department);
+        contact.Email = CleanNullable(dto.Email);
+        contact.Phone = CleanNullable(dto.Phone);
+        contact.Mobile = CleanNullable(dto.Mobile);
+        contact.IsPrimary = dto.IsPrimary;
+
+        await _contactRepository.UpdateAsync(contact);
+        await _contactRepository.SaveChangesAsync();
+
+        if (dto.IsPrimary)
+        {
+            await _contactRepository.SetPrimaryContactAsync(partnerId, contactId);
+        }
+        else if (wasPrimary)
+        {
+            var replacement = (await _contactRepository.GetContactsByPartnerAsync(partnerId))
+                .FirstOrDefault(x => x.Id != contactId);
+
+            if (replacement != null)
+            {
+                await _contactRepository.SetPrimaryContactAsync(partnerId, replacement.Id);
+            }
+        }
+
+        await SyncPrimaryContactSummaryAsync(partner);
+        return MapContactDto((await _contactRepository.GetByIdAsync(contactId))!);
     }
 
     public async Task DeleteContactAsync(Guid partnerId, Guid contactId)
     {
-        await Task.CompletedTask;
-        throw new NotImplementedException("Contact repository not yet implemented");
+        var partner = await GetPartnerEntityAsync(partnerId);
+        var contact = await _contactRepository.GetByIdAsync(contactId)
+            ?? throw new ArgumentException($"Contact {contactId} was not found.");
+
+        if (contact.BusinessPartnerId != partnerId || contact.TenantId != partner.TenantId)
+        {
+            throw new ArgumentException($"Contact {contactId} was not found for this business partner.");
+        }
+
+        var wasPrimary = contact.IsPrimary;
+
+        await _contactRepository.DeleteAsync(contactId);
+        await _contactRepository.SaveChangesAsync();
+
+        if (wasPrimary)
+        {
+            var replacement = (await _contactRepository.GetContactsByPartnerAsync(partnerId)).FirstOrDefault();
+            if (replacement != null)
+            {
+                await _contactRepository.SetPrimaryContactAsync(partnerId, replacement.Id);
+            }
+        }
+
+        await SyncPrimaryContactSummaryAsync(partner);
     }
 
     public async Task SetPrimaryContactAsync(Guid partnerId, Guid contactId)
     {
-        await Task.CompletedTask;
-        throw new NotImplementedException("Contact repository not yet implemented");
+        var partner = await GetPartnerEntityAsync(partnerId);
+        var contact = await _contactRepository.GetByIdAsync(contactId)
+            ?? throw new ArgumentException($"Contact {contactId} was not found.");
+
+        if (contact.BusinessPartnerId != partnerId || contact.TenantId != partner.TenantId)
+        {
+            throw new ArgumentException($"Contact {contactId} was not found for this business partner.");
+        }
+
+        await _contactRepository.SetPrimaryContactAsync(partnerId, contactId);
+        await SyncPrimaryContactSummaryAsync(partner);
     }
 
     public async Task<IEnumerable<BusinessPartnerLicenseDto>> GetLicensesAsync(Guid partnerId)
@@ -694,19 +774,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         // Map contacts
         if (partner.Contacts != null && partner.Contacts.Any())
         {
-            dto.Contacts = partner.Contacts.Select(c => new BusinessPartnerContactDto
-            {
-                Id = c.Id,
-                BusinessPartnerId = c.BusinessPartnerId,
-                ContactName = c.ContactName,
-                Title = c.ContactTitle,
-                ContactTitle = c.ContactTitle,
-                Department = c.Department,
-                Email = c.Email,
-                Phone = c.Phone,
-                Mobile = c.Mobile,
-                IsPrimary = c.IsPrimary
-            }).ToList();
+            dto.Contacts = partner.Contacts.Select(MapContactDto).ToList();
         }
 
         // Map documents
@@ -779,4 +847,55 @@ public class BusinessPartnerService : IBusinessPartnerService
 
         return dto;
     }
+
+    private async Task<BusinessPartner> GetPartnerEntityAsync(Guid partnerId)
+    {
+        var partner = await _partnerRepository.GetByIdAsync(partnerId);
+        if (partner == null)
+        {
+            throw new ArgumentException($"Business partner {partnerId} was not found.");
+        }
+
+        if (partner.TenantId != _currentUserProvider.TenantId)
+        {
+            throw new UnauthorizedAccessException("You do not have access to this business partner.");
+        }
+
+        return partner;
+    }
+
+    private async Task SyncPrimaryContactSummaryAsync(BusinessPartner partner)
+    {
+        var contacts = (await _contactRepository.GetContactsByPartnerAsync(partner.Id)).ToList();
+        var primaryContact = contacts.FirstOrDefault(x => x.IsPrimary);
+
+        partner.PrimaryContactName = primaryContact?.ContactName;
+        partner.PrimaryContactTitle = primaryContact?.ContactTitle;
+        partner.PrimaryEmail = primaryContact?.Email;
+        partner.PrimaryPhone = primaryContact?.Phone ?? primaryContact?.Mobile;
+        partner.SecondaryPhone = primaryContact?.Phone != null && primaryContact.Mobile != null
+            ? primaryContact.Mobile
+            : null;
+
+        await _partnerRepository.UpdateAsync(partner);
+    }
+
+    private static BusinessPartnerContactDto MapContactDto(BusinessPartnerContact contact)
+        => new()
+        {
+            Id = contact.Id,
+            BusinessPartnerId = contact.BusinessPartnerId,
+            ContactName = contact.ContactName,
+            Title = contact.ContactTitle,
+            ContactTitle = contact.ContactTitle,
+            Department = contact.Department,
+            Email = contact.Email,
+            Phone = contact.Phone,
+            Mobile = contact.Mobile,
+            IsPrimary = contact.IsPrimary,
+            IsActive = !contact.IsDeleted
+        };
+
+    private static string? CleanNullable(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

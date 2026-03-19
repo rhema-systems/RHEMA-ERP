@@ -102,9 +102,9 @@ public class MaintenanceMobileController : ControllerBase
             var coreDto = new ErpSystem.Core.DTOs.Maintenance.MobileWorkOrderStatusUpdateDto
             {
                 Status = updateDto.Status,
-                Notes = updateDto.Notes,
+                Notes = updateDto.Notes ?? string.Empty,
                 Timestamp = updateDto.Timestamp,
-                LocalId = updateDto.LocalId
+                LocalId = updateDto.LocalId ?? string.Empty
             };
             var result = await _mobileService.UpdateWorkOrderStatusMobileAsync(id, coreDto, CurrentUserId);
             return Ok(result);
@@ -131,7 +131,7 @@ public class MaintenanceMobileController : ControllerBase
                 Description = logDto.Description,
                 Timestamp = logDto.Timestamp,
                 Duration = logDto.Duration ?? TimeSpan.Zero,
-                LocalId = logDto.LocalId
+                LocalId = logDto.LocalId ?? string.Empty
             };
             var result = await _mobileService.AddWorkLogMobileAsync(id, coreDto, CurrentUserId);
             return Ok(result);
@@ -147,7 +147,7 @@ public class MaintenanceMobileController : ControllerBase
     /// Upload work order photos with compression and offline queuing
     /// </summary>
     [HttpPost("work-orders/{id}/photos")]
-    public async Task<ActionResult<MobilePhotoUploadResultDto>> UploadWorkOrderPhotos(
+    public ActionResult<MobilePhotoUploadResultDto> UploadWorkOrderPhotos(
         Guid id,
         [FromForm] List<IFormFile> photos,
         [FromForm] string? description = null)
@@ -275,7 +275,7 @@ public class MaintenanceMobileController : ControllerBase
                 WorkOrderId = checkInDto.WorkOrderId,
                 Latitude = checkInDto.Latitude,
                 Longitude = checkInDto.Longitude,
-                Notes = checkInDto.Notes,
+                Notes = checkInDto.Notes ?? string.Empty,
                 Timestamp = checkInDto.Timestamp
             };
             var result = await _mobileService.CheckInToWorkOrderAsync(coreDto, CurrentUserId);
@@ -299,7 +299,7 @@ public class MaintenanceMobileController : ControllerBase
             var coreDto = new ErpSystem.Core.DTOs.Maintenance.MobileCheckOutDto
             {
                 WorkOrderId = checkOutDto.WorkOrderId,
-                CompletionNotes = checkOutDto.CompletionNotes,
+                CompletionNotes = checkOutDto.CompletionNotes ?? string.Empty,
                 Timestamp = checkOutDto.Timestamp,
                 // ActualDuration property doesn't exist in Core DTO
                 // TODO: Add ActualDuration to the Core DTO or calculate it differently

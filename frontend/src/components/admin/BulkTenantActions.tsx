@@ -88,7 +88,8 @@ const bulkUpdateSchema = z.object({
   notificationMessage: z.string().optional(),
 });
 
-type BulkUpdateFormData = z.infer<typeof bulkUpdateSchema>;
+type BulkUpdateFormValues = z.input<typeof bulkUpdateSchema>;
+type BulkUpdateFormData = z.output<typeof bulkUpdateSchema>;
 
 const notificationSchema = z.object({
   subject: z.string().min(1, 'Subject is required'),
@@ -96,7 +97,8 @@ const notificationSchema = z.object({
   includeTenantDetails: z.boolean().default(true),
 });
 
-type NotificationFormData = z.infer<typeof notificationSchema>;
+type NotificationFormValues = z.input<typeof notificationSchema>;
+type NotificationFormData = z.output<typeof notificationSchema>;
 
 export function BulkTenantActions({
   selectedTenantIds,
@@ -110,7 +112,7 @@ export function BulkTenantActions({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const updateForm = useForm<BulkUpdateFormData>({
+  const updateForm = useForm<BulkUpdateFormValues, any, BulkUpdateFormData>({
     resolver: zodResolver(bulkUpdateSchema),
     defaultValues: {
       action: 'activate',
@@ -118,7 +120,7 @@ export function BulkTenantActions({
     },
   });
 
-  const notificationForm = useForm<NotificationFormData>({
+  const notificationForm = useForm<NotificationFormValues, any, NotificationFormData>({
     resolver: zodResolver(notificationSchema),
     defaultValues: {
       subject: '',

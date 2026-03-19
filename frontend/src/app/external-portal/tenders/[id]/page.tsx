@@ -31,7 +31,7 @@ import { TenderClarifications } from '@/components/procurement/tenders/TenderCla
 export default function ExternalTenderDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const tenderId = params.id as string;
+  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [myBid, setMyBid] = useState<any>(null);
@@ -80,6 +80,10 @@ export default function ExternalTenderDetailPage() {
 
   const handleStartBid = () => {
     if (!tender) return;
+    if (!tender.submissionDeadline) {
+      toast.error('Tender submission deadline is not available');
+      return;
+    }
 
     if (new Date(tender.submissionDeadline) < new Date()) {
       toast.error('Tender submission deadline has passed');
@@ -103,7 +107,11 @@ export default function ExternalTenderDetailPage() {
     }
   };
 
-  const getDeadlineStatus = (deadline: string) => {
+  const getDeadlineStatus = (deadline?: string) => {
+    if (!deadline) {
+      return { text: 'Deadline not set', variant: 'secondary' as const, urgent: false };
+    }
+
     const deadlineDate = new Date(deadline);
     const now = new Date();
     const hoursRemaining = (deadlineDate.getTime() - now.getTime()) / (1000 * 60 * 60);
@@ -153,8 +161,13 @@ export default function ExternalTenderDetailPage() {
     );
   }
 
-  const isExpired = new Date(tender.submissionDeadline) < new Date();
+  const isExpired = tender.submissionDeadline ? new Date(tender.submissionDeadline) < new Date() : false;
   const deadlineStatus = getDeadlineStatus(tender.submissionDeadline);
+  const canAskQuestions =
+    !myBid &&
+    (tender.submissionDeadline
+      ? new Date(tender.submissionDeadline) > new Date()
+      : false);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -307,7 +320,7 @@ export default function ExternalTenderDetailPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
                 <div>
                   <p className="text-sm text-gray-500">Published Date</p>
-                  <p className="font-medium">{formatDate(tender.publishedDate)}</p>
+                  <p className="font-medium">{formatDate(tender.publishDate)}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500">Closing Date</p>
@@ -645,7 +658,7 @@ export default function ExternalTenderDetailPage() {
         <TabsContent value="clarifications">
           <TenderClarifications
             tenderId={tenderId}
-            canAskQuestions={!myBid && new Date(tender.submissionDeadline) > new Date()}
+            canAskQuestions={canAskQuestions}
           />
         </TabsContent>
 
@@ -705,4 +718,3 @@ export default function ExternalTenderDetailPage() {
     </div>
   );
 }
-

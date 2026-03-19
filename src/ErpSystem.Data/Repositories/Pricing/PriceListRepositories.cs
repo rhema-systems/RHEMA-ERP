@@ -167,7 +167,7 @@ public class PriceListLineRepository : GenericRepository<PriceListLine>, IPriceL
 {
     public PriceListLineRepository(ApplicationDbContext context) : base(context) { }
 
-    public override async Task<PriceListLine> GetByIdAsync(Guid id)
+    public override async Task<PriceListLine?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(l => l.Id == id && !l.IsDeleted)

@@ -50,6 +50,17 @@ export class TenantService {
       if (typeof window !== 'undefined' && response?.user) {
         try {
           localStorage.setItem('user', JSON.stringify(response.user));
+          localStorage.setItem('currentTenantCode', response.user.currentTenantCode || tenantCode);
+
+          if (response.user.currentTenantId && response.user.currentTenantCode) {
+            localStorage.setItem('currentTenant', JSON.stringify({
+              id: response.user.currentTenantId,
+              code: response.user.currentTenantCode,
+              name: response.user.currentTenantName || response.user.currentTenantCode,
+              isActive: true,
+              createdAt: new Date().toISOString(),
+            }));
+          }
         } catch {
           // ignore storage errors
         }

@@ -19,7 +19,7 @@ export default function HelpdeskKnowledgeBasePage() {
   const [q, setQ] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const { data: categories } = useQuery({

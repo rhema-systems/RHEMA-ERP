@@ -20,12 +20,12 @@ namespace ErpSystem.Data.Repositories
             _dbSet = context.Set<T>();
         }
 
-        public virtual async Task<T> GetByIdAsync(Guid id)
+        public virtual async Task<T?> GetByIdAsync(Guid id)
         {
             return await _dbSet.FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
         }
 
-        public virtual async Task<T> GetByIdAsync(Guid id, params Expression<Func<T, object>>[] includes)
+        public virtual async Task<T?> GetByIdAsync(Guid id, params Expression<Func<T, object>>[] includes)
         {
             var query = _dbSet.Where(e => e.Id == id && !e.IsDeleted);
             foreach (var include in includes)
@@ -65,12 +65,12 @@ namespace ErpSystem.Data.Repositories
             return await query.ToListAsync();
         }
 
-        public virtual async Task<T> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate)
+        public virtual async Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate)
         {
             return await _dbSet.Where(predicate).Where(e => !e.IsDeleted).FirstOrDefaultAsync();
         }
 
-        public virtual async Task<T> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate, params Expression<Func<T, object>>[] includes)
+        public virtual async Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate, params Expression<Func<T, object>>[] includes)
         {
             var query = _dbSet.Where(predicate).Where(e => !e.IsDeleted);
             foreach (var include in includes)

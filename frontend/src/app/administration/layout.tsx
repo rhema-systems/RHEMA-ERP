@@ -9,7 +9,7 @@ interface AdministrationLayoutProps {
 }
 
 export default function AdministrationLayout({ children }: AdministrationLayoutProps) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
 
   let requiredPermissions: string[] | undefined;
   if (pathname.startsWith('/administration/project-management')) {

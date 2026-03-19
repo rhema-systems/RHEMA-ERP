@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client";
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
@@ -83,7 +82,7 @@ const bulkCriteriaSchema = z.object({
   browser: z.string().optional(),
   loginTimeBefore: z.date().optional(),
   lastActivityBefore: z.date().optional(),
-  includeCurrentUser: z.boolean(),
+  includeCurrentUser: z.boolean().default(false),
   reason: z.string().min(3, 'Reason must be at least 3 characters').max(500, 'Reason cannot exceed 500 characters')
 });
 
@@ -94,9 +93,17 @@ type BulkCriteriaFormData = z.infer<typeof bulkCriteriaSchema>;
 // Enhanced interface that combines SignalR data with session management data
 interface EnhancedUserSession extends UserSession {
   // Additional fields from OnlineUser for display
+  email?: string;
+  role?: string;
   status?: 'active' | 'idle' | 'inactive';
   connectionCount?: number;
 }
+
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
 
 export default function EnhancedOnlineUsersPage() {
   const { toast } = useToast();
@@ -105,7 +112,7 @@ export default function EnhancedOnlineUsersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-
+  
   // Session management state
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
@@ -114,14 +121,14 @@ export default function EnhancedOnlineUsersPage() {
   const [showCriteriaTerminateDialog, setShowCriteriaTerminateDialog] = useState(false);
   const [terminatingSession, setTerminatingSession] = useState<string | null>(null);
   const [bulkOperationInProgress, setBulkOperationInProgress] = useState(false);
-
+  
   // SignalR for real-time updates
-  const {
-    dashboardData,
-    isConnected: isSignalRConnected,
-    userSessionUpdates
+  const { 
+    dashboardData, 
+    isConnected: isSignalRConnected, 
+    userSessionUpdates 
   } = useDashboardSignalR();
-
+  
   // Form instances
   const filterForm = useForm<FilterFormData>({
     resolver: zodResolver(filterSchema),
@@ -159,17 +166,17 @@ export default function EnhancedOnlineUsersPage() {
     try {
       setRefreshing(true);
       setError(null);
-
+      
       // Get actual session data from API
       const apiSessions = await securityService.getAllActiveSessions(filters);
-
+      
       // Also get dashboard data for additional user info
       const dashboardUsers = dashboardData?.onlineUsers || [];
-
+      
       // Merge session data with user info from SignalR
       const enhancedSessions: EnhancedUserSession[] = apiSessions.map(session => {
         const signalRUser = dashboardUsers.find(u => u.userId === session.userId);
-
+        
         return {
           ...session,
           email: signalRUser?.email || 'N/A',
@@ -178,17 +185,17 @@ export default function EnhancedOnlineUsersPage() {
           connectionCount: 1,
         };
       });
-
+      
       setSessions(enhancedSessions);
       setLastUpdated(new Date());
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load active sessions';
       setError(errorMessage);
       console.error('Failed to load sessions:', err);
-      toast({
-        title: 'Error',
-        description: errorMessage,
-        variant: 'destructive'
+      toast({ 
+        title: 'Error', 
+        description: errorMessage, 
+        variant: 'destructive' 
       });
     } finally {
       setLoading(false);
@@ -305,12 +312,12 @@ export default function EnhancedOnlineUsersPage() {
         Array.from(selectedSessions),
         data.reason
       );
-
-      toast({
-        title: 'Bulk Termination Complete',
+      
+      toast({ 
+        title: 'Bulk Termination Complete', 
         description: `Terminated ${result.successful} of ${result.totalRequested} sessions`
       });
-
+      
       setShowBulkTerminateDialog(false);
       terminateReasonForm.reset();
       setSelectedSessions(new Set());
@@ -336,14 +343,14 @@ export default function EnhancedOnlineUsersPage() {
         lastActivityBefore: data.lastActivityBefore,
         includeCurrentUser: data.includeCurrentUser
       };
-
+      
       const result = await securityService.terminateSessionsByCriteria(criteria);
-
-      toast({
-        title: 'Criteria-based Termination Complete',
+      
+      toast({ 
+        title: 'Criteria-based Termination Complete', 
         description: `Terminated ${result.successful} of ${result.totalRequested} sessions matching criteria`
       });
-
+      
       setShowCriteriaTerminateDialog(false);
       bulkCriteriaForm.reset();
       await loadSessions();
@@ -373,7 +380,7 @@ export default function EnhancedOnlineUsersPage() {
   useEffect(() => {
     if (userSessionUpdates.length > 0) {
       const latestUpdate = userSessionUpdates[0];
-
+      
       if (latestUpdate.type === 'logout') {
         setSessions(prev => prev.filter(session => session.userId !== latestUpdate.userId));
         toast({
@@ -394,7 +401,7 @@ export default function EnhancedOnlineUsersPage() {
   const columns = useMemo<DataTableColumn<EnhancedUserSession>[]>(() => [
     {
       id: 'select',
-      header: ({ table }: { table: any }) => (
+      header: ({ table }) => (
         <Checkbox
           checked={table.getIsAllPageRowsSelected()}
           onCheckedChange={(value) => {
@@ -404,7 +411,7 @@ export default function EnhancedOnlineUsersPage() {
           aria-label="Select all"
         />
       ),
-      cell: ({ row }: { row: any }) => (
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => (
         <Checkbox
           checked={selectedSessions.has(row.original.sessionId)}
           onCheckedChange={(value) => handleSelectSession(row.original.sessionId, !!value)}
@@ -417,10 +424,10 @@ export default function EnhancedOnlineUsersPage() {
     {
       accessorKey: 'username',
       header: 'User',
-      cell: ({ row }: { row: any }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const session = row.original;
         const initials = session.username.substring(0, 2).toUpperCase();
-
+        
         return (
           <div className="flex items-center space-x-3">
             <Avatar className="h-8 w-8">
@@ -443,7 +450,7 @@ export default function EnhancedOnlineUsersPage() {
     {
       accessorKey: 'role',
       header: 'Role',
-      cell: ({ row }: { row: any }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const role = row.original.role;
         const roleColors = {
           'SuperAdmin': 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
@@ -451,10 +458,10 @@ export default function EnhancedOnlineUsersPage() {
           'Manager': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
           'Employee': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
         };
-
+        
         return (
-          <Badge
-            variant="secondary"
+          <Badge 
+            variant="secondary" 
             className={roleColors[role as keyof typeof roleColors] || ''}
           >
             {role}
@@ -466,13 +473,13 @@ export default function EnhancedOnlineUsersPage() {
     {
       accessorKey: 'status',
       header: 'Status',
-      cell: ({ row }: { row: any }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const session = row.original;
-        const status = session.status;
-
+        const status = session.status ?? 'inactive';
+        
         return (
           <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${getActivityStatusColor(status!)}`} />
+            <div className={`w-2 h-2 rounded-full ${getActivityStatusColor(status)}`} />
             <Badge variant={status === 'active' ? 'default' : 'secondary'}>
               {status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown'}
             </Badge>
@@ -484,9 +491,9 @@ export default function EnhancedOnlineUsersPage() {
     {
       accessorKey: 'deviceType',
       header: 'Device',
-      cell: ({ row }: { row: any }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const deviceType = row.original.deviceType;
-
+        
         return (
           <div className="flex items-center space-x-2">
             {getDeviceIcon(deviceType)}
@@ -499,7 +506,7 @@ export default function EnhancedOnlineUsersPage() {
     {
       accessorKey: 'ipAddress',
       header: 'IP Address',
-      cell: ({ row }: { row: any }) => (
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => (
         <code className="text-xs bg-muted px-2 py-1 rounded">
           {row.original.ipAddress}
         </code>
@@ -508,11 +515,11 @@ export default function EnhancedOnlineUsersPage() {
     {
       accessorKey: 'sessionDuration',
       header: 'Session Duration',
-      cell: ({ row }: { row: any }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const loginTime = row.original.loginTime;
         const duration = formatDistanceToNow(new Date(loginTime));
         const durationColor = getSessionDurationColor(new Date(loginTime));
-
+        
         return (
           <div className="flex items-center space-x-1">
             <ClockIcon className="h-3 w-3 text-muted-foreground" />
@@ -525,7 +532,7 @@ export default function EnhancedOnlineUsersPage() {
     {
       accessorKey: 'lastActivityTime',
       header: 'Last Activity',
-      cell: ({ row }: { row: any }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const lastActivity = new Date(row.original.lastActivityTime);
         return (
           <div className="text-sm">
@@ -602,13 +609,13 @@ export default function EnhancedOnlineUsersPage() {
               {sessions.length} active sessions
             </Badge>
           </div>
-
+          
           <div className="flex items-center space-x-2">
             <Badge variant={isSignalRConnected ? 'default' : 'destructive'} className="flex items-center space-x-1">
               <div className={`w-2 h-2 rounded-full ${isSignalRConnected ? 'bg-green-500' : 'bg-red-500'}`} />
               <span>{isSignalRConnected ? 'Live' : 'Disconnected'}</span>
             </Badge>
-
+            
             <Button
               variant="outline"
               size="sm"
@@ -617,7 +624,7 @@ export default function EnhancedOnlineUsersPage() {
               <Filter className="h-4 w-4 mr-2" />
               Filters
             </Button>
-
+            
             <Button
               variant="outline"
               size="sm"
@@ -649,7 +656,7 @@ export default function EnhancedOnlineUsersPage() {
                       </FormItem>
                     )}
                   />
-
+                  
                   <FormField
                     control={filterForm.control}
                     name="ipAddress"
@@ -663,7 +670,7 @@ export default function EnhancedOnlineUsersPage() {
                       </FormItem>
                     )}
                   />
-
+                  
                   <FormField
                     control={filterForm.control}
                     name="deviceType"
@@ -692,13 +699,13 @@ export default function EnhancedOnlineUsersPage() {
                     )}
                   />
                 </div>
-
+                
                 <div className="flex items-center space-x-2">
                   <Button type="submit" size="sm">
                     <Search className="h-4 w-4 mr-2" />
                     Apply Filters
                   </Button>
-
+                  
                   <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
                     <X className="h-4 w-4 mr-2" />
                     Clear
@@ -718,7 +725,7 @@ export default function EnhancedOnlineUsersPage() {
                 {selectedSessions.size} session{selectedSessions.size !== 1 ? 's' : ''} selected
               </span>
             </div>
-
+            
             <div className="flex items-center space-x-2">
               <Button
                 variant="destructive"
@@ -729,7 +736,7 @@ export default function EnhancedOnlineUsersPage() {
                 <PowerOff className="h-4 w-4 mr-2" />
                 Terminate Selected
               </Button>
-
+              
               <Button
                 variant="outline"
                 size="sm"
@@ -807,33 +814,33 @@ export default function EnhancedOnlineUsersPage() {
             description={`Last updated: ${format(lastUpdated, 'MMM dd, yyyy HH:mm:ss')}`}
             loading={refreshing}
             error={error}
-
+            
             // Row selection
             enableRowSelection={true}
-
+            
             // Pagination
             enablePagination={true}
             pageSize={20}
             pageSizeOptions={[10, 20, 50, 100]}
-
+            
             // Sorting and filtering
             enableSorting={true}
             enableGlobalFilter={true}
             enableColumnFilters={true}
             searchPlaceholder="Search sessions..."
-
+            
             // Export
             enableExport={true}
             exportFileName={`active-sessions-${format(new Date(), 'yyyy-MM-dd')}`}
             exportFormats={['csv', 'excel']}
-
+            
             // Actions
             rowActions={rowActions}
-
+            
             // Mobile optimization
             enableMobileCards={true}
             hideColumnsOnMobile={['ipAddress', 'browser', 'sessionDuration']}
-
+            
             // Styling
             striped={true}
             hoverable={true}
@@ -954,7 +961,7 @@ export default function EnhancedOnlineUsersPage() {
                       </FormItem>
                     )}
                   />
-
+                  
                   <FormField
                     control={bulkCriteriaForm.control}
                     name="deviceType"
@@ -983,7 +990,7 @@ export default function EnhancedOnlineUsersPage() {
                     )}
                   />
                 </div>
-
+                
                 <FormField
                   control={bulkCriteriaForm.control}
                   name="browser"
@@ -1017,7 +1024,7 @@ export default function EnhancedOnlineUsersPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={bulkCriteriaForm.control}
                   name="reason"
@@ -1034,7 +1041,7 @@ export default function EnhancedOnlineUsersPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <DialogFooter>
                   <Button
                     type="button"

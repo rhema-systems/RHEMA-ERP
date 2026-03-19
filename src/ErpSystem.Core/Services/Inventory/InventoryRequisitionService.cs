@@ -27,6 +27,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     private readonly IStockMovementRepository _stockMovementRepository;
     private readonly IConsignmentSettlementService _consignmentSettlementService;
     private readonly IProjectRepository _projectRepository;
+    private readonly IProjectService _projectService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
@@ -43,6 +44,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         IStockMovementRepository stockMovementRepository,
         IConsignmentSettlementService consignmentSettlementService,
         IProjectRepository projectRepository,
+        IProjectService projectService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
@@ -58,6 +60,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         _stockMovementRepository = stockMovementRepository;
         _consignmentSettlementService = consignmentSettlementService;
         _projectRepository = projectRepository;
+        _projectService = projectService;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
@@ -400,8 +403,6 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
         var warehouse = await _warehouseRepository.GetByIdAsync(requisition.WarehouseId)
             ?? throw new ArgumentException($"Warehouse not found");
-        var linkedProject = await GetLinkedProjectAsync(requisition);
-
         foreach (var issueItem in dto.Items)
         {
             var requisitionItem = requisition.Items.FirstOrDefault(i => i.Id == issueItem.ItemId)
@@ -481,10 +482,6 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             await _stockMovementRepository.AddAsync(movement);
             await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
 
-            if (linkedProject != null)
-            {
-                await PostProjectMaterialConsumptionAsync(linkedProject, requisition, requisitionItem, issueItem.IssuedQuantity, dto.Notes);
-            }
         }
 
         // Update requisition status
@@ -511,6 +508,10 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         await UpdateRequisitionTotals(requisition);
         await _requisitionRepository.UpdateAsync(requisition);
         await _unitOfWork.SaveChangesAsync();
+        if (requisition.ProjectId.HasValue)
+        {
+            await _projectService.SyncInventoryRequisitionMaterialCostAsync(requisition.Id);
+        }
 
         _logger.LogInformation("Issued items for requisition {RequisitionNumber}", requisition.RequisitionNumber);
         return true;
@@ -530,8 +531,6 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
         var warehouse = await _warehouseRepository.GetByIdAsync(requisition.WarehouseId)
             ?? throw new ArgumentException("Warehouse not found");
-        var linkedProject = await GetLinkedProjectAsync(requisition);
-
         foreach (var returnItem in dto.Items)
         {
             var requisitionItem = requisition.Items.FirstOrDefault(i => i.Id == returnItem.ItemId)
@@ -618,10 +617,6 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             await _stockMovementRepository.AddAsync(movement);
             await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
 
-            if (linkedProject != null)
-            {
-                await ReverseProjectMaterialConsumptionAsync(linkedProject, requisition, requisitionItem, returnItem.ReturnedQuantity, dto.Notes);
-            }
         }
 
         requisition.Status = ResolveStatusAfterReturn(requisition);
@@ -638,151 +633,13 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         await UpdateRequisitionTotals(requisition);
         await _requisitionRepository.UpdateAsync(requisition);
         await _unitOfWork.SaveChangesAsync();
+        if (requisition.ProjectId.HasValue)
+        {
+            await _projectService.SyncInventoryRequisitionMaterialCostAsync(requisition.Id);
+        }
 
         _logger.LogInformation("Returned items for requisition {RequisitionNumber}", requisition.RequisitionNumber);
         return true;
-    }
-
-    private async Task<Project?> GetLinkedProjectAsync(InventoryRequisition requisition)
-    {
-        if (!requisition.ProjectId.HasValue)
-        {
-            return null;
-        }
-
-        var project = await _projectRepository.GetByIdAsync(requisition.ProjectId.Value)
-            ?? throw new InvalidOperationException($"Project {requisition.ProjectId.Value} linked to requisition {requisition.RequisitionNumber} was not found.");
-
-        if (project.TenantId != _currentUserProvider.TenantId)
-        {
-            throw new UnauthorizedAccessException("The linked project belongs to a different tenant.");
-        }
-
-        return project;
-    }
-
-    private async Task PostProjectMaterialConsumptionAsync(
-        Project project,
-        InventoryRequisition requisition,
-        InventoryRequisitionItem requisitionItem,
-        decimal issuedQuantity,
-        string? issueNotes)
-    {
-        var amount = decimal.Round(issuedQuantity * requisitionItem.UnitCost, 2, MidpointRounding.AwayFromZero);
-        if (amount <= 0m)
-        {
-            return;
-        }
-
-        var effectiveUserId = _currentUserProvider.UserId != Guid.Empty
-            ? _currentUserProvider.UserId
-            : requisition.RequestedById ?? Guid.Empty;
-
-        if (effectiveUserId == Guid.Empty)
-        {
-            throw new UnauthorizedAccessException("A valid user context is required to post project material consumption.");
-        }
-
-        var noteParts = new List<string>
-        {
-            $"Material issue from requisition {requisition.RequisitionNumber}",
-            !string.IsNullOrWhiteSpace(requisitionItem.ItemCode) ? requisitionItem.ItemCode! : requisitionItem.InventoryItemId.ToString(),
-            $"{issuedQuantity:N2} @ {requisitionItem.UnitCost:N2}"
-        };
-
-        if (!string.IsNullOrWhiteSpace(issueNotes))
-        {
-            noteParts.Add(issueNotes.Trim());
-        }
-
-        var expense = new ProjectExpense
-        {
-            TenantId = _currentUserProvider.TenantId,
-            ProjectId = project.Id,
-            UserId = effectiveUserId,
-            ExpenseDate = DateTime.UtcNow.Date,
-            Category = "Materials",
-            Currency = "USD",
-            Amount = amount,
-            TaxAmount = 0m,
-            IsBillable = false,
-            Status = "Approved",
-            Notes = string.Join(" | ", noteParts),
-            ApprovedAt = DateTime.UtcNow,
-            ApprovedById = effectiveUserId,
-            CreatedBy = _currentUserProvider.Username,
-            CreatedById = effectiveUserId
-        };
-
-        await _unitOfWork.Repository<ProjectExpense>().AddAsync(expense);
-
-        project.ActualCost = (project.ActualCost ?? 0m) + amount;
-        project.UpdatedAt = DateTime.UtcNow;
-        project.UpdatedBy = _currentUserProvider.Username;
-        project.LastModifiedById = effectiveUserId;
-        await _projectRepository.UpdateAsync(project);
-    }
-
-    private async Task ReverseProjectMaterialConsumptionAsync(
-        Project project,
-        InventoryRequisition requisition,
-        InventoryRequisitionItem requisitionItem,
-        decimal returnedQuantity,
-        string? returnNotes)
-    {
-        var amount = decimal.Round(returnedQuantity * requisitionItem.UnitCost, 2, MidpointRounding.AwayFromZero);
-        if (amount <= 0m)
-        {
-            return;
-        }
-
-        var effectiveUserId = _currentUserProvider.UserId != Guid.Empty
-            ? _currentUserProvider.UserId
-            : requisition.RequestedById ?? Guid.Empty;
-
-        if (effectiveUserId == Guid.Empty)
-        {
-            throw new UnauthorizedAccessException("A valid user context is required to reverse project material consumption.");
-        }
-
-        var noteParts = new List<string>
-        {
-            $"Material return from requisition {requisition.RequisitionNumber}",
-            !string.IsNullOrWhiteSpace(requisitionItem.ItemCode) ? requisitionItem.ItemCode! : requisitionItem.InventoryItemId.ToString(),
-            $"{returnedQuantity:N2} @ {requisitionItem.UnitCost:N2}"
-        };
-
-        if (!string.IsNullOrWhiteSpace(returnNotes))
-        {
-            noteParts.Add(returnNotes.Trim());
-        }
-
-        var expense = new ProjectExpense
-        {
-            TenantId = _currentUserProvider.TenantId,
-            ProjectId = project.Id,
-            UserId = effectiveUserId,
-            ExpenseDate = DateTime.UtcNow.Date,
-            Category = "Materials",
-            Currency = "USD",
-            Amount = -amount,
-            TaxAmount = 0m,
-            IsBillable = false,
-            Status = "Approved",
-            Notes = string.Join(" | ", noteParts),
-            ApprovedAt = DateTime.UtcNow,
-            ApprovedById = effectiveUserId,
-            CreatedBy = _currentUserProvider.Username,
-            CreatedById = effectiveUserId
-        };
-
-        await _unitOfWork.Repository<ProjectExpense>().AddAsync(expense);
-
-        project.ActualCost = Math.Max(0m, (project.ActualCost ?? 0m) - amount);
-        project.UpdatedAt = DateTime.UtcNow;
-        project.UpdatedBy = _currentUserProvider.Username;
-        project.LastModifiedById = effectiveUserId;
-        await _projectRepository.UpdateAsync(project);
     }
 
     private static RequisitionStatus ResolveStatusAfterReturn(InventoryRequisition requisition)
@@ -1018,6 +875,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             CostCenter = requisition.CostCenter,
             WarehouseId = requisition.WarehouseId,
             WarehouseName = requisition.Warehouse?.Name ?? string.Empty,
+            LocationId = requisition.LocationId,
+            LocationName = requisition.Location?.LocationCode,
             ProjectId = requisition.ProjectId,
             ProjectCode = requisition.ProjectCode,
             Status = requisition.Status,

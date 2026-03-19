@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
@@ -383,7 +382,6 @@ const NotificationTopics: React.FC = () => {
 
   useEffect(() => {
     loadAll()
-     
   }, [])
 
   const seedEntityTypes = async () => {
@@ -468,8 +466,10 @@ const NotificationTopics: React.FC = () => {
       isActive: !!t.isActive,
       enableInApp: !!t.enableInApp,
       enableEmail: !!t.enableEmail,
+      enableSms: !!t.enableSms,
       inAppTitleTemplate: t.inAppTitleTemplate || '',
       inAppBodyTemplate: t.inAppBodyTemplate || '',
+      smsBodyTemplate: t.smsBodyTemplate || '',
       actionUrlTemplate: t.actionUrlTemplate || '',
       emailTemplateId: t.emailTemplateId || '',
       recipients: (t.recipients || []).map(r => ({
@@ -817,8 +817,18 @@ const TopicForm: React.FC<{
 
   const entityTypeOptions = useMemo(() => {
     const list = (entityTypes || [])
-      .filter(et => !!(et?.name || '').trim())
-      .map(et => ({ value: et.name!.trim(), label: et.code ? `${et.name} (${et.code})` : et.name! }))
+      .map(et => {
+        const entityTypeName = et?.name?.trim()
+        if (!entityTypeName) {
+          return null
+        }
+
+        return {
+          value: entityTypeName,
+          label: et.code ? `${entityTypeName} (${et.code})` : entityTypeName,
+        }
+      })
+      .filter((et): et is { value: string; label: string } => et !== null)
       .sort((a, b) => a.label.localeCompare(b.label))
     return list
   }, [entityTypes])

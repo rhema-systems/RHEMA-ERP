@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, ReactNode } from 'react';
+import { useEffect, ReactNode, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '../../services/auth';
 import { useAuth } from '../../hooks/use-auth';
+import { buildLoginRedirectUrl, getCurrentRelativeUrl } from '../../lib/auth-redirect';
 
 interface AuthGuardProps {
   children: ReactNode;
@@ -20,41 +21,58 @@ export function AuthGuard({
 }: AuthGuardProps) {
   const router = useRouter();
   const { user, isLoading } = useAuth();
+  const [hasMounted, setHasMounted] = useState(false);
+  const storedUser = hasMounted ? authService.getStoredUser() : null;
+  const isAuthenticated = hasMounted && authService.isAuthenticated();
+  const effectiveUser = user ?? storedUser;
+  const permissionsResolved = !requiredPermissions?.length || !!effectiveUser || !isLoading;
   const hasRequiredPermission = requiredPermissions?.length
-    ? (user?.permissions?.some(permission => requiredPermissions.includes(permission)) ??
-      authService.hasAnyPermission(requiredPermissions))
+    ? (effectiveUser?.permissions?.some(permission => requiredPermissions.includes(permission)) ?? false)
     : true;
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && !authService.isAuthenticated()) {
-      router.push(redirectTo);
+    setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasMounted) {
       return;
     }
 
-    if (
-      typeof window !== 'undefined' &&
-      !isLoading &&
-      requiredPermissions?.length &&
-      !hasRequiredPermission
-    ) {
-      router.push('/dashboard');
+    if (!isAuthenticated) {
+      const loginTarget = redirectTo === '/login'
+        ? buildLoginRedirectUrl(getCurrentRelativeUrl())
+        : redirectTo;
+      router.replace(loginTarget);
+      return;
     }
-  }, [router, redirectTo, requiredPermissions, hasRequiredPermission, isLoading]);
 
-  // Don't render anything if not authenticated
-  if (typeof window !== 'undefined' && !authService.isAuthenticated()) {
+    if (requiredPermissions?.length && permissionsResolved && !hasRequiredPermission) {
+      router.replace('/dashboard');
+    }
+  }, [
+    hasMounted,
+    isAuthenticated,
+    router,
+    redirectTo,
+    requiredPermissions,
+    permissionsResolved,
+    hasRequiredPermission,
+  ]);
+
+  if (!hasMounted) {
     return <>{fallback}</>;
   }
 
-  if (isLoading) {
+  if (!isAuthenticated) {
     return <>{fallback}</>;
   }
 
-  if (
-    typeof window !== 'undefined' &&
-    requiredPermissions?.length &&
-    !hasRequiredPermission
-  ) {
+  if (requiredPermissions?.length && !permissionsResolved) {
+    return <>{fallback}</>;
+  }
+
+  if (requiredPermissions?.length && !hasRequiredPermission) {
     return <>{fallback}</>;
   }
 

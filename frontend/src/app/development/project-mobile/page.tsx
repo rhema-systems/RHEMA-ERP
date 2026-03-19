@@ -451,6 +451,7 @@ export default function ProjectMobilePage() {
                   onChange={(e) => setTimesheetDrafts((prev) => ({
                     ...prev,
                     [item.workItemId]: {
+                      ...prev[item.workItemId],
                       userId,
                       entryDate: today(),
                       hours: Number(e.target.value || '0'),
@@ -458,7 +459,6 @@ export default function ProjectMobilePage() {
                       hourlyRate: 0,
                       workType: pickPreferredOption(workTypeOptions, ['Field', 'Standard']),
                       notes: '',
-                      ...prev[item.workItemId],
                     },
                   }))}
                 />
@@ -470,6 +470,7 @@ export default function ProjectMobilePage() {
                   onValueChange={(value) => setTimesheetDrafts((prev) => ({
                     ...prev,
                     [item.workItemId]: {
+                      ...prev[item.workItemId],
                       userId,
                       entryDate: today(),
                       hours: 8,
@@ -477,7 +478,6 @@ export default function ProjectMobilePage() {
                       hourlyRate: 0,
                       workType: value,
                       notes: '',
-                      ...prev[item.workItemId],
                     },
                   }))}
                 >
@@ -498,6 +498,7 @@ export default function ProjectMobilePage() {
                   onChange={(e) => setExpenseDrafts((prev) => ({
                     ...prev,
                     [item.workItemId]: {
+                      ...prev[item.workItemId],
                       userId,
                       expenseDate: today(),
                       category: pickPreferredOption(expenseCategoryOptions, ['Travel', 'Supplies']),
@@ -506,7 +507,6 @@ export default function ProjectMobilePage() {
                       taxAmount: 0,
                       isBillable: false,
                       notes: '',
-                      ...prev[item.workItemId],
                     },
                   }))}
                 />
@@ -518,6 +518,7 @@ export default function ProjectMobilePage() {
                   onValueChange={(value) => setExpenseDrafts((prev) => ({
                     ...prev,
                     [item.workItemId]: {
+                      ...prev[item.workItemId],
                       userId,
                       expenseDate: today(),
                       category: value,
@@ -526,7 +527,6 @@ export default function ProjectMobilePage() {
                       taxAmount: 0,
                       isBillable: false,
                       notes: '',
-                      ...prev[item.workItemId],
                     },
                   }))}
                 >

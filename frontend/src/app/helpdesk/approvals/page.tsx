@@ -14,7 +14,7 @@ import { ehcServiceCatalogService, type WorkflowApprovalItem } from '@/services/
 
 export default function HelpdeskApprovalsPage() {
   const searchParams = useSearchParams();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [q, setQ] = useState('');
 

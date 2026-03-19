@@ -93,10 +93,12 @@ export interface TenderBidDocumentDto {
   tenderBidId: string;
   documentType: string;
   documentName: string;
+  fileName?: string;
   filePath: string;
   fileType?: string;
   fileSize?: number;
   uploadedDate: string;
+  uploadedAt?: string;
   uploadedByName?: string;
 }
 
@@ -455,8 +457,7 @@ export async function uploadBidDocument(
     formData.append('documentName', documentName);
   }
 
-  const headers = getAuthHeaders();
-  delete headers['Content-Type']; // Let browser set Content-Type with boundary for multipart/form-data
+  const { ['Content-Type']: _contentType, ...headers } = getAuthHeaders() as Record<string, string>;
 
   const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/documents`, {
     method: 'POST',
@@ -539,4 +540,3 @@ export async function openAllBidsByTender(tenderId: string): Promise<{ openedCou
 
   return response.json();
 }
-

@@ -143,16 +143,16 @@ export default function AdministrationReportsPage() {
   const [executingReportId, setExecutingReportId] = useState<string | null>(null);
   const [showResultsDialog, setShowResultsDialog] = useState(false);
   const [selectedReportForResults, setSelectedReportForResults] = useState<{ id: string; name: string } | null>(null);
-
+  
   // Module/Role assignment dialogs
   const [showModuleAssignDialog, setShowModuleAssignDialog] = useState(false);
   const [showRoleAssignDialog, setShowRoleAssignDialog] = useState(false);
   const [selectedReportForAssignment, setSelectedReportForAssignment] = useState<string | null>(null);
   const [selectedModuleForAssignment, setSelectedModuleForAssignment] = useState<string | null>(null);
   const [showPublishDialog, setShowPublishDialog] = useState(false);
-
+  
   const isClient = useIsClient();
-
+  
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -205,7 +205,7 @@ export default function AdministrationReportsPage() {
     isLoading: reportsLoading,
     error: reportsError,
     refetch: refetchReports
-  } = useQuery({
+  } = useQuery<ReportDefinition[], Error>({
     queryKey: ['admin-reports', selectedType !== 'all' ? selectedType : undefined, selectedStatus !== 'all' ? selectedStatus : undefined],
     queryFn: () => {
       console.log('Fetching reports...');
@@ -215,23 +215,29 @@ export default function AdministrationReportsPage() {
       );
     },
     refetchOnWindowFocus: false,
-    onSuccess: (data) => {
-      console.log('Reports fetched successfully:', data.length, 'reports');
-    },
-    onError: (error) => {
-      console.error('Failed to fetch reports:', error);
-    }
   });
 
   // Fetch analytics
   const {
     data: analytics,
     isLoading: analyticsLoading
-  } = useQuery({
+  } = useQuery<ReportAnalytics, Error>({
     queryKey: ['reportAnalytics'],
     queryFn: () => reportsService.getReportAnalytics(),
     refetchOnWindowFocus: false,
   });
+
+  React.useEffect(() => {
+    if (reports.length > 0) {
+      console.log('Reports fetched successfully:', reports.length, 'reports');
+    }
+  }, [reports]);
+
+  React.useEffect(() => {
+    if (reportsError) {
+      console.error('Failed to fetch reports:', reportsError);
+    }
+  }, [reportsError]);
 
   // Enhanced mutations for admin functionality
   const executeReportMutation = useMutation({
@@ -356,7 +362,7 @@ export default function AdministrationReportsPage() {
     if (isPublished) {
       return <Badge variant="default" className="bg-green-600"><CheckCircle className="h-3 w-3 mr-1" />Published</Badge>;
     }
-
+    
     switch (status.toLowerCase()) {
       case 'published':
         return <Badge variant="default" className="bg-green-600"><CheckCircle className="h-3 w-3 mr-1" />Published</Badge>;
@@ -370,8 +376,8 @@ export default function AdministrationReportsPage() {
   };
 
   const getModuleIcon = (moduleId: string) => {
-    const selectedModule = modules.find(m => m.id === moduleId);
-    switch (selectedModule?.icon) {
+    const matchedModule = modules.find(m => m.id === moduleId);
+    switch (matchedModule?.icon) {
       case 'DollarSign':
         return <DollarSign className="h-3 w-3" />;
       case 'TrendingUp':
@@ -433,9 +439,9 @@ export default function AdministrationReportsPage() {
   // Filter reports
   const filteredReports = reports.filter(report => {
     const matchesSearch = report.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.description.toLowerCase().includes(searchQuery.toLowerCase());
+                         report.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = selectedType === 'all' || report.type.toLowerCase() === selectedType.toLowerCase();
-    const matchesStatus = selectedStatus === 'all' ||
+    const matchesStatus = selectedStatus === 'all' || 
       (selectedStatus === 'published' && (report as EnhancedReportDefinition).isPublished) ||
       (selectedStatus === 'draft' && !(report as EnhancedReportDefinition).isPublished);
     return matchesSearch && matchesType && matchesStatus;
@@ -483,7 +489,7 @@ export default function AdministrationReportsPage() {
             </div>
           </div>
         )}
-
+        
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Reports Administration</h1>
@@ -491,10 +497,10 @@ export default function AdministrationReportsPage() {
               Create, manage, and publish reports for your organization
             </p>
           </div>
-
+          
           <div className="flex items-center space-x-2">
-            <Button
-              variant="outline"
+            <Button 
+              variant="outline" 
               onClick={() => refetchReports()}
               disabled={reportsLoading}
             >
@@ -664,7 +670,7 @@ export default function AdministrationReportsPage() {
                   className="pl-10"
                 />
               </div>
-
+              
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline">
@@ -773,7 +779,7 @@ export default function AdministrationReportsPage() {
                               </div>
                             </div>
                           </div>
-
+                        
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="sm">
@@ -781,7 +787,7 @@ export default function AdministrationReportsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem
+                              <DropdownMenuItem 
                                 onClick={() => handleRunReport(report.id)}
                                 disabled={executingReportId === report.id}
                               >
@@ -807,7 +813,7 @@ export default function AdministrationReportsPage() {
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               {!enhancedReport.isPublished ? (
-                                <DropdownMenuItem
+                                <DropdownMenuItem 
                                   onClick={() => handlePublishReport(report.id)}
                                   className="text-green-600"
                                 >
@@ -829,7 +835,7 @@ export default function AdministrationReportsPage() {
                                 <Edit className="h-4 w-4 mr-2" />
                                 Edit
                               </DropdownMenuItem>
-                              <DropdownMenuItem
+                              <DropdownMenuItem 
                                 onClick={() => handleDeleteReport(report.id)}
                                 className="text-red-600"
                               >
@@ -840,12 +846,12 @@ export default function AdministrationReportsPage() {
                           </DropdownMenu>
                         </div>
                       </CardHeader>
-
+                      
                       <CardContent>
                         <CardDescription className="mb-4">
                           {report.description}
                         </CardDescription>
-
+                        
                         <div className="space-y-2 text-sm text-muted-foreground">
                           <div className="flex justify-between">
                             <span>Created by:</span>
@@ -870,11 +876,11 @@ export default function AdministrationReportsPage() {
                             </div>
                           )}
                         </div>
-
+                        
                         <div className="flex space-x-2 mt-4">
-                          <Button
-                            size="sm"
-                            className="flex-1"
+                          <Button 
+                            size="sm" 
+                            className="flex-1" 
                             onClick={() => handleRunReport(report.id)}
                             disabled={executingReportId === report.id}
                           >
@@ -885,18 +891,18 @@ export default function AdministrationReportsPage() {
                             )}
                             Test
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
                             onClick={() => handleViewResults(report.id, report.name)}
                           >
                             <Eye className="h-4 w-4 mr-2" />
                             View
                           </Button>
                           {!enhancedReport.isPublished ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
                               onClick={() => handlePublishReport(report.id)}
                               className="text-green-600 border-green-600 hover:bg-green-50"
                             >
@@ -1019,7 +1025,7 @@ export default function AdministrationReportsPage() {
                     <CardContent>
                       <div className="space-y-4">
                         {roles.map((role) => {
-                          const assignedReportCount = filteredReports.filter(r =>
+                          const assignedReportCount = filteredReports.filter(r => 
                             (r as EnhancedReportDefinition).assignedRoles?.includes(role.name)
                           ).length;
                           return (
@@ -1105,25 +1111,25 @@ export default function AdministrationReportsPage() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {modules.map((module) => (
-                    <Card key={module.id}>
+                  {modules.map((tenantModule) => (
+                    <Card key={tenantModule.id}>
                       <CardHeader className="pb-3">
                         <div className="flex items-center space-x-2">
                           <div className="p-2 rounded-lg bg-blue-100 text-blue-700">
-                            {getModuleIcon(module.id)}
+                            {getModuleIcon(tenantModule.id)}
                           </div>
                           <div>
-                            <CardTitle className="text-lg">{module.name}</CardTitle>
+                            <CardTitle className="text-lg">{tenantModule.name}</CardTitle>
                           </div>
                         </div>
                       </CardHeader>
                       <CardContent>
                         <p className="text-sm text-muted-foreground mb-4">
-                          {module.description}
+                          {tenantModule.description}
                         </p>
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">
-                            {filteredReports.filter(r => (r as EnhancedReportDefinition).moduleId === module.id).length} reports
+                            {filteredReports.filter(r => (r as EnhancedReportDefinition).moduleId === tenantModule.id).length} reports
                           </span>
                           <Button size="sm" variant="outline">
                             <Settings className="h-4 w-4 mr-2" />
@@ -1162,11 +1168,11 @@ export default function AdministrationReportsPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="flex-1 overflow-y-auto px-6 py-4">
-              <ReportBuilder
+              <ReportBuilder 
                 onClose={() => {
                   setIsBuilderOpen(false);
                   setEditingReport(null);
-                }}
+                }} 
                 onReportCreated={() => {
                   setIsBuilderOpen(false);
                   setEditingReport(null);
@@ -1203,27 +1209,28 @@ export default function AdministrationReportsPage() {
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-3 max-h-96 overflow-y-auto">
-                {modules.map((module) => (
-                  <Card
-                    key={module.id}
-                    className={`cursor-pointer hover:bg-muted/50 transition-colors ${selectedModuleForAssignment === module.id ? 'ring-2 ring-primary bg-muted/50' : ''
-                      }`}
-                    onClick={() => setSelectedModuleForAssignment(module.id)}
+                {modules.map((tenantModule) => (
+                  <Card 
+                    key={tenantModule.id} 
+                    className={`cursor-pointer hover:bg-muted/50 transition-colors ${
+                      selectedModuleForAssignment === tenantModule.id ? 'ring-2 ring-primary bg-muted/50' : ''
+                    }`} 
+                    onClick={() => setSelectedModuleForAssignment(tenantModule.id)}
                   >
                     <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           <div className="p-2 rounded-lg bg-blue-100 text-blue-700">
-                            {getModuleIcon(module.id)}
+                            {getModuleIcon(tenantModule.id)}
                           </div>
                           <div>
-                            <CardTitle className="text-base">{module.name}</CardTitle>
+                            <CardTitle className="text-base">{tenantModule.name}</CardTitle>
                             <CardDescription className="text-sm">
-                              {module.description}
+                              {tenantModule.description}
                             </CardDescription>
                           </div>
                         </div>
-                        {selectedModuleForAssignment === module.id && (
+                        {selectedModuleForAssignment === tenantModule.id && (
                           <CheckCircle className="h-5 w-5 text-primary" />
                         )}
                       </div>
@@ -1231,10 +1238,10 @@ export default function AdministrationReportsPage() {
                   </Card>
                 ))}
               </div>
-
+              
               <div className="flex justify-end space-x-3 pt-4 border-t">
-                <Button
-                  variant="outline"
+                <Button 
+                  variant="outline" 
                   onClick={() => {
                     setShowModuleAssignDialog(false);
                     setSelectedReportForAssignment(null);
@@ -1243,12 +1250,12 @@ export default function AdministrationReportsPage() {
                 >
                   Cancel
                 </Button>
-                <Button
+                <Button 
                   onClick={() => {
                     if (selectedReportForAssignment && selectedModuleForAssignment) {
-                      assignModuleMutation.mutate({
-                        reportId: selectedReportForAssignment,
-                        moduleId: selectedModuleForAssignment
+                      assignModuleMutation.mutate({ 
+                        reportId: selectedReportForAssignment, 
+                        moduleId: selectedModuleForAssignment 
                       });
                       setShowModuleAssignDialog(false);
                       setSelectedReportForAssignment(null);

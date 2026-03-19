@@ -14,7 +14,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, Send, XCircle, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
-import { DateRange } from '@/components/ui/calendar';
+import type { DateRange } from 'react-day-picker';
 import { format } from 'date-fns';
 import {
   Dialog,
@@ -57,6 +57,10 @@ import { ClipboardCheck, CheckCircle as CheckIcon, XCircle as XIcon } from 'luci
 import { Switch } from '@/components/ui/switch';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 
+type JobCardStatus = 'Draft' | 'Submitted' | 'UnderReview' | 'Approved' | 'Rejected' | 'Cancelled';
+type JobCardApprovalStatus = 'NotStarted' | 'Pending' | 'Approved' | 'Rejected' | 'ChangesRequested';
+type JobCardPriority = 'Low' | 'Medium' | 'High' | 'Critical';
+
 // Use the JobCard type from service instead of local interface
 interface JobCard {
   id: string;
@@ -66,24 +70,39 @@ interface JobCard {
   problemDescription?: string;
   assetId: string;
   assetName: string;
-  assetCode: string;
+  assetCode?: string;
   maintenanceTypeId: string;
   maintenanceType: string;
   priorityLevelId: string;
-  priority: 'Low' | 'Medium' | 'High' | 'Critical';
-  priorityColor: string;
-  jobCardStatus: 'Draft' | 'Submitted' | 'UnderReview' | 'Approved' | 'Rejected' | 'Cancelled';
-  approvalStatus: 'NotStarted' | 'Pending' | 'Approved' | 'Rejected' | 'ChangesRequested';
+  priority: JobCardPriority;
+  priorityColor?: string;
+  jobCardStatus: JobCardStatus;
+  approvalStatus: JobCardApprovalStatus;
+  requestedById?: string;
   requestedBy: string;
-  requestedDate: string;
+  requestedDate?: string;
   requiredCompletionDate?: string;
   estimatedHours: number;
   estimatedCost: number;
-  requiresShutdown: boolean;
-  requiresSafetyPermit: boolean;
+  requiresShutdown?: boolean;
+  requiresSafetyPermit?: boolean;
   generatedWorkOrderId?: string;
   workOrderGeneratedAt?: string;
   createdAt: string;
+}
+
+interface JobCardFormState {
+  title: string;
+  description: string;
+  assetName: string;
+  assetId: string;
+  priority: JobCardPriority;
+  maintenanceType: string;
+  maintenanceTypeId: string;
+  priorityLevelId: string;
+  estimatedHours: number;
+  estimatedCost: number;
+  problemDescription: string;
 }
 
 export default function JobCardsPage() {
@@ -197,18 +216,21 @@ export default function JobCardsPage() {
   const [approvalCardId, setApprovalCardId] = useState<string | null>(null);
   const [approvalBillingType, setApprovalBillingType] = useState<'Maintenance' | 'Repairs'>('Repairs');
 
-  const [newJobCard, setNewJobCard] = useState({
+  const [newJobCard, setNewJobCard] = useState<JobCardFormState>({
     title: '',
     description: '',
     assetName: '',
+    assetId: '',
     priority: 'Medium' as const,
     maintenanceType: 'Preventive',
+    maintenanceTypeId: '',
+    priorityLevelId: '',
     estimatedHours: 0,
     estimatedCost: 0,
     problemDescription: '',
   });
 
-  const [editJobCard, setEditJobCard] = useState({
+  const [editJobCard, setEditJobCard] = useState<JobCardFormState>({
     title: '',
     description: '',
     assetName: '',
@@ -229,7 +251,7 @@ export default function JobCardsPage() {
         const admissionsResult = await assetAdmissionService.getAdmissions({
           jobCardId,
           status: 'Active',
-          pageNumber: 1,
+          page: 1,
           pageSize: 1,
         });
 
@@ -270,18 +292,18 @@ export default function JobCardsPage() {
         console.log('🧪 TESTING MODE: Using mock data');
 
         // Mock data for testing
-        const mockAssets = [
-          { id: '1', name: 'HVAC Unit 1', assetNumber: 'HVAC-001' },
-          { id: '2', name: 'Elevator Unit 1', assetNumber: 'ELEV-001' },
-          { id: '3', name: 'Generator Unit 1', assetNumber: 'GEN-001' },
-          { id: '4', name: 'Fire Pump System', assetNumber: 'FP-001' }
+        const mockAssets: Asset[] = [
+          { id: '1', name: 'HVAC Unit 1', assetNumber: 'HVAC-001', status: 'Active', criticality: 'Medium', assetCategoryId: '1' },
+          { id: '2', name: 'Elevator Unit 1', assetNumber: 'ELEV-001', status: 'Active', criticality: 'High', assetCategoryId: '2' },
+          { id: '3', name: 'Generator Unit 1', assetNumber: 'GEN-001', status: 'Active', criticality: 'Critical', assetCategoryId: '3' },
+          { id: '4', name: 'Fire Pump System', assetNumber: 'FP-001', status: 'Active', criticality: 'High', assetCategoryId: '4' }
         ];
 
-        const mockPriorityLevels = [
-          { id: '1', name: 'Low' },
-          { id: '2', name: 'Medium' },
-          { id: '3', name: 'High' },
-          { id: '4', name: 'Critical' }
+        const mockPriorityLevels: PriorityLevel[] = [
+          { id: '1', name: 'Low', code: 'LOW', level: 1, isActive: true, responseTime: 72, escalationTime: 96, slaHours: 72, autoAssign: false },
+          { id: '2', name: 'Medium', code: 'MED', level: 2, isActive: true, responseTime: 48, escalationTime: 72, slaHours: 48, autoAssign: false },
+          { id: '3', name: 'High', code: 'HIGH', level: 3, isActive: true, responseTime: 24, escalationTime: 36, slaHours: 24, autoAssign: true },
+          { id: '4', name: 'Critical', code: 'CRIT', level: 4, isActive: true, responseTime: 4, escalationTime: 8, slaHours: 4, autoAssign: true }
         ];
 
         const mockMaintenanceTypes = [
@@ -786,25 +808,31 @@ export default function JobCardsPage() {
       const jobCardsResponse = await jobCardService.getJobCards({
         hasWorkOrder: hasWorkOrderFilter === 'all' ? undefined : hasWorkOrderFilter === 'with'
       });
-      const mappedJobCards = jobCardsResponse.items.map((card: JobCardType) => ({
+      const mappedJobCards: JobCard[] = jobCardsResponse.items.map((card: JobCardType) => ({
         id: card.id,
         jobCardNumber: card.jobCardNumber,
         title: card.title,
         description: card.description,
         problemDescription: card.problemDescription,
         assetName: card.assetName,
+        assetCode: card.assetCode,
         requestedBy: card.requestedBy,
+        requestedById: card.requestedById,
         jobCardStatus: card.jobCardStatus as JobCard['jobCardStatus'],
         approvalStatus: card.approvalStatus as JobCard['approvalStatus'],
         priority: card.priority as JobCard['priority'],
+        priorityColor: card.priorityColor,
         createdAt: card.createdAt,
+        requestedDate: card.requestedDate,
         estimatedHours: card.estimatedHours,
         estimatedCost: card.estimatedCost,
         maintenanceType: card.maintenanceType,
         generatedWorkOrderId: card.generatedWorkOrderId,
         assetId: card.assetId,
         maintenanceTypeId: card.maintenanceTypeId,
-        priorityLevelId: card.priorityLevelId
+        priorityLevelId: card.priorityLevelId,
+        requiresShutdown: card.requiresShutdown,
+        requiresSafetyPermit: card.requiresSafetyPermit
       }));
       setJobCards(mappedJobCards);
       setFilteredCards(mappedJobCards);
@@ -885,7 +913,8 @@ export default function JobCardsPage() {
     }
 
     if (dateRange?.from) {
-      filtered = filtered.filter(card => new Date(card.createdAt) >= dateRange.from!);
+      const { from } = dateRange;
+      filtered = filtered.filter((card) => new Date(card.createdAt) >= from);
     }
 
     if (dateRange?.to) {
@@ -899,7 +928,7 @@ export default function JobCardsPage() {
 
   // Handle opening job card from URL parameter
   useEffect(() => {
-    const jobCardId = searchParams.get('id');
+    const jobCardId = searchParams?.get('id');
     if (jobCardId && jobCards.length > 0 && !isViewDialogOpen && !loadingData) {
       const jobCard = jobCards.find(jc => jc.id === jobCardId);
       if (jobCard) {
@@ -1063,8 +1092,11 @@ export default function JobCardsPage() {
         title: '',
         description: '',
         assetName: '',
+        assetId: '',
         priority: 'Medium',
         maintenanceType: 'Preventive',
+        maintenanceTypeId: '',
+        priorityLevelId: '',
         estimatedHours: 0,
         estimatedCost: 0,
         problemDescription: '',
@@ -1145,7 +1177,7 @@ export default function JobCardsPage() {
     </TableHead>
   );
 
-  const getStatusBadge = (jobCardStatus: JobCard['jobCardStatus'], approvalStatus: JobCard['approvalStatus']) => {
+  const getStatusBadge = (jobCardStatus: string, approvalStatus: string) => {
     const statusColors = {
       'Draft': 'bg-gray-100 text-gray-800',
       'Submitted': 'bg-blue-100 text-blue-800',
@@ -1153,29 +1185,29 @@ export default function JobCardsPage() {
       'Approved': 'bg-green-100 text-green-800',
       'Rejected': 'bg-red-100 text-red-800',
       'Cancelled': 'bg-red-100 text-red-800',
-    };
+    } satisfies Record<JobCardStatus, string>;
 
     const displayStatus = jobCardStatus === 'Submitted' && approvalStatus === 'Pending' ? 'Under Review' :
                          jobCardStatus === 'Approved' && approvalStatus === 'ChangesRequested' ? 'Changes Requested' :
                          jobCardStatus;
 
     return (
-      <Badge className={statusColors[jobCardStatus] || 'bg-gray-100 text-gray-800'}>
+      <Badge className={statusColors[jobCardStatus as JobCardStatus] || 'bg-gray-100 text-gray-800'}>
         {displayStatus}
       </Badge>
     );
   };
 
-  const getPriorityBadge = (priority: JobCard['priority']) => {
+  const getPriorityBadge = (priority: string) => {
     const colors = {
       'Low': 'bg-green-100 text-green-800',
       'Medium': 'bg-blue-100 text-blue-800',
       'High': 'bg-orange-100 text-orange-800',
       'Critical': 'bg-red-100 text-red-800',
-    };
+    } satisfies Record<JobCardPriority, string>;
 
     return (
-      <Badge className={colors[priority]}>
+      <Badge className={colors[priority as JobCardPriority] || 'bg-gray-100 text-gray-800'}>
         {priority}
       </Badge>
     );
@@ -3965,10 +3997,13 @@ export default function JobCardsPage() {
                           <Label className="text-sm font-medium">🔧 Action Required:</Label>
                           <Select
                             value={itemResponses[item.id]?.repairReplacementAction || item.defaultRepairReplacementAction || 'None'}
-                            onValueChange={(value) => setItemResponses(prev => ({
-                              ...prev,
-                              [item.id]: { ...prev[item.id], checklistItemId: item.id, repairReplacementAction: value }
-                            }))}
+                            onValueChange={(value) => {
+                              const repairReplacementAction = value as SubmitAssetConditionItemDto['repairReplacementAction'];
+                              setItemResponses(prev => ({
+                                ...prev,
+                                [item.id]: { ...prev[item.id], checklistItemId: item.id, repairReplacementAction }
+                              }));
+                            }}
                           >
                             <SelectTrigger className="w-40">
                               <SelectValue placeholder="Select action" />

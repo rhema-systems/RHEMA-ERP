@@ -233,23 +233,27 @@ export default function QualityControlPage() {
       } catch (complianceError) {
         console.log('Compliance API not available, using mock data');
         setComplianceDashboard({
+          totalAssets: 15,
+          compliantAssets: 12,
+          atRiskAssets: 1,
+          overdueAssets: 2,
+          overdueItems: 2,
+          violations: 2,
+          complianceRate: 85.7,
+          upcomingDeadlines: [],
+          recentViolations: [],
+          criticalRequirements: [],
+          complianceByCategory: [],
+          complianceByRequirement: [],
+          auditActivity: [],
           totalRequirements: 15,
           compliantRequirements: 12,
           nonCompliantRequirements: 2,
           pendingRequirements: 1,
-          complianceRate: 85.7,
           lastAuditDate: new Date().toISOString(),
-          nextAuditDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+          nextAuditDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
         });
-        setUpcomingDeadlines([
-          {
-            id: '1',
-            title: 'Annual Safety Inspection',
-            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            priority: 'High',
-            status: 'Pending'
-          }
-        ]);
+        setUpcomingDeadlines([]);
       }
       
       // Try to load checklists count, fallback to mock data

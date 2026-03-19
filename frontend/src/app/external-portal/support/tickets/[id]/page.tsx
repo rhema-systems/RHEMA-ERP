@@ -98,7 +98,7 @@ const toDisplayUrl = (attachment: EhcTicketAttachment) => {
 export default function ExternalPortalSupportTicketDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const ticketId = params?.id;
+  const ticketId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -764,7 +764,6 @@ export default function ExternalPortalSupportTicketDetailPage() {
           {preview?.url ? (
             preview.kind === 'image' ? (
               <div className="rounded-md border bg-white p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={preview.url} alt={preview.name} className="max-h-[70vh] w-full object-contain" />
               </div>
             ) : preview.kind === 'pdf' ? (

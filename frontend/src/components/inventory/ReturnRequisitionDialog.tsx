@@ -33,6 +33,8 @@ interface ReturnItemState {
   issuedQuantity: number;
   returningQuantity: number;
   unitOfMeasure: string;
+  locationId?: string;
+  locationName?: string;
 }
 
 const normalizeStatus = (status: number | string | undefined): number => {
@@ -72,6 +74,8 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
         issuedQuantity: item.issuedQuantity || 0,
         returningQuantity: 0,
         unitOfMeasure: item.unitOfMeasure,
+        locationId: item.locationId || detail.locationId,
+        locationName: item.locationName || detail.locationName,
       })));
       setNotes('');
     } catch (error) {
@@ -111,6 +115,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
         items: items.map((item) => ({
           itemId: item.itemId,
           returnedQuantity: item.returningQuantity,
+          locationId: item.locationId,
         })),
         notes: notes || undefined,
       };
@@ -152,6 +157,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                   <div><span className="text-muted-foreground">Request Date:</span> <span className="font-medium">{requisition.requestDateFormatted || format(new Date(requisition.requestDate), 'dd/MM/yyyy')}</span></div>
                   <div><span className="text-muted-foreground">Issued Date:</span> <span className="font-medium">{requisition.issuedDate ? format(new Date(requisition.issuedDate), 'dd/MM/yyyy') : 'N/A'}</span></div>
                   <div><span className="text-muted-foreground">Project:</span> <span className="font-medium">{requisition.projectCode || 'Not linked'}</span></div>
+                  <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{requisition.locationName || 'Warehouse level'}</span></div>
                 </div>
               </CardContent>
             </Card>
@@ -167,6 +173,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                   <TableHead>Item</TableHead>
                   <TableHead className="text-center">Issued Qty</TableHead>
                   <TableHead className="text-center">Return Qty</TableHead>
+                  <TableHead>Location</TableHead>
                   <TableHead>UoM</TableHead>
                 </TableRow>
               </TableHeader>
@@ -191,6 +198,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                         disabled={item.issuedQuantity <= 0}
                       />
                     </TableCell>
+                    <TableCell>{item.locationName || requisition.locationName || 'Warehouse level'}</TableCell>
                     <TableCell>{item.unitOfMeasure}</TableCell>
                   </TableRow>
                 ))}

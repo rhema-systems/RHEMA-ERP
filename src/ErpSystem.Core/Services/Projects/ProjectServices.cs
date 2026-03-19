@@ -17,6 +17,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Services;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Projects;
@@ -43,6 +44,7 @@ public partial class ProjectService : IProjectService
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IWorkflowService _workflowService;
+    private readonly IUserService _userService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IAppEventBus _appEventBus;
@@ -60,6 +62,7 @@ public partial class ProjectService : IProjectService
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IWorkflowService workflowService,
+        IUserService userService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
@@ -76,6 +79,7 @@ public partial class ProjectService : IProjectService
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _workflowService = workflowService;
+        _userService = userService;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
@@ -189,6 +193,7 @@ public partial class ProjectService : IProjectService
     public async Task<ProjectDetailDto?> GetProjectByIdAsync(Guid id)
     {
         await GetProjectForOperationAsync(id, ProjectAccessOperation.View);
+        await SyncProjectMaterialCostAsync(id);
         var project = await _projectRepository.GetDetailByIdAsync(id);
         if (project == null)
         {
@@ -196,12 +201,14 @@ public partial class ProjectService : IProjectService
         }
 
         var dto = MapToDetailDto(project);
+        dto.ResourceAllocations = await EnrichResourceAllocationsAsync(dto.ResourceAllocations, project.ResourceAllocations.ToList());
         dto.WorkItems = (await GetWorkItemsAsync(id)).ToList();
         dto.Deliverables = (await GetDeliverablesAsync(id)).ToList();
         dto.TaskDependencies = (await GetTaskDependenciesAsync(id)).ToList();
         dto.Baselines = (await GetBaselinesAsync(id)).ToList();
         dto.TimesheetEntries = (await GetTimesheetEntriesAsync(id)).ToList();
         dto.Expenses = (await GetExpensesAsync(id)).ToList();
+        dto.MaterialCostEntries = (await GetMaterialCostEntriesAsync(id)).ToList();
         dto.QualityCheckpoints = (await GetQualityCheckpointsAsync(id)).ToList();
         dto.NonConformances = (await GetNonConformancesAsync(id)).ToList();
         dto.RevenueRecognitions = (await GetRevenueRecognitionsAsync(id)).ToList();
@@ -213,6 +220,7 @@ public partial class ProjectService : IProjectService
         dto.LessonsLearned = (await GetLessonsLearnedAsync(id)).ToList();
         dto.Closure = await GetClosureAsync(id);
         await ApplyBaselineMetadataAsync(dto);
+        await EnrichUserDisplayNamesAsync(dto);
         return dto;
     }
 
@@ -705,7 +713,7 @@ public partial class ProjectService : IProjectService
             .ThenBy(x => x.UserId)
             .ToList();
 
-        return allocations.Select(x => MapToDto(x, allocations)).ToList();
+        return await EnrichResourceAllocationsAsync(allocations.Select(x => MapToDto(x, allocations)).ToList(), allocations);
     }
 
     public async Task<ProjectResourceAllocationDto> AddResourceAllocationAsync(Guid projectId, CreateProjectResourceAllocationDto dto)
@@ -726,6 +734,9 @@ public partial class ProjectService : IProjectService
             BookingType = dto.BookingType,
             Status = dto.Status,
             Notes = dto.Notes,
+            RequiredSkillsJson = SerializeJsonList(dto.RequiredSkills),
+            RequiredCertificationsJson = SerializeJsonList(dto.RequiredCertifications),
+            RoutingPolicy = NormalizeRoutingPolicy(dto.RoutingPolicy),
             CreatedBy = _currentUserProvider.Username,
             CreatedById = _currentUserProvider.UserId
         };
@@ -740,7 +751,7 @@ public partial class ProjectService : IProjectService
             ["Status"] = entity.Status,
             ["BookingType"] = entity.BookingType
         });
-        return MapToDto(entity, allocations);
+        return (await EnrichResourceAllocationsAsync(new List<ProjectResourceAllocationDto> { MapToDto(entity, allocations) }, new List<ProjectResourceAllocation> { entity })).Single();
     }
 
     public async Task<ProjectResourceAllocationDto> UpdateResourceAllocationAsync(Guid allocationId, CreateProjectResourceAllocationDto dto)
@@ -761,13 +772,16 @@ public partial class ProjectService : IProjectService
         entity.BookingType = dto.BookingType;
         entity.Status = dto.Status;
         entity.Notes = dto.Notes;
+        entity.RequiredSkillsJson = SerializeJsonList(dto.RequiredSkills);
+        entity.RequiredCertificationsJson = SerializeJsonList(dto.RequiredCertifications);
+        entity.RoutingPolicy = NormalizeRoutingPolicy(dto.RoutingPolicy);
         entity.UpdatedBy = _currentUserProvider.Username;
         entity.LastModifiedById = _currentUserProvider.UserId;
 
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         var allocations = (await repo.FindAsync(x => x.UserId == dto.UserId && x.TenantId == _currentUserProvider.TenantId)).ToList();
-        return MapToDto(entity, allocations);
+        return (await EnrichResourceAllocationsAsync(new List<ProjectResourceAllocationDto> { MapToDto(entity, allocations) }, new List<ProjectResourceAllocation> { entity })).Single();
     }
 
     public async Task<ProjectResourceAllocationDto> ApproveResourceAllocationAsync(Guid allocationId)
@@ -791,7 +805,7 @@ public partial class ProjectService : IProjectService
             ["UserId"] = entity.UserId,
             ["ApprovedAt"] = entity.ApprovedAt ?? DateTime.UtcNow
         });
-        return MapToDto(entity, allocations);
+        return (await EnrichResourceAllocationsAsync(new List<ProjectResourceAllocationDto> { MapToDto(entity, allocations) }, new List<ProjectResourceAllocation> { entity })).Single();
     }
 
     public async Task<ProjectResourceSubstitutionResultDto> SubstituteResourceAllocationAsync(Guid allocationId, SubstituteProjectResourceAllocationDto dto)
@@ -847,6 +861,9 @@ public partial class ProjectService : IProjectService
             BookingType = string.IsNullOrWhiteSpace(dto.BookingType) ? source.BookingType : dto.BookingType.Trim(),
             Status = replacementStatus,
             Notes = AppendResourceNote(source.Notes, "SubstitutionTarget", dto.Reason),
+            RequiredSkillsJson = source.RequiredSkillsJson,
+            RequiredCertificationsJson = source.RequiredCertificationsJson,
+            RoutingPolicy = source.RoutingPolicy,
             SourceAllocationId = source.Id,
             SubstitutionReason = dto.Reason,
             ApprovedAt = string.Equals(replacementStatus, "Approved", StringComparison.OrdinalIgnoreCase) ? DateTime.UtcNow : null,
@@ -892,10 +909,12 @@ public partial class ProjectService : IProjectService
 
         var sourceAllocations = (await repo.FindAsync(x => x.UserId == source.UserId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var replacementAllocations = (await repo.FindAsync(x => x.UserId == replacement.UserId && x.TenantId == _currentUserProvider.TenantId)).ToList();
+        var sourceDto = (await EnrichResourceAllocationsAsync(new List<ProjectResourceAllocationDto> { MapToDto(source, sourceAllocations) }, new List<ProjectResourceAllocation> { source })).Single();
+        var replacementDto = (await EnrichResourceAllocationsAsync(new List<ProjectResourceAllocationDto> { MapToDto(replacement, replacementAllocations) }, new List<ProjectResourceAllocation> { replacement })).Single();
         return new ProjectResourceSubstitutionResultDto
         {
-            SourceAllocation = MapToDto(source, sourceAllocations),
-            ReplacementAllocation = MapToDto(replacement, replacementAllocations)
+            SourceAllocation = sourceDto,
+            ReplacementAllocation = replacementDto
         };
     }
 
@@ -1640,11 +1659,12 @@ public partial class ProjectService : IProjectService
     public async Task<IEnumerable<ProjectDeliverableDto>> GetDeliverablesAsync(Guid projectId)
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.View);
-        return (await _unitOfWork.Repository<ProjectDeliverable>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId))
+        var deliverables = (await _unitOfWork.Repository<ProjectDeliverable>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId))
             .OrderBy(x => x.TargetDate)
             .ThenBy(x => x.Title)
             .Select(MapToDto)
             .ToList();
+        return await AttachDeliverableExternalReviewsAsync(deliverables);
     }
 
     public async Task<ProjectDeliverableDto> AddDeliverableAsync(Guid projectId, CreateProjectDeliverableDto dto)
@@ -3436,8 +3456,10 @@ public partial class ProjectService : IProjectService
     {
         var assignments = (await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.AssignedToUserId == userId)).OrderBy(x => x.PlannedEndDate).ToList();
         var projects = (await _projectRepository.LookupAsync(take: 500)).ToDictionary(x => x.Id);
-        var pendingHours = (await _unitOfWork.Repository<ProjectTimesheetEntry>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.UserId == userId && !string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase))).Sum(x => x.Hours);
-        var pendingExpenses = (await _unitOfWork.Repository<ProjectExpense>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.UserId == userId && !string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase))).Sum(x => x.Amount + x.TaxAmount);
+        var timesheetEntries = (await _unitOfWork.Repository<ProjectTimesheetEntry>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.UserId == userId)).ToList();
+        var expenseEntries = (await _unitOfWork.Repository<ProjectExpense>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.UserId == userId)).ToList();
+        var pendingHours = timesheetEntries.Where(x => !HasApprovedEntryStatus(x.Status)).Sum(x => x.Hours);
+        var pendingExpenses = expenseEntries.Where(x => !HasApprovedEntryStatus(x.Status)).Sum(x => x.Amount + x.TaxAmount);
 
         return new ProjectMobileSummaryDto
         {
@@ -3623,6 +3645,7 @@ public partial class ProjectService : IProjectService
                 return dto;
             })
             .ToList();
+        visibleDeliverables = await AttachDeliverableExternalReviewsAsync(visibleDeliverables);
         var visibleDocuments = project.Documents
             .Where(x => x.IsExternalVisible && HasArtifactAccess(project, policies, partner.Id, "Document", x.Id))
             .OrderByDescending(x => x.CreatedAt)
@@ -3715,6 +3738,9 @@ public partial class ProjectService : IProjectService
         var project = await RequireExternalProjectAsync(projectId, userId, requireCollaboration: true);
         await EnsureExternalPolicyAsync(projectId, userId, "Deliverable", deliverableId, requireApprove: false, requireUpload: true, requireComment: false, requireCollaboration: false);
         var result = await SubmitDeliverableAsync(deliverableId, dto);
+        await AddDeliverableExternalReviewAsync(projectId, deliverableId, userId, "Submitted", result.Status, dto.Notes, result.SubmittedDocumentId);
+        await _unitOfWork.SaveChangesAsync();
+        result = (await AttachDeliverableExternalReviewsAsync(new List<ProjectDeliverableDto> { result })).Single();
         await PublishActivityAsync(project, "ExternalDeliverableSubmitted", new Dictionary<string, object> { ["DeliverableId"] = deliverableId }, audience: "External");
         return result;
     }
@@ -3744,6 +3770,7 @@ public partial class ProjectService : IProjectService
         entity.LastModifiedById = _currentUserProvider.UserId;
         await repo.UpdateAsync(entity);
         await AddDeliverableCommentAsync(entity, "ExternalDeliverableApproval", notes);
+        await AddDeliverableExternalReviewAsync(entity.ProjectId, entity.Id, userId, "Approved", entity.Status, notes, entity.SubmittedDocumentId);
         await SubmitDeliverableWorkflowAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         await PublishActivityAsync(project, "ExternalDeliverableApproved", new Dictionary<string, object>
@@ -3751,8 +3778,43 @@ public partial class ProjectService : IProjectService
             ["DeliverableId"] = deliverableId,
             ["Status"] = entity.Status
         }, audience: "External");
-        var result = MapToDto(entity);
-        return result;
+        return (await AttachDeliverableExternalReviewsAsync(new List<ProjectDeliverableDto> { MapToDto(entity) })).Single();
+    }
+
+    public async Task<ProjectDeliverableDto> RejectExternalDeliverableAsync(Guid projectId, Guid deliverableId, string? notes, Guid userId)
+    {
+        var project = await RequireExternalProjectAsync(projectId, userId, requireCollaboration: true);
+        await EnsureExternalPolicyAsync(projectId, userId, "Deliverable", deliverableId, requireApprove: true, requireUpload: false, requireComment: false, requireCollaboration: false);
+        var repo = _unitOfWork.Repository<ProjectDeliverable>();
+        var entity = await repo.FirstOrDefaultAsync(x => x.Id == deliverableId && x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)
+            ?? throw new InvalidOperationException($"Project deliverable with ID {deliverableId} not found");
+        if (!entity.ExternalSignOffRequired)
+        {
+            throw new InvalidOperationException("This deliverable does not require external sign-off.");
+        }
+
+        if (!string.Equals(entity.Status, DeliverableStatusPendingExternalSignOff, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Project deliverable must be in {DeliverableStatusPendingExternalSignOff} status for external rejection.");
+        }
+
+        var rejectionText = !string.IsNullOrWhiteSpace(notes) ? notes.Trim() : "Rejected by external reviewer";
+        entity.ExternalApprovedAt = null;
+        entity.ExternalApprovedById = null;
+        entity.ExternalApprovalNotes = rejectionText;
+        entity.Status = DeliverableStatusRejected;
+        entity.UpdatedBy = _currentUserProvider.Username;
+        entity.LastModifiedById = _currentUserProvider.UserId;
+        await repo.UpdateAsync(entity);
+        await AddDeliverableCommentAsync(entity, "ExternalDeliverableRejection", rejectionText);
+        await AddDeliverableExternalReviewAsync(entity.ProjectId, entity.Id, userId, "Rejected", entity.Status, rejectionText, entity.SubmittedDocumentId);
+        await _unitOfWork.SaveChangesAsync();
+        await PublishActivityAsync(project, "ExternalDeliverableRejected", new Dictionary<string, object>
+        {
+            ["DeliverableId"] = deliverableId,
+            ["Status"] = entity.Status
+        }, audience: "External");
+        return (await AttachDeliverableExternalReviewsAsync(new List<ProjectDeliverableDto> { MapToDto(entity) })).Single();
     }
 
     public async Task<ProjectWorkItemDto> UpdateExternalWorkItemProgressAsync(Guid projectId, Guid workItemId, UpdateProjectWorkItemProgressDto dto, Guid userId)
@@ -4267,43 +4329,51 @@ public partial class ProjectService : IProjectService
         }
 
         var projectIds = projects.Select(x => x.Id).ToHashSet();
+        await SyncProjectMaterialCostsAsync(projectIds);
         var inventoryRequisitions = (await _unitOfWork.Repository<InventoryRequisition>().FindAsync(x =>
                 x.TenantId == _currentUserProvider.TenantId
                 && x.ProjectId.HasValue
-                && projectIds.Contains(x.ProjectId.Value)))
+                && projectIds.Contains(x.ProjectId.Value),
+                x => x.Items))
             .ToList();
-        var expenses = (await _unitOfWork.Repository<ProjectExpense>().FindAsync(x =>
-                x.TenantId == _currentUserProvider.TenantId
-                && projectIds.Contains(x.ProjectId)))
+        var ledgerEntries = (await GetMaterialCostEntryEntitiesAsync(projectIds))
             .ToList();
+        var ledgerEntriesByProjectId = ledgerEntries
+            .GroupBy(x => x.ProjectId)
+            .ToDictionary(x => x.Key, x => x.ToList());
 
         var report = projects
             .Select(project =>
             {
                 var projectRequisitions = inventoryRequisitions.Where(x => x.ProjectId == project.Id).ToList();
-                var projectExpenses = expenses.Where(x => x.ProjectId == project.Id).ToList();
+                var projectLedgerEntries = ledgerEntriesByProjectId.TryGetValue(project.Id, out var entries)
+                    ? entries
+                    : new List<ProjectMaterialCostEntry>();
                 var requestedValue = projectRequisitions.Sum(x => x.TotalValue);
-                var issuedValue = projectRequisitions
-                    .Where(x => x.Status == RequisitionStatus.PartiallyIssued || x.Status == RequisitionStatus.Issued || x.Status == RequisitionStatus.Completed)
-                    .Sum(x => x.Items != null && x.Items.Count > 0 ? x.Items.Sum(i => i.LineValue) : x.TotalValue);
-                var trackedMaterialCost = projectExpenses
-                    .Where(x => string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(x.Category, "Materials", StringComparison.OrdinalIgnoreCase))
-                    .Sum(x => x.Amount + x.TaxAmount);
-                var returnedValue = Math.Abs(projectExpenses
-                    .Where(x => string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(x.Category, "Materials", StringComparison.OrdinalIgnoreCase)
-                        && (x.Amount + x.TaxAmount) < 0m)
-                    .Sum(x => x.Amount + x.TaxAmount));
+                var issuedValue = projectLedgerEntries
+                    .Where(x => string.Equals(x.EntryType, "InventoryIssue", StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => Math.Abs(x.Amount));
+                var returnedValue = projectLedgerEntries
+                    .Where(x => string.Equals(x.EntryType, "InventoryReturn", StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => Math.Abs(x.Amount));
                 var netIssuedValue = issuedValue - returnedValue;
+                var trackedMaterialCost = projectLedgerEntries
+                    .Where(x => x.AffectsActualCost)
+                    .Sum(x => x.Amount);
                 var materialCostVariance = decimal.Round(netIssuedValue - trackedMaterialCost, 2);
                 var pendingRequisitionCount = projectRequisitions.Count(x => x.Status == RequisitionStatus.Submitted || x.Status == RequisitionStatus.Approved);
+                var missingSourceLinkCount = projectLedgerEntries.Count(x => x.HasMissingSourceLink);
+                var reversalGapCount = projectLedgerEntries.Count(x => x.HasReversalGap);
                 var reconciliationState = materialCostVariance switch
                 {
                     > 0.01m => "UnderTracked",
                     < -0.01m => "OverTracked",
                     _ => "Balanced"
                 };
+                if (missingSourceLinkCount > 0 || reversalGapCount > 0)
+                {
+                    reconciliationState = "Exception";
+                }
 
                 return new ProjectMaterialReconciliationReportItemDto
                 {
@@ -4320,6 +4390,9 @@ public partial class ProjectService : IProjectService
                     NetIssuedValue = netIssuedValue,
                     TrackedMaterialCost = trackedMaterialCost,
                     MaterialCostVariance = materialCostVariance,
+                    MaterialLedgerEntryCount = projectLedgerEntries.Count,
+                    MissingSourceLinkCount = missingSourceLinkCount,
+                    ReversalGapCount = reversalGapCount,
                     ReconciliationStatus = reconciliationState
                 };
             })
@@ -4342,6 +4415,7 @@ public partial class ProjectService : IProjectService
         }
 
         var projectIds = projects.Select(x => x.Id).ToHashSet();
+        await SyncProjectMaterialCostsAsync(projectIds);
         var purchaseRequisitions = (await _unitOfWork.Repository<PurchaseRequisition>().FindAsync(x =>
                 x.TenantId == _currentUserProvider.TenantId
                 && x.ProjectId.HasValue
@@ -4380,10 +4454,7 @@ public partial class ProjectService : IProjectService
                 && x.ProjectId.HasValue
                 && projectIds.Contains(x.ProjectId.Value)))
             .ToList();
-        var expenses = (await _unitOfWork.Repository<ProjectExpense>().FindAsync(x =>
-                x.TenantId == _currentUserProvider.TenantId
-                && projectIds.Contains(x.ProjectId)))
-            .ToList();
+        var ledgerEntries = await GetMaterialCostEntryEntitiesAsync(projectIds);
 
         var purchaseOrderItemsById = purchaseOrderItems.ToDictionary(x => x.Id, x => x);
         var purchaseRequisitionsById = purchaseRequisitions.ToDictionary(x => x.Id, x => x);
@@ -4413,7 +4484,7 @@ public partial class ProjectService : IProjectService
             .Where(x => x.ProjectId.HasValue)
             .GroupBy(x => x.ProjectId!.Value)
             .ToDictionary(x => x.Key, x => x.ToList());
-        var expensesByProjectId = expenses
+        var ledgerEntriesByProjectId = ledgerEntries
             .GroupBy(x => x.ProjectId)
             .ToDictionary(x => x.Key, x => x.ToList());
 
@@ -4429,9 +4500,9 @@ public partial class ProjectService : IProjectService
                 var projectInventoryRequisitions = inventoryRequisitionsByProjectId.TryGetValue(project.Id, out var requisitionList)
                     ? requisitionList
                     : new List<InventoryRequisition>();
-                var projectExpenses = expensesByProjectId.TryGetValue(project.Id, out var expenseList)
-                    ? expenseList
-                    : new List<ProjectExpense>();
+                var projectLedgerEntries = ledgerEntriesByProjectId.TryGetValue(project.Id, out var ledgerList)
+                    ? ledgerList
+                    : new List<ProjectMaterialCostEntry>();
                 var projectPurchaseReceiptsById = projectPurchaseReceipts.ToDictionary(x => x.Id, x => x);
 
                 var receivedAmount = decimal.Round(projectReceiptItems.Sum(receiptItem =>
@@ -4446,45 +4517,29 @@ public partial class ProjectService : IProjectService
                     return decimal.Round(ResolvePurchaseOrderItemUnitCost(orderItem) * valuedQuantity, 2);
                 }), 2);
 
-                var acceptedReceiptAmount = decimal.Round(projectReceiptItems.Sum(receiptItem =>
-                {
-                    var receipt = projectPurchaseReceiptsById.GetValueOrDefault(receiptItem.ReceiptId);
-                    if (receipt == null || !purchaseOrderItemsById.TryGetValue(receiptItem.PurchaseOrderItemId, out var orderItem))
-                    {
-                        return 0m;
-                    }
-
-                    var valuedQuantity = ResolveAcceptedReceiptQuantity(receipt, receiptItem);
-                    return decimal.Round(ResolvePurchaseOrderItemUnitCost(orderItem) * valuedQuantity, 2);
-                }), 2);
-
-                var pendingInspectionAmount = decimal.Round(projectReceiptItems.Sum(receiptItem =>
-                {
-                    var receipt = projectPurchaseReceiptsById.GetValueOrDefault(receiptItem.ReceiptId);
-                    if (receipt == null || !purchaseOrderItemsById.TryGetValue(receiptItem.PurchaseOrderItemId, out var orderItem))
-                    {
-                        return 0m;
-                    }
-
-                    var valuedQuantity = ResolvePendingInspectionQuantity(receipt, receiptItem);
-                    return decimal.Round(ResolvePurchaseOrderItemUnitCost(orderItem) * valuedQuantity, 2);
-                }), 2);
-
-                var issuedInventoryValue = projectInventoryRequisitions
-                    .Where(x => x.Status == RequisitionStatus.PartiallyIssued || x.Status == RequisitionStatus.Issued || x.Status == RequisitionStatus.Completed)
-                    .Sum(x => x.Items != null && x.Items.Count > 0 ? x.Items.Sum(i => i.LineValue) : x.TotalValue);
-                var returnedValue = Math.Abs(projectExpenses
-                    .Where(x => string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(x.Category, "Materials", StringComparison.OrdinalIgnoreCase)
-                        && (x.Amount + x.TaxAmount) < 0m)
-                    .Sum(x => x.Amount + x.TaxAmount));
-                var netIssuedInventoryValue = decimal.Round(issuedInventoryValue - returnedValue, 2);
-                var postedMaterialCost = projectExpenses
-                    .Where(x => string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(x.Category, "Materials", StringComparison.OrdinalIgnoreCase))
-                    .Sum(x => x.Amount + x.TaxAmount);
-                var receiptToIssueVariance = decimal.Round(acceptedReceiptAmount - netIssuedInventoryValue, 2);
+                var acceptedReceiptAmount = decimal.Round(projectLedgerEntries
+                    .Where(x => string.Equals(x.EntryType, "PurchaseReceiptAccepted", StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => x.Amount), 2);
+                var pendingInspectionAmount = decimal.Round(projectLedgerEntries
+                    .Where(x => string.Equals(x.EntryType, "PurchaseReceiptPendingInspection", StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => x.Amount), 2);
+                var supplierReturnAmount = decimal.Round(projectLedgerEntries
+                    .Where(x => string.Equals(x.EntryType, "PurchaseReturn", StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => Math.Abs(x.Amount)), 2);
+                var issuedInventoryValue = decimal.Round(projectLedgerEntries
+                    .Where(x => string.Equals(x.EntryType, "InventoryIssue", StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => Math.Abs(x.Amount)), 2);
+                var returnedInventoryValue = decimal.Round(projectLedgerEntries
+                    .Where(x => string.Equals(x.EntryType, "InventoryReturn", StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => Math.Abs(x.Amount)), 2);
+                var netIssuedInventoryValue = decimal.Round(issuedInventoryValue - returnedInventoryValue, 2);
+                var postedMaterialCost = decimal.Round(projectLedgerEntries
+                    .Where(x => x.AffectsActualCost)
+                    .Sum(x => x.Amount), 2);
+                var receiptToIssueVariance = decimal.Round((acceptedReceiptAmount - supplierReturnAmount) - netIssuedInventoryValue, 2);
                 var issueToPostingVariance = decimal.Round(netIssuedInventoryValue - postedMaterialCost, 2);
+                var missingSourceLinkCount = projectLedgerEntries.Count(x => x.HasMissingSourceLink);
+                var reversalGapCount = projectLedgerEntries.Count(x => x.HasReversalGap);
 
                 var state = pendingInspectionAmount > 0.01m
                     ? "PendingInspection"
@@ -4497,6 +4552,10 @@ public partial class ProjectService : IProjectService
                                 : issueToPostingVariance > 0.01m
                                     ? "IssueAheadOfPosting"
                                     : "PostingAheadOfIssue";
+                if (missingSourceLinkCount > 0 || reversalGapCount > 0)
+                {
+                    state = "Exception";
+                }
 
                 return new ProjectProcurementReconciliationReportItemDto
                 {
@@ -4514,11 +4573,15 @@ public partial class ProjectService : IProjectService
                     ReceivedAmount = receivedAmount,
                     AcceptedReceiptAmount = acceptedReceiptAmount,
                     PendingInspectionAmount = pendingInspectionAmount,
+                    SupplierReturnAmount = supplierReturnAmount,
                     IssuedInventoryValue = issuedInventoryValue,
                     NetIssuedInventoryValue = netIssuedInventoryValue,
                     PostedMaterialCost = postedMaterialCost,
                     ReceiptToIssueVariance = receiptToIssueVariance,
                     IssueToPostingVariance = issueToPostingVariance,
+                    ProcurementLedgerEntryCount = projectLedgerEntries.Count,
+                    MissingSourceLinkCount = missingSourceLinkCount,
+                    ReversalGapCount = reversalGapCount,
                     ReconciliationStatus = state
                 };
             })
@@ -5413,6 +5476,162 @@ public partial class ProjectService : IProjectService
                 x => string.IsNullOrWhiteSpace(x.DisplayName) ? x.FullName : x.DisplayName);
     }
 
+    private async Task<List<ProjectResourceAllocationDto>> EnrichResourceAllocationsAsync(List<ProjectResourceAllocationDto> allocations, List<ProjectResourceAllocation> sourceAllocations)
+    {
+        if (allocations.Count == 0)
+        {
+            return allocations;
+        }
+
+        var allocationLookup = sourceAllocations.ToDictionary(x => x.Id, x => x);
+        var periodStart = allocations.Min(x => x.StartDate);
+        var periodEnd = allocations.Max(x => x.EndDate);
+        var normalizedRequiredNames = allocations
+            .SelectMany(x => x.RequiredSkills.Concat(x.RequiredCertifications))
+            .Select(NormalizeRequirementValue)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var requiredSkills = normalizedRequiredNames.Count == 0
+            ? new List<Skill>()
+            : (await _unitOfWork.Repository<Skill>().FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId
+                    && normalizedRequiredNames.Contains(x.Name)))
+                .ToList();
+        var requiredSkillIds = requiredSkills.Select(x => x.Id).ToHashSet();
+        var skills = requiredSkillIds.Count == 0
+            ? new List<EmployeeSkill>()
+            : (await _unitOfWork.Repository<EmployeeSkill>().FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId
+                    && x.IsVerified
+                    && requiredSkillIds.Contains(x.SkillId)))
+                .ToList();
+        var candidateEmployeeIds = sourceAllocations
+            .Select(x => x.UserId)
+            .Concat(skills.Select(x => x.EmployeeId))
+            .Distinct()
+            .ToList();
+        var employees = candidateEmployeeIds.Count == 0
+            ? new List<Employee>()
+            : (await _unitOfWork.Repository<Employee>().FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId
+                    && !x.IsDeleted
+                    && candidateEmployeeIds.Contains(x.Id)))
+                .ToList();
+        var employeeDisplayNames = employees.ToDictionary(
+            x => x.Id,
+            x => string.IsNullOrWhiteSpace(x.DisplayName) ? x.FullName : x.DisplayName);
+        var employeeIds = employees.Select(x => x.Id).ToHashSet();
+        var tenantAllocations = (await _unitOfWork.Repository<ProjectResourceAllocation>().FindAsync(x =>
+                x.TenantId == _currentUserProvider.TenantId
+                && x.StartDate <= periodEnd
+                && x.EndDate >= periodStart))
+            .Where(x => employeeIds.Contains(x.UserId))
+            .Where(IsAllocationActiveForCapacity)
+            .ToList();
+        var skillLookup = requiredSkills.ToDictionary(
+            x => x.Id,
+            x => NormalizeRequirementValue(x.Name));
+        var skillProfiles = BuildEmployeeSkillProfiles(skills, skillLookup, DateOnly.FromDateTime(DateTime.UtcNow.Date));
+
+        foreach (var allocation in allocations)
+        {
+            if (!allocationLookup.TryGetValue(allocation.Id, out var entity))
+            {
+                continue;
+            }
+
+            var allocationRequiredSkills = allocation.RequiredSkills
+                .Select(NormalizeRequirementValue)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var requiredCertifications = allocation.RequiredCertifications
+                .Select(NormalizeRequirementValue)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var assignedProfile = skillProfiles.GetValueOrDefault(entity.UserId, EmployeeSkillProfile.Empty);
+            var missingSkills = allocationRequiredSkills.Where(x => !assignedProfile.SkillNames.Contains(x)).ToList();
+            var missingCertifications = requiredCertifications.Where(x => !assignedProfile.CertifiedSkillNames.Contains(x)).ToList();
+            var expiringCertifications = requiredCertifications.Where(x => assignedProfile.ExpiringCertifiedSkillNames.Contains(x)).ToList();
+            var totalRequirements = allocationRequiredSkills.Count + requiredCertifications.Count;
+            var matchedRequirements = (allocationRequiredSkills.Count - missingSkills.Count) + (requiredCertifications.Count - missingCertifications.Count);
+
+            allocation.RequiredSkills = allocationRequiredSkills;
+            allocation.RequiredCertifications = requiredCertifications;
+            allocation.RoutingPolicy = NormalizeRoutingPolicy(allocation.RoutingPolicy);
+            allocation.MissingSkills = missingSkills;
+            allocation.MissingCertifications = missingCertifications;
+            allocation.QualificationMatchPercent = totalRequirements == 0
+                ? 100m
+                : decimal.Round((matchedRequirements * 100m) / totalRequirements, 2);
+            allocation.QualificationRisk = missingCertifications.Count > 0
+                ? "Critical"
+                : missingSkills.Count > 0
+                    ? "High"
+                    : expiringCertifications.Count > 0
+                        ? "Watch"
+                        : "Healthy";
+
+            var currentUtilization = GetCandidateCapacityUtilization(entity.UserId, allocation.StartDate, allocation.EndDate, entity.Id, tenantAllocations);
+            var bestCandidate = employees
+                .Where(x => x.Id != entity.UserId)
+                .Select(candidate => EvaluateResourceRoutingCandidate(
+                    candidate.Id,
+                    employeeDisplayNames.GetValueOrDefault(candidate.Id),
+                    allocation.RoutingPolicy,
+                    allocationRequiredSkills,
+                    requiredCertifications,
+                    allocation.StartDate,
+                    allocation.EndDate,
+                    entity.Id,
+                    skillProfiles.GetValueOrDefault(candidate.Id, EmployeeSkillProfile.Empty),
+                    tenantAllocations))
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => x.MissingCertificationCount)
+                .ThenBy(x => x.MissingSkillCount)
+                .FirstOrDefault();
+
+            if (bestCandidate is null || totalRequirements == 0 && !allocation.HasConflict)
+            {
+                allocation.RoutingRecommendation = totalRequirements == 0
+                    ? "No explicit skill routing requirements defined for this allocation."
+                    : $"Assigned resource currently matches {allocation.QualificationMatchPercent}% of the requirement profile.";
+                continue;
+            }
+
+            var currentGapCount = missingSkills.Count + missingCertifications.Count;
+            var candidateGapCount = bestCandidate.MissingSkillCount + bestCandidate.MissingCertificationCount;
+            var candidateImprovesCoverage = candidateGapCount < currentGapCount
+                || candidateGapCount == currentGapCount && bestCandidate.CapacityUtilizationPercent < currentUtilization;
+
+            allocation.RecommendedUserId = candidateImprovesCoverage ? bestCandidate.UserId : null;
+            allocation.RecommendedUserDisplayName = candidateImprovesCoverage ? bestCandidate.UserDisplayName : null;
+            allocation.RoutingRecommendation = candidateImprovesCoverage
+                ? BuildRoutingRecommendation(allocation, bestCandidate)
+                : BuildAssignedResourceRecommendation(allocation, expiringCertifications);
+        }
+
+        return allocations;
+    }
+
+    private async Task<Dictionary<Guid, string>> GetSkillNamesByIdAsync(IEnumerable<Guid> skillIds)
+    {
+        var ids = skillIds.Where(x => x != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        return (await _unitOfWork.Repository<Skill>().FindAsync(x =>
+                x.TenantId == _currentUserProvider.TenantId
+                && ids.Contains(x.Id)))
+            .ToDictionary(
+                x => x.Id,
+                x => NormalizeRequirementValue(x.Name));
+    }
+
     private async Task<Dictionary<Guid, ResourceLeaveMetrics>> GetApprovedLeaveMetricsAsync(IEnumerable<Guid> userIds, DateTime periodStart, DateTime periodEnd)
     {
         var ids = userIds.Where(x => x != Guid.Empty).Distinct().ToList();
@@ -5466,6 +5685,28 @@ public partial class ProjectService : IProjectService
                         : "Limited";
     }
 
+    private sealed record EmployeeSkillProfile(
+        HashSet<string> SkillNames,
+        HashSet<string> CertifiedSkillNames,
+        HashSet<string> ExpiringCertifiedSkillNames)
+    {
+        public static EmployeeSkillProfile Empty { get; } = new(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private sealed record ResourceRoutingCandidate(
+        Guid UserId,
+        string? UserDisplayName,
+        decimal Score,
+        decimal CapacityUtilizationPercent,
+        int MissingSkillCount,
+        int MissingCertificationCount,
+        List<string> MatchedSkills,
+        List<string> MissingSkills,
+        List<string> MissingCertifications);
+
     private static Dictionary<Guid, ResourceQualificationMetrics> BuildQualificationMetricsLookup(IEnumerable<EmployeeSkill> skills, DateOnly today)
         => skills
             .GroupBy(x => x.EmployeeId)
@@ -5481,6 +5722,32 @@ public partial class ProjectService : IProjectService
                         verified.Count(skill => skill.IsCertified && IsCertificationExpired(skill, today)));
                 });
 
+    private static Dictionary<Guid, EmployeeSkillProfile> BuildEmployeeSkillProfiles(IEnumerable<EmployeeSkill> skills, IReadOnlyDictionary<Guid, string> skillLookup, DateOnly today)
+        => skills
+            .GroupBy(x => x.EmployeeId)
+            .ToDictionary(
+                x => x.Key,
+                x =>
+                {
+                    var verified = x.Where(skill => skill.IsVerified).ToList();
+                    var skillNames = verified
+                        .Select(skill => skillLookup.TryGetValue(skill.SkillId, out var name) ? name : string.Empty)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var certifiedSkillNames = verified
+                        .Where(skill => skill.IsCertified && !IsCertificationExpired(skill, today))
+                        .Select(skill => skillLookup.TryGetValue(skill.SkillId, out var name) ? name : string.Empty)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var expiringCertifiedSkillNames = verified
+                        .Where(skill => skill.IsCertified && IsCertificationExpiring(skill, today))
+                        .Select(skill => skillLookup.TryGetValue(skill.SkillId, out var name) ? name : string.Empty)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    return new EmployeeSkillProfile(skillNames, certifiedSkillNames, expiringCertifiedSkillNames);
+                });
+
     private static bool IsCertificationExpired(EmployeeSkill skill, DateOnly today)
         => skill.CertificationExpiryDate.HasValue
             && skill.CertificationExpiryDate.Value < today;
@@ -5489,6 +5756,143 @@ public partial class ProjectService : IProjectService
         => skill.CertificationExpiryDate.HasValue
             && skill.CertificationExpiryDate.Value >= today
             && skill.CertificationExpiryDate.Value <= today.AddDays(30);
+
+    private static string NormalizeRequirementValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private static string NormalizeRoutingPolicy(string? routingPolicy)
+        => routingPolicy?.Trim() switch
+        {
+            "BestMatch" => "BestMatch",
+            "CertifiedFirst" => "CertifiedFirst",
+            "AvailabilityFirst" => "AvailabilityFirst",
+            _ => "Balanced"
+        };
+
+    private static string? SerializeJsonList(IEnumerable<string>? values)
+    {
+        var sanitized = values?
+            .Select(NormalizeRequirementValue)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            ?? new List<string>();
+
+        return sanitized.Count == 0 ? null : JsonSerializer.Serialize(sanitized);
+    }
+
+    private static List<string> DeserializeJsonList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<string>();
+        }
+
+        try
+        {
+            return (JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>())
+                .Select(NormalizeRequirementValue)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
+    private static decimal GetCandidateCapacityUtilization(Guid userId, DateTime startDate, DateTime endDate, Guid currentAllocationId, IEnumerable<ProjectResourceAllocation> allocations)
+    {
+        var overlapping = allocations
+            .Where(x => x.UserId == userId && x.Id != currentAllocationId && x.StartDate <= endDate && x.EndDate >= startDate)
+            .ToList();
+        var allocatedPercent = overlapping
+            .Where(x => string.Equals(x.AllocationType, "Percent", StringComparison.OrdinalIgnoreCase))
+            .Sum(x => x.AllocationValue);
+        var allocatedHours = overlapping
+            .Where(x => !string.Equals(x.AllocationType, "Percent", StringComparison.OrdinalIgnoreCase))
+            .Sum(GetEffectiveHours);
+        return Math.Max(
+            allocatedPercent,
+            GetCapacityUtilizationPercent(allocatedHours, startDate, endDate));
+    }
+
+    private static ResourceRoutingCandidate EvaluateResourceRoutingCandidate(
+        Guid userId,
+        string? userDisplayName,
+        string routingPolicy,
+        IReadOnlyCollection<string> requiredSkills,
+        IReadOnlyCollection<string> requiredCertifications,
+        DateTime startDate,
+        DateTime endDate,
+        Guid currentAllocationId,
+        EmployeeSkillProfile profile,
+        IEnumerable<ProjectResourceAllocation> allocations)
+    {
+        var matchedSkills = requiredSkills.Where(x => profile.SkillNames.Contains(x)).ToList();
+        var missingSkills = requiredSkills.Where(x => !profile.SkillNames.Contains(x)).ToList();
+        var missingCertifications = requiredCertifications.Where(x => !profile.CertifiedSkillNames.Contains(x)).ToList();
+        var matchedCertificationCount = requiredCertifications.Count - missingCertifications.Count;
+        var capacityUtilizationPercent = GetCandidateCapacityUtilization(userId, startDate, endDate, currentAllocationId, allocations);
+        var capacityHeadroom = Math.Max(0m, 100m - capacityUtilizationPercent);
+
+        var score = NormalizeRoutingPolicy(routingPolicy) switch
+        {
+            "CertifiedFirst" => (matchedCertificationCount * 140m) + (matchedSkills.Count * 35m) + capacityHeadroom - (missingCertifications.Count * 160m) - (missingSkills.Count * 80m),
+            "AvailabilityFirst" => (capacityHeadroom * 3m) + (matchedCertificationCount * 60m) + (matchedSkills.Count * 30m) - (missingCertifications.Count * 120m) - (missingSkills.Count * 60m),
+            "BestMatch" => (matchedCertificationCount * 110m) + (matchedSkills.Count * 55m) + (capacityHeadroom * 0.5m) - (missingCertifications.Count * 150m) - (missingSkills.Count * 90m),
+            _ => (matchedCertificationCount * 100m) + (matchedSkills.Count * 45m) + (capacityHeadroom * 1.5m) - (missingCertifications.Count * 140m) - (missingSkills.Count * 75m)
+        };
+
+        return new ResourceRoutingCandidate(
+            userId,
+            userDisplayName,
+            score,
+            decimal.Round(capacityUtilizationPercent, 2),
+            missingSkills.Count,
+            missingCertifications.Count,
+            matchedSkills,
+            missingSkills,
+            missingCertifications);
+    }
+
+    private static string BuildAssignedResourceRecommendation(ProjectResourceAllocationDto allocation, IReadOnlyCollection<string> expiringCertifications)
+    {
+        if (allocation.MissingCertifications.Count > 0)
+        {
+            return $"Assigned resource is missing required certifications: {string.Join(", ", allocation.MissingCertifications)}.";
+        }
+
+        if (allocation.MissingSkills.Count > 0)
+        {
+            return $"Assigned resource is missing required skills: {string.Join(", ", allocation.MissingSkills)}.";
+        }
+
+        if (expiringCertifications.Count > 0)
+        {
+            return $"Assigned resource meets current routing requirements, but certifications are expiring soon: {string.Join(", ", expiringCertifications)}.";
+        }
+
+        return $"Assigned resource satisfies the requirement profile under {allocation.RoutingPolicy} routing.";
+    }
+
+    private static string BuildRoutingRecommendation(ProjectResourceAllocationDto allocation, ResourceRoutingCandidate candidate)
+    {
+        var baseText = $"Route this allocation using {allocation.RoutingPolicy}: {candidate.UserDisplayName ?? candidate.UserId.ToString()} is the best-fit backup at {candidate.CapacityUtilizationPercent}% utilization.";
+        if (candidate.MissingCertificationCount > 0 || candidate.MissingSkillCount > 0)
+        {
+            var gaps = candidate.MissingCertifications.Concat(candidate.MissingSkills).ToList();
+            return $"{baseText} Remaining coverage gaps: {string.Join(", ", gaps)}.";
+        }
+
+        if (candidate.MatchedSkills.Count > 0)
+        {
+            return $"{baseText} Matched skills: {string.Join(", ", candidate.MatchedSkills)}.";
+        }
+
+        return baseText;
+    }
 
     private static string MaxSeverity(string left, string right)
         => GetSeverityRank(left) >= GetSeverityRank(right) ? left : right;
@@ -5688,6 +6092,9 @@ public partial class ProjectService : IProjectService
             : "Draft";
     }
 
+    private static bool HasApprovedEntryStatus(string? status)
+        => string.Equals(status, "Approved", StringComparison.OrdinalIgnoreCase);
+
     private static void EnsureEntryEditable(string status, string entryType)
     {
         if (string.Equals(status, "Approved", StringComparison.OrdinalIgnoreCase) ||
@@ -5821,6 +6228,67 @@ public partial class ProjectService : IProjectService
             CreatedBy = _currentUserProvider.Username,
             CreatedById = _currentUserProvider.UserId
         });
+    }
+
+    private async Task AddDeliverableExternalReviewAsync(Guid projectId, Guid deliverableId, Guid? reviewedById, string decision, string? statusSnapshot, string? notes, Guid? submittedDocumentId)
+    {
+        await _unitOfWork.Repository<ProjectDeliverableExternalReview>().AddAsync(new ProjectDeliverableExternalReview
+        {
+            TenantId = _currentUserProvider.TenantId,
+            ProjectId = projectId,
+            DeliverableId = deliverableId,
+            ReviewDate = DateTime.UtcNow,
+            ReviewedById = reviewedById,
+            SubmittedDocumentId = submittedDocumentId,
+            Decision = decision,
+            StatusSnapshot = statusSnapshot,
+            Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(),
+            CreatedBy = _currentUserProvider.Username,
+            CreatedById = _currentUserProvider.UserId
+        });
+    }
+
+    private async Task<List<ProjectDeliverableDto>> AttachDeliverableExternalReviewsAsync(List<ProjectDeliverableDto> deliverables)
+    {
+        if (deliverables.Count == 0)
+        {
+            return deliverables;
+        }
+
+        var deliverableIds = deliverables.Select(x => x.Id).Distinct().ToList();
+        var reviews = (await _unitOfWork.Repository<ProjectDeliverableExternalReview>().FindAsync(x =>
+                x.TenantId == _currentUserProvider.TenantId &&
+                deliverableIds.Contains(x.DeliverableId)))
+            .OrderByDescending(x => x.ReviewDate)
+            .ThenByDescending(x => x.CreatedAt)
+            .ToList();
+
+        var submittedDocumentIds = reviews
+            .Where(x => x.SubmittedDocumentId.HasValue)
+            .Select(x => x.SubmittedDocumentId!.Value)
+            .Distinct()
+            .ToList();
+        var documentLookup = submittedDocumentIds.Count == 0
+            ? new Dictionary<Guid, ProjectDocument>()
+            : (await _unitOfWork.Repository<ProjectDocument>().FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId &&
+                    submittedDocumentIds.Contains(x.Id)))
+                .ToDictionary(x => x.Id, x => x);
+
+        var reviewLookup = reviews
+            .GroupBy(x => x.DeliverableId)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(review => MapToDto(review, documentLookup)).ToList());
+
+        foreach (var deliverable in deliverables)
+        {
+            deliverable.ExternalReviews = reviewLookup.TryGetValue(deliverable.Id, out var entries)
+                ? entries
+                : new List<ProjectDeliverableExternalReviewDto>();
+        }
+
+        return deliverables;
     }
 
     private async Task<List<ProjectExternalAccessPolicy>> GetExternalPoliciesAsync(Guid projectId, Guid businessPartnerId)
@@ -6512,7 +6980,35 @@ public partial class ProjectService : IProjectService
     private static ProjectMemberDto MapToDto(ProjectMember entity) => new() { Id = entity.Id, UserId = entity.UserId, Role = entity.Role, IsActive = entity.IsActive, JoinedAt = entity.JoinedAt };
     private static ProjectWorkItemDto MapToDto(ProjectWorkItem entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, ParentId = entity.ParentId, NodeType = entity.NodeType, Title = entity.Title, Description = entity.Description, Status = entity.Status, Priority = entity.Priority, SortOrder = entity.SortOrder, AssignedToUserId = entity.AssignedToUserId, PlannedStartDate = entity.PlannedStartDate, PlannedEndDate = entity.PlannedEndDate, ActualStartDate = entity.ActualStartDate, ActualEndDate = entity.ActualEndDate, PercentComplete = entity.PercentComplete, IsRollupEnabled = entity.IsRollupEnabled, EffortEstimateHours = entity.EffortEstimateHours, ActualEffortHours = entity.ActualEffortHours, BaselineVarianceDays = 0, IsOffBaseline = false, CanExternalUpdate = false, CanExternalComment = false };
     private static ProjectMilestoneDto MapToDto(ProjectMilestone entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, WorkItemId = entity.WorkItemId, Title = entity.Title, Description = entity.Description, TargetDate = entity.TargetDate, ActualDate = entity.ActualDate, Status = entity.Status, RequiresApproval = entity.RequiresApproval };
-    private static ProjectResourceAllocationDto MapToDto(ProjectResourceAllocation entity, List<ProjectResourceAllocation> allocations) => new() { Id = entity.Id, ProjectId = entity.ProjectId, WorkItemId = entity.WorkItemId, UserId = entity.UserId, AllocationRole = entity.AllocationRole, AllocationType = entity.AllocationType, AllocationValue = entity.AllocationValue, PlannedHours = entity.PlannedHours, StartDate = entity.StartDate, EndDate = entity.EndDate, BookingType = entity.BookingType, Status = entity.Status, Notes = entity.Notes, SourceAllocationId = entity.SourceAllocationId, ReplacementAllocationId = entity.ReplacementAllocationId, SubstitutionReason = entity.SubstitutionReason, CanSubstitute = IsAllocationActiveForCapacity(entity), HasConflict = HasAllocationConflict(entity, allocations), CapacityUtilizationPercent = decimal.Round(string.Equals(entity.AllocationType, "Percent", StringComparison.OrdinalIgnoreCase) ? entity.AllocationValue : GetCapacityUtilizationPercent(GetEffectiveHours(entity), entity.StartDate, entity.EndDate), 2) };
+    private static ProjectResourceAllocationDto MapToDto(ProjectResourceAllocation entity, List<ProjectResourceAllocation> allocations) => new()
+    {
+        Id = entity.Id,
+        ProjectId = entity.ProjectId,
+        WorkItemId = entity.WorkItemId,
+        UserId = entity.UserId,
+        AllocationRole = entity.AllocationRole,
+        AllocationType = entity.AllocationType,
+        AllocationValue = entity.AllocationValue,
+        PlannedHours = entity.PlannedHours,
+        StartDate = entity.StartDate,
+        EndDate = entity.EndDate,
+        BookingType = entity.BookingType,
+        Status = entity.Status,
+        Notes = entity.Notes,
+        RequiredSkills = DeserializeJsonList(entity.RequiredSkillsJson),
+        RequiredCertifications = DeserializeJsonList(entity.RequiredCertificationsJson),
+        RoutingPolicy = NormalizeRoutingPolicy(entity.RoutingPolicy),
+        SourceAllocationId = entity.SourceAllocationId,
+        ReplacementAllocationId = entity.ReplacementAllocationId,
+        SubstitutionReason = entity.SubstitutionReason,
+        CanSubstitute = IsAllocationActiveForCapacity(entity),
+        HasConflict = HasAllocationConflict(entity, allocations),
+        CapacityUtilizationPercent = decimal.Round(
+            string.Equals(entity.AllocationType, "Percent", StringComparison.OrdinalIgnoreCase)
+                ? entity.AllocationValue
+                : GetCapacityUtilizationPercent(GetEffectiveHours(entity), entity.StartDate, entity.EndDate),
+            2)
+    };
     private static ProjectRiskDto MapToDto(ProjectRisk entity) => new() { Id = entity.Id, Title = entity.Title, Description = entity.Description, OwnerId = entity.OwnerId, Status = entity.Status, Category = entity.Category, Probability = entity.Probability, Impact = entity.Impact, Exposure = entity.Exposure, ResponseStrategy = entity.ResponseStrategy, MitigationPlan = entity.MitigationPlan, DueDate = entity.DueDate };
     private static ProjectIssueDto MapToDto(ProjectIssue entity) => new() { Id = entity.Id, Title = entity.Title, Description = entity.Description, OwnerId = entity.OwnerId, Status = entity.Status, Severity = entity.Severity, TargetResolutionDate = entity.TargetResolutionDate, RootCause = entity.RootCause, CorrectiveAction = entity.CorrectiveAction };
     private static ProjectQualityCheckpointDto MapToDto(ProjectQualityCheckpoint entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, WorkItemId = entity.WorkItemId, DeliverableId = entity.DeliverableId, QaOwnerId = entity.QaOwnerId, Title = entity.Title, Description = entity.Description, Status = entity.Status, DueDate = entity.DueDate, RequiresQaSignOff = entity.RequiresQaSignOff, SignedOffAt = entity.SignedOffAt, SignedOffById = entity.SignedOffById, SignOffNotes = entity.SignOffNotes };
@@ -6544,6 +7040,21 @@ public partial class ProjectService : IProjectService
         ExternalApprovalNotes = entity.ExternalApprovalNotes,
         CanExternalSubmit = false,
         CanExternalApprove = false
+    };
+    private static ProjectDeliverableExternalReviewDto MapToDto(ProjectDeliverableExternalReview entity, IReadOnlyDictionary<Guid, ProjectDocument> documents) => new()
+    {
+        Id = entity.Id,
+        ProjectId = entity.ProjectId,
+        DeliverableId = entity.DeliverableId,
+        ReviewDate = entity.ReviewDate,
+        ReviewedById = entity.ReviewedById,
+        SubmittedDocumentId = entity.SubmittedDocumentId,
+        SubmittedDocumentName = entity.SubmittedDocumentId.HasValue && documents.TryGetValue(entity.SubmittedDocumentId.Value, out var document)
+            ? document.DocumentName
+            : null,
+        Decision = entity.Decision,
+        StatusSnapshot = entity.StatusSnapshot,
+        Notes = entity.Notes
     };
     private static ProjectTaskDependencyDto MapToDto(ProjectTaskDependency entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, PredecessorWorkItemId = entity.PredecessorWorkItemId, SuccessorWorkItemId = entity.SuccessorWorkItemId, DependencyType = entity.DependencyType, LagDays = entity.LagDays, IsEnforced = entity.IsEnforced };
     private static ProjectInterdependencyDto MapToDto(ProjectInterdependency entity, IReadOnlyDictionary<Guid, Project> projects) => new()
@@ -6630,6 +7141,225 @@ public partial class ProjectService : IProjectService
     private static ProjectClosureDto MapToDto(ProjectClosure entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, Status = entity.Status, SubmittedAt = entity.SubmittedAt, ApprovedAt = entity.ApprovedAt, ApprovedById = entity.ApprovedById, FinalBudget = entity.FinalBudget, FinalCost = entity.FinalCost, DeliverablesAccepted = entity.DeliverablesAccepted, TasksCompletedOrWaived = entity.TasksCompletedOrWaived, AssetsReconciled = entity.AssetsReconciled, OpenItemsDisposed = entity.OpenItemsDisposed, ClosureChecklistJson = entity.ClosureChecklistJson, OpenItemsDisposition = entity.OpenItemsDisposition, AssetReconciliationNotes = entity.AssetReconciliationNotes, LessonsLearnedSummary = entity.LessonsLearnedSummary, PostImplementationReview = entity.PostImplementationReview, OverrideReason = entity.OverrideReason, RejectionReason = entity.RejectionReason };
     private static ProjectDocumentDto MapToDto(ProjectDocument entity) => new() { Id = entity.Id, DocumentName = entity.DocumentName, Category = entity.Category, DocumentType = entity.DocumentType, FilePath = entity.FilePath, PublicUrl = entity.PublicUrl, FileType = entity.FileType, FileSize = entity.FileSize, VersionLabel = entity.VersionLabel, Status = entity.Status, IsExternalVisible = entity.IsExternalVisible, CreatedAt = entity.CreatedAt, ArtifactLabel = entity.DocumentName };
     private static ProjectCommentDto MapToDto(ProjectComment entity) => new() { Id = entity.Id, WorkItemId = entity.WorkItemId, CommentType = entity.CommentType, Body = entity.Body, MentionedUsersJson = entity.MentionedUsersJson, CreatedAt = entity.CreatedAt, CreatedBy = entity.CreatedBy };
+
+    private async Task EnrichUserDisplayNamesAsync(ProjectDetailDto dto)
+    {
+        var userLookup = await BuildUserDisplayNameLookupAsync(CollectProjectUserIds(dto));
+
+        dto.ProjectManagerDisplayName = ResolveUserDisplayName(userLookup, dto.ProjectManagerId);
+        dto.SponsorDisplayName = ResolveUserDisplayName(userLookup, dto.SponsorId);
+
+        foreach (var member in dto.Members)
+        {
+            member.UserDisplayName = ResolveUserDisplayName(userLookup, member.UserId);
+        }
+
+        foreach (var resource in dto.ResourceAllocations)
+        {
+            resource.UserDisplayName = ResolveUserDisplayName(userLookup, resource.UserId);
+        }
+
+        foreach (var risk in dto.Risks)
+        {
+            risk.OwnerDisplayName = ResolveUserDisplayName(userLookup, risk.OwnerId);
+        }
+
+        foreach (var issue in dto.Issues)
+        {
+            issue.OwnerDisplayName = ResolveUserDisplayName(userLookup, issue.OwnerId);
+        }
+
+        foreach (var checkpoint in dto.QualityCheckpoints)
+        {
+            checkpoint.QaOwnerDisplayName = ResolveUserDisplayName(userLookup, checkpoint.QaOwnerId);
+            checkpoint.SignedOffByDisplayName = ResolveUserDisplayName(userLookup, checkpoint.SignedOffById);
+        }
+
+        foreach (var nonConformance in dto.NonConformances)
+        {
+            nonConformance.OwnerDisplayName = ResolveUserDisplayName(userLookup, nonConformance.OwnerId);
+        }
+
+        foreach (var entry in dto.TimesheetEntries)
+        {
+            entry.UserDisplayName = ResolveUserDisplayName(userLookup, entry.UserId);
+            entry.ApprovedByDisplayName = ResolveUserDisplayName(userLookup, entry.ApprovedById);
+        }
+
+        foreach (var expense in dto.Expenses)
+        {
+            expense.UserDisplayName = ResolveUserDisplayName(userLookup, expense.UserId);
+            expense.ApprovedByDisplayName = ResolveUserDisplayName(userLookup, expense.ApprovedById);
+        }
+
+        foreach (var decision in dto.Decisions)
+        {
+            decision.ApproverDisplayName = ResolveUserDisplayName(userLookup, decision.ApproverId);
+        }
+
+        foreach (var meeting in dto.Meetings)
+        {
+            meeting.FacilitatorDisplayName = ResolveUserDisplayName(userLookup, meeting.FacilitatorId);
+        }
+
+        foreach (var actionItem in dto.ActionItems)
+        {
+            actionItem.OwnerDisplayName = ResolveUserDisplayName(userLookup, actionItem.OwnerId);
+        }
+
+        EnrichWorkItemUserDisplayNames(dto.WorkItems, userLookup);
+    }
+
+    private static void EnrichWorkItemUserDisplayNames(IEnumerable<ProjectWorkItemDto> workItems, IReadOnlyDictionary<Guid, string> userLookup)
+    {
+        foreach (var workItem in workItems)
+        {
+            workItem.AssignedToUserDisplayName = ResolveUserDisplayName(userLookup, workItem.AssignedToUserId);
+            if (workItem.Children.Count > 0)
+            {
+                EnrichWorkItemUserDisplayNames(workItem.Children, userLookup);
+            }
+        }
+    }
+
+    private async Task<Dictionary<Guid, string>> BuildUserDisplayNameLookupAsync(IEnumerable<Guid> userIds)
+    {
+        var distinctUserIds = userIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (distinctUserIds.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        var users = await _userService.GetUsersByIdsAsync(distinctUserIds);
+
+        return users
+            .GroupBy(user => user.Id)
+            .ToDictionary(group => group.Key, group => FormatUserDisplayName(group.First()));
+    }
+
+    private static IEnumerable<Guid> CollectProjectUserIds(ProjectDetailDto dto)
+    {
+        var userIds = new HashSet<Guid>();
+
+        AddUserId(userIds, dto.ProjectManagerId);
+        AddUserId(userIds, dto.SponsorId);
+
+        foreach (var member in dto.Members)
+        {
+            AddUserId(userIds, member.UserId);
+        }
+
+        foreach (var workItem in FlattenWorkItems(dto.WorkItems))
+        {
+            AddUserId(userIds, workItem.AssignedToUserId);
+        }
+
+        foreach (var resource in dto.ResourceAllocations)
+        {
+            AddUserId(userIds, resource.UserId);
+            AddUserId(userIds, resource.RecommendedUserId);
+        }
+
+        foreach (var risk in dto.Risks)
+        {
+            AddUserId(userIds, risk.OwnerId);
+        }
+
+        foreach (var issue in dto.Issues)
+        {
+            AddUserId(userIds, issue.OwnerId);
+        }
+
+        foreach (var checkpoint in dto.QualityCheckpoints)
+        {
+            AddUserId(userIds, checkpoint.QaOwnerId);
+            AddUserId(userIds, checkpoint.SignedOffById);
+        }
+
+        foreach (var nonConformance in dto.NonConformances)
+        {
+            AddUserId(userIds, nonConformance.OwnerId);
+        }
+
+        foreach (var entry in dto.TimesheetEntries)
+        {
+            AddUserId(userIds, entry.UserId);
+            AddUserId(userIds, entry.ApprovedById);
+        }
+
+        foreach (var expense in dto.Expenses)
+        {
+            AddUserId(userIds, expense.UserId);
+            AddUserId(userIds, expense.ApprovedById);
+        }
+
+        foreach (var decision in dto.Decisions)
+        {
+            AddUserId(userIds, decision.ApproverId);
+        }
+
+        foreach (var meeting in dto.Meetings)
+        {
+            AddUserId(userIds, meeting.FacilitatorId);
+        }
+
+        foreach (var actionItem in dto.ActionItems)
+        {
+            AddUserId(userIds, actionItem.OwnerId);
+        }
+
+        return userIds;
+    }
+
+    private static IEnumerable<ProjectWorkItemDto> FlattenWorkItems(IEnumerable<ProjectWorkItemDto> workItems)
+    {
+        foreach (var workItem in workItems)
+        {
+            yield return workItem;
+
+            foreach (var child in FlattenWorkItems(workItem.Children))
+            {
+                yield return child;
+            }
+        }
+    }
+
+    private static void AddUserId(ISet<Guid> userIds, Guid? userId)
+    {
+        if (userId.HasValue && userId.Value != Guid.Empty)
+        {
+            userIds.Add(userId.Value);
+        }
+    }
+
+    private static string? ResolveUserDisplayName(IReadOnlyDictionary<Guid, string> userLookup, Guid? userId)
+    {
+        if (!userId.HasValue || userId.Value == Guid.Empty)
+        {
+            return null;
+        }
+
+        return userLookup.TryGetValue(userId.Value, out var displayName)
+            ? displayName
+            : null;
+    }
+
+    private static string FormatUserDisplayName(ApplicationUser user)
+    {
+        var fullName = $"{user.FirstName} {user.LastName}".Trim();
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            return user.UserName ?? user.Email ?? user.Id.ToString();
+        }
+
+        return string.IsNullOrWhiteSpace(user.UserName)
+            ? fullName
+            : $"{fullName} ({user.UserName})";
+    }
 
     private async Task<ProjectExternalAccessPolicyDto> MapToDtoAsync(Project project, ProjectExternalAccessPolicy entity)
     {

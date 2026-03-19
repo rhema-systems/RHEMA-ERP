@@ -488,8 +488,7 @@ export const contractService = {
       formData.append('description', description);
     }
 
-    const headers = getAuthHeaders();
-    delete headers['Content-Type']; // Let browser set Content-Type with boundary for multipart/form-data
+    const { ['Content-Type']: _contentType, ...headers } = getAuthHeaders() as Record<string, string>;
 
     const response = await fetch(`${API_BASE_URL}/procurement/Contracts/${contractId}/documents`, {
       method: 'POST',
@@ -517,4 +516,3 @@ export const contractService = {
     }
   },
 };
-

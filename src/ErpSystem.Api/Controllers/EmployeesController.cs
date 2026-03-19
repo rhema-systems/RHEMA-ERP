@@ -103,10 +103,10 @@ namespace ErpSystem.Api.Controllers
                 var employee = await _employeeRepository.GetByIdAsync(id,
                     e => e.Department,
                     e => e.Position,
-                    e => e.Section,
-                    e => e.Manager,
-                    e => e.Country,
-                    e => e.Shift);
+                    e => e.Section!,
+                    e => e.Manager!,
+                    e => e.Country!,
+                    e => e.Shift!);
 
                 if (employee == null)
                 {
@@ -173,9 +173,9 @@ namespace ErpSystem.Api.Controllers
 
             var employeeDtos = _mapper.Map<IEnumerable<EmployeeDto>>(paginatedEmployees);
 
-            Response.Headers.Add("X-Total-Count", employees.Count().ToString());
-            Response.Headers.Add("X-Page", page.ToString());
-            Response.Headers.Add("X-Page-Size", pageSize.ToString());
+            Response.Headers["X-Total-Count"] = employees.Count().ToString();
+            Response.Headers["X-Page"] = page.ToString();
+            Response.Headers["X-Page-Size"] = pageSize.ToString();
 
             return Ok(employeeDtos);
         }
@@ -225,8 +225,8 @@ namespace ErpSystem.Api.Controllers
                 var employeeWithRelations = await _employeeRepository.GetByIdAsync(createdEmployee.Id,
                     e => e.Department,
                     e => e.Position,
-                    e => e.Section,
-                    e => e.Manager);
+                    e => e.Section!,
+                    e => e.Manager!);
 
                 var employeeDto = _mapper.Map<EmployeeDetailDto>(employeeWithRelations);
 
@@ -271,8 +271,8 @@ namespace ErpSystem.Api.Controllers
                 var updatedEmployee = await _employeeRepository.GetByIdAsync(id,
                     e => e.Department,
                     e => e.Position,
-                    e => e.Section,
-                    e => e.Manager);
+                    e => e.Section!,
+                    e => e.Manager!);
 
                 var employeeDto = _mapper.Map<EmployeeDetailDto>(updatedEmployee);
                 return Ok(employeeDto);

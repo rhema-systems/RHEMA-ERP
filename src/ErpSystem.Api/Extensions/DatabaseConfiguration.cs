@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
 using ErpSystem.Data.Extensions;
 using ErpSystem.Core.Interfaces;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace ErpSystem.Api.Extensions
 {
@@ -106,6 +107,11 @@ namespace ErpSystem.Api.Extensions
                     throw new InvalidOperationException($"Unsupported database provider: {provider}. " +
                         $"Supported providers: SqlServer, PostgreSQL, MySQL, Oracle, SQLite, DB2, Firebird, CosmosDB, InMemory");
             }
+
+            // The ERP intentionally keeps some historical dependent rows while soft-deleting principals.
+            // We fix real model issues separately and suppress this noisy validation warning during startup.
+            options.ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
         }
 
         #region SQL Server Configuration

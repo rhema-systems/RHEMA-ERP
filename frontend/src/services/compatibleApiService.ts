@@ -5,9 +5,9 @@ import { apiService } from './api.service';
  * This ensures backward compatibility while using the unified api.service.ts
  */
 class CompatibleApiService {
-  async get<T>(endpoint: string): Promise<T> {
+  async get<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
     try {
-      return await apiService.get<T>(endpoint);
+      return await apiService.get<T>(endpoint, query);
     } catch (error) {
       console.error(`GET ${endpoint} failed:`, error);
       throw error;
@@ -15,11 +15,11 @@ class CompatibleApiService {
   }
 
   // Silent GET method - doesn't log errors to console (useful for expected 404s)
-  async silentGet<T>(endpoint: string): Promise<T> {
-    return await apiService.silentGet<T>(endpoint);
+  async silentGet<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
+    return await apiService.silentGet<T>(endpoint, query);
   }
 
-  async post<T>(endpoint: string, data?: any): Promise<T> {
+  async post<T = any>(endpoint: string, data?: any): Promise<T> {
     try {
       return await apiService.post<T>(endpoint, data);
     } catch (error) {
@@ -28,7 +28,7 @@ class CompatibleApiService {
     }
   }
 
-  async put<T>(endpoint: string, data?: any): Promise<T> {
+  async put<T = any>(endpoint: string, data?: any): Promise<T> {
     try {
       return await apiService.put<T>(endpoint, data);
     } catch (error) {
@@ -37,7 +37,7 @@ class CompatibleApiService {
     }
   }
 
-  async delete<T>(endpoint: string): Promise<T> {
+  async delete<T = any>(endpoint: string): Promise<T> {
     try {
       return await apiService.delete<T>(endpoint);
     } catch (error) {

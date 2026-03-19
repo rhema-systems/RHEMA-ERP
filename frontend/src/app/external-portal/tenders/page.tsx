@@ -56,7 +56,11 @@ export default function ExternalTendersPage() {
     router.push(`/external-portal/tenders/${tenderId}`);
   };
 
-  const getDeadlineStatus = (deadline: string) => {
+  const getDeadlineStatus = (deadline?: string) => {
+    if (!deadline) {
+      return { text: 'Deadline not set', variant: 'secondary' as const, urgent: false };
+    }
+
     const deadlineDate = new Date(deadline);
     const now = new Date();
     const hoursRemaining = (deadlineDate.getTime() - now.getTime()) / (1000 * 60 * 60);
@@ -111,6 +115,7 @@ export default function ExternalTendersPage() {
           <CardContent>
             <p className="text-2xl font-bold text-orange-600">
               {tenders.filter(t => {
+                if (!t.submissionDeadline) return false;
                 const hours = (new Date(t.submissionDeadline).getTime() - new Date().getTime()) / (1000 * 60 * 60);
                 return hours > 0 && hours < 72;
               }).length}
@@ -182,7 +187,7 @@ export default function ExternalTendersPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {tenders.map((tender) => {
               const deadlineStatus = getDeadlineStatus(tender.submissionDeadline);
-              const isExpired = new Date(tender.submissionDeadline) < new Date();
+              const isExpired = tender.submissionDeadline ? new Date(tender.submissionDeadline) < new Date() : false;
 
               return (
                 <Card
@@ -284,4 +289,3 @@ export default function ExternalTendersPage() {
     </div>
   );
 }
-

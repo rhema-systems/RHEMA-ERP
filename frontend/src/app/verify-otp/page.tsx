@@ -24,7 +24,7 @@ function VerifyOtpContent() {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const phoneNumber = searchParams.get('phone') || '';
+  const phoneNumber = searchParams?.get('phone') || '';
 
   useEffect(() => {
     settingsService.getPublicSecuritySettings().then((s) => {

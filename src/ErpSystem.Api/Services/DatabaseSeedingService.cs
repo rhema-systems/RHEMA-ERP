@@ -3865,6 +3865,10 @@ namespace ErpSystem.Web.Services
         {
             _logger.LogInformation("Seeding test users...");
 
+            await SeedRolesAsync();
+            await SeedRolePermissionAssignmentsAsync();
+            await SeedDefaultTenantAsync();
+
             var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
             if (defaultTenant == null)
             {
@@ -3876,22 +3880,22 @@ namespace ErpSystem.Web.Services
             // Ensure these accounts exist and remain usable on every Development seed run.
             // (CreateTestUserAsync is idempotent and will update existing users as needed.)
             await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
-                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.LDAP);
+                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
-                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager, AuthenticationProvider.LDAP);
+                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
-                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee, AuthenticationProvider.LDAP);
+                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("helpdesk.agent", "helpdesk.agent@default.com", "Helpdesk123!",
-                "Helpdesk", "Agent", defaultTenant.Id, Constants.Roles.HelpdeskAgent, AuthenticationProvider.LDAP);
+                "Helpdesk", "Agent", defaultTenant.Id, Constants.Roles.HelpdeskAgent, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("helpdesk.supervisor", "helpdesk.supervisor@default.com", "Helpdesk123!",
-                "Helpdesk", "Supervisor", defaultTenant.Id, Constants.Roles.HelpdeskSupervisor, AuthenticationProvider.LDAP);
+                "Helpdesk", "Supervisor", defaultTenant.Id, Constants.Roles.HelpdeskSupervisor, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("helpdesk.manager", "helpdesk.manager@default.com", "Helpdesk123!",
-                "Helpdesk", "Manager", defaultTenant.Id, Constants.Roles.HelpdeskManager, AuthenticationProvider.LDAP);
+                "Helpdesk", "Manager", defaultTenant.Id, Constants.Roles.HelpdeskManager, AuthenticationProvider.Local);
 
             // External portal user (Local auth) for testing support portal flows
             await CreateTestUserAsync("external", "external@default.com", "External123!",
@@ -4449,6 +4453,8 @@ namespace ErpSystem.Web.Services
                     await _userManager.UpdateAsync(existingUser);
                 }
 
+                await EnsureTestUserTenantAccessAsync(existingUser.Id, tenantId, roleName);
+
                 // Ensure role assignment
                 var inRole = await _userManager.IsInRoleAsync(existingUser, roleName);
                 if (!inRole)
@@ -4498,6 +4504,8 @@ namespace ErpSystem.Web.Services
             var result = await _userManager.CreateAsync(user, password);
             if (result.Succeeded)
             {
+                await EnsureTestUserTenantAccessAsync(user.Id, tenantId, roleName);
+
                 // Add user to role
                 var roleResult = await _userManager.AddToRoleAsync(user, roleName);
                 if (roleResult.Succeeded)
@@ -4515,6 +4523,59 @@ namespace ErpSystem.Web.Services
                 _logger.LogError("Failed to create test user {Username}: {Errors}",
                     username, string.Join(", ", result.Errors.Select(e => e.Description)));
             }
+        }
+
+        private async Task EnsureTestUserTenantAccessAsync(Guid userId, Guid tenantId, string roleName)
+        {
+            var accessLevel = string.Equals(roleName, Constants.Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase)
+                ? UserTenantAccessLevel.Admin
+                : UserTenantAccessLevel.Standard;
+
+            var relationships = await _context.UserTenants
+                .Where(ut => ut.UserId == userId && !ut.IsDeleted)
+                .ToListAsync();
+
+            var targetRelationship = relationships.FirstOrDefault(ut => ut.TenantId == tenantId);
+            if (targetRelationship == null)
+            {
+                targetRelationship = new UserTenant
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    TenantId = tenantId,
+                    AccessLevel = accessLevel,
+                    Status = UserTenantStatus.Active,
+                    IsDefault = true,
+                    GrantedAt = DateTime.UtcNow,
+                    GrantedBy = "System",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.UserTenants.Add(targetRelationship);
+            }
+            else
+            {
+                targetRelationship.AccessLevel = accessLevel;
+                targetRelationship.Status = UserTenantStatus.Active;
+                targetRelationship.IsDefault = true;
+                targetRelationship.ExpiresAt = null;
+                targetRelationship.SuspendedAt = null;
+                targetRelationship.ReactivatedAt ??= DateTime.UtcNow;
+                targetRelationship.GrantedAt = targetRelationship.GrantedAt == default ? DateTime.UtcNow : targetRelationship.GrantedAt;
+                targetRelationship.GrantedBy ??= "System";
+                targetRelationship.UpdatedAt = DateTime.UtcNow;
+                targetRelationship.UpdatedBy = "System";
+            }
+
+            foreach (var relationship in relationships.Where(ut => ut.TenantId != tenantId && ut.IsDefault))
+            {
+                relationship.IsDefault = false;
+                relationship.UpdatedAt = DateTime.UtcNow;
+                relationship.UpdatedBy = "System";
+            }
+
+            await _context.SaveChangesAsync();
         }
     }
 

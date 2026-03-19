@@ -19,7 +19,7 @@ import {
   Download,
   Filter
 } from 'lucide-react';
-import { BaseTreeChart, BaseLineChart, BaseBarChart } from '../charts/BaseCharts';
+import { BaseLineChart, BaseBarChart } from '../charts/BaseCharts';
 import { AnalyticsErrorDisplay, AnalyticsLoadingSkeleton } from '../common/ErrorHandling';
 import { useRootCauseAnalysis } from '../../../hooks/useAssetAnalytics';
 import { cn } from '@/lib/utils';

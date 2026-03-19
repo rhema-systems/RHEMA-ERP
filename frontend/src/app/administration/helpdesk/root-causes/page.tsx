@@ -15,6 +15,12 @@ import { useToast } from '@/hooks/use-toast';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { ehcRootCauseAdminService, type CreateEhcRootCauseCodeRequest, type EhcRootCauseCode } from '@/services/ehcRootCauseAdminService';
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 export default function HelpdeskRootCausesAdminPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -95,7 +101,7 @@ export default function HelpdeskRootCausesAdminPage() {
         id: 'code',
         header: 'Code',
         accessorKey: 'code',
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcRootCauseCode>) => (
           <button className="text-blue-600 hover:underline" onClick={() => startEdit(row.original)} title="Edit">
             {row.original.code}
           </button>
@@ -106,14 +112,14 @@ export default function HelpdeskRootCausesAdminPage() {
         id: 'isActive',
         header: 'Active',
         accessorKey: 'isActive',
-        cell: ({ row }) => (row.original.isActive ? 'Yes' : 'No'),
+        cell: ({ row }: TableCellProps<EhcRootCauseCode>) => (row.original.isActive ? 'Yes' : 'No'),
       },
       {
         id: 'actions',
         header: '',
         accessorKey: 'id',
         enableHiding: false,
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcRootCauseCode>) => (
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="icon" onClick={() => startEdit(row.original)} title="Edit">
               <Pencil className="h-4 w-4" />
@@ -209,4 +215,3 @@ export default function HelpdeskRootCausesAdminPage() {
     </div>
   );
 }
-

@@ -1,5 +1,7 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
@@ -51,6 +53,12 @@ public class JwtBlacklistService : IJwtBlacklistService
 
             _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId} (reason: {Reason})",
                 jti, userId, blacklistedToken.Reason);
+        }
+        catch (Exception ex) when (IsDuplicateBlacklistInsert(ex))
+        {
+            _logger.LogInformation(
+                "JWT token with JTI {Jti} was already blacklisted by another request. Treating blacklist call as successful.",
+                jti);
         }
         catch (Exception ex)
         {
@@ -152,5 +160,23 @@ public class JwtBlacklistService : IJwtBlacklistService
             _logger.LogError(ex, "Error cleaning up expired blacklisted tokens");
             return 0;
         }
+    }
+
+    private static bool IsDuplicateBlacklistInsert(Exception ex)
+    {
+        if (ex is DbUpdateException dbUpdateException && dbUpdateException.InnerException != null)
+        {
+            return IsDuplicateBlacklistInsert(dbUpdateException.InnerException);
+        }
+
+        if (ex is SqlException sqlException)
+        {
+            return sqlException.Number is 2601 or 2627;
+        }
+
+        return !string.IsNullOrWhiteSpace(ex.Message)
+            && ex.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase)
+            && (ex.Message.Contains("BlacklistedTokens", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("IX_BlacklistedTokens_Jti", StringComparison.OrdinalIgnoreCase));
     }
 }

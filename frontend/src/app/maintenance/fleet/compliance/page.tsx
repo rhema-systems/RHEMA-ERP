@@ -110,7 +110,7 @@ export default function FleetCompliancePage() {
   React.useEffect(() => {
     loadVehicles();
     loadTemplates();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   React.useEffect(() => {

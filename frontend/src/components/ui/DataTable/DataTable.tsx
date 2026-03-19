@@ -15,6 +15,7 @@ import {
   PaginationState,
   Table as TanStackTable,
   Row,
+  Updater,
   flexRender,
 } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
@@ -58,7 +59,7 @@ import { DataTablePagination } from './DataTablePagination';
 import { DataTableColumnFilter } from './DataTableColumnFilter';
 import { DataTableToolbar } from './DataTableToolbar';
 
-export interface DataTableColumn<TData> extends ColumnDef<TData> {
+export type DataTableColumn<TData> = ColumnDef<TData> & {
   accessorKey?: string;
   title?: string;
   searchable?: boolean;
@@ -68,7 +69,7 @@ export interface DataTableColumn<TData> extends ColumnDef<TData> {
   width?: number | string;
   minWidth?: number;
   maxWidth?: number;
-}
+};
 
 export interface DataTableAction<TData = any> {
   id: string;
@@ -243,6 +244,39 @@ export function DataTable<TData>({
     pageIndex: 0,
     pageSize: pageSize,
   });
+
+  const handleSortingChange = useCallback((updater: Updater<SortingState>) => {
+    if (serverSideSorting) {
+      const nextSorting = typeof updater === 'function' ? updater(sorting) : updater;
+      setSorting(nextSorting);
+      onSortingChange?.(nextSorting);
+      return;
+    }
+
+    setSorting(updater);
+  }, [onSortingChange, serverSideSorting, sorting]);
+
+  const handleColumnFiltersChange = useCallback((updater: Updater<ColumnFiltersState>) => {
+    if (serverSideFiltering) {
+      const nextFilters = typeof updater === 'function' ? updater(columnFilters) : updater;
+      setColumnFilters(nextFilters);
+      onColumnFiltersChange?.(nextFilters);
+      return;
+    }
+
+    setColumnFilters(updater);
+  }, [columnFilters, onColumnFiltersChange, serverSideFiltering]);
+
+  const handlePaginationChange = useCallback((updater: Updater<PaginationState>) => {
+    if (serverSidePagination) {
+      const nextPagination = typeof updater === 'function' ? updater(pagination) : updater;
+      setPagination(nextPagination);
+      onPaginationChange?.(nextPagination);
+      return;
+    }
+
+    setPagination(updater);
+  }, [onPaginationChange, pagination, serverSidePagination]);
   
   // Responsive behavior
   const shouldUseMobileView = enableMobileCards && (isMobile || isTablet);
@@ -274,11 +308,15 @@ export function DataTable<TData>({
               .filter(column => column.getIsVisible() && column.id !== 'select' && column.id !== 'actions')
               .slice(0, 3) // Show only first 3 columns in card
               .map(column => {
-                const cellValue = flexRender(column.columnDef.cell, {
-                  ...row.getVisibleCells().find(cell => cell.column.id === column.id)?.getContext(),
-                  row,
-                  column,
-                });
+                const matchingCell = row.getVisibleCells().find(cell => cell.column.id === column.id);
+                if (!matchingCell) {
+                  return null;
+                }
+
+                const cellValue = flexRender(
+                  matchingCell.column.columnDef.cell,
+                  matchingCell.getContext(),
+                );
                 
                 return (
                   <div key={column.id} className="flex justify-between items-start">
@@ -345,7 +383,7 @@ export function DataTable<TData>({
             className="translate-y-[2px]"
           />
         ),
-        cell: ({ row }) => (
+        cell: ({ row }: { row: Row<TData> }) => (
           <Checkbox
             checked={row.getIsSelected()}
             onCheckedChange={(value) => row.toggleSelected(!!value)}
@@ -367,7 +405,7 @@ export function DataTable<TData>({
       cols.push({
         id: 'actions',
         header: 'Actions',
-        cell: ({ row }) => (
+        cell: ({ row }: { row: Row<TData> }) => (
           <div className="flex items-center space-x-1">
             {rowActions.map((action) => {
               const isHidden = action.hidden?.(row);
@@ -409,12 +447,12 @@ export function DataTable<TData>({
   const table = useReactTable({
     data,
     columns: tableColumns,
-    onSortingChange: serverSideSorting ? onSortingChange : setSorting,
-    onColumnFiltersChange: serverSideFiltering ? onColumnFiltersChange : setColumnFilters,
+    onSortingChange: handleSortingChange,
+    onColumnFiltersChange: handleColumnFiltersChange,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     onGlobalFilterChange: serverSideFiltering ? onGlobalFilterChange : setGlobalFilter,
-    onPaginationChange: serverSidePagination ? onPaginationChange : setPagination,
+    onPaginationChange: handlePaginationChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: serverSideSorting ? undefined : getSortedRowModel(),
     getFilteredRowModel: serverSideFiltering ? undefined : getFilteredRowModel(),

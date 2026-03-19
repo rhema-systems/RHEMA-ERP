@@ -57,17 +57,17 @@ namespace ErpSystem.Api.Controllers
                 if (!string.IsNullOrEmpty(query.Username))
                 {
                     sessionsQuery = sessionsQuery.Where(s =>
-                        s.User != null && s.User.UserName.Contains(query.Username));
+                        s.User != null && s.User.UserName != null && s.User.UserName.Contains(query.Username));
                 }
 
                 if (!string.IsNullOrEmpty(query.IpAddress))
                 {
-                    sessionsQuery = sessionsQuery.Where(s => s.IpAddress.Contains(query.IpAddress));
+                    sessionsQuery = sessionsQuery.Where(s => s.IpAddress != null && s.IpAddress.Contains(query.IpAddress));
                 }
 
                 if (!string.IsNullOrEmpty(query.DeviceType))
                 {
-                    sessionsQuery = sessionsQuery.Where(s => s.DeviceType.Contains(query.DeviceType));
+                    sessionsQuery = sessionsQuery.Where(s => s.DeviceType != null && s.DeviceType.Contains(query.DeviceType));
                 }
 
                 if (query.LoginTimeAfter.HasValue)
@@ -86,19 +86,19 @@ namespace ErpSystem.Api.Controllers
                     {
                         SessionId = s.SessionId,
                         UserId = s.UserId,
-                        Username = s.User != null ? s.User.UserName : "Unknown",
+                        Username = s.User != null ? s.User.UserName ?? "Unknown" : "Unknown",
                         Role = s.User != null ? s.User.UserRoles.OrderByDescending(ur => ur.Role.Name == "SuperAdmin" ? 10 :
                                                     ur.Role.Name == "TenantAdmin" ? 9 :
                                                     ur.Role.Name == "Manager" ? 8 :
                                                     ur.Role.Name == "Employee" ? 7 : 0)
                                                 .Select(ur => ur.Role.Name).FirstOrDefault() ?? "Unknown" : "Unknown",
-                        Email = s.User != null ? s.User.Email : "Unknown",
-                        IpAddress = s.IpAddress,
-                        UserAgent = s.UserAgent,
-                        DeviceType = s.DeviceType,
-                        Browser = s.Browser,
-                        OperatingSystem = s.OperatingSystem,
-                        Location = s.Location,
+                        Email = s.User != null ? s.User.Email ?? "Unknown" : "Unknown",
+                        IpAddress = s.IpAddress ?? string.Empty,
+                        UserAgent = s.UserAgent ?? string.Empty,
+                        DeviceType = s.DeviceType ?? string.Empty,
+                        Browser = s.Browser ?? string.Empty,
+                        OperatingSystem = s.OperatingSystem ?? string.Empty,
+                        Location = s.Location ?? string.Empty,
                         LoginTime = s.LoginTime,
                         LastActivityTime = s.LastActivityTime,
                         SessionDuration = DateTime.UtcNow - s.LoginTime

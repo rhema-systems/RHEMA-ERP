@@ -171,7 +171,6 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
     };
 
     ensure();
-     
   }, [tab, vehicleAssetId]);
 
   return (

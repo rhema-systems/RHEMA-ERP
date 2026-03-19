@@ -37,6 +37,10 @@ import {
   qualityChecklistService
 } from '@/services/qualityChecklistService';
 
+interface QualityChecklistFormData extends Omit<CreateQualityChecklistDto, 'items'> {
+  items: QualityChecklistItem[];
+}
+
 export default function QualityChecklistsPage() {
   const [mounted, setMounted] = useState(false);
   const [checklists, setChecklists] = useState<QualityChecklist[]>([]);
@@ -59,7 +63,7 @@ export default function QualityChecklistsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form data
-  const [formData, setFormData] = useState<CreateQualityChecklistDto>({
+  const [formData, setFormData] = useState<QualityChecklistFormData>({
     name: '',
     description: '',
     workOrderType: '',
@@ -197,6 +201,7 @@ export default function QualityChecklistsPage() {
       const createData: CreateQualityChecklistDto = {
         ...formData,
         maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType,
+        items: formData.items.map(({ id, ...item }) => item),
         // Include IDs for proper foreign key matching
         workOrderTypeId: findWorkOrderTypeId(formData.workOrderType),
         assetCategoryId: findAssetCategoryId(formData.assetCategory),
@@ -227,6 +232,7 @@ export default function QualityChecklistsPage() {
         ...formData,
         maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType,
         isActive: selectedChecklist.isActive,
+        items: formData.items.map(({ id, ...item }) => item),
         // Include IDs for proper foreign key matching
         workOrderTypeId: findWorkOrderTypeId(formData.workOrderType),
         assetCategoryId: findAssetCategoryId(formData.assetCategory),
@@ -319,6 +325,7 @@ export default function QualityChecklistsPage() {
       isMandatory: checklist.isMandatory,
       minimumPassingScore: checklist.minimumPassingScore,
       items: checklist.items.map(item => ({
+        id: item.id,
         text: item.text,
         description: item.description,
         required: item.required,
@@ -360,7 +367,8 @@ export default function QualityChecklistsPage() {
   };
 
   const addChecklistItem = () => {
-    const newItem: Omit<QualityChecklistItem, 'id'> = {
+    const newItem: QualityChecklistItem = {
+      id: `temp-${Date.now()}`,
       text: '',
       description: '',
       required: true,

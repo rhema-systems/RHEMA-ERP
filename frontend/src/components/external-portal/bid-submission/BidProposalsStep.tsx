@@ -216,7 +216,7 @@ export default function BidProposalsStep({
                   <div>
                     <p className="text-sm font-medium text-green-900">{technicalProposalDoc.documentName}</p>
                     <p className="text-xs text-green-700">
-                      {(technicalProposalDoc.fileSize / 1024 / 1024).toFixed(2)} MB
+                      {((technicalProposalDoc.fileSize ?? 0) / 1024 / 1024).toFixed(2)} MB
                     </p>
                   </div>
                 </div>
@@ -362,7 +362,7 @@ export default function BidProposalsStep({
                   <div>
                     <p className="text-sm font-medium text-green-900">{commercialProposalDoc.documentName}</p>
                     <p className="text-xs text-green-700">
-                      {(commercialProposalDoc.fileSize / 1024 / 1024).toFixed(2)} MB
+                      {((commercialProposalDoc.fileSize ?? 0) / 1024 / 1024).toFixed(2)} MB
                     </p>
                   </div>
                 </div>
@@ -529,4 +529,3 @@ export default function BidProposalsStep({
     </div>
   );
 }
-

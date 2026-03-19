@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import type { DateRange } from 'react-day-picker';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar, DateRange } from '@/components/ui/calendar';
+import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -39,6 +40,7 @@ import { ClientOnly } from '@/components/ClientOnly';
 
 interface ScheduledMaintenanceItem {
   id: string;
+  code?: string;
   title: string;
   assetId: string;
   assetName: string;
@@ -147,8 +149,7 @@ export default function ScheduledMaintenancePage() {
           toast({
             title: "Employee API Not Available",
             description: "Unable to load employee data. The technician dropdown will be empty. Please check the console for endpoint details and contact your system administrator.",
-            variant: "destructive",
-            duration: 8000
+            variant: "destructive"
           });
         }
 
@@ -166,6 +167,7 @@ export default function ScheduledMaintenancePage() {
         // Map MaintenanceSchedule to ScheduledMaintenanceItem interface
         const mappedSchedules = schedules.map((schedule: any) => ({
           id: schedule.id,
+          code: schedule.code || '',
           title: schedule.name || schedule.title,
           assetId: schedule.assetId,
           assetName: schedule.assetName || 'Unknown Asset',
@@ -391,10 +393,10 @@ export default function ScheduledMaintenancePage() {
         estimatedDuration: 60, // Default to 60 minutes
         estimatedHours: parseFloat(formData.estimatedHours) || 1,
         estimatedCost: 0,
-        assignedTechnicianId: formData.assignedTechnician && formData.assignedTechnician.trim() !== '' && formData.assignedTechnician !== '__UNASSIGNED__' ? formData.assignedTechnician : null,
-        assignedTeamId: null,
+        assignedTechnicianId: formData.assignedTechnician && formData.assignedTechnician.trim() !== '' && formData.assignedTechnician !== '__UNASSIGNED__' ? formData.assignedTechnician : undefined,
+        assignedTeamId: undefined,
         assignedTeam: '',
-        assetCategory: assets.find(asset => asset.id === formData.assetId)?.categoryName || '',
+        assetCategory: assets.find(asset => asset.id === formData.assetId)?.category || '',
         instructions: formData.description,
         safetyNotes: '',
         requiredSkills: [],
@@ -405,17 +407,17 @@ export default function ScheduledMaintenancePage() {
         autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
         advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
-        notificationRecipients: formData.notificationRecipients || null,
+        notificationRecipients: formData.notificationRecipients || undefined,
         maxDelayDays: 3,
         notes: formData.description,
         // Trigger fields
         primaryTriggerType: formData.primaryTriggerType,
-        secondaryTriggerType: formData.secondaryTriggerType || null,
+        secondaryTriggerType: formData.secondaryTriggerType || undefined,
         triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
-        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
-        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
-        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
-        conditionCriteria: formData.conditionCriteria || null
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : undefined,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : undefined,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : undefined,
+        conditionCriteria: formData.conditionCriteria || undefined
       };
 
       console.log('Sending createDto:', createDto);
@@ -793,10 +795,10 @@ export default function ScheduledMaintenancePage() {
         estimatedDuration: 60,
         estimatedHours: parseFloat(formData.estimatedHours) || 1,
         estimatedCost: 0,
-        assignedTechnicianId: assignedTechnicianId,
-        assignedTeamId: null,
+        assignedTechnicianId: assignedTechnicianId || undefined,
+        assignedTeamId: undefined,
         assignedTeam: '',
-        assetCategory: assets.find(asset => asset.id === formData.assetId)?.categoryName || '',
+        assetCategory: assets.find(asset => asset.id === formData.assetId)?.category || '',
         instructions: formData.description,
         safetyNotes: '',
         requiredSkills: [],
@@ -807,17 +809,17 @@ export default function ScheduledMaintenancePage() {
         autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
         advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
-        notificationRecipients: formData.notificationRecipients || null,
+        notificationRecipients: formData.notificationRecipients || undefined,
         maxDelayDays: 3,
         notes: formData.description,
         // Trigger fields
         primaryTriggerType: formData.primaryTriggerType,
-        secondaryTriggerType: formData.secondaryTriggerType || null,
+        secondaryTriggerType: formData.secondaryTriggerType || undefined,
         triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
-        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
-        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
-        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
-        conditionCriteria: formData.conditionCriteria || null
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : undefined,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : undefined,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : undefined,
+        conditionCriteria: formData.conditionCriteria || undefined
       };
 
       console.log('Final request payload:', JSON.stringify(updateDto, null, 2));
@@ -836,6 +838,7 @@ export default function ScheduledMaintenancePage() {
       const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
       const mappedSchedules = schedules.map((schedule: any) => ({
         id: schedule.id,
+        code: schedule.code || '',
         title: schedule.name || schedule.title,
         assetId: schedule.assetId,
         assetName: schedule.assetName || 'Unknown Asset',
@@ -1742,8 +1745,6 @@ export default function ScheduledMaintenancePage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {console.log('📊 RENDERING GRID - filteredData length:', filteredData.length)}
-            {console.log('📊 RENDERING GRID - filteredData:', filteredData)}
             {filteredData.length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 No scheduled maintenance tasks found.

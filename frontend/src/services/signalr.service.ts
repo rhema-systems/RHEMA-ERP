@@ -169,7 +169,6 @@ class SignalRService {
       await this.connection.start();
       
       console.log(`SignalR connection established successfully. ConnectionId: ${this.connection.connectionId}`);
-      console.log(`Transport: ${this.connection.transport ? this.connection.transport.name : 'Unknown'}`);
       
       this.notifyConnectionStateChange(this.connection.state);
       

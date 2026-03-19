@@ -158,6 +158,10 @@ class QualityControlService {
     return response.data;
   }
 
+  async getValidationByWorkOrder(workOrderId: string): Promise<QualityValidationResult> {
+    return this.validateWorkOrderCompletion(workOrderId);
+  }
+
   async getRequiredInspections(assetId: string, workOrderType: string): Promise<RequiredInspection[]> {
     const response = await axios.get(`${API_URL}/maintenance/quality-control/required-inspections`, {
       params: { assetId, workOrderType },

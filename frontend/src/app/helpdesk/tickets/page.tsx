@@ -62,13 +62,19 @@ const priorityBadgeClassName = (p: EhcTicketPriority) => {
 
 const isTerminalStatus = (s: EhcTicketStatus) => s === 'Resolved' || s === 'Closed';
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 export default function HelpdeskTicketsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [status, setStatus] = useState<EhcTicketStatus | ''>('');
   const [ticketType, setTicketType] = useState<EhcTicketType | ''>(
@@ -244,7 +250,7 @@ export default function HelpdeskTicketsPage() {
         id: 'ticketNumber',
         header: 'Ticket',
         accessorKey: 'ticketNumber',
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => (
           <div className="font-medium text-slate-900">
             {row.original.ticketNumber}
             {row.original.subject ? <div className="text-xs text-slate-500 truncate max-w-[260px]">{row.original.subject}</div> : null}
@@ -255,13 +261,13 @@ export default function HelpdeskTicketsPage() {
         id: 'createdAt',
         header: 'Created',
         accessorKey: 'createdAt',
-        cell: ({ row }) => <div className="whitespace-nowrap">{formatCreatedAt(row.original.createdAt)}</div>,
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => <div className="whitespace-nowrap">{formatCreatedAt(row.original.createdAt)}</div>,
       },
       {
         id: 'requester',
         header: 'Submitted By',
-        accessorFn: (r) => r.requesterName || '—',
-        cell: ({ row }) => {
+        accessorFn: (r: EhcTicketListItem) => r.requesterName || '—',
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => {
           const name = row.original.requesterName || '—';
           const provider = row.original.requesterAuthenticationProvider || null;
           const submittedVia = provider === 'Local' ? 'External Portal' : provider ? 'Internal ERP' : null;
@@ -276,7 +282,7 @@ export default function HelpdeskTicketsPage() {
       {
         id: 'source',
         header: 'Channel',
-        accessorFn: (r) => {
+        accessorFn: (r: EhcTicketListItem) => {
           if (r.source === 'Web') return 'Website';
           if (r.source === 'PhoneCall') return 'Phone Call';
           if (r.source === 'Sms') return 'SMS';
@@ -291,8 +297,8 @@ export default function HelpdeskTicketsPage() {
       {
         id: 'priority',
         header: 'Priority',
-        accessorFn: (r) => r.priority,
-        cell: ({ row }) => (
+        accessorFn: (r: EhcTicketListItem) => r.priority,
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => (
           <Badge className={priorityBadgeClassName(row.original.priority)}>
             {priorityLabelByValue.get(row.original.priority) ?? row.original.priority}
           </Badge>
@@ -301,28 +307,28 @@ export default function HelpdeskTicketsPage() {
       {
         id: 'status',
         header: 'Status',
-        accessorFn: (r) => r.status,
-        cell: ({ row }) => <Badge className={statusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
+        accessorFn: (r: EhcTicketListItem) => r.status,
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => <Badge className={statusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
       },
       {
         id: 'categoryName',
         header: 'Category',
-        accessorFn: (r) => r.categoryName || '—',
+        accessorFn: (r: EhcTicketListItem) => r.categoryName || '—',
       },
       {
         id: 'assignedDepartmentName',
         header: 'Department',
-        accessorFn: (r) => r.assignedDepartmentName || '—',
+        accessorFn: (r: EhcTicketListItem) => r.assignedDepartmentName || '—',
       },
       {
         id: 'assignedToName',
         header: 'Assignee',
-        accessorFn: (r) => r.assignedToName || '—',
+        accessorFn: (r: EhcTicketListItem) => r.assignedToName || '—',
       },
       {
         id: 'sla',
         header: 'SLA',
-        accessorFn: (r) => {
+        accessorFn: (r: EhcTicketListItem) => {
           const now = Date.now();
           const firstResponseDueAt = r.firstResponseDueAt ? Date.parse(r.firstResponseDueAt) : Number.NaN;
           const resolutionDueAt = r.resolutionDueAt ? Date.parse(r.resolutionDueAt) : Number.NaN;
@@ -337,7 +343,7 @@ export default function HelpdeskTicketsPage() {
           if (firstResponseOverdue) return 'FirstResponseOverdue';
           return '';
         },
-        cell: ({ row }) => {
+        cell: ({ row }: TableCellProps<EhcTicketListItem>) => {
           const t = row.original;
           if (isTerminalStatus(t.status)) return <span className="text-slate-500">—</span>;
 

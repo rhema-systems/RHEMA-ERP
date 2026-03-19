@@ -57,7 +57,7 @@ const GRNStatuses = [
 export default function PurchaseReceiptDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
   const [receipt, setReceipt] = useState<PurchaseOrderReceiptDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -248,7 +248,6 @@ export default function PurchaseReceiptDetailPage() {
     if (activeTab !== 'landed-cost') return;
     if (!id) return;
     fetchLandedCosts(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, id]);
 
   useEffect(() => {
@@ -280,7 +279,6 @@ export default function PurchaseReceiptDetailPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedLandedCostId]);
 
   const getStatusBadge = (status: string) => {
@@ -686,7 +684,7 @@ export default function PurchaseReceiptDetailPage() {
                   </Button>
                   <Button
                     onClick={allocateLandedCost}
-                    disabled={!selectedLandedCostId || landedCostLoading || landedCostAllocating || landedCostPosting || (landedCostDetail?.status && landedCostDetail.status !== 'Draft')}
+                    disabled={!selectedLandedCostId || landedCostLoading || landedCostAllocating || landedCostPosting || Boolean(landedCostDetail?.status && landedCostDetail.status !== 'Draft')}
                   >
                     {landedCostAllocating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     Allocate

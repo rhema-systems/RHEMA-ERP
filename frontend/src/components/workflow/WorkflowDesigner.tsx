@@ -7,6 +7,7 @@ import ReactFlow, {
   Edge,
   addEdge,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   useNodesState,
@@ -63,7 +64,7 @@ import {
   Save, X, Play, Pause, Settings, Users, Clock, AlertTriangle,
   FileText, Mail, Phone, MessageSquare, Database, Code,
   GitBranch, CheckCircle, XCircle, AlertCircle, Timer,
-  User, UserCheck, Building, Zap, Bell, Upload, Download,
+  User as UserIcon, UserCheck, Building, Zap, Bell, Upload, Download,
   ChevronsUpDown, Check
 } from 'lucide-react';
 
@@ -206,7 +207,7 @@ const moduleIntegrations = [
   { id: 'procurement', name: 'Procurement', icon: FileText },
   { id: 'helpdesk', name: 'Helpdesk (EHC)', icon: MessageSquare },
   { id: 'projects', name: 'Project Management', icon: CheckCircle },
-  { id: 'sales', name: 'Sales & CRM', icon: User },
+  { id: 'sales', name: 'Sales & CRM', icon: UserIcon },
   { id: 'quality', name: 'Quality Management', icon: CheckCircle },
 ];
 
@@ -886,7 +887,10 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     const reachable = new Set<string>();
     const queue: string[] = Array.from(startNodeIds);
     while (queue.length > 0) {
-      const current = queue.shift()!;
+      const current = queue.shift();
+      if (!current) {
+        continue;
+      }
       if (reachable.has(current)) continue;
       reachable.add(current);
       const next = adjacency.get(current) ?? [];
@@ -915,7 +919,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
     const usedNames = new Map<string, number>();
     const steps: CreateWorkflowStepDto[] = sortedNodes.map((node, index) => {
-      const stepId = nodeIdToStepId.get(node.id)!;
+      const stepId = nodeIdToStepId.get(node.id) ?? node.id;
       const baseName = (node.data?.label || `Step ${index + 1}`).toString().trim() || `Step ${index + 1}`;
       const normalizedName = baseName.toLowerCase();
       const duplicateCount = usedNames.get(normalizedName) ?? 0;
@@ -957,8 +961,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       return stepNodes.slice(0, -1).map((node, index) => {
         const nextNode = stepNodes[index + 1];
         return {
-          fromStepId: nodeIdToStepId.get(node.id)!,
-          toStepId: nodeIdToStepId.get(nextNode.id)!,
+          fromStepId: nodeIdToStepId.get(node.id) ?? node.id,
+          toStepId: nodeIdToStepId.get(nextNode.id) ?? nextNode.id,
           name: `${node.data?.label ?? `Step ${index + 1}`} to ${nextNode.data?.label ?? `Step ${index + 2}`}`,
           description: undefined,
           condition: undefined,
@@ -1027,8 +1031,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
     const outgoingIndex: Record<string, number> = {};
     return edgesForTransitions.map((edge) => {
-      const fromStepId = nodeIdToStepId.get(edge.source)!;
-      const toStepId = nodeIdToStepId.get(edge.target)!;
+      const fromStepId = nodeIdToStepId.get(edge.source) ?? edge.source;
+      const toStepId = nodeIdToStepId.get(edge.target) ?? edge.target;
       const sourceNode = stepNodes.find(node => node.id === edge.source);
       const targetNode = stepNodes.find(node => node.id === edge.target);
       const name = edge.label?.toString() || `${sourceNode?.data?.label ?? 'Step'} to ${targetNode?.data?.label ?? 'Step'}`;
@@ -1058,7 +1062,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       if (node.type === 'start' || node.type === 'end') {
         return node;
       }
-      return { ...node, id: nodeIdToStepId.get(node.id)! };
+      return { ...node, id: nodeIdToStepId.get(node.id) ?? node.id };
     });
 
     const normalizedEdges = edges.map((edge) => {
@@ -1076,10 +1080,12 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       const approvalConfig = step.configuration?.approvalConfig;
       const approverRoles = approvalConfig?.approverRules
         ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.Role && rule.role)
-        .map(rule => rule.role!) ?? [];
+        .map(rule => rule.role ?? '')
+        .filter(Boolean) ?? [];
       const approverUsers = approvalConfig?.approverRules
         ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.User && rule.userId)
-        .map(rule => rule.userId!) ?? [];
+        .map(rule => rule.userId ?? '')
+        .filter(Boolean) ?? [];
       return {
         ...baseData,
         approvers: approverRoles,
@@ -1259,7 +1265,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     const apiVariables = conditionVariables.map(variable => ({
       label: variable.displayName || variable.name,
       value: variable.name,
-      description: variable.description,
+      description: variable.description || '',
       group: getVariableGroup(variable)
     }));
 
@@ -1707,7 +1713,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                 >
                   <Controls />
                   <MiniMap />
-                  <Background variant="dots" gap={12} size={1} />
+                  <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
                 </ReactFlow>
               </ReactFlowProvider>
             </div>

@@ -160,7 +160,7 @@ public class FrontendOptimizationMiddleware
         return response.ContentType?.Contains("application/json") == true;
     }
 
-    private async Task OptimizeJsonResponse(HttpContext context)
+    private Task OptimizeJsonResponse(HttpContext context)
     {
         var response = context.Response;
 
@@ -175,6 +175,8 @@ public class FrontendOptimizationMiddleware
             _logger.LogInformation("Large response detected ({Size} bytes) for {Path}",
                 response.ContentLength, context.Request.Path);
         }
+
+        return Task.CompletedTask;
     }
 }
 

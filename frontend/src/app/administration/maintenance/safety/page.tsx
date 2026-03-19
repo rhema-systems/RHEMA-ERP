@@ -56,6 +56,25 @@ interface SafetyProtocol {
   incidentsLastYear: number;
 }
 
+interface SafetyProtocolFormData {
+  name: string;
+  code: string;
+  description: string;
+  category: string;
+  riskLevel: string;
+  isActive: boolean;
+  isMandatory: boolean;
+  version: string;
+  reviewFrequency: string;
+  applicableAreas: string[];
+  requiredTraining: string[];
+  estimatedTime: number;
+  steps: string[];
+  requiredPPE: string[];
+  emergencyContacts: string[];
+  documents: string[];
+}
+
 const mockSafetyProtocolsData = [
   {
     id: 1,
@@ -244,7 +263,7 @@ export default function SafetyProtocolsPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<SafetyProtocolFormData>({
     name: '',
     code: '',
     description: '',
@@ -421,7 +440,7 @@ export default function SafetyProtocolsPage() {
     setIsEditDialogOpen(true);
   };
 
-  const handleView = (protocol: any) => {
+  const handleView = (protocol: SafetyProtocol) => {
     setSelectedProtocol(protocol);
     setIsViewDialogOpen(true);
   };
