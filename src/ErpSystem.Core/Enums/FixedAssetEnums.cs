@@ -166,4 +166,49 @@ namespace ErpSystem.Core.Enums
         [Display(Name = "Missing")]
         Missing = 6
     }
+
+    public enum ValuationType
+    {
+        [Display(Name = "Revaluation")]
+        Revaluation = 1,
+
+        [Display(Name = "Impairment")]
+        Impairment = 2,
+
+        [Display(Name = "Impairment Reversal")]
+        ImpairmentReversal = 3
+    }
+
+    public enum PaymentFrequency
+    {
+        [Display(Name = "Monthly")]
+        Monthly = 1,
+
+        [Display(Name = "Quarterly")]
+        Quarterly = 2,
+
+        [Display(Name = "Semi-Annual")]
+        SemiAnnual = 3,
+
+        [Display(Name = "Annual")]
+        Annual = 4
+    }
+
+    public enum LeaseStatus
+    {
+        [Display(Name = "Draft")]
+        Draft = 1,
+
+        [Display(Name = "Active")]
+        Active = 2,
+
+        [Display(Name = "Expired")]
+        Expired = 3,
+
+        [Display(Name = "Terminated")]
+        Terminated = 4,
+
+        [Display(Name = "Cancelled")]
+        Cancelled = 5
+    }
 }

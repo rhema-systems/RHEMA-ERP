@@ -36,6 +36,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     {
     }
 
+    /// <summary>
+    /// Protected constructor for derived contexts (e.g. ReportingDbContext) that use their own typed options.
+    /// </summary>
+    protected ApplicationDbContext(DbContextOptions options) : base(options)
+    {
+    }
+
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, Guid? tenantId) : base(options)
     {
         _tenantId = tenantId;
@@ -4400,7 +4407,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         });
     }
 
-    private void ApplyGlobalFilters(ModelBuilder builder)
+    protected virtual void ApplyGlobalFilters(ModelBuilder builder)
     {
         // Apply soft delete filter to all entities that inherit from BaseEntity
         foreach (var entityType in builder.Model.GetEntityTypes())
@@ -6198,7 +6205,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(icl => icl.IsFullyConsumed);
 
             entity.HasOne(icl => icl.InventoryItem)
-                .WithMany(ii => ii.CostLayers)
+                .WithMany()
                 .HasForeignKey(icl => icl.InventoryItemId)
                 .OnDelete(DeleteBehavior.NoAction);
 

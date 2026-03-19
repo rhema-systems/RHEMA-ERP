@@ -2510,23 +2510,6 @@ public enum CompanyAssetStatus
     Reserved = 7
 }
 
-public enum AssetCondition
-{
-    [Description("Excellent")]
-    Excellent = 1,
-
-    [Description("Good")]
-    Good = 2,
-
-    [Description("Fair")]
-    Fair = 3,
-
-    [Description("Poor")]
-    Poor = 4,
-
-    [Description("Non-Functional")]
-    NonFunctional = 5
-}
 
 public enum DisposalMethod
 {
@@ -2669,17 +2652,6 @@ public enum AssetRequisitionStatus
     Cancelled = 6
 }
 
-public enum AssetTransferType
-{
-    [Description("Employee to Employee")]
-    EmployeeToEmployee = 1,
-
-    [Description("Location to Location")]
-    LocationToLocation = 2,
-
-    [Description("Department to Department")]
-    DepartmentToDepartment = 3
-}
 
 public enum HRAssetTransferStatus
 {
@@ -3509,16 +3481,5 @@ public enum FiscalYearStatus
     Archived = 3
 }
 
-public enum PeriodType
-{
-    [Description("Quarter")]
-    Quarter = 1,
-
-    [Description("Month")]
-    Month = 2,
-
-    [Description("Semi-Annual")]
-    SemiAnnual = 3
-}
 
 #endregion Company Schedule

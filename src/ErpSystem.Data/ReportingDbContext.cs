@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Data
 {
@@ -10,8 +9,8 @@ namespace ErpSystem.Data
     public class ReportingDbContext : ApplicationDbContext
     {
 
-        public ReportingDbContext(DbContextOptions<ReportingDbContext> options, IServiceProvider serviceProvider) 
-            : base(options, serviceProvider)
+        public ReportingDbContext(DbContextOptions<ReportingDbContext> options) 
+            : base(options)
         {
         }
 
