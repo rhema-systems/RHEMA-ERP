@@ -65,6 +65,7 @@ interface ChartContainerProps extends BaseChartProps {
 
 const ChartContainer: React.FC<ChartContainerProps> = ({
   children,
+  data,
   title,
   description,
   className,
@@ -105,6 +106,27 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
             <div className="text-center">
               <div className="text-red-500 mb-2">⚠️</div>
               <p className="text-sm text-muted-foreground">{error}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <Card className={cn('w-full', className)}>
+        {(title || description) && (
+          <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
+            {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
+            {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
+          </CardHeader>
+        )}
+        <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
+          <div className="flex items-center justify-center" style={{ height }}>
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground">No live data yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">This widget will populate as records flow into the module.</p>
             </div>
           </div>
         </CardContent>
@@ -357,6 +379,8 @@ export const BaseBarChart: React.FC<BarChartProps> = ({
   error,
   compact,
 }) => {
+  const isHorizontal = orientation === 'horizontal';
+
   return (
     <ChartContainer
       className={className}
@@ -368,17 +392,18 @@ export const BaseBarChart: React.FC<BarChartProps> = ({
       data={data}
       compact={compact}
     >
-      <BarChart data={data} layout={orientation === 'horizontal' ? 'horizontal' : 'vertical'}>
+      <BarChart data={data} layout={isHorizontal ? 'vertical' : 'horizontal'}>
         {showGrid && <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />}
         <XAxis 
-          dataKey={xAxisKey}
-          type={orientation === 'horizontal' ? 'number' : 'category'}
+          dataKey={isHorizontal ? undefined : xAxisKey}
+          type={isHorizontal ? 'number' : 'category'}
           className="text-xs fill-muted-foreground"
           tickLine={false}
           axisLine={false}
         />
         <YAxis 
-          type={orientation === 'horizontal' ? 'category' : 'number'}
+          dataKey={isHorizontal ? xAxisKey : undefined}
+          type={isHorizontal ? 'category' : 'number'}
           className="text-xs fill-muted-foreground"
           tickLine={false}
           axisLine={false}
