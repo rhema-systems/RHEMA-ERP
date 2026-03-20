@@ -20,6 +20,7 @@ namespace ErpSystem.Web.Services
     public interface IDatabaseSeedingService
     {
         Task SeedAsync();
+        Task SeedWithoutMigrationAsync();
         Task SeedBasicDataAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
@@ -48,14 +49,21 @@ namespace ErpSystem.Web.Services
             _environment = environment;
         }
 
-        public async Task SeedAsync()
+        public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
+
+        public Task SeedWithoutMigrationAsync() => SeedCoreAsync(applyMigrations: false);
+
+        private async Task SeedCoreAsync(bool applyMigrations)
         {
             try
             {
                 _logger.LogInformation("Starting database seeding...");
 
-                // Ensure database is created and migrated
-                await _context.Database.MigrateAsync();
+                if (applyMigrations)
+                {
+                    // Ensure database is created and migrated
+                    await _context.Database.MigrateAsync();
+                }
 
                 // Always ensure roles exist (safe/idempotent; required for new module roles on existing DBs)
                 _logger.LogInformation("Ensuring roles are seeded...");

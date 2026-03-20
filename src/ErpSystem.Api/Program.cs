@@ -115,6 +115,34 @@ if (args.Length > 0 && args[0] == "seed-db")
     return;
 }
 
+// Check for development database rebuild command.
+// This bypasses the current migration chain and recreates the schema directly from the EF model.
+if (args.Length > 0 && args[0] == "rebuild-db")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+
+        Console.WriteLine("⚠️  Rebuilding database from the current EF model...");
+        await db.Database.EnsureDeletedAsync();
+        await db.Database.EnsureCreatedAsync();
+        await seedingService.SeedWithoutMigrationAsync();
+    }
+
+    Console.WriteLine("✅ Database rebuild completed!");
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 if (builder.Environment.IsEnvironment("Testing")

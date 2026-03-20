@@ -741,6 +741,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new TenderLotConfiguration());
         builder.ApplyConfiguration(new TenderBidConfiguration());
         builder.ApplyConfiguration(new TenderBidLotConfiguration());
+        builder.ApplyConfiguration(new TenderBidItemConfiguration());
+        builder.ApplyConfiguration(new TenderNegotiationConfiguration());
+        builder.ApplyConfiguration(new TenderNegotiationItemConfiguration());
         builder.ApplyConfiguration(new TenderAwardConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
@@ -899,6 +902,138 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.ToTable("SalesProducts");
             entity.Ignore(e => e.Margin);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SalesOrder>(entity =>
+        {
+            entity.ToTable("SalesOrders");
+            entity.HasOne(e => e.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Quote)
+                .WithMany()
+                .HasForeignKey(e => e.QuoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Opportunity)
+                .WithMany()
+                .HasForeignKey(e => e.OpportunityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SalesRep)
+                .WithMany()
+                .HasForeignKey(e => e.SalesRepId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Invoice)
+                .WithMany()
+                .HasForeignKey(e => e.InvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SalesOrderLine>(entity =>
+        {
+            entity.ToTable("SalesOrderLines");
+            entity.HasOne(e => e.SalesOrder)
+                .WithMany(e => e.Lines)
+                .HasForeignKey(e => e.SalesOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Product)
+                .WithMany()
+                .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Location)
+                .WithMany()
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.GLAccount)
+                .WithMany()
+                .HasForeignKey(e => e.GLAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<DeliveryNote>(entity =>
+        {
+            entity.ToTable("DeliveryNotes");
+            entity.HasOne(e => e.SalesOrder)
+                .WithMany(e => e.DeliveryNotes)
+                .HasForeignKey(e => e.SalesOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PackedBy)
+                .WithMany()
+                .HasForeignKey(e => e.PackedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ShippedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ShippedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReceivedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ReceivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<DeliveryNoteLine>(entity =>
+        {
+            entity.ToTable("DeliveryNoteLines");
+            entity.HasOne(e => e.DeliveryNote)
+                .WithMany(e => e.Lines)
+                .HasForeignKey(e => e.DeliveryNoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.SalesOrderLine)
+                .WithMany()
+                .HasForeignKey(e => e.SalesOrderLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Location)
+                .WithMany()
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
@@ -1067,6 +1202,220 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(p => p.Installments)
                 .HasForeignKey(e => e.PaymentPlanId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── Accounts Payable FK Configurations ───
+
+        builder.Entity<VendorInvoice>(entity =>
+        {
+            entity.ToTable("VendorInvoice");
+            entity.HasOne(e => e.Supplier)
+                .WithMany()
+                .HasForeignKey(e => e.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(e => e.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ExpenseAccount)
+                .WithMany()
+                .HasForeignKey(e => e.ExpenseAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ApAccount)
+                .WithMany()
+                .HasForeignKey(e => e.ApAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<VendorInvoiceLineItem>(entity =>
+        {
+            entity.ToTable("VendorInvoiceLineItem");
+            entity.HasOne(e => e.VendorInvoice)
+                .WithMany(i => i.LineItems)
+                .HasForeignKey(e => e.VendorInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.GLAccount)
+                .WithMany()
+                .HasForeignKey(e => e.GLAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PurchaseOrderItem)
+                .WithMany()
+                .HasForeignKey(e => e.PurchaseOrderItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Location)
+                .WithMany()
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<VendorPayment>(entity =>
+        {
+            entity.ToTable("VendorPayment");
+            entity.HasOne(e => e.Supplier)
+                .WithMany()
+                .HasForeignKey(e => e.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BankAccount)
+                .WithMany()
+                .HasForeignKey(e => e.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PaymentBatch)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<VendorPaymentAllocation>(entity =>
+        {
+            entity.ToTable("VendorPaymentAllocation");
+            entity.HasOne(e => e.VendorPayment)
+                .WithMany(p => p.Allocations)
+                .HasForeignKey(e => e.VendorPaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.VendorInvoice)
+                .WithMany(i => i.PaymentAllocations)
+                .HasForeignKey(e => e.VendorInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentBatch>(entity =>
+        {
+            entity.ToTable("PaymentBatch");
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentBatchItem>(entity =>
+        {
+            entity.ToTable("PaymentBatchItem");
+            entity.HasOne(e => e.PaymentBatch)
+                .WithMany(b => b.Items)
+                .HasForeignKey(e => e.PaymentBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.VendorPayment)
+                .WithMany()
+                .HasForeignKey(e => e.VendorPaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── General Ledger FK Configurations ───
+
+        builder.Entity<FiscalYear>(entity =>
+        {
+            entity.ToTable("FiscalYears");
+            entity.HasOne(e => e.NextFiscalYear)
+                .WithOne(e => e.PreviousFiscalYear)
+                .HasForeignKey<FiscalYear>(e => e.NextFiscalYearId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ClosingJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ClosingJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OpeningBalanceJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OpeningBalanceJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FiscalPeriod>(entity =>
+        {
+            entity.ToTable("FiscalPeriods");
+            entity.HasOne(e => e.FiscalYear)
+                .WithMany(y => y.FiscalPeriods)
+                .HasForeignKey(e => e.FiscalYearId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<JournalEntry>(entity =>
+        {
+            entity.ToTable("JournalEntries");
+            entity.HasOne(e => e.FiscalPeriod)
+                .WithMany(p => p.JournalEntries)
+                .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountTransaction>(entity =>
+        {
+            entity.ToTable("AccountTransactions");
+            entity.HasOne(e => e.Account)
+                .WithMany(a => a.Transactions)
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.JournalEntry)
+                .WithMany(j => j.Transactions)
+                .HasForeignKey(e => e.JournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FiscalPeriod)
+                .WithMany(p => p.Transactions)
+                .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalTransaction)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalTransaction)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)

@@ -369,3 +369,127 @@ public class TenderBidLotConfiguration : IEntityTypeConfiguration<TenderBidLot>
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public class TenderBidItemConfiguration : IEntityTypeConfiguration<TenderBidItem>
+{
+    public void Configure(EntityTypeBuilder<TenderBidItem> builder)
+    {
+        builder.ToTable("TenderBidItems");
+
+        builder.HasKey(i => i.Id);
+
+        builder.HasIndex(i => i.TenderBidId);
+        builder.HasIndex(i => i.BidLotId);
+        builder.HasIndex(i => i.TenderItemId);
+
+        builder.HasOne(i => i.Tenant)
+            .WithMany()
+            .HasForeignKey(i => i.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(i => i.TenderBid)
+            .WithMany(b => b.Items)
+            .HasForeignKey(i => i.TenderBidId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(i => i.BidLot)
+            .WithMany(bl => bl.Items)
+            .HasForeignKey(i => i.BidLotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(i => i.TenderItem)
+            .WithMany(ti => ti.BidItems)
+            .HasForeignKey(i => i.TenderItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class TenderNegotiationConfiguration : IEntityTypeConfiguration<TenderNegotiation>
+{
+    public void Configure(EntityTypeBuilder<TenderNegotiation> builder)
+    {
+        builder.ToTable("TenderNegotiations");
+
+        builder.HasKey(n => n.Id);
+
+        builder.HasIndex(n => n.TenderId);
+        builder.HasIndex(n => n.TenderBidId);
+        builder.HasIndex(n => n.BusinessPartnerId);
+        builder.HasIndex(n => n.LotId);
+        builder.HasIndex(n => n.BidLotId);
+        builder.HasIndex(n => n.Status);
+
+        builder.HasOne(n => n.Tenant)
+            .WithMany()
+            .HasForeignKey(n => n.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(n => n.Tender)
+            .WithMany()
+            .HasForeignKey(n => n.TenderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(n => n.TenderBid)
+            .WithMany()
+            .HasForeignKey(n => n.TenderBidId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(n => n.BusinessPartner)
+            .WithMany()
+            .HasForeignKey(n => n.BusinessPartnerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(n => n.Lot)
+            .WithMany()
+            .HasForeignKey(n => n.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(n => n.BidLot)
+            .WithMany()
+            .HasForeignKey(n => n.BidLotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(n => n.InvitedBy)
+            .WithMany()
+            .HasForeignKey(n => n.InvitedById)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasOne(n => n.CompletedBy)
+            .WithMany()
+            .HasForeignKey(n => n.CompletedById)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasMany(n => n.Items)
+            .WithOne(i => i.Negotiation)
+            .HasForeignKey(i => i.NegotiationId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class TenderNegotiationItemConfiguration : IEntityTypeConfiguration<TenderNegotiationItem>
+{
+    public void Configure(EntityTypeBuilder<TenderNegotiationItem> builder)
+    {
+        builder.ToTable("TenderNegotiationItems");
+
+        builder.HasKey(i => i.Id);
+
+        builder.HasIndex(i => i.NegotiationId);
+        builder.HasIndex(i => i.TenderBidItemId);
+
+        builder.HasOne(i => i.Tenant)
+            .WithMany()
+            .HasForeignKey(i => i.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(i => i.Negotiation)
+            .WithMany(n => n.Items)
+            .HasForeignKey(i => i.NegotiationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(i => i.TenderBidItem)
+            .WithMany()
+            .HasForeignKey(i => i.TenderBidItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
