@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -11,11 +12,14 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Services.Workflow;
@@ -104,6 +108,48 @@ public class ProjectServiceTests
     }
 
     [Fact]
+    public async Task CreateProjectAsync_ShouldSeedConstructionProfile_AndDefaultLifecyclePhases()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SettingsRepository
+            .Setup(x => x.GetOrCreateDefaultAsync(tenantId, userId))
+            .ReturnsAsync(new ProjectManagementSettings
+            {
+                TenantId = tenantId,
+                ProjectNumberFormat = "PRJ-{YYYY}-{####}",
+                RequireSponsor = false,
+                DefaultApprovalRequired = true
+            });
+
+        var service = fixture.CreateService();
+
+        var result = await service.CreateProjectAsync(new CreateProjectDto
+        {
+            Title = "Tower Development",
+            DevelopmentProfile = new UpsertProjectDevelopmentProfileDto
+            {
+                DeliveryStructure = ProjectDeliveryStructures.MultiUnit,
+                DevelopmentType = "Residential",
+                SiteName = "Airport Hills Plot 10",
+                ProcurementRoute = "Traditional",
+                ContractStrategy = "MeasuredWorks",
+                HandoverStrategy = "UnitByUnitHandover"
+            }
+        });
+
+        result.DevelopmentProfile.Should().NotBeNull();
+        result.DevelopmentProfile!.DeliveryStructure.Should().Be(ProjectDeliveryStructures.MultiUnit);
+        result.DevelopmentProfile.DevelopmentType.Should().Be("Residential");
+        result.Phases.Should().NotBeEmpty();
+        result.Phases.Select(x => x.Name).Should().Contain("Feasibility");
+        result.Phases.Select(x => x.Name).Should().Contain("Construction");
+        fixture.DevelopmentProfiles.Should().ContainSingle(x => x.ProjectId == result.Id);
+        fixture.ProjectPhases.Should().HaveCount(9);
+    }
+
+    [Fact]
     public async Task CreateProjectAsync_ShouldSupportSeqTokenInNumberFormat()
     {
         var tenantId = Guid.NewGuid();
@@ -127,6 +173,370 @@ public class ProjectServiceTests
         });
 
         result.ProjectCode.Should().Be($"IT-{DateTime.UtcNow:yy}-001");
+    }
+
+    [Fact]
+    public async Task ReleaseProjectUnitAsync_ShouldMarkUnitReleased_AndMovePlannedUnitToAvailable()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-UNIT-1",
+            Title = "Unit Release Project"
+        };
+        var unit = new ProjectUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Apartment A1",
+            Status = ProjectUnitStatuses.Planned,
+            Currency = "USD"
+        };
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectUnits.Add(unit);
+        fixture.Users.Add(new ApplicationUser
+        {
+            Id = userId,
+            FirstName = "Release",
+            LastName = "Manager",
+            UserName = "release.manager"
+        });
+
+        var service = fixture.CreateService();
+
+        var result = await service.ReleaseProjectUnitAsync(unit.Id);
+
+        result.IsReleasedForMarket.Should().BeTrue();
+        result.Status.Should().Be(ProjectUnitStatuses.Available);
+        result.ReleasedByDisplayName.Should().Be("Release Manager");
+        unit.IsReleasedForMarket.Should().BeTrue();
+        unit.ReleasedAt.Should().NotBeNull();
+        unit.Status.Should().Be(ProjectUnitStatuses.Available);
+    }
+
+    [Fact]
+    public async Task CreateSalesAgreementFromProjectUnitAsync_ShouldLinkAgreement_AndReserveUnit()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-UNIT-2",
+            Title = "Sales Handoff Project"
+        };
+        var unit = new ProjectUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Apartment B4",
+            Code = "B4",
+            Status = ProjectUnitStatuses.Available,
+            Currency = "USD",
+            BasePrice = 250000m,
+            CustomerBusinessPartnerId = customerId,
+            IsReleasedForMarket = true
+        };
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectUnits.Add(unit);
+        fixture.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = customerId,
+            TenantId = tenantId,
+            LegalName = "Unit Buyer Ltd"
+        });
+        fixture.Users.Add(new ApplicationUser
+        {
+            Id = userId,
+            FirstName = "Sales",
+            LastName = "Coordinator",
+            UserName = "sales.coordinator"
+        });
+        fixture.SalesAgreementService
+            .Setup(x => x.CreateAsync(It.IsAny<CreateSalesAgreementDto>()))
+            .ReturnsAsync((CreateSalesAgreementDto dto) =>
+            {
+                var agreementId = Guid.NewGuid();
+                fixture.SalesAgreements.Add(new SalesAgreement
+                {
+                    Id = agreementId,
+                    TenantId = tenantId,
+                    BusinessPartnerId = dto.BusinessPartnerId,
+                    CustomerName = "Unit Buyer",
+                    AgreementTitle = dto.AgreementTitle,
+                    AgreementStatus = SalesAgreementStatus.Draft,
+                    AgreementType = SalesAgreementType.General,
+                    StartDate = dto.StartDate,
+                    AgreedValue = dto.AgreedValue,
+                    MinimumCommitment = dto.MinimumCommitment,
+                    MaximumCommitment = dto.MaximumCommitment,
+                    Currency = dto.Currency,
+                    PropertyReference = dto.PropertyReference,
+                    DocumentNumber = "AGR-UNIT-001"
+                });
+
+                return new SalesAgreementDetailDto
+                {
+                    Id = agreementId,
+                    DocumentNumber = "AGR-UNIT-001",
+                    BusinessPartnerId = dto.BusinessPartnerId,
+                    CustomerName = "Unit Buyer",
+                    AgreementTitle = dto.AgreementTitle,
+                    AgreementStatus = "Draft",
+                    StartDate = dto.StartDate,
+                    AgreedValue = dto.AgreedValue,
+                    Currency = dto.Currency,
+                    PropertyReference = dto.PropertyReference
+                };
+            });
+
+        var service = fixture.CreateService();
+
+        var result = await service.CreateSalesAgreementFromProjectUnitAsync(unit.Id);
+
+        result.SalesAgreementId.Should().NotBeNull();
+        result.SalesAgreementNumber.Should().Be("AGR-UNIT-001");
+        result.Status.Should().Be(ProjectUnitStatuses.Reserved);
+        result.CommercialStatus.Should().Be(ProjectUnitStatuses.Reserved);
+        unit.SalesAgreementId.Should().Be(result.SalesAgreementId);
+        unit.Status.Should().Be(ProjectUnitStatuses.Reserved);
+    }
+
+    [Fact]
+    public async Task CreateLeaseAgreementFromProjectUnitAsync_ShouldLinkAgreement_AndReserveUnit()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-UNIT-LEASE",
+            Title = "Lease Handoff Project"
+        };
+        var unit = new ProjectUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Apartment L2",
+            Code = "L2",
+            UnitType = ProjectUnitTypes.Apartment,
+            Status = ProjectUnitStatuses.Available,
+            Currency = "USD",
+            CustomerBusinessPartnerId = customerId,
+            IsReleasedForMarket = true
+        };
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectUnits.Add(unit);
+        fixture.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = customerId,
+            TenantId = tenantId,
+            LegalName = "Tenant Customer Ltd"
+        });
+        fixture.SalesAgreementService
+            .Setup(x => x.CreateAsync(It.IsAny<CreateSalesAgreementDto>()))
+            .ReturnsAsync((CreateSalesAgreementDto dto) =>
+            {
+                var agreementId = Guid.NewGuid();
+                fixture.SalesAgreements.Add(new SalesAgreement
+                {
+                    Id = agreementId,
+                    TenantId = tenantId,
+                    BusinessPartnerId = dto.BusinessPartnerId,
+                    CustomerName = "Tenant Customer",
+                    AgreementTitle = dto.AgreementTitle,
+                    AgreementStatus = SalesAgreementStatus.Draft,
+                    AgreementType = SalesAgreementType.TenancyAgreement,
+                    StartDate = dto.StartDate,
+                    Currency = dto.Currency,
+                    PropertyReference = dto.PropertyReference,
+                    DocumentNumber = "AGR-LEASE-001"
+                });
+
+                return new SalesAgreementDetailDto
+                {
+                    Id = agreementId,
+                    DocumentNumber = "AGR-LEASE-001",
+                    BusinessPartnerId = dto.BusinessPartnerId,
+                    CustomerName = "Tenant Customer",
+                    AgreementTitle = dto.AgreementTitle,
+                    AgreementType = SalesAgreementType.TenancyAgreement.ToString(),
+                    AgreementStatus = SalesAgreementStatus.Draft.ToString(),
+                    StartDate = dto.StartDate,
+                    Currency = dto.Currency,
+                    PropertyReference = dto.PropertyReference
+                };
+            });
+
+        var service = fixture.CreateService();
+
+        var result = await service.CreateLeaseAgreementFromProjectUnitAsync(unit.Id);
+
+        result.SalesAgreementId.Should().NotBeNull();
+        result.SalesAgreementNumber.Should().Be("AGR-LEASE-001");
+        result.SalesAgreementType.Should().Be(SalesAgreementType.TenancyAgreement.ToString());
+        result.Status.Should().Be(ProjectUnitStatuses.Reserved);
+        result.CommercialStatus.Should().Be(ProjectUnitStatuses.Reserved);
+        unit.SalesAgreementId.Should().Be(result.SalesAgreementId);
+        unit.Status.Should().Be(ProjectUnitStatuses.Reserved);
+    }
+
+    [Fact]
+    public async Task GetProjectUnitsAsync_ShouldMarkActiveLeaseAgreementAsLeased()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var agreementId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-LEASE-SYNC",
+            Title = "Lease Sync Project"
+        };
+        var unit = new ProjectUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Suite 4A",
+            UnitType = ProjectUnitTypes.OfficeSuite,
+            Status = ProjectUnitStatuses.Reserved,
+            CustomerBusinessPartnerId = customerId,
+            SalesAgreementId = agreementId,
+            Currency = "USD",
+            IsReleasedForMarket = true
+        };
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectUnits.Add(unit);
+        fixture.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = customerId,
+            TenantId = tenantId,
+            LegalName = "Tenant Customer Ltd"
+        });
+        fixture.SalesAgreements.Add(new SalesAgreement
+        {
+            Id = agreementId,
+            TenantId = tenantId,
+            BusinessPartnerId = customerId,
+            CustomerName = "Tenant Customer",
+            AgreementTitle = "Suite 4A Lease",
+            AgreementType = SalesAgreementType.LeaseAgreement,
+            AgreementStatus = SalesAgreementStatus.Active,
+            StartDate = DateTime.UtcNow.Date,
+            Currency = "USD",
+            DocumentNumber = "AGR-LEASE-002"
+        });
+
+        var service = fixture.CreateService();
+
+        var result = (await service.GetProjectUnitsAsync(project.Id)).Single();
+
+        result.SalesAgreementType.Should().Be(SalesAgreementType.LeaseAgreement.ToString());
+        result.CommercialStatus.Should().Be(ProjectUnitStatuses.Leased);
+        result.HandoverStatus.Should().Be(ProjectUnitHandoverStatuses.Pending);
+    }
+
+    [Fact]
+    public async Task CreateSalesOrderFromProjectUnitAsync_ShouldLinkOrder_AndReserveUnit()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-UNIT-3",
+            Title = "Sales Order Handoff Project"
+        };
+        var unit = new ProjectUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Apartment C5",
+            Code = "C5",
+            Status = ProjectUnitStatuses.Available,
+            Currency = "USD",
+            BasePrice = 315000m,
+            AreaSquareMeters = 96.5m,
+            CustomerBusinessPartnerId = customerId,
+            IsReleasedForMarket = true
+        };
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectUnits.Add(unit);
+        fixture.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = customerId,
+            TenantId = tenantId,
+            LegalName = "Unit Buyer Ltd"
+        });
+        fixture.SalesOrderService
+            .Setup(x => x.CreateSalesOrderAsync(It.IsAny<CreateSalesOrderDto>()))
+            .ReturnsAsync((CreateSalesOrderDto dto) =>
+            {
+                var orderId = Guid.NewGuid();
+                fixture.SalesOrders.Add(new SalesOrder
+                {
+                    Id = orderId,
+                    TenantId = tenantId,
+                    BusinessPartnerId = dto.BusinessPartnerId,
+                    CustomerName = "Unit Buyer",
+                    DocumentNumber = "SO-UNIT-001",
+                    OrderType = dto.OrderType,
+                    OrderStatus = SalesOrderStatus.Draft,
+                    Currency = dto.Currency ?? "USD",
+                    PropertyReference = dto.PropertyReference,
+                    PropertyType = dto.PropertyType
+                });
+
+                return new SalesOrderDetailDto
+                {
+                    Id = orderId,
+                    DocumentNumber = "SO-UNIT-001",
+                    OrderType = dto.OrderType,
+                    OrderStatus = SalesOrderStatus.Draft,
+                    BusinessPartnerId = dto.BusinessPartnerId,
+                    CustomerName = "Unit Buyer",
+                    Currency = dto.Currency ?? "USD",
+                    PropertyReference = dto.PropertyReference,
+                    PropertyType = dto.PropertyType
+                };
+            });
+
+        var service = fixture.CreateService();
+
+        var result = await service.CreateSalesOrderFromProjectUnitAsync(unit.Id);
+
+        result.SalesOrderId.Should().NotBeNull();
+        result.SalesOrderNumber.Should().Be("SO-UNIT-001");
+        result.Status.Should().Be(ProjectUnitStatuses.Reserved);
+        result.CommercialStatus.Should().Be(ProjectUnitStatuses.Reserved);
+        unit.SalesOrderId.Should().Be(result.SalesOrderId);
+        unit.Status.Should().Be(ProjectUnitStatuses.Reserved);
     }
 
     [Fact]
@@ -1465,17 +1875,38 @@ public class ProjectServiceTests
     {
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
+        var portfolioId = Guid.NewGuid();
+        var programId = Guid.NewGuid();
         var project = new Project
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             ProjectCode = "PRJ-INT-1",
             Title = "Integrated Project",
-            CreatedById = userId
+            CreatedById = userId,
+            PortfolioId = portfolioId,
+            ProgramId = programId
         };
 
         var fixture = new ProjectServiceFixture(tenantId, userId);
         fixture.Projects.Add(project);
+        fixture.Portfolios.Add(new ProjectPortfolio
+        {
+            Id = portfolioId,
+            TenantId = tenantId,
+            Code = "PORT-001",
+            Name = "Delivery Portfolio",
+            Status = "Active"
+        });
+        fixture.Programs.Add(new ProjectProgram
+        {
+            Id = programId,
+            TenantId = tenantId,
+            PortfolioId = portfolioId,
+            Code = "PROG-001",
+            Name = "Growth Program",
+            Status = "Active"
+        });
         fixture.PurchaseRequisitions.Add(new PurchaseRequisition
         {
             Id = Guid.NewGuid(),
@@ -1557,10 +1988,12 @@ public class ProjectServiceTests
         result.Links.Should().Contain(x => x.LinkType == "PurchaseOrder" && x.Reference.Contains("PO-001"));
         result.Links.Should().Contain(x => x.LinkType == "PurchaseReceipt" && x.Reference.Contains("POR-001"));
         result.Links.Should().Contain(x => x.LinkType == "InventoryRequisition" && x.Reference.Contains("IR-001"));
+        result.Links.Should().Contain(x => x.LinkType == "Portfolio" && x.Reference == "Delivery Portfolio");
+        result.Links.Should().Contain(x => x.LinkType == "Program" && x.Reference == "Growth Program");
         result.Warnings.Should().Contain(x => x.Contains("Procurement requisitions"));
         result.Warnings.Should().Contain(x => x.Contains("Purchase orders"));
         result.Warnings.Should().Contain(x => x.Contains("Purchase receipts"));
-        result.Warnings.Should().Contain(x => x.Contains("Inventory has been issued"));
+        result.Warnings.Should().NotContain(x => x.Contains("Inventory has been issued", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1947,6 +2380,9 @@ public class ProjectServiceTests
         var fixture = new ProjectServiceFixture(tenantId, userId);
         fixture.Projects.Add(project);
         fixture.BillingSchedules.Add(schedule);
+        fixture.TenantSettingsService
+            .Setup(x => x.GetBaseCurrencyAsync())
+            .ReturnsAsync("EUR");
 
         var service = fixture.CreateService();
 
@@ -1956,6 +2392,7 @@ public class ProjectServiceTests
         result.BillingScheduleId.Should().Be(schedule.Id);
         result.RequestNumber.Should().Be($"INVREQ-{DateTime.UtcNow.Year}-0001");
         result.RequestedAmount.Should().Be(1250m);
+        result.Currency.Should().Be("EUR");
         result.Notes.Should().Be("Release milestone reached");
         fixture.InvoiceRequests.Should().ContainSingle(x => x.BillingScheduleId == schedule.Id);
         schedule.Status.Should().Be("Invoiced");
@@ -1998,7 +2435,7 @@ public class ProjectServiceTests
 
         fixture.ContractService.Verify(x => x.UpdateMilestoneStatusAsync(
             contractMilestoneId,
-            It.Is<UpdateMilestoneStatusDto>(dto => dto.Status == "Invoiced" && dto.InvoiceNumber == result.RequestNumber)),
+            It.Is<ErpSystem.Core.DTOs.Procurement.UpdateMilestoneStatusDto>(dto => dto.Status == "Invoiced" && dto.InvoiceNumber == result.RequestNumber)),
             Times.Once);
     }
 
@@ -3860,6 +4297,8 @@ public class ProjectServiceTests
         public List<ProjectMember> Members { get; } = new();
         public List<ProjectPortfolio> Portfolios { get; } = new();
         public List<ProjectProgram> Programs { get; } = new();
+        public List<ProjectDevelopmentProfile> DevelopmentProfiles { get; } = new();
+        public List<ProjectPhase> ProjectPhases { get; } = new();
         public List<ProjectWorkItem> WorkItems { get; } = new();
         public List<ProjectMilestone> Milestones { get; } = new();
         public List<ProjectInitiationVersion> InitiationVersions { get; } = new();
@@ -3887,6 +4326,7 @@ public class ProjectServiceTests
         public List<ProjectActionItem> ActionItems { get; } = new();
         public List<ProjectLessonLearned> LessonsLearned { get; } = new();
         public List<ProjectClosure> Closures { get; } = new();
+        public List<ProjectUnit> ProjectUnits { get; } = new();
         public List<PurchaseRequisition> PurchaseRequisitions { get; } = new();
         public List<PurchaseOrder> PurchaseOrders { get; } = new();
         public List<PurchaseOrderItem> PurchaseOrderItems { get; } = new();
@@ -3897,6 +4337,10 @@ public class ProjectServiceTests
         public List<StockMovement> StockMovements { get; } = new();
         public List<InventoryItem> InventoryItems { get; } = new();
         public List<MaintenanceAsset> MaintenanceAssets { get; } = new();
+        public List<WorkOrder> WorkOrders { get; } = new();
+        public List<MaintenanceType> MaintenanceTypes { get; } = new();
+        public List<PriorityLevel> PriorityLevels { get; } = new();
+        public List<WorkOrderType> WorkOrderTypes { get; } = new();
         public List<CompanyAsset> CompanyAssets { get; } = new();
         public List<JobCard> JobCards { get; } = new();
         public List<Employee> Employees { get; } = new();
@@ -3907,6 +4351,13 @@ public class ProjectServiceTests
         public List<Payment> Payments { get; } = new();
         public List<ProjectComment> Comments { get; } = new();
         public List<ProjectMaterialCostEntry> MaterialCostEntries { get; } = new();
+        public List<ProjectDeliverableExternalReview> DeliverableExternalReviews { get; } = new();
+        public List<Warehouse> Warehouses { get; } = new();
+        public List<WarehouseLocation> WarehouseLocations { get; } = new();
+        public List<Tender> Tenders { get; } = new();
+        public List<BusinessPartner> BusinessPartners { get; } = new();
+        public List<SalesAgreement> SalesAgreements { get; } = new();
+        public List<SalesOrder> SalesOrders { get; } = new();
         public List<ApplicationUser> Users { get; } = new();
 
         public Mock<IProjectRepository> ProjectRepository { get; } = new();
@@ -3921,7 +4372,12 @@ public class ProjectServiceTests
         public Mock<IWorkflowStatusAdapterRegistry> WorkflowStatusAdapterRegistry { get; } = new();
         public Mock<IWorkflowService> WorkflowService { get; } = new();
         public Mock<IUserService> UserService { get; } = new();
+        public Mock<IJobCardService> JobCardService { get; } = new();
+        public Mock<IWorkOrderService> WorkOrderService { get; } = new();
+        public Mock<ISalesAgreementService> SalesAgreementService { get; } = new();
+        public Mock<ISalesOrderService> SalesOrderService { get; } = new();
         public Mock<IUnitOfWork> UnitOfWork { get; } = new();
+        public Mock<ITenantSettingsService> TenantSettingsService { get; } = new();
         public Mock<ICurrentUserProvider> CurrentUserProvider { get; } = new();
         public Mock<IAppEventBus> AppEventBus { get; } = new();
 
@@ -3931,6 +4387,8 @@ public class ProjectServiceTests
         };
         private readonly Mock<IGenericRepository<Project>> _projectEntityRepository;
         private readonly Mock<IGenericRepository<ProjectMember>> _memberRepository;
+        private readonly Mock<IGenericRepository<ProjectDevelopmentProfile>> _developmentProfileRepository;
+        private readonly Mock<IGenericRepository<ProjectPhase>> _projectPhaseRepository;
         private readonly Mock<IGenericRepository<ProjectWorkItem>> _workItemRepository;
         private readonly Mock<IGenericRepository<ProjectMilestone>> _milestoneRepository;
         private readonly Mock<IGenericRepository<ProjectInitiationVersion>> _initiationVersionRepository;
@@ -3958,6 +4416,7 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<ProjectActionItem>> _actionItemRepository;
         private readonly Mock<IGenericRepository<ProjectLessonLearned>> _lessonLearnedRepository;
         private readonly Mock<IGenericRepository<ProjectClosure>> _closureRepository;
+        private readonly Mock<IGenericRepository<ProjectUnit>> _projectUnitRepository;
         private readonly Mock<IGenericRepository<PurchaseRequisition>> _purchaseRequisitionRepository;
         private readonly Mock<IGenericRepository<PurchaseOrder>> _purchaseOrderRepository;
         private readonly Mock<IGenericRepository<PurchaseOrderItem>> _purchaseOrderItemRepository;
@@ -3968,6 +4427,10 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<StockMovement>> _stockMovementRepository;
         private readonly Mock<IGenericRepository<InventoryItem>> _inventoryItemRepository;
         private readonly Mock<IGenericRepository<MaintenanceAsset>> _maintenanceAssetRepository;
+        private readonly Mock<IGenericRepository<WorkOrder>> _workOrderRepository;
+        private readonly Mock<IGenericRepository<MaintenanceType>> _maintenanceTypeRepository;
+        private readonly Mock<IGenericRepository<PriorityLevel>> _priorityLevelRepository;
+        private readonly Mock<IGenericRepository<WorkOrderType>> _workOrderTypeRepository;
         private readonly Mock<IGenericRepository<CompanyAsset>> _companyAssetRepository;
         private readonly Mock<IGenericRepository<JobCard>> _jobCardRepository;
         private readonly Mock<IGenericRepository<Employee>> _employeeRepository;
@@ -3978,11 +4441,20 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<Payment>> _paymentRepository;
         private readonly Mock<IGenericRepository<ProjectComment>> _commentRepository;
         private readonly Mock<IGenericRepository<ProjectMaterialCostEntry>> _materialCostEntryRepository;
+        private readonly Mock<IGenericRepository<ProjectDeliverableExternalReview>> _deliverableExternalReviewRepository;
+        private readonly Mock<IGenericRepository<Warehouse>> _warehouseRepository;
+        private readonly Mock<IGenericRepository<WarehouseLocation>> _warehouseLocationRepository;
+        private readonly Mock<IGenericRepository<Tender>> _tenderRepository;
+        private readonly Mock<IGenericRepository<BusinessPartner>> _businessPartnerRepository;
+        private readonly Mock<IGenericRepository<SalesAgreement>> _salesAgreementRepository;
+        private readonly Mock<IGenericRepository<SalesOrder>> _salesOrderRepository;
 
         public ProjectServiceFixture(Guid tenantId, Guid userId)
         {
             _projectEntityRepository = CreateRepository(Projects);
             _memberRepository = CreateRepository(Members);
+            _developmentProfileRepository = CreateRepository(DevelopmentProfiles);
+            _projectPhaseRepository = CreateRepository(ProjectPhases);
             _workItemRepository = CreateRepository(WorkItems);
             _milestoneRepository = CreateRepository(Milestones);
             _initiationVersionRepository = CreateRepository(InitiationVersions);
@@ -4010,6 +4482,7 @@ public class ProjectServiceTests
             _actionItemRepository = CreateRepository(ActionItems);
             _lessonLearnedRepository = CreateRepository(LessonsLearned);
             _closureRepository = CreateRepository(Closures);
+            _projectUnitRepository = CreateRepository(ProjectUnits);
             _purchaseRequisitionRepository = CreateRepository(PurchaseRequisitions);
             _purchaseOrderRepository = CreateRepository(PurchaseOrders);
             _purchaseOrderItemRepository = CreateRepository(PurchaseOrderItems);
@@ -4020,6 +4493,10 @@ public class ProjectServiceTests
             _stockMovementRepository = CreateRepository(StockMovements);
             _inventoryItemRepository = CreateRepository(InventoryItems);
             _maintenanceAssetRepository = CreateRepository(MaintenanceAssets);
+            _workOrderRepository = CreateRepository(WorkOrders);
+            _maintenanceTypeRepository = CreateRepository(MaintenanceTypes);
+            _priorityLevelRepository = CreateRepository(PriorityLevels);
+            _workOrderTypeRepository = CreateRepository(WorkOrderTypes);
             _companyAssetRepository = CreateRepository(CompanyAssets);
             _jobCardRepository = CreateRepository(JobCards);
             _employeeRepository = CreateRepository(Employees);
@@ -4030,6 +4507,13 @@ public class ProjectServiceTests
             _paymentRepository = CreateRepository(Payments);
             _commentRepository = CreateRepository(Comments);
             _materialCostEntryRepository = CreateRepository(MaterialCostEntries);
+            _deliverableExternalReviewRepository = CreateRepository(DeliverableExternalReviews);
+            _warehouseRepository = CreateRepository(Warehouses);
+            _warehouseLocationRepository = CreateRepository(WarehouseLocations);
+            _tenderRepository = CreateRepository(Tenders);
+            _businessPartnerRepository = CreateRepository(BusinessPartners);
+            _salesAgreementRepository = CreateRepository(SalesAgreements);
+            _salesOrderRepository = CreateRepository(SalesOrders);
 
             ProjectRepository
                 .Setup(x => x.LookupAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int>()))
@@ -4049,6 +4533,8 @@ public class ProjectServiceTests
                     }
 
                     project.Members = Members.Where(x => x.ProjectId == id && x.IsActive).OrderBy(x => x.JoinedAt).ToList();
+                    project.DevelopmentProfile = DevelopmentProfiles.SingleOrDefault(x => x.ProjectId == id);
+                    project.Phases = ProjectPhases.Where(x => x.ProjectId == id).OrderBy(x => x.SortOrder).ToList();
                     project.WorkItems = WorkItems.Where(x => x.ProjectId == id).OrderBy(x => x.SortOrder).ToList();
                     project.Milestones = Milestones.Where(x => x.ProjectId == id).OrderBy(x => x.TargetDate).ToList();
                     project.InitiationVersions = InitiationVersions.Where(x => x.ProjectId == id).OrderByDescending(x => x.VersionNumber).ToList();
@@ -4066,6 +4552,7 @@ public class ProjectServiceTests
                     project.Decisions = Decisions.Where(x => x.ProjectId == id).OrderByDescending(x => x.DecisionDate).ToList();
                     project.Meetings = Meetings.Where(x => x.ProjectId == id).OrderByDescending(x => x.MeetingDate).ToList();
                     project.ActionItems = ActionItems.Where(x => x.ProjectId == id).OrderBy(x => x.DueDate).ToList();
+                    project.Units = ProjectUnits.Where(x => x.ProjectId == id).OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToList();
                     project.RevenueRecognitions = RevenueRecognitions.Where(x => x.ProjectId == id).OrderByDescending(x => x.RecognitionPeriod).ToList();
                     project.AssetLinks = AssetLinks.Where(x => x.ProjectId == id).ToList();
                     project.ExternalAccessPolicies = ExternalAccessPolicies.Where(x => x.ProjectId == id).ToList();
@@ -4131,9 +4618,14 @@ public class ProjectServiceTests
                         .ToHashSet();
                     return Users.Where(user => lookup.Contains(user.Id)).ToList();
                 });
+            TenantSettingsService
+                .Setup(x => x.GetBaseCurrencyAsync())
+                .ReturnsAsync("USD");
 
             UnitOfWork.Setup(x => x.Repository<Project>()).Returns(_projectEntityRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectMember>()).Returns(_memberRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectDevelopmentProfile>()).Returns(_developmentProfileRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectPhase>()).Returns(_projectPhaseRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectWorkItem>()).Returns(_workItemRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectMilestone>()).Returns(_milestoneRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectInitiationVersion>()).Returns(_initiationVersionRepository.Object);
@@ -4161,6 +4653,7 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<ProjectActionItem>()).Returns(_actionItemRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectLessonLearned>()).Returns(_lessonLearnedRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectClosure>()).Returns(_closureRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectUnit>()).Returns(_projectUnitRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseRequisition>()).Returns(_purchaseRequisitionRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrder>()).Returns(_purchaseOrderRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrderItem>()).Returns(_purchaseOrderItemRepository.Object);
@@ -4171,6 +4664,10 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<StockMovement>()).Returns(_stockMovementRepository.Object);
             UnitOfWork.Setup(x => x.Repository<InventoryItem>()).Returns(_inventoryItemRepository.Object);
             UnitOfWork.Setup(x => x.Repository<MaintenanceAsset>()).Returns(_maintenanceAssetRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<WorkOrder>()).Returns(_workOrderRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<MaintenanceType>()).Returns(_maintenanceTypeRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<PriorityLevel>()).Returns(_priorityLevelRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<WorkOrderType>()).Returns(_workOrderTypeRepository.Object);
             UnitOfWork.Setup(x => x.Repository<CompanyAsset>()).Returns(_companyAssetRepository.Object);
             UnitOfWork.Setup(x => x.Repository<JobCard>()).Returns(_jobCardRepository.Object);
             UnitOfWork.Setup(x => x.Repository<Employee>()).Returns(_employeeRepository.Object);
@@ -4181,6 +4678,13 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<Payment>()).Returns(_paymentRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectComment>()).Returns(_commentRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectMaterialCostEntry>()).Returns(_materialCostEntryRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectDeliverableExternalReview>()).Returns(_deliverableExternalReviewRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<Warehouse>()).Returns(_warehouseRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<WarehouseLocation>()).Returns(_warehouseLocationRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<Tender>()).Returns(_tenderRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<BusinessPartner>()).Returns(_businessPartnerRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<SalesAgreement>()).Returns(_salesAgreementRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<SalesOrder>()).Returns(_salesOrderRepository.Object);
             UnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
             AppEventBus
                 .Setup(x => x.PublishAsync(It.IsAny<EntityActivityEvent>(), It.IsAny<CancellationToken>()))
@@ -4208,7 +4712,12 @@ public class ProjectServiceTests
                 WorkflowStatusAdapterRegistry.Object,
                 WorkflowService.Object,
                 UserService.Object,
+                JobCardService.Object,
+                WorkOrderService.Object,
+                SalesAgreementService.Object,
+                SalesOrderService.Object,
                 UnitOfWork.Object,
+                TenantSettingsService.Object,
                 CurrentUserProvider.Object,
                 AppEventBus.Object,
                 NullLogger<ProjectService>.Instance);
@@ -4226,6 +4735,9 @@ public class ProjectServiceTests
         {
             var repository = new Mock<IGenericRepository<T>>();
 
+            repository
+                .Setup(x => x.GetByIdAsync(It.IsAny<Guid>()))
+                .ReturnsAsync((Guid id) => items.FirstOrDefault(entity => entity.Id == id));
             repository
                 .Setup(x => x.FindAsync(It.IsAny<Expression<Func<T, bool>>>()))
                 .ReturnsAsync((Expression<Func<T, bool>> predicate) => items.Where(predicate.Compile()).ToList());
@@ -4245,6 +4757,16 @@ public class ProjectServiceTests
                 .Setup(x => x.AddAsync(It.IsAny<T>()))
                 .ReturnsAsync((T entity) =>
                 {
+                    if (entity.Id == Guid.Empty)
+                    {
+                        entity.Id = Guid.NewGuid();
+                    }
+
+                    if (entity.CreatedAt == default)
+                    {
+                        entity.CreatedAt = DateTime.UtcNow;
+                    }
+
                     items.Add(entity);
                     return entity;
                 });
@@ -4253,6 +4775,19 @@ public class ProjectServiceTests
                 .ReturnsAsync((IEnumerable<T> entities) =>
                 {
                     var entityList = entities.ToList();
+                    foreach (var entity in entityList)
+                    {
+                        if (entity.Id == Guid.Empty)
+                        {
+                            entity.Id = Guid.NewGuid();
+                        }
+
+                        if (entity.CreatedAt == default)
+                        {
+                            entity.CreatedAt = DateTime.UtcNow;
+                        }
+                    }
+
                     items.AddRange(entityList);
                     return entityList.AsEnumerable();
                 });
@@ -4260,10 +4795,24 @@ public class ProjectServiceTests
                 .Setup(x => x.UpdateAsync(It.IsAny<T>()))
                 .Returns(Task.CompletedTask);
             repository
+                .Setup(x => x.UpdateRangeAsync(It.IsAny<IEnumerable<T>>()))
+                .Returns(Task.CompletedTask);
+            repository
                 .Setup(x => x.DeleteAsync(It.IsAny<T>()))
                 .Returns((T entity) =>
                 {
                     items.Remove(entity);
+                    return Task.CompletedTask;
+                });
+            repository
+                .Setup(x => x.DeleteRangeAsync(It.IsAny<IEnumerable<T>>()))
+                .Returns((IEnumerable<T> entities) =>
+                {
+                    foreach (var entity in entities.ToList())
+                    {
+                        items.Remove(entity);
+                    }
+
                     return Task.CompletedTask;
                 });
             repository

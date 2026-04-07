@@ -139,6 +139,8 @@ public partial class ProjectService
             return;
         }
 
+        var baseCurrencyCode = await GetProjectBaseCurrencyCodeAsync();
+
         var requisitionRepo = _unitOfWork.Repository<InventoryRequisition>();
         var requisitions = (await requisitionRepo.FindAsync(
                 x => x.TenantId == _currentUserProvider.TenantId && x.ProjectId.HasValue && distinctProjectIds.Contains(x.ProjectId.Value),
@@ -158,6 +160,10 @@ public partial class ProjectService
                     && x.ReferenceId.HasValue
                     && requisitionIds.Contains(x.ReferenceId.Value)))
                 .ToList();
+        var requisitionIdsWithStockMovements = stockMovements
+            .Where(x => x.ReferenceId.HasValue)
+            .Select(x => x.ReferenceId!.Value)
+            .ToHashSet();
 
         var purchaseRequisitions = (await _unitOfWork.Repository<PurchaseRequisition>().FindAsync(
                 x => x.TenantId == _currentUserProvider.TenantId
@@ -212,6 +218,7 @@ public partial class ProjectService
 
         var inventoryItemIds = stockMovements
             .Select(x => x.InventoryItemId)
+            .Concat(requisitions.SelectMany(x => x.Items).Select(x => x.InventoryItemId))
             .Concat(purchaseOrderItems.Where(x => x.InventoryItemId.HasValue).Select(x => x.InventoryItemId!.Value))
             .Concat(purchaseReturns.SelectMany(x => x.Items).Select(x => x.InventoryItemId))
             .Where(x => x != Guid.Empty)
@@ -275,13 +282,66 @@ public partial class ProjectService
                 UnitOfMeasure = inventoryItem?.UnitOfMeasure,
                 UnitCost = stockMovement.UnitCost,
                 Amount = decimal.Round(amount, 2),
-                Currency = "USD",
+                Currency = baseCurrencyCode,
                 HasMissingSourceLink = inventoryItem == null,
                 HasReversalGap = false,
                 Notes = stockMovement.Notes,
                 CreatedBy = _currentUserProvider.Username,
                 CreatedById = _currentUserProvider.UserId
             });
+        }
+
+        foreach (var requisition in requisitions
+                     .Where(x =>
+                         x.ProjectId.HasValue
+                         && !requisitionIdsWithStockMovements.Contains(x.Id)
+                         && (x.Status == RequisitionStatus.PartiallyIssued
+                             || x.Status == RequisitionStatus.Issued
+                             || x.Status == RequisitionStatus.Completed)))
+        {
+            foreach (var item in requisition.Items.Where(x => x.IssuedQuantity > 0m))
+            {
+                inventoryItems.TryGetValue(item.InventoryItemId, out var inventoryItem);
+                var unitCost = item.UnitCost > 0m
+                    ? item.UnitCost
+                    : item.IssuedQuantity > 0m && item.LineValue > 0m
+                        ? decimal.Round(item.LineValue / item.IssuedQuantity, 2)
+                        : 0m;
+                var amount = decimal.Round(unitCost * item.IssuedQuantity, 2);
+                if (amount <= 0m && item.LineValue > 0m)
+                {
+                    amount = decimal.Round(item.LineValue, 2);
+                }
+
+                newEntries.Add(new ProjectMaterialCostEntry
+                {
+                    TenantId = _currentUserProvider.TenantId,
+                    ProjectId = requisition.ProjectId!.Value,
+                    EntryDate = requisition.IssuedDate ?? requisition.CompletedDate ?? requisition.RequiredDate ?? requisition.RequestDate,
+                    EntryType = "InventoryIssue",
+                    PostingState = "Posted",
+                    AffectsActualCost = true,
+                    IsReversed = false,
+                    SourceDocumentType = "InventoryRequisition",
+                    SourceDocumentId = requisition.Id,
+                    SourceDocumentNumber = requisition.RequisitionNumber,
+                    SourceTransactionType = "InventoryRequisitionItem",
+                    SourceTransactionId = item.Id,
+                    InventoryItemId = item.InventoryItemId,
+                    InventoryItemCode = inventoryItem?.ItemCode ?? item.ItemCode,
+                    InventoryItemName = inventoryItem?.Name ?? item.ItemName,
+                    Quantity = item.IssuedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure ?? inventoryItem?.UnitOfMeasure,
+                    UnitCost = unitCost,
+                    Amount = amount,
+                    Currency = baseCurrencyCode,
+                    HasMissingSourceLink = false,
+                    HasReversalGap = false,
+                    Notes = item.Notes ?? requisition.Notes,
+                    CreatedBy = _currentUserProvider.Username,
+                    CreatedById = _currentUserProvider.UserId
+                });
+            }
         }
 
         foreach (var receiptItem in purchaseReceiptItems)
@@ -480,9 +540,20 @@ public partial class ProjectService
             .Where(x => x.AffectsActualCost)
             .GroupBy(x => x.ProjectId)
             .ToDictionary(x => x.Key, x => x.Sum(y => y.Amount));
+        var projectsWithTrackedActuals = approvedTimesheets
+            .Select(x => x.ProjectId)
+            .Concat(approvedExpenses.Where(x => !IsLegacyAutoMaterialExpense(x)).Select(x => x.ProjectId))
+            .Concat(ledgerEntries.Where(x => x.AffectsActualCost).Select(x => x.ProjectId))
+            .Distinct()
+            .ToHashSet();
 
         foreach (var project in projects)
         {
+            if (!projectsWithTrackedActuals.Contains(project.Id))
+            {
+                continue;
+            }
+
             var recalculatedCost =
                 approvedTimesheetCostByProject.GetValueOrDefault(project.Id)
                 + approvedExpenseCostByProject.GetValueOrDefault(project.Id)

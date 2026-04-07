@@ -11,7 +11,7 @@ public class PaymentCreateDto
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
     public string PaymentMethod { get; set; } = "Cash";
-    public string CurrencyCode { get; set; } = "USD";
+    public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? BankAccountId { get; set; }
     public string? CheckNumber { get; set; }
@@ -70,7 +70,7 @@ public class InvoiceCreateDto
     public DateTime? DueDate { get; set; }
     public string? Reference { get; set; }
     public string? Notes { get; set; }
-    public string CurrencyCode { get; set; } = "USD";
+    public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public decimal DiscountAmount { get; set; }
     public List<InvoiceLineItemCreateDto> LineItems { get; set; } = new();

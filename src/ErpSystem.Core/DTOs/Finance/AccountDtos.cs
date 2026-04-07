@@ -133,7 +133,7 @@ namespace ErpSystem.Core.DTOs.Finance
         /// NOTE:
         /// - Defaults to the tenant's base currency (e.g. "GHS" for Ghana).
         /// </summary>
-        public string CurrencyCode { get; set; } = "GHS";
+        public string CurrencyCode { get; set; } = string.Empty;
 
         /// <summary>
         /// Indicates whether this account supports multiple currencies.
@@ -390,7 +390,7 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         [Required]
         [MaxLength(3)]
-        public string CurrencyCode { get; set; } = "GHS";
+        public string CurrencyCode { get; set; } = string.Empty;
 
         /// <summary>
         /// Indicates whether this account can operate in multiple currencies.
@@ -551,7 +551,7 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         [Required]
         [MaxLength(3)]
-        public string CurrencyCode { get; set; } = "GHS";
+        public string CurrencyCode { get; set; } = string.Empty;
 
         /// <summary>
         /// Indicates whether this account can operate in multiple currencies.

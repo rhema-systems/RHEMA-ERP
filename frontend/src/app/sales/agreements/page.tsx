@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Search, Eye, RefreshCw, Download, Plus, AlertCircle, CheckCircle, Clock, Ban } from 'lucide-react';
+import { FileText, Search, Eye, RefreshCw, Download, Plus, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { salesAgreementService, type SalesAgreementSummaryDto } from '@/services/salesAgreementService';
 import { format } from 'date-fns';
@@ -32,17 +32,25 @@ export default function SalesAgreementsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
+  const [salesScope, setSalesScope] = useState<'all' | 'projectLinked' | 'releasedUnits'>('all');
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const pageSize = 20;
 
-  useEffect(() => { loadAgreements(); }, [page, statusFilter, typeFilter]);
+  useEffect(() => { loadAgreements(); }, [page, statusFilter, typeFilter, salesScope]);
 
   const loadAgreements = async () => {
     try {
       setLoading(true);
       const data = await salesAgreementService.getAgreements(
-        page, pageSize, searchTerm, statusFilter || undefined, typeFilter || undefined
+        page,
+        pageSize,
+        searchTerm,
+        statusFilter || undefined,
+        typeFilter || undefined,
+        undefined,
+        salesScope === 'projectLinked' || salesScope === 'releasedUnits',
+        salesScope === 'releasedUnits'
       );
       setAgreements(data.items);
       setTotalCount(data.totalCount);
@@ -65,6 +73,8 @@ export default function SalesAgreementsPage() {
       'End Date': a.endDate ? format(new Date(a.endDate), 'yyyy-MM-dd') : '',
       'Agreed Value': a.agreedValue, 'Utilized Value': a.utilizedValue, Currency: a.currency,
       Property: a.propertyReference || '', 'Auto-Renew': a.autoRenew ? 'Yes' : 'No',
+      Project: a.projectUnitContext?.projectCode || '',
+      'Project Unit': a.projectUnitContext?.projectUnitCode || a.projectUnitContext?.projectUnitName || '',
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Agreements');
@@ -74,6 +84,7 @@ export default function SalesAgreementsPage() {
 
   const formatDate = (d?: string) => { if (!d) return '-'; try { return format(new Date(d), 'dd MMM yyyy'); } catch { return d; } };
   const formatCurrency = (n: number) => `GHS ${n.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  const formatLabel = (value?: string) => value ? value.replace(/([A-Z])/g, ' $1').trim() : '-';
   const getStatusBadge = (s: string) => {
     const c = STATUS_CONFIG[s] || { variant: 'outline' as const, className: '' };
     return <Badge variant={c.variant} className={c.className}>{s.replace(/([A-Z])/g, ' $1').trim()}</Badge>;
@@ -98,9 +109,14 @@ export default function SalesAgreementsPage() {
           </h1>
           <p className="text-gray-500">Manage customer agreements, leases, and contracts</p>
         </div>
-        <Button onClick={() => router.push('/sales/agreements/create')}>
-          <Plus className="h-4 w-4 mr-2" />New Agreement
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => router.push('/sales/agreements/create?source=released-unit')}>
+            <Building2 className="h-4 w-4 mr-2" />From Released Unit
+          </Button>
+          <Button onClick={() => router.push('/sales/agreements/create')}>
+            <Plus className="h-4 w-4 mr-2" />New Agreement
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -151,6 +167,14 @@ export default function SalesAgreementsPage() {
                 <SelectItem value="ServiceLevel">Service Level</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={salesScope} onValueChange={(v: 'all' | 'projectLinked' | 'releasedUnits') => setSalesScope(v)}>
+              <SelectTrigger><SelectValue placeholder="Sales Scope" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Records</SelectItem>
+                <SelectItem value="projectLinked">Project-Linked Only</SelectItem>
+                <SelectItem value="releasedUnits">Released Units Only</SelectItem>
+              </SelectContent>
+            </Select>
             <div className="flex gap-2">
               <Button variant="outline" onClick={handleExport}><Download className="h-4 w-4 mr-2" />Export</Button>
               <Button variant="outline" onClick={loadAgreements}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
@@ -194,8 +218,35 @@ export default function SalesAgreementsPage() {
                       <TableRow key={a.id} className="cursor-pointer hover:bg-gray-50"
                         onClick={() => router.push(`/sales/agreements/${a.id}`)}>
                         <TableCell className="font-mono text-sm text-purple-600">{a.documentNumber}</TableCell>
-                        <TableCell><div><p className="font-medium">{a.agreementTitle}</p>{a.propertyReference && <p className="text-xs text-gray-500">🏠 {a.propertyReference}</p>}</div></TableCell>
-                        <TableCell>{a.customerName}</TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{a.agreementTitle}</p>
+                            {a.propertyReference && <p className="text-xs text-gray-500">Property: {a.propertyReference}</p>}
+                            {a.projectUnitContext && (
+                              <div className="mt-1 flex items-center gap-1 text-xs text-blue-600">
+                                <Building2 className="h-3 w-3" />
+                                <span>
+                                  {a.projectUnitContext.projectCode}
+                                  {a.projectUnitContext.projectUnitCode
+                                    ? ` • ${a.projectUnitContext.projectUnitCode}`
+                                    : a.projectUnitContext.projectUnitName
+                                      ? ` • ${a.projectUnitContext.projectUnitName}`
+                                      : ''}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p>{a.customerName}</p>
+                            {a.projectUnitContext && (
+                              <p className="text-xs text-gray-500">
+                                {formatLabel(a.projectUnitContext.projectUnitCommercialStatus)} • {formatLabel(a.projectUnitContext.projectUnitHandoverStatus)}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell><Badge variant="outline">{a.agreementType.replace(/([A-Z])/g, ' $1').trim()}</Badge></TableCell>
                         <TableCell><div className="text-sm"><p>{formatDate(a.startDate)}</p><p className="text-gray-400">→ {formatDate(a.endDate)}</p></div></TableCell>
                         <TableCell className="text-right font-semibold">{formatCurrency(a.agreedValue)}</TableCell>

@@ -42,6 +42,9 @@ const emptySubstitution: SubstituteProjectResourceAllocationDto = {
   reason: '',
 };
 
+const flattenWorkItems = (items: ProjectDetailDto['workItems'] = []): NonNullable<ProjectDetailDto['workItems']> =>
+  items.flatMap((item) => [item, ...(item.children || [])]);
+
 export default function DevelopmentResourcesPage() {
   const [projects, setProjects] = useState<ProjectLookupDto[]>([]);
   const [resourceDirectory, setResourceDirectory] = useState<ProjectResourceLookupDto[]>([]);
@@ -58,6 +61,7 @@ export default function DevelopmentResourcesPage() {
   const [saving, setSaving] = useState(false);
   const [substituteForId, setSubstituteForId] = useState<string | null>(null);
   const [substitution, setSubstitution] = useState<SubstituteProjectResourceAllocationDto>(emptySubstitution);
+  const projectWorkItems = useMemo(() => flattenWorkItems(project?.workItems), [project?.workItems]);
 
   const load = async (projectId?: string, resourceId?: string) => {
     try {
@@ -263,6 +267,14 @@ export default function DevelopmentResourcesPage() {
   }, [capacity, optimizationSuggestions, project?.resourceAllocations, recommendations, resourceLabels]);
 
   const getResourceLabel = (userId: string, displayName?: string) => displayName || resourceLabels.get(userId) || userId;
+  const getWorkItemLabel = (workItemId?: string) => {
+    if (!workItemId) {
+      return 'Project level';
+    }
+
+    const match = projectWorkItems.find((item) => item.id === workItemId);
+    return match?.title || workItemId;
+  };
 
   const criticalRecommendations = recommendations.filter((item) => item.severity === 'Critical').length;
   const highRecommendations = recommendations.filter((item) => item.severity === 'High').length;
@@ -353,7 +365,6 @@ export default function DevelopmentResourcesPage() {
                   <TableRow key={item.userId}>
                     <TableCell>
                       <div className="font-medium">{getResourceLabel(item.userId, item.userDisplayName)}</div>
-                      <div className="text-xs text-muted-foreground">{item.userId}</div>
                       <div className="text-xs text-muted-foreground">{item.projectCodes.join(', ') || 'Unassigned'}</div>
                     </TableCell>
                     <TableCell>
@@ -488,7 +499,6 @@ export default function DevelopmentResourcesPage() {
                     <TableRow key={item.userId}>
                       <TableCell>
                         <div className="font-medium">{getResourceLabel(item.userId, item.userDisplayName)}</div>
-                        <div className="text-xs text-muted-foreground">{item.userId}</div>
                       </TableCell>
                       <TableCell>{item.allocationCount}</TableCell>
                       <TableCell>{item.totalAllocatedHours.toLocaleString()}</TableCell>
@@ -640,8 +650,7 @@ export default function DevelopmentResourcesPage() {
                   <TableRow>
                     <TableCell>
                       <div className="font-medium">{getResourceLabel(item.userId)}</div>
-                      <div className="text-xs text-muted-foreground">{item.userId}</div>
-                      <div className="text-xs text-muted-foreground">{item.workItemId || 'Project level'}</div>
+                      <div className="text-xs text-muted-foreground">{getWorkItemLabel(item.workItemId)}</div>
                     </TableCell>
                     <TableCell>{item.allocationRole}</TableCell>
                     <TableCell>

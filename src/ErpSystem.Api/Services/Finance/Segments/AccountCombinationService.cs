@@ -29,6 +29,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
+        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<AccountCombinationService> _logger;
 
         private Guid TenantId => _currentUser.TenantId 
@@ -38,10 +39,12 @@ namespace ErpSystem.Api.Services.Finance.Segments
         public AccountCombinationService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            ITenantSettingsService tenantSettingsService,
             ILogger<AccountCombinationService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _tenantSettingsService = tenantSettingsService;
             _logger = logger;
         }
 
@@ -132,6 +135,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 .ToListAsync(cancellationToken);
 
             var existingAccountMap = existingAccounts.ToDictionary(a => a.AccountNumber, a => a.Id);
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             // 7. Build preview DTOs
             var previews = new List<AccountCombinationPreviewDto>();
@@ -151,7 +155,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                     GeneratedName = generatedName,
                     AccountType = request.AccountType,
                     AccountCategory = request.AccountCategory,
-                    CurrencyCode = request.CurrencyCode,
+                    CurrencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode) ? baseCurrencyCode : request.CurrencyCode.Trim().ToUpperInvariant(),
                     SegmentValues = orderedValues.Select(lv => new SegmentValuePreviewDto
                     {
                         SegmentStructureId = lv.SegmentStructureId,
@@ -222,6 +226,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
             var settings = await _unitOfWork.Repository<FinanceSettings>()
                 .FirstOrDefaultAsync(s => s.TenantId == TenantId);
             var separator = settings?.AccountSeparator ?? "-";
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             foreach (var combination in toCreate)
             {
@@ -249,7 +254,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                         AccountName = combination.GeneratedName,
                         AccountType = accountType,
                         AccountCategory = combination.AccountCategory,
-                        CurrencyCode = combination.CurrencyCode ?? "GHS",
+                        CurrencyCode = string.IsNullOrWhiteSpace(combination.CurrencyCode) ? baseCurrencyCode : combination.CurrencyCode.Trim().ToUpperInvariant(),
                         IsMultiCurrency = false, // Could be made configurable
                         IsSegmented = true,
                         AllowDirectPosting = true,

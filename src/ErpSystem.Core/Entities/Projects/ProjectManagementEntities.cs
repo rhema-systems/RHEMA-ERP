@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Sales;
 
 namespace ErpSystem.Core.Entities.Projects;
 
@@ -24,6 +26,187 @@ public static class ProjectWorkItemNodeTypes
     public const string Task = "Task";
     public const string Subtask = "Subtask";
     public const string ChecklistItem = "ChecklistItem";
+}
+
+public static class ProjectDeliveryStructures
+{
+    public const string WholeDevelopment = "WholeDevelopment";
+    public const string SingleUnit = "SingleUnit";
+    public const string MultiUnit = "MultiUnit";
+}
+
+public static class ProjectPhaseStatuses
+{
+    public const string NotStarted = "NotStarted";
+    public const string InProgress = "InProgress";
+    public const string Blocked = "Blocked";
+    public const string Completed = "Completed";
+    public const string Waived = "Waived";
+    public const string Cancelled = "Cancelled";
+}
+
+public static class ProjectPackageStatuses
+{
+    public const string Planned = "Planned";
+    public const string ProcurementPending = "ProcurementPending";
+    public const string Awarded = "Awarded";
+    public const string Active = "Active";
+    public const string Completed = "Completed";
+    public const string OnHold = "OnHold";
+    public const string Cancelled = "Cancelled";
+}
+
+public static class ProjectPackageTypes
+{
+    public const string WorkPackage = "WorkPackage";
+    public const string TradePackage = "TradePackage";
+    public const string SupplyPackage = "SupplyPackage";
+    public const string ProvisionalSum = "ProvisionalSum";
+}
+
+public static class ProjectBoqItemTypes
+{
+    public const string Item = "Item";
+    public const string ProvisionalSum = "ProvisionalSum";
+    public const string PrimeCost = "PrimeCost";
+    public const string Variation = "Variation";
+    public const string Allowance = "Allowance";
+}
+
+public static class ProjectApprovalRegisterStatuses
+{
+    public const string Planned = "Planned";
+    public const string InPreparation = "InPreparation";
+    public const string Submitted = "Submitted";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
+    public const string Expired = "Expired";
+    public const string Waived = "Waived";
+}
+
+public static class ProjectApprovalRegisterTypes
+{
+    public const string PlanningPermission = "PlanningPermission";
+    public const string BuildingPermit = "BuildingPermit";
+    public const string EnvironmentalPermit = "EnvironmentalPermit";
+    public const string FireClearance = "FireClearance";
+    public const string UtilityClearance = "UtilityClearance";
+    public const string InspectionCertificate = "InspectionCertificate";
+    public const string OccupancyCertificate = "OccupancyCertificate";
+    public const string Other = "Other";
+}
+
+public static class ProjectUnitStatuses
+{
+    public const string Planned = "Planned";
+    public const string Available = "Available";
+    public const string Reserved = "Reserved";
+    public const string Sold = "Sold";
+    public const string Leased = "Leased";
+    public const string HandedOver = "HandedOver";
+    public const string Occupied = "Occupied";
+    public const string Archived = "Archived";
+}
+
+public static class ProjectUnitHandoverStatuses
+{
+    public const string NotScheduled = "NotScheduled";
+    public const string Pending = "Pending";
+    public const string Scheduled = "Scheduled";
+    public const string Due = "Due";
+    public const string HandedOver = "HandedOver";
+    public const string Occupied = "Occupied";
+}
+
+public static class ProjectUnitCommercialIntents
+{
+    public const string Sale = "Sale";
+    public const string Lease = "Lease";
+}
+
+public static class ProjectUnitTypes
+{
+    public const string WholeBuilding = "WholeBuilding";
+    public const string Apartment = "Apartment";
+    public const string OfficeSuite = "OfficeSuite";
+    public const string RetailShop = "RetailShop";
+    public const string Warehouse = "Warehouse";
+    public const string Unit = "Unit";
+}
+
+public static class ProjectCustomerVariationStatuses
+{
+    public const string Requested = "Requested";
+    public const string UnderReview = "UnderReview";
+    public const string Quoted = "Quoted";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
+    public const string InProgress = "InProgress";
+    public const string Completed = "Completed";
+    public const string Billed = "Billed";
+    public const string Cancelled = "Cancelled";
+}
+
+public static class ProjectCustomerVariationTimings
+{
+    public const string PreHandover = "PreHandover";
+    public const string PostHandover = "PostHandover";
+}
+
+public static class ProjectCommissioningItemStatuses
+{
+    public const string Planned = "Planned";
+    public const string InProgress = "InProgress";
+    public const string ReadyForInspection = "ReadyForInspection";
+    public const string Completed = "Completed";
+    public const string Waived = "Waived";
+}
+
+public static class ProjectHandoverItemStatuses
+{
+    public const string Planned = "Planned";
+    public const string InPreparation = "InPreparation";
+    public const string Ready = "Ready";
+    public const string Completed = "Completed";
+    public const string Waived = "Waived";
+}
+
+public static class ProjectHandoverItemTypes
+{
+    public const string PracticalCompletion = "PracticalCompletion";
+    public const string AsBuiltDrawing = "AsBuiltDrawing";
+    public const string OperationManual = "OperationManual";
+    public const string KeyHandover = "KeyHandover";
+    public const string OccupancyCertificate = "OccupancyCertificate";
+    public const string FinalCompletion = "FinalCompletion";
+    public const string Other = "Other";
+}
+
+public static class ProjectSnagStatuses
+{
+    public const string Open = "Open";
+    public const string InProgress = "InProgress";
+    public const string ReadyForVerification = "ReadyForVerification";
+    public const string Closed = "Closed";
+    public const string Waived = "Waived";
+}
+
+public static class ProjectSnagSeverities
+{
+    public const string Low = "Low";
+    public const string Medium = "Medium";
+    public const string High = "High";
+    public const string Critical = "Critical";
+}
+
+public static class ProjectDefectLiabilityStatuses
+{
+    public const string Reported = "Reported";
+    public const string UnderReview = "UnderReview";
+    public const string InProgress = "InProgress";
+    public const string Resolved = "Resolved";
+    public const string Closed = "Closed";
+    public const string WarrantyExpired = "WarrantyExpired";
 }
 
 public class ProjectType : TenantEntity
@@ -302,8 +485,20 @@ public class Project : TenantEntity
     [ForeignKey(nameof(ProgramId))]
     public virtual ProjectProgram? Program { get; set; }
 
+    public virtual ProjectDevelopmentProfile? DevelopmentProfile { get; set; }
+
     public virtual ICollection<ProjectInitiationVersion> InitiationVersions { get; set; } = new List<ProjectInitiationVersion>();
     public virtual ICollection<ProjectMember> Members { get; set; } = new List<ProjectMember>();
+    public virtual ICollection<ProjectPhase> Phases { get; set; } = new List<ProjectPhase>();
+    public virtual ICollection<ProjectPackage> Packages { get; set; } = new List<ProjectPackage>();
+    public virtual ICollection<ProjectBoqItem> BoqItems { get; set; } = new List<ProjectBoqItem>();
+    public virtual ICollection<ProjectApprovalRegisterItem> ApprovalRegisterItems { get; set; } = new List<ProjectApprovalRegisterItem>();
+    public virtual ICollection<ProjectUnit> Units { get; set; } = new List<ProjectUnit>();
+    public virtual ICollection<ProjectCustomerVariation> CustomerVariations { get; set; } = new List<ProjectCustomerVariation>();
+    public virtual ICollection<ProjectCommissioningItem> CommissioningItems { get; set; } = new List<ProjectCommissioningItem>();
+    public virtual ICollection<ProjectHandoverItem> HandoverItems { get; set; } = new List<ProjectHandoverItem>();
+    public virtual ICollection<ProjectSnagItem> SnagItems { get; set; } = new List<ProjectSnagItem>();
+    public virtual ICollection<ProjectDefectLiabilityCase> DefectLiabilityCases { get; set; } = new List<ProjectDefectLiabilityCase>();
     public virtual ICollection<ProjectWorkItem> WorkItems { get; set; } = new List<ProjectWorkItem>();
     public virtual ICollection<ProjectMilestone> Milestones { get; set; } = new List<ProjectMilestone>();
     public virtual ICollection<ProjectResourceAllocation> ResourceAllocations { get; set; } = new List<ProjectResourceAllocation>();
@@ -332,6 +527,557 @@ public class Project : TenantEntity
     public virtual ICollection<ProjectDocument> Documents { get; set; } = new List<ProjectDocument>();
     public virtual ICollection<ProjectComment> Comments { get; set; } = new List<ProjectComment>();
     public virtual ProjectClosure? Closure { get; set; }
+}
+
+public class ProjectDevelopmentProfile : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string DeliveryStructure { get; set; } = ProjectDeliveryStructures.WholeDevelopment;
+
+    [MaxLength(100)]
+    public string? DevelopmentType { get; set; }
+
+    [MaxLength(200)]
+    public string? SiteName { get; set; }
+
+    [MaxLength(2000)]
+    public string? SiteAddress { get; set; }
+
+    [MaxLength(200)]
+    public string? LandReference { get; set; }
+
+    [MaxLength(100)]
+    public string? ProcurementRoute { get; set; }
+
+    [MaxLength(100)]
+    public string? ContractStrategy { get; set; }
+
+    [MaxLength(1000)]
+    public string? ConsultantTeam { get; set; }
+
+    [MaxLength(200)]
+    public string? FundingArrangement { get; set; }
+
+    [MaxLength(200)]
+    public string? HandoverStrategy { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+}
+
+public class ProjectPhase : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ParentPhaseId { get; set; }
+
+    [MaxLength(50)]
+    public string? Code { get; set; }
+
+    [Required]
+    [MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectPhaseStatuses.NotStarted;
+
+    public int SortOrder { get; set; }
+    public bool IsOptional { get; set; }
+    public bool IsStageGateRequired { get; set; }
+    public bool IsTemplateSeeded { get; set; }
+    public DateTime? PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
+    public DateTime? ActualStartDate { get; set; }
+    public DateTime? ActualEndDate { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ParentPhaseId))]
+    public virtual ProjectPhase? ParentPhase { get; set; }
+
+    public virtual ICollection<ProjectPhase> Children { get; set; } = new List<ProjectPhase>();
+    public virtual ICollection<ProjectPackage> Packages { get; set; } = new List<ProjectPackage>();
+    public virtual ICollection<ProjectApprovalRegisterItem> ApprovalRegisterItems { get; set; } = new List<ProjectApprovalRegisterItem>();
+}
+
+public class ProjectPackage : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+
+    [MaxLength(50)]
+    public string? Code { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string PackageType { get; set; } = ProjectPackageTypes.WorkPackage;
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectPackageStatuses.Planned;
+
+    public int SortOrder { get; set; }
+
+    [MaxLength(100)]
+    public string? ProcurementRoute { get; set; }
+
+    [MaxLength(100)]
+    public string? ContractStrategy { get; set; }
+
+    public Guid? BusinessPartnerId { get; set; }
+    public Guid? TenderId { get; set; }
+    public Guid? ContractId { get; set; }
+    public Guid? ProcurementPlanItemId { get; set; }
+    public Guid? PurchaseRequisitionId { get; set; }
+    public Guid? PurchaseOrderId { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? BudgetAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? CommittedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ActualAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ForecastAmount { get; set; }
+
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectPhaseId))]
+    public virtual ProjectPhase? ProjectPhase { get; set; }
+
+    public virtual ICollection<ProjectBoqItem> BoqItems { get; set; } = new List<ProjectBoqItem>();
+}
+
+public class ProjectBoqItem : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid ProjectPackageId { get; set; }
+
+    [MaxLength(50)]
+    public string? LineNumber { get; set; }
+
+    [MaxLength(50)]
+    public string? ItemCode { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string ItemType { get; set; } = ProjectBoqItemTypes.Item;
+
+    [Required]
+    [MaxLength(1000)]
+    public string Description { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal Quantity { get; set; }
+
+    [MaxLength(20)]
+    public string? UnitOfMeasure { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? UnitRate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? BudgetAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? CommittedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ActualAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ForecastAmount { get; set; }
+
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    public Guid? InventoryItemId { get; set; }
+    public Guid? TenderItemId { get; set; }
+    public Guid? ProcurementPlanItemId { get; set; }
+    public Guid? PurchaseRequisitionItemId { get; set; }
+    public Guid? PurchaseOrderItemId { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    public int SortOrder { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectPackageId))]
+    public virtual ProjectPackage ProjectPackage { get; set; } = null!;
+}
+
+public class ProjectApprovalRegisterItem : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string ApprovalType { get; set; } = ProjectApprovalRegisterTypes.Other;
+
+    [Required]
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    public string? AuthorityName { get; set; }
+
+    [MaxLength(100)]
+    public string? ReferenceNumber { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectApprovalRegisterStatuses.Planned;
+
+    public bool IsRequired { get; set; } = true;
+    public DateTime? SubmittedDate { get; set; }
+    public DateTime? TargetDecisionDate { get; set; }
+    public DateTime? ApprovedDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+
+    [MaxLength(2000)]
+    public string? ConditionSummary { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectPhaseId))]
+    public virtual ProjectPhase? ProjectPhase { get; set; }
+}
+
+public class ProjectUnit : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public Guid? SalesAgreementId { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public bool IsReleasedForMarket { get; set; }
+    public DateTime? ReleasedAt { get; set; }
+    public Guid? ReleasedById { get; set; }
+
+    [MaxLength(50)]
+    public string? Code { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(50)]
+    public string UnitType { get; set; } = ProjectUnitTypes.Unit;
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectUnitStatuses.Planned;
+
+    [MaxLength(100)]
+    public string? BlockName { get; set; }
+
+    [MaxLength(100)]
+    public string? FloorLabel { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? AreaSquareMeters { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ValuationRate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? BasePrice { get; set; }
+
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    public DateTime? HandoverDate { get; set; }
+    public int SortOrder { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(SalesAgreementId))]
+    public virtual SalesAgreement? SalesAgreement { get; set; }
+
+    [ForeignKey(nameof(SalesOrderId))]
+    public virtual SalesOrder? SalesOrder { get; set; }
+
+    public virtual ICollection<ProjectCustomerVariation> CustomerVariations { get; set; } = new List<ProjectCustomerVariation>();
+    public virtual ICollection<ProjectCommissioningItem> CommissioningItems { get; set; } = new List<ProjectCommissioningItem>();
+    public virtual ICollection<ProjectHandoverItem> HandoverItems { get; set; } = new List<ProjectHandoverItem>();
+    public virtual ICollection<ProjectSnagItem> SnagItems { get; set; } = new List<ProjectSnagItem>();
+    public virtual ICollection<ProjectDefectLiabilityCase> DefectLiabilityCases { get; set; } = new List<ProjectDefectLiabilityCase>();
+}
+
+public class ProjectCustomerVariation : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public Guid? SalesAgreementId { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public Guid? JobCardId { get; set; }
+    public Guid? WorkOrderId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+
+    [MaxLength(100)]
+    public string? VariationType { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string Timing { get; set; } = ProjectCustomerVariationTimings.PreHandover;
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectCustomerVariationStatuses.Requested;
+
+    public DateTime RequestDate { get; set; } = DateTime.UtcNow;
+    public DateTime? TargetCompletionDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? QuotedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ApprovedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? BilledAmount { get; set; }
+
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    public bool RequiresScheduleAdjustment { get; set; }
+    public int? ScheduleImpactDays { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectUnitId))]
+    public virtual ProjectUnit? ProjectUnit { get; set; }
+
+    [ForeignKey(nameof(SalesAgreementId))]
+    public virtual SalesAgreement? SalesAgreement { get; set; }
+
+    [ForeignKey(nameof(SalesOrderId))]
+    public virtual SalesOrder? SalesOrder { get; set; }
+
+    [ForeignKey(nameof(JobCardId))]
+    public virtual JobCard? JobCard { get; set; }
+
+    [ForeignKey(nameof(WorkOrderId))]
+    public virtual WorkOrder? WorkOrder { get; set; }
+}
+
+public class ProjectCommissioningItem : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? SystemArea { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectCommissioningItemStatuses.Planned;
+
+    public bool RequiresRegulatoryInspection { get; set; }
+    public DateTime? PlannedDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+
+    [MaxLength(100)]
+    public string? CertificateReference { get; set; }
+
+    [MaxLength(200)]
+    public string? ResponsibleParty { get; set; }
+
+    public int SortOrder { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectUnitId))]
+    public virtual ProjectUnit? ProjectUnit { get; set; }
+}
+
+public class ProjectHandoverItem : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string HandoverType { get; set; } = ProjectHandoverItemTypes.Other;
+
+    [Required]
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectHandoverItemStatuses.Planned;
+
+    [MaxLength(200)]
+    public string? ResponsibleParty { get; set; }
+
+    [MaxLength(100)]
+    public string? ReferenceNumber { get; set; }
+
+    public DateTime? TargetDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public int SortOrder { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectUnitId))]
+    public virtual ProjectUnit? ProjectUnit { get; set; }
+}
+
+public class ProjectSnagItem : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(4000)]
+    public string? Description { get; set; }
+
+    [Required]
+    [MaxLength(20)]
+    public string Severity { get; set; } = ProjectSnagSeverities.Medium;
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectSnagStatuses.Open;
+
+    public DateTime ReportedDate { get; set; } = DateTime.UtcNow;
+    public DateTime? TargetClosureDate { get; set; }
+    public DateTime? ClosedDate { get; set; }
+
+    [MaxLength(200)]
+    public string? RaisedByName { get; set; }
+
+    [MaxLength(200)]
+    public string? ResponsibleParty { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectUnitId))]
+    public virtual ProjectUnit? ProjectUnit { get; set; }
+}
+
+public class ProjectDefectLiabilityCase : TenantEntity
+{
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public Guid? JobCardId { get; set; }
+    public Guid? WorkOrderId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(4000)]
+    public string? Description { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = ProjectDefectLiabilityStatuses.Reported;
+
+    public DateTime ReportedDate { get; set; } = DateTime.UtcNow;
+    public DateTime? TargetResolutionDate { get; set; }
+    public DateTime? ResolvedDate { get; set; }
+    public bool IsWarrantyRelated { get; set; }
+    public DateTime? WarrantyExpiryDate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? RectificationCost { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ChargeableAmount { get; set; }
+
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(ProjectId))]
+    public virtual Project Project { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectUnitId))]
+    public virtual ProjectUnit? ProjectUnit { get; set; }
+
+    [ForeignKey(nameof(JobCardId))]
+    public virtual JobCard? JobCard { get; set; }
+
+    [ForeignKey(nameof(WorkOrderId))]
+    public virtual WorkOrder? WorkOrder { get; set; }
 }
 
 public class ProjectInitiationVersion : TenantEntity

@@ -69,7 +69,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation(
+        _logger.LogDebug(
             "Notification Dispatcher Background Service is starting with MaxRetries={MaxRetries}, DispatchInterval={DispatchIntervalSeconds}s",
             _maxRetryAttempts, _dispatchInterval.TotalSeconds);
 
@@ -97,7 +97,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         catch (OperationCanceledException)
         {
             // Expected when the service is stopping
-            _logger.LogInformation("Notification Dispatcher Background Service is stopping due to cancellation");
+            _logger.LogDebug("Notification Dispatcher Background Service is stopping due to cancellation");
         }
         catch (Exception ex)
         {
@@ -105,12 +105,12 @@ public class NotificationDispatcherBackgroundService : BackgroundService
             throw;
         }
 
-        _logger.LogInformation("Notification Dispatcher Background Service has stopped");
+        _logger.LogDebug("Notification Dispatcher Background Service has stopped");
     }
 
     private async Task DispatchPendingNotificationsAsync()
     {
-        _logger.LogInformation("Starting pending notification dispatch");
+        _logger.LogDebug("Starting pending notification dispatch");
 
         using var scope = _serviceProvider.CreateScope();
 
@@ -123,7 +123,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
 
             if (sentCount > 0)
             {
-                _logger.LogInformation("Notification dispatch completed. Sent {Count} pending notifications", sentCount);
+                _logger.LogDebug("Notification dispatch completed. Sent {Count} pending notifications", sentCount);
             }
             else
             {

@@ -4,6 +4,18 @@ using System.ComponentModel.DataAnnotations;
 namespace ErpSystem.Core.DTOs.Finance
 {
     /// <summary>
+    /// Shared lightweight reference for the tenant's base currency.
+    /// Used across the API when only the canonical code/name/symbol metadata is needed.
+    /// </summary>
+    public class BaseCurrencyReferenceDto
+    {
+        public string CurrencyCode { get; set; } = "GHS";
+        public string CurrencyName { get; set; } = "Ghana Cedi";
+        public string CurrencySymbol { get; set; } = "₵";
+        public int DecimalPlaces { get; set; } = 2;
+    }
+
+    /// <summary>
     /// READ DTO: Represents a Currency as returned by the Finance API.
     /// Used for multi-currency operations across all modules.
     /// </summary>

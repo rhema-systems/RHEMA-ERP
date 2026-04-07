@@ -73,6 +73,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 // 3. Map DTO to Entity
                 var now = DateTime.UtcNow;
                 var userName = _currentUserService.UserName ?? "system";
+                var baseCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync();
 
                 var account = new Account
                 {
@@ -83,7 +84,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     AccountType = accountType,
                     AccountCategory = accountDto.AccountCategory,
                     AccountSubCategory = accountDto.AccountSubCategory,
-                    CurrencyCode = accountDto.CurrencyCode ?? "GHS",
+                    CurrencyCode = string.IsNullOrWhiteSpace(accountDto.CurrencyCode) ? baseCurrencyCode : accountDto.CurrencyCode.Trim().ToUpperInvariant(),
                     IsMultiCurrency = accountDto.IsMultiCurrency,
                     IsSegmented = true,
                     IsIFRSClassified = true,
@@ -310,6 +311,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 _context.JournalEntries.Add(journalEntry);
 
                 // 4. Process Lines and Update Balances
+                var baseCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync();
                 int lineNum = 1;
                 foreach (var lineDto in entryDto.Transactions)
                 {
@@ -370,7 +372,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     };
 
                     // Update Foreign Currency Balance if applicable
-                    if (!string.IsNullOrEmpty(lineDto.CurrencyCode) && lineDto.CurrencyCode != "GHS") // Assuming GHS is base
+                    if (!string.IsNullOrWhiteSpace(lineDto.CurrencyCode)
+                        && !string.Equals(lineDto.CurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
                     {
                         var currencyLink = await _context.AccountCurrencyLinks
                             .FirstOrDefaultAsync(l => l.AccountId == account.Id && l.LinkedCurrencyCode == lineDto.CurrencyCode);
@@ -421,12 +424,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
         }
 
-        public async Task<decimal> GetAccountBalanceAsync(Guid accountId, string currencyCode = "GHS")
+        public async Task<decimal> GetAccountBalanceAsync(Guid accountId, string? currencyCode = null)
         {
             var account = await _context.Accounts.FindAsync(accountId);
             if (account == null) throw new ArgumentException("Account not found");
+            var requestedCurrency = string.IsNullOrWhiteSpace(currencyCode)
+                ? await _tenantSettings.GetBaseCurrencyAsync()
+                : currencyCode.Trim().ToUpperInvariant();
 
             // TODO: Implement multi-currency balance calculation using AccountCurrencyLink and ExchangeRates
+            _ = requestedCurrency;
             return account.Balance;
         }
 
@@ -508,6 +515,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 account.CurrencyLinks = currencyLinks.Where(cl => cl.AccountId == account.Id).ToList();
             }
 
+            var baseCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync();
             var accounts = new List<Account>();
 
             if (!string.IsNullOrEmpty(request.CurrencyCode))
@@ -522,7 +530,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 accounts = allAccounts.Where(a => 
                     a.IsMultiCurrency 
-                    || a.CurrencyCode != "GHS" 
+                    || !string.Equals(a.CurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase)
                     || a.CurrencyLinks.Any())
                     .ToList();
             }
@@ -560,7 +568,8 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 // Group by currency to handle multi-currency accounts correctly
                 var currencyGroups = accountTransactions
-                    .Where(t => t.TransactionCurrency != null && t.TransactionCurrency != "GHS") // Exclude base currency txns
+                    .Where(t => t.TransactionCurrency != null
+                        && !string.Equals(t.TransactionCurrency, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
                     .GroupBy(t => t.TransactionCurrency);
 
                 foreach (var group in currencyGroups)
@@ -580,7 +589,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                     // Get Exchange Rate
                     var exchangeRateEntity = await _context.ExchangeRates
-                        .Where(r => r.TargetCurrencyCode == currency && r.BaseCurrencyCode == "GHS" && r.EffectiveDate <= revaluationDate)
+                        .Where(r => r.TargetCurrencyCode == currency
+                            && r.BaseCurrencyCode == baseCurrencyCode
+                            && r.EffectiveDate <= revaluationDate)
                         .OrderByDescending(r => r.EffectiveDate)
                         .FirstOrDefaultAsync();
 

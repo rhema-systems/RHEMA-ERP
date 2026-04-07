@@ -10,6 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { IssueRequisitionDialog } from '@/components/inventory/IssueRequisitionDialog';
 import { ReturnRequisitionDialog } from '@/components/inventory/ReturnRequisitionDialog';
 import { RequisitionDialog } from '@/components/inventory/RequisitionDialog';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
 import { inventoryManagementService, type WarehouseDto } from '@/services/inventoryManagementService';
 import { inventoryRequisitionService, type InventoryRequisitionDto, RequisitionStatusMap } from '@/services/inventoryRequisitionService';
 import { projectService, type ProjectMaterialCostEntryDto, type ProjectMaterialReconciliationReportItemDto, type ProjectProcurementReconciliationReportItemDto } from '@/services/projectService';
@@ -38,6 +44,7 @@ export default function ProjectMaterialsPage() {
   const [procurementReconciliation, setProcurementReconciliation] = useState<ProjectProcurementReconciliationReportItemDto[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<ProjectMaterialCostEntryDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [ledgerPostingFilter, setLedgerPostingFilter] = useState('all');
@@ -55,12 +62,13 @@ export default function ProjectMaterialsPage() {
   const load = async () => {
     try {
       setLoading(true);
-      const [requisitionResult, warehouseResult, reconciliationResult, procurementReconciliationResult, ledgerResult] = await Promise.all([
+      const [requisitionResult, warehouseResult, reconciliationResult, procurementReconciliationResult, ledgerResult, currencyContext] = await Promise.all([
         inventoryRequisitionService.getAll(),
         inventoryManagementService.getWarehouses(),
         projectService.getMaterialReconciliationReport(100),
         projectService.getProcurementReconciliationReport(100),
         projectService.getMaterialCostLedgerReport(undefined, 150),
+        loadProjectCurrencyContext(),
       ]);
 
       setRequisitions(
@@ -72,6 +80,7 @@ export default function ProjectMaterialsPage() {
       setReconciliation(reconciliationResult);
       setProcurementReconciliation(procurementReconciliationResult);
       setLedgerEntries(ledgerResult);
+      setBaseCurrency(currencyContext.baseCurrency);
     } catch (error: any) {
       toast.error(error.message || 'Failed to load project materials oversight');
     } finally {
@@ -86,10 +95,11 @@ export default function ProjectMaterialsPage() {
   const filteredRequisitions = useMemo(
     () =>
       requisitions.filter((item) => {
-        const matchesSearch = !searchTerm
+          const matchesSearch = !searchTerm
           || item.requisitionNumber.toLowerCase().includes(searchTerm.toLowerCase())
           || (item.projectCode || '').toLowerCase().includes(searchTerm.toLowerCase())
-          || (item.warehouseName || '').toLowerCase().includes(searchTerm.toLowerCase());
+          || (item.warehouseName || '').toLowerCase().includes(searchTerm.toLowerCase())
+          || (item.locationName || '').toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === 'all' || normalizeStatus(item.status) === Number(statusFilter);
         return matchesSearch && matchesStatus;
       }),
@@ -156,6 +166,8 @@ export default function ProjectMaterialsPage() {
     setReturnDialogOpen(true);
   };
 
+  const formatMoney = (value: number) => formatProjectMoney(value, baseCurrency.code, baseCurrency.code);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -170,28 +182,28 @@ export default function ProjectMaterialsPage() {
         <Card><CardHeader className="pb-2"><CardDescription>Project Requisitions</CardDescription><CardTitle>{requisitions.length}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Pending Approval</CardDescription><CardTitle>{stats.pendingApproval}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Pending Issue</CardDescription><CardTitle>{stats.pendingIssue}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Requested Value</CardDescription><CardTitle>{stats.totalValue.toLocaleString()}</CardTitle></CardHeader><CardContent className="pt-0 text-sm text-muted-foreground">Completed {stats.completed}</CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Requested Value</CardDescription><CardTitle>{formatMoney(stats.totalValue)}</CardTitle></CardHeader><CardContent className="pt-0 text-sm text-muted-foreground">Completed {stats.completed}</CardContent></Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card><CardHeader className="pb-2"><CardDescription>Projects on Watch</CardDescription><CardTitle>{reconciliationStats.watchProjects}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Under-Tracked Cost</CardDescription><CardTitle>{reconciliationStats.underTracked}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Total Net Issued</CardDescription><CardTitle>{reconciliationStats.totalNetIssued.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Total Variance</CardDescription><CardTitle>{reconciliationStats.totalVariance.toLocaleString()}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Total Net Issued</CardDescription><CardTitle>{formatMoney(reconciliationStats.totalNetIssued)}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Total Variance</CardDescription><CardTitle>{formatMoney(reconciliationStats.totalVariance)}</CardTitle></CardHeader></Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card><CardHeader className="pb-2"><CardDescription>Procurement Watch</CardDescription><CardTitle>{procurementStats.watchProjects}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Pending Inspection</CardDescription><CardTitle>{procurementStats.pendingInspection}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Receipt To Issue Variance</CardDescription><CardTitle>{procurementStats.receiptToIssueVariance.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Issue To Posting Variance</CardDescription><CardTitle>{procurementStats.issueToPostingVariance.toLocaleString()}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Receipt To Issue Variance</CardDescription><CardTitle>{formatMoney(procurementStats.receiptToIssueVariance)}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Issue To Posting Variance</CardDescription><CardTitle>{formatMoney(procurementStats.issueToPostingVariance)}</CardTitle></CardHeader></Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card><CardHeader className="pb-2"><CardDescription>Ledger Movements</CardDescription><CardTitle>{ledgerStats.movements}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Exceptions</CardDescription><CardTitle>{ledgerStats.exceptionCount}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Reversed Entries</CardDescription><CardTitle>{ledgerStats.reversedCount}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Actual Cost Impact</CardDescription><CardTitle>{ledgerStats.actualCostImpact.toLocaleString()}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Actual Cost Impact</CardDescription><CardTitle>{formatMoney(ledgerStats.actualCostImpact)}</CardTitle></CardHeader></Card>
       </div>
 
       <Card>
@@ -199,7 +211,7 @@ export default function ProjectMaterialsPage() {
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
-          <Input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search requisition, project code, or warehouse" />
+          <Input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search requisition, project code, warehouse, or location" />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger><SelectValue placeholder="All statuses" /></SelectTrigger>
             <SelectContent>
@@ -238,7 +250,7 @@ export default function ProjectMaterialsPage() {
                       {item.currentWorkflowStepName ? <Badge variant="outline">Step: {item.currentWorkflowStepName}</Badge> : null}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      Warehouse {item.warehouseName} | Items {item.totalItems} | Qty {item.totalQuantity} | Value {item.totalValue.toLocaleString()}
+                      Warehouse {item.warehouseName}{item.locationName ? ` | Location ${item.locationName}` : ''} | Items {item.totalItems} | Qty {item.totalQuantity} | Value {formatMoney(item.totalValue)}
                     </div>
                     {item.purpose ? <div className="text-sm text-muted-foreground">{item.purpose}</div> : null}
                   </div>
@@ -280,10 +292,10 @@ export default function ProjectMaterialsPage() {
                     <Badge variant={item.reconciliationStatus === 'Balanced' ? 'outline' : 'destructive'}>{item.reconciliationStatus}</Badge>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Requested {item.requestedValue.toLocaleString()} | Issued {item.issuedValue.toLocaleString()} | Returned {item.returnedValue.toLocaleString()} | Net Issued {item.netIssuedValue.toLocaleString()}
+                    Requested {formatMoney(item.requestedValue)} | Issued {formatMoney(item.issuedValue)} | Returned {formatMoney(item.returnedValue)} | Net Issued {formatMoney(item.netIssuedValue)}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Tracked Material Cost {item.trackedMaterialCost.toLocaleString()} | Variance {item.materialCostVariance.toLocaleString()} | Pending Requisitions {item.pendingRequisitionCount}
+                    Tracked Material Cost {formatMoney(item.trackedMaterialCost)} | Variance {formatMoney(item.materialCostVariance)} | Pending Requisitions {item.pendingRequisitionCount}
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Ledger Entries {item.materialLedgerEntryCount} | Missing Links {item.missingSourceLinkCount} | Reversal Gaps {item.reversalGapCount}
@@ -323,13 +335,13 @@ export default function ProjectMaterialsPage() {
                     PR {item.purchaseRequisitionCount} | PO {item.purchaseOrderCount} | Receipts {item.purchaseReceiptCount} | Open PO {item.openPurchaseOrderCount}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Received {item.receivedAmount.toLocaleString()} | Accepted {item.acceptedReceiptAmount.toLocaleString()} | Pending Inspection {item.pendingInspectionAmount.toLocaleString()} | Supplier Return {item.supplierReturnAmount.toLocaleString()}
+                    Received {formatMoney(item.receivedAmount)} | Accepted {formatMoney(item.acceptedReceiptAmount)} | Pending Inspection {formatMoney(item.pendingInspectionAmount)} | Supplier Return {formatMoney(item.supplierReturnAmount)}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Issued {item.issuedInventoryValue.toLocaleString()} | Net Issued {item.netIssuedInventoryValue.toLocaleString()} | Posted {item.postedMaterialCost.toLocaleString()}
+                    Issued {formatMoney(item.issuedInventoryValue)} | Net Issued {formatMoney(item.netIssuedInventoryValue)} | Posted {formatMoney(item.postedMaterialCost)}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Receipt to Issue Variance {item.receiptToIssueVariance.toLocaleString()} | Issue to Posting Variance {item.issueToPostingVariance.toLocaleString()}
+                    Receipt to Issue Variance {formatMoney(item.receiptToIssueVariance)} | Issue to Posting Variance {formatMoney(item.issueToPostingVariance)}
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Ledger Entries {item.procurementLedgerEntryCount} | Missing Links {item.missingSourceLinkCount} | Reversal Gaps {item.reversalGapCount}
@@ -408,7 +420,7 @@ export default function ProjectMaterialsPage() {
                     {new Date(item.entryDate).toLocaleString()} | {item.sourceDocumentType || 'Source'} {item.sourceDocumentNumber || item.sourceDocumentId || 'Unlinked'}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Item {(item.inventoryItemCode || item.inventoryItemName || 'Unlinked item')} | Qty {item.quantity.toLocaleString()} {item.unitOfMeasure || ''} | Unit Cost {item.unitCost.toLocaleString()} | Amount {item.amount.toLocaleString()} {item.currency}
+                    Item {(item.inventoryItemCode || item.inventoryItemName || 'Unlinked item')} | Qty {item.quantity.toLocaleString()} {item.unitOfMeasure || ''} | Unit Cost {formatProjectMoney(item.unitCost, item.currency, baseCurrency.code, 2)} | Amount {formatProjectMoney(item.amount, item.currency, baseCurrency.code, 2)}
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Affects Actual Cost {item.affectsActualCost ? 'Yes' : 'No'}{item.notes ? ` | ${item.notes}` : ''}

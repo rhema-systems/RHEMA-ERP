@@ -9,8 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  ShoppingCart, Search, Eye, RefreshCw, Download, Plus,
-  Clock, CheckCircle, XCircle, AlertTriangle
+  ShoppingCart, Search, Eye, RefreshCw, Download, Plus, Building2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { salesOrderService, type SalesOrderSummaryDto } from '@/services/salesOrderService';
@@ -38,19 +37,30 @@ export default function SalesOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [salesScope, setSalesScope] = useState<'all' | 'projectLinked' | 'releasedUnits'>('all');
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const pageSize = 20;
 
   useEffect(() => {
     loadOrders();
-  }, [page, statusFilter]);
+  }, [page, statusFilter, salesScope]);
 
   const loadOrders = async () => {
     try {
       setLoading(true);
       const data = await salesOrderService.getSalesOrders(
-        page, pageSize, searchTerm, statusFilter || undefined
+        page,
+        pageSize,
+        searchTerm,
+        statusFilter || undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        salesScope === 'projectLinked' || salesScope === 'releasedUnits',
+        salesScope === 'releasedUnits'
       );
       setOrders(data.items);
       setTotalCount(data.totalCount);
@@ -81,6 +91,8 @@ export default function SalesOrdersPage() {
       'Order Date': o.orderDate ? format(new Date(o.orderDate), 'yyyy-MM-dd') : '',
       'Expected Delivery': o.expectedDeliveryDate ? format(new Date(o.expectedDeliveryDate), 'yyyy-MM-dd') : '',
       'Delivery %': o.deliveryProgress,
+      'Project': o.projectUnitContext?.projectCode || '',
+      'Project Unit': o.projectUnitContext?.projectUnitCode || o.projectUnitContext?.projectUnitName || '',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -96,6 +108,7 @@ export default function SalesOrdersPage() {
 
   const formatCurrency = (amount: number, currency: string) =>
     `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  const formatLabel = (value?: string) => value ? value.replace(/([A-Z])/g, ' $1').trim() : '-';
 
   const getStatusBadge = (status: string) => {
     const c = STATUS_CONFIG[status] || { variant: 'outline' as const, className: '' };
@@ -122,9 +135,14 @@ export default function SalesOrdersPage() {
           </h1>
           <p className="text-gray-500">Manage customer sales orders</p>
         </div>
-        <Button onClick={() => router.push('/sales/orders/create')}>
-          <Plus className="h-4 w-4 mr-2" />New Sales Order
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => router.push('/sales/orders/create?source=released-unit')}>
+            <Building2 className="h-4 w-4 mr-2" />From Released Unit
+          </Button>
+          <Button onClick={() => router.push('/sales/orders/create')}>
+            <Plus className="h-4 w-4 mr-2" />New Sales Order
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -177,6 +195,14 @@ export default function SalesOrdersPage() {
                 <SelectItem value="Closed">Closed</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={salesScope} onValueChange={(v: 'all' | 'projectLinked' | 'releasedUnits') => setSalesScope(v)}>
+              <SelectTrigger><SelectValue placeholder="Sales Scope" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Records</SelectItem>
+                <SelectItem value="projectLinked">Project-Linked Only</SelectItem>
+                <SelectItem value="releasedUnits">Released Units Only</SelectItem>
+              </SelectContent>
+            </Select>
             <div className="flex gap-2">
               <Button variant="outline" onClick={handleExport}><Download className="h-4 w-4 mr-2" />Export</Button>
               <Button variant="outline" onClick={loadOrders}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
@@ -217,6 +243,7 @@ export default function SalesOrdersPage() {
                     <TableHead>Priority</TableHead>
                     <TableHead>Delivery</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="hidden xl:table-cell">Project Context</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -230,6 +257,19 @@ export default function SalesOrdersPage() {
                           <p className="font-medium">{order.customerName}</p>
                           {order.propertyReference && (
                             <p className="text-xs text-gray-500">Property: {order.propertyReference}</p>
+                          )}
+                          {order.projectUnitContext && (
+                            <div className="mt-1 flex items-center gap-1 text-xs text-emerald-600">
+                              <Building2 className="h-3 w-3" />
+                              <span>
+                                {order.projectUnitContext.projectCode}
+                                {order.projectUnitContext.projectUnitCode
+                                  ? ` • ${order.projectUnitContext.projectUnitCode}`
+                                  : order.projectUnitContext.projectUnitName
+                                    ? ` • ${order.projectUnitContext.projectUnitName}`
+                                    : ''}
+                              </span>
+                            </div>
                           )}
                         </div>
                       </TableCell>
@@ -252,6 +292,11 @@ export default function SalesOrdersPage() {
                         </div>
                       </TableCell>
                       <TableCell>{getStatusBadge(order.status)}</TableCell>
+                      <TableCell className="hidden xl:table-cell text-xs text-gray-500">
+                        {order.projectUnitContext
+                          ? `${formatLabel(order.projectUnitContext.projectUnitCommercialStatus)} / ${formatLabel(order.projectUnitContext.projectUnitHandoverStatus)}`
+                          : '-'}
+                      </TableCell>
                       <TableCell>
                         <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); router.push(`/sales/orders/${order.id}`); }}>
                           <Eye className="h-4 w-4 mr-1" />View

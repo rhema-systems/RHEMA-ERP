@@ -445,17 +445,6 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Marketing',
-    href: '/marketing',
-    icon: Megaphone,
-    children: [
-      { title: 'Campaigns', href: '/marketing/campaigns', icon: Megaphone },
-      { title: 'Products', href: '/marketing/products', icon: Package },
-      { title: 'Leads', href: '/sales/crm/leads', icon: Users },
-      { title: 'Analytics', href: '/marketing/analytics', icon: BarChart3 },
-    ],
-  },
-  {
     title: 'Estate',
     href: '/estate',
     icon: Home,

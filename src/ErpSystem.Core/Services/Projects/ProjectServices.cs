@@ -15,8 +15,10 @@ using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services;
 using Microsoft.Extensions.Logging;
 
@@ -45,7 +47,12 @@ public partial class ProjectService : IProjectService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IWorkflowService _workflowService;
     private readonly IUserService _userService;
+    private readonly IJobCardService _jobCardService;
+    private readonly IWorkOrderService _workOrderService;
+    private readonly ISalesAgreementService _salesAgreementService;
+    private readonly ISalesOrderService _salesOrderService;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ITenantSettingsService _tenantSettingsService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IAppEventBus _appEventBus;
     private readonly ILogger<ProjectService> _logger;
@@ -63,7 +70,12 @@ public partial class ProjectService : IProjectService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IWorkflowService workflowService,
         IUserService userService,
+        IJobCardService jobCardService,
+        IWorkOrderService workOrderService,
+        ISalesAgreementService salesAgreementService,
+        ISalesOrderService salesOrderService,
         IUnitOfWork unitOfWork,
+        ITenantSettingsService tenantSettingsService,
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
         ILogger<ProjectService> logger)
@@ -80,7 +92,12 @@ public partial class ProjectService : IProjectService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _workflowService = workflowService;
         _userService = userService;
+        _jobCardService = jobCardService;
+        _workOrderService = workOrderService;
+        _salesAgreementService = salesAgreementService;
+        _salesOrderService = salesOrderService;
         _unitOfWork = unitOfWork;
+        _tenantSettingsService = tenantSettingsService;
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
         _logger = logger;
@@ -202,6 +219,15 @@ public partial class ProjectService : IProjectService
 
         var dto = MapToDetailDto(project);
         dto.ResourceAllocations = await EnrichResourceAllocationsAsync(dto.ResourceAllocations, project.ResourceAllocations.ToList());
+        dto.Packages = (await GetProjectPackagesAsync(id)).ToList();
+        dto.BoqItems = (await GetProjectBoqItemsAsync(id)).ToList();
+        dto.ApprovalRegister = (await GetApprovalRegisterAsync(id)).ToList();
+        dto.Units = (await GetProjectUnitsAsync(id)).ToList();
+        dto.CustomerVariations = (await GetCustomerVariationsAsync(id)).ToList();
+        dto.CommissioningItems = (await GetProjectCommissioningItemsAsync(id)).ToList();
+        dto.HandoverItems = (await GetProjectHandoverItemsAsync(id)).ToList();
+        dto.SnagItems = (await GetProjectSnagItemsAsync(id)).ToList();
+        dto.DefectLiabilityCases = (await GetProjectDefectLiabilityCasesAsync(id)).ToList();
         dto.WorkItems = (await GetWorkItemsAsync(id)).ToList();
         dto.Deliverables = (await GetDeliverablesAsync(id)).ToList();
         dto.TaskDependencies = (await GetTaskDependenciesAsync(id)).ToList();
@@ -318,7 +344,11 @@ public partial class ProjectService : IProjectService
 
         if (project.TemplateId.HasValue)
         {
-            await ApplyTemplateAsync(project, project.TemplateId.Value);
+            await ApplyTemplateAsync(project, project.TemplateId.Value, dto.DevelopmentProfile);
+        }
+        else if (dto.DevelopmentProfile != null)
+        {
+            await UpsertProjectConstructionFoundationAsync(project, dto.DevelopmentProfile);
         }
 
         await SaveInitiationSnapshotAsync(project, "Created", "Initial project creation");
@@ -390,6 +420,12 @@ public partial class ProjectService : IProjectService
         await _unitOfWork.SaveChangesAsync();
         await EnsureProjectMembershipsAsync(project);
         await _unitOfWork.SaveChangesAsync();
+
+        if (dto.DevelopmentProfile != null)
+        {
+            await UpsertProjectConstructionFoundationAsync(project, dto.DevelopmentProfile);
+        }
+
         await PublishActivityAsync(project, "Updated");
 
         return (await GetProjectByIdAsync(project.Id))!;
@@ -1387,6 +1423,7 @@ public partial class ProjectService : IProjectService
     public async Task<ProjectInvoiceRequestDto> CreateInvoiceRequestAsync(Guid projectId, CreateProjectInvoiceRequestDto dto)
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageFinancials);
+        var currencyCode = await ResolveProjectCurrencyAsync(dto.Currency);
         var entity = new ProjectInvoiceRequest
         {
             TenantId = _currentUserProvider.TenantId,
@@ -1395,7 +1432,7 @@ public partial class ProjectService : IProjectService
             ContractId = dto.ContractId ?? project.ContractId,
             RequestNumber = await GenerateInvoiceRequestNumberAsync(),
             RequestedAmount = dto.RequestedAmount,
-            Currency = dto.Currency,
+            Currency = currencyCode,
             Status = dto.Status,
             ExternalReference = dto.ExternalReference,
             Notes = dto.Notes,
@@ -1421,6 +1458,7 @@ public partial class ProjectService : IProjectService
         var schedule = await scheduleRepo.FirstOrDefaultAsync(x => x.Id == billingScheduleId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project billing schedule with ID {billingScheduleId} not found");
         var project = await RequireProjectAsync(schedule.ProjectId, ProjectAccessOperation.ManageFinancials);
+        var currencyCode = await GetProjectBaseCurrencyCodeAsync();
 
         var entity = new ProjectInvoiceRequest
         {
@@ -1430,7 +1468,7 @@ public partial class ProjectService : IProjectService
             ContractId = schedule.ContractId,
             RequestNumber = await GenerateInvoiceRequestNumberAsync(),
             RequestedAmount = schedule.Amount,
-            Currency = "USD",
+            Currency = currencyCode,
             Status = "Draft",
             Notes = notes,
             CreatedBy = _currentUserProvider.Username,
@@ -1827,6 +1865,27 @@ public partial class ProjectService : IProjectService
             ["Status"] = entity.Status
         });
         return MapToDto(entity);
+    }
+
+    public async Task DeleteDeliverableAsync(Guid deliverableId)
+    {
+        var repo = _unitOfWork.Repository<ProjectDeliverable>();
+        var entity = await repo.FirstOrDefaultAsync(x => x.Id == deliverableId && x.TenantId == _currentUserProvider.TenantId)
+            ?? throw new InvalidOperationException($"Project deliverable with ID {deliverableId} not found");
+        var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
+
+        if (string.Equals(entity.Status, DeliverableStatusApproved, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Approved deliverables cannot be deleted.");
+        }
+
+        await repo.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+        await PublishActivityAsync(project, "DeliverableDeleted", new Dictionary<string, object>
+        {
+            ["DeliverableId"] = entity.Id,
+            ["Title"] = entity.Title
+        });
     }
 
     public async Task<IEnumerable<ProjectTaskDependencyDto>> GetTaskDependenciesAsync(Guid projectId)
@@ -2582,6 +2641,7 @@ public partial class ProjectService : IProjectService
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageExecution);
         await ValidateExpenseAsync(project, dto);
+        var currencyCode = await ResolveProjectCurrencyAsync(dto.Currency);
         var entity = new ProjectExpense
         {
             TenantId = _currentUserProvider.TenantId,
@@ -2590,7 +2650,7 @@ public partial class ProjectService : IProjectService
             UserId = dto.UserId,
             ExpenseDate = dto.ExpenseDate == default ? DateTime.UtcNow.Date : dto.ExpenseDate.Date,
             Category = dto.Category,
-            Currency = dto.Currency,
+            Currency = currencyCode,
             Amount = dto.Amount,
             TaxAmount = dto.TaxAmount,
             IsBillable = dto.IsBillable,
@@ -2614,12 +2674,13 @@ public partial class ProjectService : IProjectService
         var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
         EnsureEntryEditable(entity.Status, "expense");
         await ValidateExpenseAsync(project, dto);
+        var currencyCode = await ResolveProjectCurrencyAsync(dto.Currency);
 
         entity.WorkItemId = dto.WorkItemId;
         entity.UserId = dto.UserId;
         entity.ExpenseDate = dto.ExpenseDate == default ? entity.ExpenseDate.Date : dto.ExpenseDate.Date;
         entity.Category = dto.Category;
-        entity.Currency = dto.Currency;
+        entity.Currency = currencyCode;
         entity.Amount = dto.Amount;
         entity.TaxAmount = dto.TaxAmount;
         entity.IsBillable = dto.IsBillable;
@@ -5310,21 +5371,54 @@ public partial class ProjectService : IProjectService
         });
     }
 
-    private async Task ApplyTemplateAsync(Project project, Guid templateId)
+    private async Task ApplyTemplateAsync(Project project, Guid templateId, UpsertProjectDevelopmentProfileDto? requestedDevelopmentProfile = null)
     {
         var template = await _templateRepository.GetByIdAsync(templateId);
-        if (template == null || string.IsNullOrWhiteSpace(template.TemplateDefinitionJson))
+        if (template == null)
         {
+            if (requestedDevelopmentProfile != null)
+            {
+                await UpsertProjectConstructionFoundationAsync(project, requestedDevelopmentProfile);
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(template.TemplateDefinitionJson))
+        {
+            if (requestedDevelopmentProfile != null)
+            {
+                await UpsertProjectConstructionFoundationAsync(project, requestedDevelopmentProfile);
+            }
+
             return;
         }
 
         try
         {
             using var document = JsonDocument.Parse(template.TemplateDefinitionJson);
+            await ApplyProjectConstructionTemplateAsync(project, document.RootElement, requestedDevelopmentProfile);
             if (document.RootElement.TryGetProperty("workItems", out var workItems) && workItems.ValueKind == JsonValueKind.Array)
             {
                 foreach (var workItem in workItems.EnumerateArray())
                 {
+                    if (workItem.ValueKind == JsonValueKind.String)
+                    {
+                        await _unitOfWork.Repository<ProjectWorkItem>().AddAsync(new ProjectWorkItem
+                        {
+                            TenantId = _currentUserProvider.TenantId,
+                            ProjectId = project.Id,
+                            NodeType = ProjectWorkItemNodeTypes.Task,
+                            Title = workItem.GetString() ?? "Untitled",
+                            Status = "New",
+                            Priority = "Normal",
+                            PercentComplete = 0,
+                            CreatedBy = _currentUserProvider.Username,
+                            CreatedById = _currentUserProvider.UserId
+                        });
+                        continue;
+                    }
+
                     await _unitOfWork.Repository<ProjectWorkItem>().AddAsync(new ProjectWorkItem
                     {
                         TenantId = _currentUserProvider.TenantId,
@@ -5346,6 +5440,21 @@ public partial class ProjectService : IProjectService
             {
                 foreach (var milestone in milestones.EnumerateArray())
                 {
+                    if (milestone.ValueKind == JsonValueKind.String)
+                    {
+                        await _unitOfWork.Repository<ProjectMilestone>().AddAsync(new ProjectMilestone
+                        {
+                            TenantId = _currentUserProvider.TenantId,
+                            ProjectId = project.Id,
+                            Title = milestone.GetString() ?? "Milestone",
+                            TargetDate = DateTime.UtcNow.Date,
+                            Status = "Draft",
+                            CreatedBy = _currentUserProvider.Username,
+                            CreatedById = _currentUserProvider.UserId
+                        });
+                        continue;
+                    }
+
                     await _unitOfWork.Repository<ProjectMilestone>().AddAsync(new ProjectMilestone
                     {
                         TenantId = _currentUserProvider.TenantId,
@@ -5364,6 +5473,10 @@ public partial class ProjectService : IProjectService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to apply template {TemplateId} to project {ProjectId}", templateId, project.Id);
+            if (requestedDevelopmentProfile != null)
+            {
+                await UpsertProjectConstructionFoundationAsync(project, requestedDevelopmentProfile);
+            }
         }
     }
 
@@ -6975,7 +7088,70 @@ public partial class ProjectService : IProjectService
 
     private static ProjectLookupDto MapToLookupDto(Project entity) => new() { Id = entity.Id, ProjectCode = entity.ProjectCode, Title = entity.Title, Status = entity.Status, ProjectTypeName = entity.ProjectType?.Name, PortfolioName = entity.Portfolio?.Name, ProgramName = entity.Program?.Name };
     private static ProjectDto MapToDto(Project entity) => new() { Id = entity.Id, ProjectCode = entity.ProjectCode, Title = entity.Title, Status = entity.Status, Summary = entity.Summary, ProjectTypeName = entity.ProjectType?.Name, ProjectPriorityName = entity.ProjectPriority?.Name, PortfolioId = entity.PortfolioId, PortfolioName = entity.Portfolio?.Name, ProgramId = entity.ProgramId, ProgramName = entity.Program?.Name, ProjectManagerId = entity.ProjectManagerId, SponsorId = entity.SponsorId, StartDate = entity.StartDate, TargetEndDate = entity.TargetEndDate, EstimatedBudget = entity.EstimatedBudget, ApprovedBudget = entity.ApprovedBudget, ActualCost = entity.ActualCost, ProgressPercent = entity.ProgressPercent, ExternalPortalAccessEnabled = entity.ExternalPortalAccessEnabled, ExternalCollaborationEnabled = entity.ExternalCollaborationEnabled, CreatedAt = entity.CreatedAt };
-    private static ProjectDetailDto MapToDetailDto(Project entity) => new() { Id = entity.Id, ProjectCode = entity.ProjectCode, Title = entity.Title, Status = entity.Status, Summary = entity.Summary, ProjectTypeId = entity.ProjectTypeId, ProjectTypeName = entity.ProjectType?.Name, ProjectPriorityId = entity.ProjectPriorityId, ProjectPriorityName = entity.ProjectPriority?.Name, TemplateId = entity.TemplateId, PortfolioId = entity.PortfolioId, PortfolioName = entity.Portfolio?.Name, ProgramId = entity.ProgramId, ProgramName = entity.Program?.Name, BusinessCase = entity.BusinessCase, Objectives = entity.Objectives, StrategicAlignment = entity.StrategicAlignment, Methodology = entity.Methodology, SponsorId = entity.SponsorId, ProjectManagerId = entity.ProjectManagerId, DepartmentId = entity.DepartmentId, LocationId = entity.LocationId, CustomerId = entity.CustomerId, BusinessPartnerId = entity.BusinessPartnerId, ContractId = entity.ContractId, TenderId = entity.TenderId, StartDate = entity.StartDate, TargetEndDate = entity.TargetEndDate, ActualStartDate = entity.ActualStartDate, ActualEndDate = entity.ActualEndDate, EstimatedBudget = entity.EstimatedBudget, ApprovedBudget = entity.ApprovedBudget, ActualCost = entity.ActualCost, BudgetStatus = entity.BudgetStatus, ProgressPercent = entity.ProgressPercent, ApprovalRequired = entity.ApprovalRequired, SubmittedAt = entity.SubmittedAt, ApprovedAt = entity.ApprovedAt, ScopeStatement = entity.ScopeStatement, Assumptions = entity.Assumptions, Constraints = entity.Constraints, ExpectedBenefits = entity.ExpectedBenefits, FundingSource = entity.FundingSource, StatusRemarks = entity.StatusRemarks, ExternalPortalAccessEnabled = entity.ExternalPortalAccessEnabled, ExternalCollaborationEnabled = entity.ExternalCollaborationEnabled, CreatedAt = entity.CreatedAt, HasLockedBaseline = entity.Baselines.Any(x => x.IsLocked), Members = entity.Members.OrderBy(x => x.JoinedAt).Select(MapToDto).ToList(), Milestones = entity.Milestones.OrderBy(x => x.TargetDate).Select(MapToDto).ToList(), ResourceAllocations = entity.ResourceAllocations.OrderBy(x => x.StartDate).ThenBy(x => x.UserId).Select(x => MapToDto(x, entity.ResourceAllocations.ToList())).ToList(), Risks = entity.Risks.OrderByDescending(x => x.Exposure).Select(MapToDto).ToList(), Issues = entity.Issues.OrderBy(x => x.TargetResolutionDate).Select(MapToDto).ToList(), ChangeRequests = entity.ChangeRequests.OrderByDescending(x => x.CreatedAt).Select(MapToDto).ToList(), BillingSchedules = entity.BillingSchedules.OrderBy(x => x.BillingDate).Select(MapToDto).ToList(), InvoiceRequests = entity.InvoiceRequests.OrderByDescending(x => x.RequestedAt).Select(MapToDto).ToList(), Documents = entity.Documents.OrderByDescending(x => x.CreatedAt).Select(MapToDto).ToList(), Comments = entity.Comments.OrderByDescending(x => x.CreatedAt).Select(MapToDto).ToList(), InitiationVersions = entity.InitiationVersions.OrderByDescending(x => x.VersionNumber).Select(MapToDto).ToList() };
+    private static ProjectDetailDto MapToDetailDto(Project entity) => new()
+    {
+        Id = entity.Id,
+        ProjectCode = entity.ProjectCode,
+        Title = entity.Title,
+        Status = entity.Status,
+        Summary = entity.Summary,
+        ProjectTypeId = entity.ProjectTypeId,
+        ProjectTypeName = entity.ProjectType?.Name,
+        ProjectPriorityId = entity.ProjectPriorityId,
+        ProjectPriorityName = entity.ProjectPriority?.Name,
+        TemplateId = entity.TemplateId,
+        PortfolioId = entity.PortfolioId,
+        PortfolioName = entity.Portfolio?.Name,
+        ProgramId = entity.ProgramId,
+        ProgramName = entity.Program?.Name,
+        BusinessCase = entity.BusinessCase,
+        Objectives = entity.Objectives,
+        StrategicAlignment = entity.StrategicAlignment,
+        Methodology = entity.Methodology,
+        SponsorId = entity.SponsorId,
+        ProjectManagerId = entity.ProjectManagerId,
+        DepartmentId = entity.DepartmentId,
+        LocationId = entity.LocationId,
+        CustomerId = entity.CustomerId,
+        BusinessPartnerId = entity.BusinessPartnerId,
+        ContractId = entity.ContractId,
+        TenderId = entity.TenderId,
+        StartDate = entity.StartDate,
+        TargetEndDate = entity.TargetEndDate,
+        ActualStartDate = entity.ActualStartDate,
+        ActualEndDate = entity.ActualEndDate,
+        EstimatedBudget = entity.EstimatedBudget,
+        ApprovedBudget = entity.ApprovedBudget,
+        ActualCost = entity.ActualCost,
+        BudgetStatus = entity.BudgetStatus,
+        ProgressPercent = entity.ProgressPercent,
+        ApprovalRequired = entity.ApprovalRequired,
+        SubmittedAt = entity.SubmittedAt,
+        ApprovedAt = entity.ApprovedAt,
+        ScopeStatement = entity.ScopeStatement,
+        Assumptions = entity.Assumptions,
+        Constraints = entity.Constraints,
+        ExpectedBenefits = entity.ExpectedBenefits,
+        FundingSource = entity.FundingSource,
+        StatusRemarks = entity.StatusRemarks,
+        ExternalPortalAccessEnabled = entity.ExternalPortalAccessEnabled,
+        ExternalCollaborationEnabled = entity.ExternalCollaborationEnabled,
+        CreatedAt = entity.CreatedAt,
+        HasLockedBaseline = entity.Baselines.Any(x => x.IsLocked),
+        DevelopmentProfile = entity.DevelopmentProfile == null ? null : MapToDto(entity.DevelopmentProfile),
+        Members = entity.Members.OrderBy(x => x.JoinedAt).Select(MapToDto).ToList(),
+        Phases = MapToPhaseTree(entity.Phases),
+        Milestones = entity.Milestones.OrderBy(x => x.TargetDate).Select(MapToDto).ToList(),
+        ResourceAllocations = entity.ResourceAllocations.OrderBy(x => x.StartDate).ThenBy(x => x.UserId).Select(x => MapToDto(x, entity.ResourceAllocations.ToList())).ToList(),
+        Risks = entity.Risks.OrderByDescending(x => x.Exposure).Select(MapToDto).ToList(),
+        Issues = entity.Issues.OrderBy(x => x.TargetResolutionDate).Select(MapToDto).ToList(),
+        ChangeRequests = entity.ChangeRequests.OrderByDescending(x => x.CreatedAt).Select(MapToDto).ToList(),
+        BillingSchedules = entity.BillingSchedules.OrderBy(x => x.BillingDate).Select(MapToDto).ToList(),
+        InvoiceRequests = entity.InvoiceRequests.OrderByDescending(x => x.RequestedAt).Select(MapToDto).ToList(),
+        Documents = entity.Documents.OrderByDescending(x => x.CreatedAt).Select(MapToDto).ToList(),
+        Comments = entity.Comments.OrderByDescending(x => x.CreatedAt).Select(MapToDto).ToList(),
+        InitiationVersions = entity.InitiationVersions.OrderByDescending(x => x.VersionNumber).Select(MapToDto).ToList()
+    };
     private static ProjectInitiationVersionDto MapToDto(ProjectInitiationVersion entity) => new() { Id = entity.Id, VersionNumber = entity.VersionNumber, ChangeType = entity.ChangeType, Notes = entity.Notes, CreatedAt = entity.CreatedAt };
     private static ProjectMemberDto MapToDto(ProjectMember entity) => new() { Id = entity.Id, UserId = entity.UserId, Role = entity.Role, IsActive = entity.IsActive, JoinedAt = entity.JoinedAt };
     private static ProjectWorkItemDto MapToDto(ProjectWorkItem entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, ParentId = entity.ParentId, NodeType = entity.NodeType, Title = entity.Title, Description = entity.Description, Status = entity.Status, Priority = entity.Priority, SortOrder = entity.SortOrder, AssignedToUserId = entity.AssignedToUserId, PlannedStartDate = entity.PlannedStartDate, PlannedEndDate = entity.PlannedEndDate, ActualStartDate = entity.ActualStartDate, ActualEndDate = entity.ActualEndDate, PercentComplete = entity.PercentComplete, IsRollupEnabled = entity.IsRollupEnabled, EffortEstimateHours = entity.EffortEstimateHours, ActualEffortHours = entity.ActualEffortHours, BaselineVarianceDays = 0, IsOffBaseline = false, CanExternalUpdate = false, CanExternalComment = false };

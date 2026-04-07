@@ -22,19 +22,19 @@ namespace ErpSystem.Web.Services
             _scopeFactory = scopeFactory;
             _options = optionsAccessor.Value;
             _logger = loggerFactory.CreateLogger<CustomRevalidatingAuthenticationStateProvider>();
-            _logger.LogInformation("CustomRevalidatingAuthenticationStateProvider created");
+            _logger.LogDebug("CustomRevalidatingAuthenticationStateProvider created");
         }
 
         protected override TimeSpan RevalidationInterval => TimeSpan.FromMinutes(30);
 
         public override async Task<AuthenticationState> GetAuthenticationStateAsync()
         {
-            _logger.LogInformation("GetAuthenticationStateAsync called");
+            _logger.LogDebug("GetAuthenticationStateAsync called");
 
             // First get the base authentication state from the server
             var authState = await base.GetAuthenticationStateAsync();
 
-            _logger.LogInformation("Base auth state - Authenticated: {IsAuthenticated}, Name: {Name}, Claims: {ClaimsCount}",
+            _logger.LogDebug("Base auth state - Authenticated: {IsAuthenticated}, Name: {Name}, Claims: {ClaimsCount}",
                 authState?.User?.Identity?.IsAuthenticated,
                 authState?.User?.Identity?.Name,
                 authState?.User?.Claims?.Count() ?? 0);
@@ -47,7 +47,7 @@ namespace ErpSystem.Web.Services
         /// </summary>
         public void ForceRefresh()
         {
-            _logger.LogInformation("ForceRefresh called - triggering authentication state change notification");
+            _logger.LogDebug("ForceRefresh called - triggering authentication state change notification");
 
             // Trigger a notification that the authentication state has changed
             NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
@@ -56,7 +56,7 @@ namespace ErpSystem.Web.Services
         protected override async Task<bool> ValidateAuthenticationStateAsync(
             AuthenticationState authenticationState, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("ValidateAuthenticationStateAsync called. User authenticated: {IsAuthenticated}, Name: {Name}",
+            _logger.LogDebug("ValidateAuthenticationStateAsync called. User authenticated: {IsAuthenticated}, Name: {Name}",
                 authenticationState?.User?.Identity?.IsAuthenticated,
                 authenticationState?.User?.Identity?.Name);
 
@@ -65,7 +65,7 @@ namespace ErpSystem.Web.Services
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 
             var result = await ValidateSecurityStampAsync(userManager, authenticationState?.User ?? new ClaimsPrincipal());
-            _logger.LogInformation("ValidateSecurityStampAsync result: {Result}", result);
+            _logger.LogDebug("ValidateSecurityStampAsync result: {Result}", result);
             return result;
         }
 

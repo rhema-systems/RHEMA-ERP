@@ -21,6 +21,21 @@ export interface PagedResult<T> {
   pageSize: number;
 }
 
+export interface SalesLinkedProjectUnitContextDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectUnitId: string;
+  projectUnitCode?: string;
+  projectUnitName: string;
+  projectUnitType: string;
+  projectUnitStatus: string;
+  projectUnitCommercialStatus: string;
+  projectUnitHandoverStatus: string;
+  isReleasedForMarket: boolean;
+  handoverDate?: string;
+}
+
 export interface SalesAgreementSummaryDto {
   id: string;
   documentNumber: string;
@@ -40,6 +55,7 @@ export interface SalesAgreementSummaryDto {
   completedMilestones: number;
   totalMilestones: number;
   createdAt: string;
+  projectUnitContext?: SalesLinkedProjectUnitContextDto;
 }
 
 export interface SalesAgreementDetailDto {
@@ -82,6 +98,7 @@ export interface SalesAgreementDetailDto {
   milestones: SalesAgreementMilestoneDto[];
   renewals: SalesAgreementRenewalDto[];
   documents: SalesAgreementDocumentDto[];
+  projectUnitContext?: SalesLinkedProjectUnitContextDto;
   createdAt: string;
   createdByName?: string;
   modifiedAt?: string;
@@ -213,6 +230,8 @@ export const salesAgreementService = {
     status?: string,
     agreementType?: string,
     customerId?: string,
+    projectLinkedOnly?: boolean,
+    releasedUnitsOnly?: boolean,
   ): Promise<PagedResult<SalesAgreementSummaryDto>> {
     const params = new URLSearchParams();
     params.append('page', page.toString());
@@ -221,6 +240,8 @@ export const salesAgreementService = {
     if (status) params.append('status', status);
     if (agreementType) params.append('agreementType', agreementType);
     if (customerId) params.append('customerId', customerId);
+    if (projectLinkedOnly) params.append('projectLinkedOnly', 'true');
+    if (releasedUnitsOnly) params.append('releasedUnitsOnly', 'true');
 
     const response = await fetch(`${API_BASE_URL}/sales/agreements?${params.toString()}`, {
       headers: getAuthHeaders(),

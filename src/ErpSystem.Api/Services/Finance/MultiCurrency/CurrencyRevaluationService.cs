@@ -23,17 +23,20 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         private readonly ApplicationDbContext _context;
         private readonly ReportingDbContext _reportingContext;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<CurrencyRevaluationService> _logger;
 
         public CurrencyRevaluationService(
             ApplicationDbContext context,
             ReportingDbContext reportingContext,
             ICurrentUserService currentUserService,
+            ITenantSettingsService tenantSettingsService,
             ILogger<CurrencyRevaluationService> logger)
         {
             _context = context;
             _reportingContext = reportingContext;
             _currentUserService = currentUserService;
+            _tenantSettingsService = tenantSettingsService;
             _logger = logger;
         }
 
@@ -56,6 +59,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         {
             var tenantIdValue = TenantId;
             var revaluationDate = request.RevaluationDate.Date;
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             // 1. Get Accounts to Revalue
             var allAccounts = await _reportingContext.Accounts
@@ -91,7 +95,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             {
                 accounts = allAccounts.Where(a =>
                     a.IsMultiCurrency
-                    || a.CurrencyCode != "GHS"
+                    || !string.Equals(a.CurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase)
                     || a.CurrencyLinks.Any())
                     .ToList();
             }
@@ -125,7 +129,8 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
                 // Group by currency
                 var currencyGroups = accountTransactions
-                    .Where(t => t.TransactionCurrency != null && t.TransactionCurrency != "GHS")
+                    .Where(t => t.TransactionCurrency != null
+                        && !string.Equals(t.TransactionCurrency, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
                     .GroupBy(t => t.TransactionCurrency);
 
                 foreach (var group in currencyGroups)
@@ -145,7 +150,9 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
                     // Get Exchange Rate
                     var exchangeRateEntity = await _context.ExchangeRates
-                        .Where(r => r.TargetCurrencyCode == currency && r.BaseCurrencyCode == "GHS" && r.EffectiveDate <= revaluationDate)
+                        .Where(r => r.TargetCurrencyCode == currency
+                            && r.BaseCurrencyCode == baseCurrencyCode
+                            && r.EffectiveDate <= revaluationDate)
                         .OrderByDescending(r => r.EffectiveDate)
                         .FirstOrDefaultAsync(cancellationToken);
 

@@ -10,13 +10,16 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 public class RegulatoryComplianceController : ControllerBase
 {
     private readonly ICurrentUserService _currentUserService;
+    private readonly ITenantSettingsService _tenantSettingsService;
     private readonly ILogger<RegulatoryComplianceController> _logger;
 
     public RegulatoryComplianceController(
         ICurrentUserService currentUserService,
+        ITenantSettingsService tenantSettingsService,
         ILogger<RegulatoryComplianceController> logger)
     {
         _currentUserService = currentUserService;
+        _tenantSettingsService = tenantSettingsService;
         _logger = logger;
     }
 
@@ -263,7 +266,7 @@ public class RegulatoryComplianceController : ControllerBase
     /// Gets compliance requirements
     /// </summary>
     [HttpGet("requirements")]
-    public ActionResult<object[]> GetComplianceRequirements(
+    public async Task<ActionResult<object[]>> GetComplianceRequirements(
         [FromQuery] string? assetCategory = null,
         [FromQuery] string? regulatoryBody = null,
         [FromQuery] bool? isActive = null)
@@ -271,6 +274,7 @@ public class RegulatoryComplianceController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId;
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
             _logger.LogInformation("Getting compliance requirements for tenant {TenantId}", tenantId);
 
             // Return mock compliance requirements
@@ -300,7 +304,7 @@ public class RegulatoryComplianceController : ControllerBase
                         {
                             type = "Fine",
                             amount = (int?)500,
-                            currency = (string?)"USD",
+                            currency = (string?)baseCurrencyCode,
                             description = "Fine for operating without valid safety inspection",
                             severity = "High"
                         }
@@ -332,7 +336,7 @@ public class RegulatoryComplianceController : ControllerBase
                         {
                             type = "Fine",
                             amount = (int?)2000,
-                            currency = (string?)"USD",
+                            currency = (string?)baseCurrencyCode,
                             description = "Fine for non-compliant fire safety systems",
                             severity = "Critical"
                         }

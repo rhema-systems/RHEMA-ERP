@@ -7,6 +7,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
@@ -60,11 +66,12 @@ export default function ProjectsPage() {
   const [programId, setProgramId] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [projectResult, dashboardResult, typeResult, portfolioResult] = await Promise.all([
+      const [projectResult, dashboardResult, typeResult, portfolioResult, currencyContext] = await Promise.all([
         projectService.getProjects({
           page,
           pageSize: 20,
@@ -77,6 +84,7 @@ export default function ProjectsPage() {
         projectService.getDashboard(),
         projectService.getProjectTypes(),
         projectService.getPortfolios(),
+        loadProjectCurrencyContext(),
       ]);
       const [taskAgingResult, milestoneResult, workflowQueueResult] = await Promise.all([
         projectService.getTaskAgingReport(undefined, 5),
@@ -88,6 +96,7 @@ export default function ProjectsPage() {
       setDashboard(dashboardResult);
       setTypes(typeResult);
       setPortfolios(portfolioResult);
+      setBaseCurrency(currencyContext.baseCurrency);
       setTaskAging(taskAgingResult);
       setMilestones(milestoneResult);
       setWorkflowQueue(workflowQueueResult);
@@ -123,6 +132,8 @@ export default function ProjectsPage() {
       'outline';
     return <Badge variant={tone}>{value}</Badge>;
   };
+
+  const formatMoney = (value: number, currency?: string | null) => formatProjectMoney(value, currency, baseCurrency.code);
 
   return (
     <div className="space-y-6">
@@ -326,7 +337,7 @@ export default function ProjectsPage() {
                     </TableCell>
                     <TableCell>{statusBadge(project.status)}</TableCell>
                     <TableCell>{project.projectTypeName || 'General'}</TableCell>
-                    <TableCell>{project.estimatedBudget ? project.estimatedBudget.toLocaleString() : 'N/A'}</TableCell>
+                    <TableCell>{project.estimatedBudget ? formatMoney(project.estimatedBudget) : 'N/A'}</TableCell>
                     <TableCell>{project.progressPercent}%</TableCell>
                     <TableCell>
                       <div className="text-sm">

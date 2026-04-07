@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,18 +10,33 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
-import { ShoppingCart, ArrowLeft, Plus, Trash2, Save } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Plus, Trash2, Save, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { salesOrderService, type CreateSalesOrderDto, type CreateSalesOrderLineDto } from '@/services/salesOrderService';
+import { projectService, type ProjectReleasedUnitSalesLookupDto } from '@/services/projectService';
 import { apiService } from '@/services/api.service';
 
 interface LineItem extends CreateSalesOrderLineDto {
   key: string;
 }
 
+interface LinkedProjectContext {
+  projectId: string;
+  projectCode?: string;
+  projectTitle?: string;
+  projectUnitId?: string;
+  projectUnitCode?: string;
+  projectUnitName?: string;
+}
+
 export default function CreateSalesOrderPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const [linkedProjectContext, setLinkedProjectContext] = useState<LinkedProjectContext | null>(null);
+  const [releasedUnits, setReleasedUnits] = useState<ProjectReleasedUnitSalesLookupDto[]>([]);
+  const [releasedUnitsLoading, setReleasedUnitsLoading] = useState(false);
+  const [releasedUnitsSearch, setReleasedUnitsSearch] = useState('');
+  const [selectedReleasedUnitId, setSelectedReleasedUnitId] = useState('');
 
   // Form state
   const [businessPartnerId, setBusinessPartnerId] = useState('');
@@ -44,6 +59,115 @@ export default function CreateSalesOrderPage() {
   const [lines, setLines] = useState<LineItem[]>([
     { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0, taxPercent: 0 },
   ]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    const projectCode = params.get('projectCode') || undefined;
+    const projectTitle = params.get('projectTitle') || undefined;
+    const projectUnitId = params.get('projectUnitId') || undefined;
+    const projectUnitCode = params.get('projectUnitCode') || undefined;
+    const projectUnitName = params.get('projectUnitName') || undefined;
+    const customerId = params.get('customerId');
+    const customerName = params.get('customerName');
+    const propertyReferenceParam = params.get('propertyReference');
+    const orderTypeParam = params.get('orderType');
+
+    if (projectId) {
+      setLinkedProjectContext({
+        projectId,
+        projectCode,
+        projectTitle,
+        projectUnitId,
+        projectUnitCode,
+        projectUnitName,
+      });
+    }
+
+    if (customerId) {
+      setBusinessPartnerId(customerId);
+    }
+
+    if (customerName) {
+      setCustomerSearch(customerName);
+      setSelectedCustomer({ id: customerId, companyName: customerName, name: customerName });
+    }
+
+    if (propertyReferenceParam) {
+      setPropertyReference(propertyReferenceParam);
+    }
+
+    if (orderTypeParam) {
+      setOrderType(orderTypeParam);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (linkedProjectContext) {
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setReleasedUnitsLoading(true);
+        const items = await projectService.getReleasedProjectUnitsForSales(releasedUnitsSearch, 50);
+        setReleasedUnits(items.filter((item) => item.canCreateSalesOrder));
+      } catch {
+        setReleasedUnits([]);
+      } finally {
+        setReleasedUnitsLoading(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [linkedProjectContext, releasedUnitsSearch]);
+
+  const selectedReleasedUnit = releasedUnits.find((item) => item.projectUnitId === selectedReleasedUnitId);
+
+  const applyReleasedUnit = (unit: ProjectReleasedUnitSalesLookupDto) => {
+    setLinkedProjectContext({
+      projectId: unit.projectId,
+      projectCode: unit.projectCode,
+      projectTitle: unit.projectTitle,
+      projectUnitId: unit.projectUnitId,
+      projectUnitCode: unit.projectUnitCode,
+      projectUnitName: unit.projectUnitName,
+    });
+    setBusinessPartnerId(unit.customerBusinessPartnerId || '');
+    setCustomerSearch(unit.customerBusinessPartnerName || '');
+    setSelectedCustomer(unit.customerBusinessPartnerId && unit.customerBusinessPartnerName
+      ? { id: unit.customerBusinessPartnerId, companyName: unit.customerBusinessPartnerName, name: unit.customerBusinessPartnerName }
+      : null);
+    setPropertyReference(unit.propertyReference || '');
+    setPropertyType(unit.suggestedPropertyType || '');
+    setOrderType(unit.suggestedOrderType || 'PropertySale');
+    setLines((current) => {
+      const first = current[0];
+      const shouldReplaceFirst = current.length === 1
+        && !first.itemName
+        && !first.description
+        && first.unitPrice === 0;
+
+      const updatedFirst: LineItem = {
+        ...(shouldReplaceFirst ? first : current[0]),
+        description: unit.suggestedSalesOrderLineDescription || first.description,
+        itemName: unit.projectUnitCode || unit.projectUnitName,
+        quantity: 1,
+        unitPrice: unit.basePrice ?? first.unitPrice,
+        unitOfMeasure: unit.areaSquareMeters ? 'Unit' : (first.unitOfMeasure || 'Lot'),
+      };
+
+      if (shouldReplaceFirst) {
+        return [{ ...updatedFirst, key: first.key }];
+      }
+
+      return current.map((line, index) => index === 0 ? { ...line, ...updatedFirst, key: line.key } : line);
+    });
+  };
 
   const searchCustomers = async (query: string) => {
     setCustomerSearch(query);
@@ -129,6 +253,13 @@ export default function CreateSalesOrderPage() {
     try {
       setSaving(true);
       const result = await salesOrderService.createSalesOrder(dto);
+      if (linkedProjectContext?.projectUnitId) {
+        try {
+          await projectService.linkSalesOrderToProjectUnit(linkedProjectContext.projectUnitId, result.id);
+        } catch (linkError: any) {
+          toast.warning(linkError?.message || 'Sales order created, but the project unit could not be linked automatically.');
+        }
+      }
       toast.success(`Sales Order ${result.orderNumber} created`);
       router.push(`/sales/orders/${result.id}`);
     } catch (error: any) {
@@ -158,6 +289,92 @@ export default function CreateSalesOrderPage() {
           <Save className="h-4 w-4 mr-2" />{saving ? 'Saving...' : 'Save Order'}
         </Button>
       </div>
+
+      {linkedProjectContext && (
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+              <Building2 className="h-4 w-4" />
+              Creating Order For Project-Linked Unit
+            </div>
+            <div className="mt-2 text-sm text-slate-700">
+              <p className="font-semibold">
+                {linkedProjectContext.projectCode}
+                {linkedProjectContext.projectTitle ? ` • ${linkedProjectContext.projectTitle}` : ''}
+              </p>
+              <p>
+                {linkedProjectContext.projectUnitCode || linkedProjectContext.projectUnitName || 'Linked project unit'}
+                {linkedProjectContext.projectUnitCode && linkedProjectContext.projectUnitName
+                  ? ` • ${linkedProjectContext.projectUnitName}`
+                  : ''}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!linkedProjectContext && (
+        <Card className="border-dashed border-emerald-200">
+          <CardHeader>
+            <CardTitle className="text-base">Start From Released Project Unit</CardTitle>
+            <CardDescription>Pick a released unit to prefill customer and property context before drafting the order.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+              <Input
+                placeholder="Search by project code, title, unit, or customer..."
+                value={releasedUnitsSearch}
+                onChange={(event) => setReleasedUnitsSearch(event.target.value)}
+              />
+              <Select value={selectedReleasedUnitId || 'none'} onValueChange={(value) => setSelectedReleasedUnitId(value === 'none' ? '' : value)}>
+                <SelectTrigger><SelectValue placeholder="Select released unit" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select released unit</SelectItem>
+                  {releasedUnits.map((unit) => (
+                    <SelectItem key={unit.projectUnitId} value={unit.projectUnitId}>
+                      {unit.projectCode} - {unit.projectUnitCode || unit.projectUnitName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {releasedUnitsLoading ? (
+              <p className="text-sm text-muted-foreground">Loading released units...</p>
+            ) : null}
+            {!releasedUnitsLoading && releasedUnits.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No released project units are currently ready for sales-order handoff.</p>
+            ) : null}
+            {selectedReleasedUnit ? (
+              <div className="rounded-lg border bg-slate-50 p-4 text-sm text-slate-700">
+                <div className="font-semibold text-slate-900">
+                  {selectedReleasedUnit.projectCode}
+                  {selectedReleasedUnit.projectTitle ? ` • ${selectedReleasedUnit.projectTitle}` : ''}
+                </div>
+                <div className="mt-1">
+                  {selectedReleasedUnit.projectUnitCode || selectedReleasedUnit.projectUnitName}
+                  {selectedReleasedUnit.projectUnitCode && selectedReleasedUnit.projectUnitName
+                    ? ` • ${selectedReleasedUnit.projectUnitName}`
+                    : ''}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {selectedReleasedUnit.customerBusinessPartnerName || 'No customer assigned'}
+                  {selectedReleasedUnit.basePrice != null ? ` • ${selectedReleasedUnit.currency} ${selectedReleasedUnit.basePrice.toLocaleString()}` : ''}
+                  {selectedReleasedUnit.suggestedOrderType ? ` • ${selectedReleasedUnit.suggestedOrderType}` : ''}
+                </div>
+              </div>
+            ) : null}
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateSalesOrder}
+                onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit)}
+              >
+                Use Released Unit
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Customer Selection */}
       <Card>

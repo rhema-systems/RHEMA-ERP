@@ -9,6 +9,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
+import {
   CreateProjectInterdependencyDto,
   CreateProjectProgramDto,
   ProjectDependencyWatchReportItemDto,
@@ -54,17 +60,19 @@ export default function ProjectProgramsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingDependency, setSavingDependency] = useState(false);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
 
   const load = async (portfolioId?: string) => {
     try {
       setLoading(true);
-      const [portfolioResult, programResult, summaryResult, projectResult, dependencyResult, interdependencyResult] = await Promise.all([
+      const [portfolioResult, programResult, summaryResult, projectResult, dependencyResult, interdependencyResult, currencyContext] = await Promise.all([
         projectService.getPortfolios(),
         projectService.getPrograms(portfolioId),
         projectService.getProgramSummaryReport(portfolioId, 12),
         projectService.lookupProjects(undefined, undefined, undefined, portfolioId),
         projectService.getDependencyWatchReport(portfolioId, undefined, 12),
         projectService.getInterdependencies(undefined, portfolioId),
+        loadProjectCurrencyContext(),
       ]);
       setPortfolios(portfolioResult);
       setPrograms(programResult);
@@ -72,6 +80,7 @@ export default function ProjectProgramsPage() {
       setProjectOptions(projectResult);
       setDependencyWatch(dependencyResult);
       setInterdependencies(interdependencyResult);
+      setBaseCurrency(currencyContext.baseCurrency);
     } catch (error: any) {
       toast.error(error.message || 'Failed to load programs');
     } finally {
@@ -159,6 +168,7 @@ export default function ProjectProgramsPage() {
     ? summary.reduce((sum, item) => sum + item.averageProgressPercent, 0) / summary.length
     : 0;
   const activeDependencies = dependencyWatch.filter((item) => item.coordinationState !== 'Resolved').length;
+  const formatMoney = (value: number, currency?: string | null) => formatProjectMoney(value, currency, baseCurrency.code);
   const getProjectLabel = (projectId?: string) => {
     const match = projectOptions.find((item) => item.id === projectId);
     return match ? `${match.projectCode} | ${match.title}` : projectId || 'Unknown project';
@@ -185,8 +195,8 @@ export default function ProjectProgramsPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <Card><CardHeader className="pb-2"><CardDescription>Programs</CardDescription><CardTitle>{programs.length}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Projects in Programs</CardDescription><CardTitle>{totalProjects}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Total Program Budget</CardDescription><CardTitle>{totalBudget.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Total Actual Cost</CardDescription><CardTitle>{totalActualCost.toLocaleString()}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Total Program Budget</CardDescription><CardTitle>{formatMoney(totalBudget)}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Total Actual Cost</CardDescription><CardTitle>{formatMoney(totalActualCost)}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Average Progress</CardDescription><CardTitle>{averageProgress.toFixed(2)}%</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Dependency Watch</CardDescription><CardTitle>{activeDependencies}</CardTitle></CardHeader></Card>
       </div>
@@ -209,8 +219,8 @@ export default function ProjectProgramsPage() {
                 </div>
                 <div className="mt-3 grid gap-2 text-sm md:grid-cols-4">
                   <div>Active: {item.activeProjectCount}</div>
-                  <div>Budget: {item.totalEstimatedBudget.toLocaleString()}</div>
-                  <div>Actual: {item.totalActualCost.toLocaleString()}</div>
+                  <div>Budget: {formatMoney(item.totalEstimatedBudget)}</div>
+                  <div>Actual: {formatMoney(item.totalActualCost)}</div>
                   <div>Avg progress: {item.averageProgressPercent.toFixed(2)}%</div>
                 </div>
               </div>
@@ -430,7 +440,7 @@ export default function ProjectProgramsPage() {
                   </div>
                   <div className="mt-1 text-sm text-muted-foreground">{item.portfolioName || 'No portfolio'}</div>
                   <div className="mt-2 text-sm text-muted-foreground">
-                    {item.projectCount} projects | Active {item.activeProjectCount} | Actual cost {item.totalActualCost.toLocaleString()} | Budget cap {(item.budgetCap ?? 0).toLocaleString()}
+                    {item.projectCount} projects | Active {item.activeProjectCount} | Actual cost {formatMoney(item.totalActualCost)} | Budget cap {formatMoney(item.budgetCap ?? 0)}
                   </div>
                 </div>
                 <div className="flex gap-2">

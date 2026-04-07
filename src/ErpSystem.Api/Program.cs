@@ -8,8 +8,11 @@ using ErpSystem.Web.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
+using Serilog.Events;
 
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
@@ -132,10 +135,12 @@ if (args.Length > 0 && args[0] == "rebuild-db")
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
         Console.WriteLine("⚠️  Rebuilding database from the current EF model...");
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
+        await StampAllKnownMigrationsAsAppliedAsync(db, logger);
         await seedingService.SeedWithoutMigrationAsync();
     }
 
@@ -216,8 +221,12 @@ Console.WriteLine("🔧 App built successfully - configuring middleware...");
 // Add global exception handling first
 app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
 
-// Add HTTP request/response logging (after exception handling)
-app.UseMiddleware<HttpLoggingMiddleware>();
+// Optional deep HTTP request/response logging. Keep this opt-in because
+// capturing full bodies on every request is expensive during normal development.
+if (app.Configuration.GetValue("HttpRequestResponseLogging:Enabled", false))
+{
+    app.UseMiddleware<HttpLoggingMiddleware>();
+}
 
 // Add security headers
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -257,8 +266,27 @@ app.UseApplicationLifecycleManagement();
 // Add development middleware
 app.UseSimpleDevelopmentMiddleware(app.Environment);
 
-// Add Serilog request logging
-app.UseSerilogRequestLogging();
+// Keep failed and slow requests visible, but avoid flooding development output
+// with a line for every successful API call.
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (httpContext, elapsed, exception) =>
+    {
+        if (exception is not null || httpContext.Response.StatusCode >= 500)
+        {
+            return LogEventLevel.Error;
+        }
+
+        if (httpContext.Response.StatusCode >= 400)
+        {
+            return LogEventLevel.Warning;
+        }
+
+        return elapsed > 1000
+            ? LogEventLevel.Information
+            : LogEventLevel.Debug;
+    };
+});
 
 // Only use HTTPS redirection in production
 if (!app.Environment.IsDevelopment())
@@ -404,6 +432,7 @@ async Task InitializeDatabaseAsync(
     using var migrationCts = new CancellationTokenSource(migrationTimeout);
     try
     {
+        await RepairDevelopmentMigrationHistoryIfNeededAsync(app.Environment, context, logger, migrationCts.Token);
         await context.Database.MigrateAsync(migrationCts.Token);
     }
     catch (OperationCanceledException ex)
@@ -429,6 +458,102 @@ static WebApplicationBuilder CreateSeedBuilder(string[] args)
 async Task SeedDatabaseAsync(WebApplication app)
 {
     await app.Services.SeedDatabaseAsync();
+}
+
+static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(
+    IWebHostEnvironment environment,
+    ApplicationDbContext context,
+    Microsoft.Extensions.Logging.ILogger logger,
+    CancellationToken cancellationToken)
+{
+    if (!environment.IsDevelopment())
+    {
+        return;
+    }
+
+    var pendingMigrations = (await context.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+    if (!pendingMigrations.Contains("20260311184920_AddProjectMaterialCostLedger"))
+    {
+        return;
+    }
+
+    if (!await TableExistsAsync(context, "ProjectMaterialCostEntries", cancellationToken))
+    {
+        return;
+    }
+
+    logger.LogWarning(
+        "Detected a development database with current-model tables but missing migration history. " +
+        "Stamping known migrations as applied before running startup migrations.");
+
+    await StampAllKnownMigrationsAsAppliedAsync(context, logger, cancellationToken);
+}
+
+static async Task StampAllKnownMigrationsAsAppliedAsync(
+    ApplicationDbContext context,
+    Microsoft.Extensions.Logging.ILogger logger,
+    CancellationToken cancellationToken = default)
+{
+    var historyRepository = context.GetService<IHistoryRepository>();
+    var migrationsAssembly = context.GetService<IMigrationsAssembly>();
+
+    var createHistoryScript = historyRepository.GetCreateIfNotExistsScript();
+    if (!string.IsNullOrWhiteSpace(createHistoryScript))
+    {
+        await context.Database.ExecuteSqlRawAsync(createHistoryScript, cancellationToken);
+    }
+
+    var appliedMigrations = (await context.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var productVersion = typeof(DbContext).Assembly.GetName().Version?.ToString(3) ?? "9.0.0";
+
+    foreach (var migrationId in migrationsAssembly.Migrations.Keys.OrderBy(id => id))
+    {
+        if (appliedMigrations.Contains(migrationId))
+        {
+            continue;
+        }
+
+        var insertScript = historyRepository.GetInsertScript(new HistoryRow(migrationId, productVersion));
+        await context.Database.ExecuteSqlRawAsync(insertScript, cancellationToken);
+        appliedMigrations.Add(migrationId);
+    }
+
+    logger.LogInformation("Stamped {MigrationCount} migrations as applied in EF migration history.", appliedMigrations.Count);
+}
+
+static async Task<bool> TableExistsAsync(
+    ApplicationDbContext context,
+    string tableName,
+    CancellationToken cancellationToken)
+{
+    var connection = context.Database.GetDbConnection();
+    var shouldCloseConnection = connection.State != System.Data.ConnectionState.Open;
+
+    if (shouldCloseConnection)
+    {
+        await connection.OpenAsync(cancellationToken);
+    }
+
+    try
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CASE WHEN OBJECT_ID(@tableName, 'U') IS NOT NULL THEN 1 ELSE 0 END";
+
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@tableName";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result ?? 0) == 1;
+    }
+    finally
+    {
+        if (shouldCloseConnection)
+        {
+            await connection.CloseAsync();
+        }
+    }
 }
 
 static string SummarizeConnectionTarget(string? connectionString)

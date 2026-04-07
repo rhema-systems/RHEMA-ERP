@@ -81,7 +81,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         public async Task<CurrencyDto?> GetBaseCurrencyAsync(CancellationToken cancellationToken = default)
         {
             var currency = await _unitOfWork.Repository<Currency>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.IsBaseCurrency);
+                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.IsBaseCurrency && c.IsActive && !c.IsDeleted);
 
             return currency == null ? null : MapToDto(currency);
         }

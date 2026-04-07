@@ -10,6 +10,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+} from '@/lib/project-currency';
 import { ProjectLookupDto, projectService } from '@/services/projectService';
 import { toast } from 'sonner';
 
@@ -81,7 +86,6 @@ const EMPTY_DATASET: ReportDataset = {
   secondaryValue: '0',
 };
 
-const formatCurrency = (value: number | undefined) => (value ?? 0).toLocaleString();
 const formatDate = (value?: string) => (value ? format(new Date(value), 'MMM dd, yyyy') : 'n/a');
 const toInputDate = (value: Date) => format(value, 'yyyy-MM-dd');
 
@@ -129,6 +133,13 @@ export default function ProjectReportsPage() {
         && new Date(rangeEnd).getTime() < new Date(rangeStart).getTime()) {
         throw new Error('End date must be on or after the start date');
       }
+      const currencyContext = await loadProjectCurrencyContext().catch(() => ({
+        activeCurrencies: [],
+        baseCurrency: DEFAULT_PROJECT_CURRENCY,
+        rawBaseCurrency: null,
+      }));
+      const formatCurrency = (value: number | undefined, currency?: string | null) =>
+        formatProjectMoney(value ?? 0, currency, currencyContext.baseCurrency.code);
 
       let next: ReportDataset;
 

@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Finance;
 using System.Threading.Tasks;
 
 namespace ErpSystem.Core.Interfaces
@@ -8,6 +9,11 @@ namespace ErpSystem.Core.Interfaces
     /// </summary>
     public interface ITenantSettingsService
     {
+        /// <summary>
+        /// Gets the full base-currency reference for the current tenant from the finance multi-currency setup.
+        /// </summary>
+        Task<BaseCurrencyReferenceDto> GetBaseCurrencyReferenceAsync();
+
         /// <summary>
         /// Gets the base currency code for the current tenant.
         /// Returns ISO 4217 three-letter code (e.g., "GHS", "USD", "EUR").

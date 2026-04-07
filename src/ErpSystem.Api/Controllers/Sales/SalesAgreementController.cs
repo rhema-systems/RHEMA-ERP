@@ -31,9 +31,11 @@ public class SalesAgreementController : ControllerBase
         [FromQuery] string? agreementType = null,
         [FromQuery] Guid? customerId = null,
         [FromQuery] DateTime? startDateFrom = null,
-        [FromQuery] DateTime? startDateTo = null)
+        [FromQuery] DateTime? startDateTo = null,
+        [FromQuery] bool projectLinkedOnly = false,
+        [FromQuery] bool releasedUnitsOnly = false)
     {
-        var (items, totalCount) = await _service.GetAllAsync(page, pageSize, search, status, agreementType, customerId, startDateFrom, startDateTo);
+        var (items, totalCount) = await _service.GetAllAsync(page, pageSize, search, status, agreementType, customerId, startDateFrom, startDateTo, projectLinkedOnly, releasedUnitsOnly);
         return Ok(new { items, totalCount, page, pageSize });
     }
 

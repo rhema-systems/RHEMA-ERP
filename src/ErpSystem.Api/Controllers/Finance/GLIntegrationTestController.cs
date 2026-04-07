@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -22,17 +23,20 @@ namespace ErpSystem.Api.Controllers.Finance;
 public class GLIntegrationTestController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
+    private readonly ITenantSettingsService _tenantSettingsService;
     private readonly IVendorInvoiceService _vendorInvoiceService;
     private readonly IInvoiceService _invoiceService;
     private readonly ILogger<GLIntegrationTestController> _logger;
 
     public GLIntegrationTestController(
         ApplicationDbContext context,
+        ITenantSettingsService tenantSettingsService,
         IVendorInvoiceService vendorInvoiceService,
         IInvoiceService invoiceService,
         ILogger<GLIntegrationTestController> logger)
     {
         _context = context;
+        _tenantSettingsService = tenantSettingsService;
         _vendorInvoiceService = vendorInvoiceService;
         _invoiceService = invoiceService;
         _logger = logger;
@@ -53,6 +57,8 @@ public class GLIntegrationTestController : ControllerBase
                 .FirstOrDefaultAsync(s => s.TenantId == tenant.Id, cancellationToken);
             if (settings == null) return BadRequest("Finance Settings not found.");
 
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+
             // 1. Setup Master Data
             var supplier = new Supplier 
             { 
@@ -67,7 +73,7 @@ public class GLIntegrationTestController : ControllerBase
                 CustomerName = "Test AR Customer", 
                 CustomerCode = "CUS-TEST-01",
                 TenantId = tenant.Id,
-                CurrencyCode = "GHS"
+                CurrencyCode = baseCurrencyCode
             };
             
             var warehouse = await _context.Warehouses.FirstOrDefaultAsync(w => w.TenantId == tenant.Id && w.IsActive, cancellationToken);
@@ -122,7 +128,7 @@ public class GLIntegrationTestController : ControllerBase
                 InvoiceNumber = $"VINV-{DateTime.Now.Ticks}",
                 InvoiceDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow.AddDays(30),
-                CurrencyCode = "GHS",
+                CurrencyCode = baseCurrencyCode,
                 SubTotal = 1000m,
                 TaxAmount = 0,
                 TotalAmount = 1000m,
@@ -155,7 +161,7 @@ public class GLIntegrationTestController : ControllerBase
                 InvoiceNumber = $"INV-{DateTime.Now.Ticks}",
                 InvoiceDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow.AddDays(30),
-                CurrencyCode = "GHS",
+                CurrencyCode = baseCurrencyCode,
                 SubTotal = 1500m,
                 TaxAmount = 0,
                 TotalAmount = 1500m,

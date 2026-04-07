@@ -93,6 +93,900 @@ public class ProjectsControllerRouteTests
     }
 
     [Fact]
+    public async Task GetProjectWorkspace_ShouldReturnAggregatedProjectOverview()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectWorkspaceAsync(projectId))
+            .ReturnsAsync(new ProjectWorkspaceDto
+            {
+                Project = new ProjectDetailDto
+                {
+                    Id = projectId,
+                    ProjectCode = "PRJ-2026-0042",
+                    Title = "Workspace Route Project",
+                    Status = "InProgress",
+                    CreatedAt = DateTime.UtcNow
+                },
+                FinancialSummary = new ProjectFinancialControlSummaryDto
+                {
+                    ProjectId = projectId,
+                    BudgetBaseline = 1000m,
+                    ActualCost = 250m,
+                    HealthStatus = "Healthy"
+                },
+                IntegrationSummary = new ProjectIntegrationSummaryDto
+                {
+                    ProjectId = projectId,
+                    HasBusinessPartner = true,
+                    HasContract = true,
+                    HasPortfolio = true,
+                    HasProgram = true
+                },
+                GovernanceSummary = new ProjectGovernanceSummaryDto
+                {
+                    ProjectId = projectId,
+                    OpenRiskCount = 2,
+                    OpenIssueCount = 1
+                },
+                LinkOptions = new ProjectLinkOptionsDto
+                {
+                    SalesAgreements = new List<ProjectSalesAgreementLinkOptionDto>
+                    {
+                        new()
+                        {
+                            Id = Guid.NewGuid(),
+                            BusinessPartnerId = Guid.NewGuid(),
+                            DocumentNumber = "AGR-2026-004",
+                            AgreementTitle = "Apartment Sale Agreement",
+                            CustomerName = "Kojo Mensah",
+                            AgreementStatus = "Active"
+                        }
+                    }
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/workspace");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var workspace = await response.Content.ReadFromJsonAsync<ProjectWorkspaceDto>();
+        workspace.Should().NotBeNull();
+        workspace!.Project.Id.Should().Be(projectId);
+        workspace.Project.Title.Should().Be("Workspace Route Project");
+        workspace.FinancialSummary.Should().NotBeNull();
+        workspace.FinancialSummary!.BudgetBaseline.Should().Be(1000m);
+        workspace.IntegrationSummary.Should().NotBeNull();
+        workspace.IntegrationSummary!.HasPortfolio.Should().BeTrue();
+        workspace.GovernanceSummary.Should().NotBeNull();
+        workspace.GovernanceSummary!.OpenRiskCount.Should().Be(2);
+        workspace.LinkOptions.Should().NotBeNull();
+        workspace.LinkOptions.SalesAgreements.Should().ContainSingle(x => x.DocumentNumber == "AGR-2026-004");
+    }
+
+    [Fact]
+    public async Task GetProjectLinkOptions_ShouldReturnProjectScopedReferences()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectLinkOptionsAsync(projectId))
+            .ReturnsAsync(new ProjectLinkOptionsDto
+            {
+                SalesAgreements = new List<ProjectSalesAgreementLinkOptionDto>
+                {
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        BusinessPartnerId = Guid.NewGuid(),
+                        DocumentNumber = "AGR-2026-010",
+                        AgreementTitle = "Penthouse Agreement",
+                        CustomerName = "Ama Owusu",
+                        AgreementStatus = "Active"
+                    }
+                },
+                WorkOrders = new List<ProjectWorkOrderLinkOptionDto>
+                {
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        AssetId = Guid.NewGuid(),
+                        WorkOrderNumber = "WO-2026-017",
+                        Title = "Post-handover rectification",
+                        Status = "Open"
+                    }
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/link-options");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var options = await response.Content.ReadFromJsonAsync<ProjectLinkOptionsDto>();
+        options.Should().NotBeNull();
+        options!.SalesAgreements.Should().ContainSingle(x => x.DocumentNumber == "AGR-2026-010");
+        options.WorkOrders.Should().ContainSingle(x => x.WorkOrderNumber == "WO-2026-017");
+    }
+
+    [Fact]
+    public async Task GetReleasedProjectUnitsForSales_ShouldReturnReleasedUnits()
+    {
+        var unitId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetReleasedProjectUnitsForSalesAsync("tower", 25))
+            .ReturnsAsync(new List<ProjectReleasedUnitSalesLookupDto>
+            {
+                new()
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-2026-021",
+                    ProjectTitle = "Airport View Towers",
+                    ProjectUnitId = unitId,
+                    ProjectUnitCode = "A-12",
+                    ProjectUnitName = "Apartment A-12",
+                    ProjectUnitType = "Apartment",
+                    ProjectUnitStatus = "Available",
+                    CommercialStatus = "Available",
+                    HandoverStatus = "NotScheduled",
+                    Currency = "GHS",
+                    CanCreateSalesAgreement = true,
+                    CanCreateLeaseAgreement = true,
+                    CanCreateSalesOrder = true
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/projects/units/released-market?search=tower&take=25");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = await response.Content.ReadFromJsonAsync<List<ProjectReleasedUnitSalesLookupDto>>();
+        items.Should().NotBeNull();
+        items!.Should().ContainSingle();
+        items[0].ProjectCode.Should().Be("PRJ-2026-021");
+        items[0].ProjectUnitCode.Should().Be("A-12");
+        items[0].CanCreateSalesOrder.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReleaseProjectUnit_ShouldReturnUpdatedUnit()
+    {
+        var unitId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.ReleaseProjectUnitAsync(unitId))
+            .ReturnsAsync(new ProjectUnitDto
+            {
+                Id = unitId,
+                ProjectId = Guid.NewGuid(),
+                Name = "Apartment B2",
+                Status = "Available",
+                CommercialStatus = "Available",
+                HandoverStatus = "NotScheduled",
+                Currency = "USD",
+                SortOrder = 1,
+                IsReleasedForMarket = true,
+                ReleasedByDisplayName = "Project Sales Admin"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync($"/api/projects/units/{unitId}/release", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var unit = await response.Content.ReadFromJsonAsync<ProjectUnitDto>();
+        unit.Should().NotBeNull();
+        unit!.IsReleasedForMarket.Should().BeTrue();
+        unit.ReleasedByDisplayName.Should().Be("Project Sales Admin");
+    }
+
+    [Fact]
+    public async Task CreateSalesAgreementFromProjectUnit_ShouldReturnUpdatedUnit()
+    {
+        var unitId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.CreateSalesAgreementFromProjectUnitAsync(unitId))
+            .ReturnsAsync(new ProjectUnitDto
+            {
+                Id = unitId,
+                ProjectId = Guid.NewGuid(),
+                Name = "Apartment C3",
+                Status = "Reserved",
+                CommercialStatus = "Reserved",
+                HandoverStatus = "Pending",
+                Currency = "USD",
+                SortOrder = 1,
+                IsReleasedForMarket = true,
+                SalesAgreementId = Guid.NewGuid(),
+                SalesAgreementNumber = "AGR-UNIT-002"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync($"/api/projects/units/{unitId}/create-sales-agreement", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var unit = await response.Content.ReadFromJsonAsync<ProjectUnitDto>();
+        unit.Should().NotBeNull();
+        unit!.Status.Should().Be("Reserved");
+        unit.SalesAgreementNumber.Should().Be("AGR-UNIT-002");
+    }
+
+    [Fact]
+    public async Task CreateLeaseAgreementFromProjectUnit_ShouldReturnUpdatedUnit()
+    {
+        var unitId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.CreateLeaseAgreementFromProjectUnitAsync(unitId))
+            .ReturnsAsync(new ProjectUnitDto
+            {
+                Id = unitId,
+                ProjectId = Guid.NewGuid(),
+                Name = "Apartment L3",
+                Status = "Reserved",
+                CommercialStatus = "Reserved",
+                HandoverStatus = "Pending",
+                Currency = "USD",
+                SortOrder = 1,
+                IsReleasedForMarket = true,
+                SalesAgreementId = Guid.NewGuid(),
+                SalesAgreementNumber = "AGR-LEASE-003",
+                SalesAgreementType = "TenancyAgreement"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync($"/api/projects/units/{unitId}/create-lease-agreement", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var unit = await response.Content.ReadFromJsonAsync<ProjectUnitDto>();
+        unit.Should().NotBeNull();
+        unit!.Status.Should().Be("Reserved");
+        unit.SalesAgreementNumber.Should().Be("AGR-LEASE-003");
+        unit.SalesAgreementType.Should().Be("TenancyAgreement");
+    }
+
+    [Fact]
+    public async Task CreateSalesOrderFromProjectUnit_ShouldReturnUpdatedUnit()
+    {
+        var unitId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.CreateSalesOrderFromProjectUnitAsync(unitId))
+            .ReturnsAsync(new ProjectUnitDto
+            {
+                Id = unitId,
+                ProjectId = Guid.NewGuid(),
+                Name = "Apartment D1",
+                Status = "Reserved",
+                CommercialStatus = "Reserved",
+                HandoverStatus = "Pending",
+                Currency = "USD",
+                SortOrder = 1,
+                IsReleasedForMarket = true,
+                SalesOrderId = Guid.NewGuid(),
+                SalesOrderNumber = "SO-UNIT-003"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync($"/api/projects/units/{unitId}/create-sales-order", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var unit = await response.Content.ReadFromJsonAsync<ProjectUnitDto>();
+        unit.Should().NotBeNull();
+        unit!.Status.Should().Be("Reserved");
+        unit.SalesOrderNumber.Should().Be("SO-UNIT-003");
+    }
+
+    [Fact]
+    public async Task LinkSalesAgreementToProjectUnit_ShouldReturnUpdatedUnit()
+    {
+        var unitId = Guid.NewGuid();
+        var agreementId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.LinkSalesAgreementToProjectUnitAsync(unitId, agreementId))
+            .ReturnsAsync(new ProjectUnitDto
+            {
+                Id = unitId,
+                ProjectId = Guid.NewGuid(),
+                Name = "Apartment E2",
+                Status = "Reserved",
+                CommercialStatus = "Reserved",
+                CommercialIntent = "Sale",
+                HandoverStatus = "Pending",
+                Currency = "USD",
+                SortOrder = 1,
+                IsReleasedForMarket = true,
+                SalesAgreementId = agreementId,
+                SalesAgreementNumber = "AGR-UNIT-004"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync($"/api/projects/units/{unitId}/link-sales-agreement", new LinkProjectUnitSalesAgreementDto
+        {
+            SalesAgreementId = agreementId
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var unit = await response.Content.ReadFromJsonAsync<ProjectUnitDto>();
+        unit.Should().NotBeNull();
+        unit!.SalesAgreementId.Should().Be(agreementId);
+        unit.CommercialIntent.Should().Be("Sale");
+    }
+
+    [Fact]
+    public async Task LinkSalesOrderToProjectUnit_ShouldReturnUpdatedUnit()
+    {
+        var unitId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.LinkSalesOrderToProjectUnitAsync(unitId, orderId))
+            .ReturnsAsync(new ProjectUnitDto
+            {
+                Id = unitId,
+                ProjectId = Guid.NewGuid(),
+                Name = "Apartment F1",
+                Status = "Reserved",
+                CommercialStatus = "Reserved",
+                CommercialIntent = "Sale",
+                HandoverStatus = "Pending",
+                Currency = "USD",
+                SortOrder = 1,
+                IsReleasedForMarket = true,
+                SalesOrderId = orderId,
+                SalesOrderNumber = "SO-UNIT-004"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync($"/api/projects/units/{unitId}/link-sales-order", new LinkProjectUnitSalesOrderDto
+        {
+            SalesOrderId = orderId
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var unit = await response.Content.ReadFromJsonAsync<ProjectUnitDto>();
+        unit.Should().NotBeNull();
+        unit!.SalesOrderId.Should().Be(orderId);
+        unit.CommercialIntent.Should().Be("Sale");
+    }
+
+    [Fact]
+    public async Task GetDevelopmentProfile_ShouldReturnConstructionProfile()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetDevelopmentProfileAsync(projectId))
+            .ReturnsAsync(new ProjectDevelopmentProfileDto
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = projectId,
+                DeliveryStructure = "MultiUnit",
+                DevelopmentType = "Residential",
+                SiteName = "Airport Hills"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/development-profile");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var profile = await response.Content.ReadFromJsonAsync<ProjectDevelopmentProfileDto>();
+        profile.Should().NotBeNull();
+        profile!.ProjectId.Should().Be(projectId);
+        profile.DeliveryStructure.Should().Be("MultiUnit");
+    }
+
+    [Fact]
+    public async Task GetProjectPhases_ShouldReturnLifecyclePhases()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectPhasesAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectPhaseDto
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Name = "Feasibility",
+                    Status = "NotStarted",
+                    SortOrder = 0,
+                    Children = new List<ProjectPhaseDto>()
+                },
+                new ProjectPhaseDto
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Name = "Construction",
+                    Status = "InProgress",
+                    SortOrder = 1,
+                    Children = new List<ProjectPhaseDto>()
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/phases");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var phases = await response.Content.ReadFromJsonAsync<List<ProjectPhaseDto>>();
+        phases.Should().NotBeNull();
+        phases.Should().HaveCount(2);
+        phases![1].Name.Should().Be("Construction");
+    }
+
+    [Fact]
+    public async Task GetProjectPackages_ShouldReturnPackageRegister()
+    {
+        var projectId = Guid.NewGuid();
+        var packageId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectPackagesAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectPackageDto
+                {
+                    Id = packageId,
+                    ProjectId = projectId,
+                    Name = "Substructure",
+                    PackageType = "TradePackage",
+                    Status = "Planned",
+                    Currency = "USD",
+                    BoqItems = new List<ProjectBoqItemDto>()
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/packages");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var packages = await response.Content.ReadFromJsonAsync<List<ProjectPackageDto>>();
+        packages.Should().NotBeNull();
+        packages.Should().HaveCount(1);
+        packages![0].Id.Should().Be(packageId);
+        packages[0].Name.Should().Be("Substructure");
+    }
+
+    [Fact]
+    public async Task GetProjectBoqItems_ShouldReturnBoqLines()
+    {
+        var projectId = Guid.NewGuid();
+        var boqItemId = Guid.NewGuid();
+        var packageId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectBoqItemsAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectBoqItemDto
+                {
+                    Id = boqItemId,
+                    ProjectId = projectId,
+                    ProjectPackageId = packageId,
+                    Description = "Excavation",
+                    ItemType = "Item",
+                    Quantity = 120,
+                    Currency = "USD",
+                    SortOrder = 0
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/boq-items");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = await response.Content.ReadFromJsonAsync<List<ProjectBoqItemDto>>();
+        items.Should().NotBeNull();
+        items.Should().HaveCount(1);
+        items![0].Id.Should().Be(boqItemId);
+        items[0].Description.Should().Be("Excavation");
+    }
+
+    [Fact]
+    public async Task GetApprovalRegister_ShouldReturnApprovalItems()
+    {
+        var projectId = Guid.NewGuid();
+        var approvalId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetApprovalRegisterAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectApprovalRegisterItemDto
+                {
+                    Id = approvalId,
+                    ProjectId = projectId,
+                    ApprovalType = "BuildingPermit",
+                    Title = "Building permit approval",
+                    Status = "Submitted"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/approval-register");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var approvals = await response.Content.ReadFromJsonAsync<List<ProjectApprovalRegisterItemDto>>();
+        approvals.Should().NotBeNull();
+        approvals.Should().HaveCount(1);
+        approvals![0].Id.Should().Be(approvalId);
+        approvals[0].Title.Should().Be("Building permit approval");
+    }
+
+    [Fact]
+    public async Task GetCommercialSummary_ShouldReturnPhaseCostRollups()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetCommercialSummaryAsync(projectId))
+            .ReturnsAsync(new ProjectCommercialSummaryDto
+            {
+                ProjectId = projectId,
+                Currency = "GHS",
+                PackageBudgetAmount = 250000m,
+                PackageForecastAmount = 265000m,
+                PhaseRollups = new List<ProjectPhaseCommercialRollupDto>
+                {
+                    new()
+                    {
+                        ProjectPhaseId = Guid.NewGuid(),
+                        PhaseName = "Construction",
+                        PackageCount = 2,
+                        BudgetAmount = 250000m,
+                        ForecastAmount = 265000m
+                    }
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/commercial-summary");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var summary = await response.Content.ReadFromJsonAsync<ProjectCommercialSummaryDto>();
+        summary.Should().NotBeNull();
+        summary!.ProjectId.Should().Be(projectId);
+        summary.Currency.Should().Be("GHS");
+        summary.PhaseRollups.Should().ContainSingle(x => x.PhaseName == "Construction");
+    }
+
+    [Fact]
+    public async Task GetProjectUnits_ShouldReturnUnitSchedule()
+    {
+        var projectId = Guid.NewGuid();
+        var unitId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectUnitsAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectUnitDto
+                {
+                    Id = unitId,
+                    ProjectId = projectId,
+                    Code = "APT-12B",
+                    Name = "Apartment 12B",
+                    UnitType = "Apartment",
+                    Status = "Available",
+                    AreaSquareMeters = 142.5m,
+                    Currency = "GHS"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/units");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var units = await response.Content.ReadFromJsonAsync<List<ProjectUnitDto>>();
+        units.Should().NotBeNull();
+        units.Should().HaveCount(1);
+        units![0].Id.Should().Be(unitId);
+        units[0].Name.Should().Be("Apartment 12B");
+    }
+
+    [Fact]
+    public async Task GetCustomerVariations_ShouldReturnVariationItems()
+    {
+        var projectId = Guid.NewGuid();
+        var variationId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetCustomerVariationsAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectCustomerVariationDto
+                {
+                    Id = variationId,
+                    ProjectId = projectId,
+                    Title = "Kitchen finish upgrade",
+                    Timing = "PreHandover",
+                    Status = "Quoted",
+                    Currency = "GHS"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/customer-variations");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var variations = await response.Content.ReadFromJsonAsync<List<ProjectCustomerVariationDto>>();
+        variations.Should().NotBeNull();
+        variations.Should().HaveCount(1);
+        variations![0].Id.Should().Be(variationId);
+        variations[0].Title.Should().Be("Kitchen finish upgrade");
+    }
+
+    [Fact]
+    public async Task CreateCustomerVariationJobCard_ShouldReturnUpdatedVariation()
+    {
+        var variationId = Guid.NewGuid();
+        var jobCardId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.CreateJobCardFromCustomerVariationAsync(
+                variationId,
+                It.IsAny<CreateProjectMaintenanceFollowThroughDto?>()))
+            .ReturnsAsync(new ProjectCustomerVariationDto
+            {
+                Id = variationId,
+                ProjectId = Guid.NewGuid(),
+                Title = "Kitchen finish upgrade",
+                Timing = "PostHandover",
+                Status = "Approved",
+                JobCardId = jobCardId,
+                JobCardNumber = "JC-2026-0007",
+                Currency = "GHS"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync($"/api/projects/customer-variations/{variationId}/create-job-card", new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var variation = await response.Content.ReadFromJsonAsync<ProjectCustomerVariationDto>();
+        variation.Should().NotBeNull();
+        variation!.JobCardId.Should().Be(jobCardId);
+        variation.JobCardNumber.Should().Be("JC-2026-0007");
+    }
+
+    [Fact]
+    public async Task GetProjectCommissioningItems_ShouldReturnCommissioningItems()
+    {
+        var projectId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectCommissioningItemsAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectCommissioningItemDto
+                {
+                    Id = itemId,
+                    ProjectId = projectId,
+                    Title = "Electrical final test",
+                    Status = "ReadyForInspection"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/commissioning");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = await response.Content.ReadFromJsonAsync<List<ProjectCommissioningItemDto>>();
+        items.Should().NotBeNull();
+        items.Should().HaveCount(1);
+        items![0].Id.Should().Be(itemId);
+        items[0].Title.Should().Be("Electrical final test");
+    }
+
+    [Fact]
+    public async Task GetProjectHandoverItems_ShouldReturnHandoverItems()
+    {
+        var projectId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectHandoverItemsAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectHandoverItemDto
+                {
+                    Id = itemId,
+                    ProjectId = projectId,
+                    HandoverType = "PracticalCompletion",
+                    Title = "Practical completion certificate",
+                    Status = "Ready"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/handover-items");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = await response.Content.ReadFromJsonAsync<List<ProjectHandoverItemDto>>();
+        items.Should().NotBeNull();
+        items.Should().HaveCount(1);
+        items![0].Id.Should().Be(itemId);
+        items[0].Title.Should().Be("Practical completion certificate");
+    }
+
+    [Fact]
+    public async Task GetProjectSnagItems_ShouldReturnSnagItems()
+    {
+        var projectId = Guid.NewGuid();
+        var snagId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectSnagItemsAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectSnagItemDto
+                {
+                    Id = snagId,
+                    ProjectId = projectId,
+                    Title = "Tile crack at lobby",
+                    Severity = "High",
+                    Status = "Open",
+                    ReportedDate = DateTime.UtcNow
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/snag-items");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = await response.Content.ReadFromJsonAsync<List<ProjectSnagItemDto>>();
+        items.Should().NotBeNull();
+        items.Should().HaveCount(1);
+        items![0].Id.Should().Be(snagId);
+        items[0].Title.Should().Be("Tile crack at lobby");
+    }
+
+    [Fact]
+    public async Task GetProjectDefectLiabilityCases_ShouldReturnCases()
+    {
+        var projectId = Guid.NewGuid();
+        var caseId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectDefectLiabilityCasesAsync(projectId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectDefectLiabilityCaseDto
+                {
+                    Id = caseId,
+                    ProjectId = projectId,
+                    Title = "Water ingress on penthouse roof",
+                    Status = "Reported",
+                    ReportedDate = DateTime.UtcNow,
+                    Currency = "GHS"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/defect-liability");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = await response.Content.ReadFromJsonAsync<List<ProjectDefectLiabilityCaseDto>>();
+        items.Should().NotBeNull();
+        items.Should().HaveCount(1);
+        items![0].Id.Should().Be(caseId);
+        items[0].Title.Should().Be("Water ingress on penthouse roof");
+    }
+
+    [Fact]
+    public async Task CreateDefectLiabilityWorkOrder_ShouldReturnUpdatedCase()
+    {
+        var defectCaseId = Guid.NewGuid();
+        var workOrderId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.CreateWorkOrderFromDefectLiabilityCaseAsync(
+                defectCaseId,
+                It.IsAny<CreateProjectMaintenanceFollowThroughDto?>()))
+            .ReturnsAsync(new ProjectDefectLiabilityCaseDto
+            {
+                Id = defectCaseId,
+                ProjectId = Guid.NewGuid(),
+                Title = "Water ingress on penthouse roof",
+                Status = "InProgress",
+                WorkOrderId = workOrderId,
+                WorkOrderNumber = "WO-2026-0012",
+                ReportedDate = DateTime.UtcNow,
+                Currency = "GHS"
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync($"/api/projects/defect-liability/{defectCaseId}/create-work-order", new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var item = await response.Content.ReadFromJsonAsync<ProjectDefectLiabilityCaseDto>();
+        item.Should().NotBeNull();
+        item!.WorkOrderId.Should().Be(workOrderId);
+        item.WorkOrderNumber.Should().Be("WO-2026-0012");
+    }
+
+    [Fact]
+    public async Task GetTenderLookup_ShouldReturnTenderOptions()
+    {
+        var tenderId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetTenderLookupAsync("tower"))
+            .ReturnsAsync(new[]
+            {
+                new ProjectTenderLookupDto
+                {
+                    Id = tenderId,
+                    TenderNumber = "TND-2026-0004",
+                    Title = "Tower Works Package",
+                    Status = "Published"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/projects/tenders/lookup?search=tower");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var tenders = await response.Content.ReadFromJsonAsync<List<ProjectTenderLookupDto>>();
+        tenders.Should().NotBeNull();
+        tenders.Should().HaveCount(1);
+        tenders![0].Id.Should().Be(tenderId);
+        tenders[0].Title.Should().Be("Tower Works Package");
+    }
+
+    [Fact]
     public async Task GetAiInsights_ShouldReturnMockedInsights()
     {
         var projectId = Guid.NewGuid();

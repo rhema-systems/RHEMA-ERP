@@ -8,7 +8,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { currencyService, type CurrencyListDto } from '@/services/financeCommonService';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  buildProjectCurrencyOptions,
+  findProjectCurrency,
+  formatProjectCurrencyLabel,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
+import { type CurrencyListDto } from '@/services/financeCommonService';
 import { CreateProjectExpenseDto, ProjectApprovalQueueSummaryDto, ProjectCatalogEntryDto, ProjectDetailDto, ProjectExpenseApprovalQueueItemDto, ProjectExpenseDto, ProjectLookupDto, projectService } from '@/services/projectService';
 import { userService } from '@/services/user';
 import type { User } from '@/types';
@@ -16,7 +25,6 @@ import { toast } from 'sonner';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const DEFAULT_EXPENSE_CATEGORIES = ['Travel', 'Meals', 'Lodging', 'Supplies', 'Equipment', 'Other'];
-const DEFAULT_CURRENCIES = ['USD'];
 
 const formatCatalogLabel = (value: string) =>
   value
@@ -39,8 +47,6 @@ const formatUserLabel = (user: User) => {
   return fullName ? `${fullName} (${user.username})` : user.username;
 };
 
-const formatCurrencyLabel = (currency: CurrencyListDto) => `${currency.code} | ${currency.name}`;
-
 const flattenWorkItems = (items: ProjectDetailDto['workItems'] = []): NonNullable<ProjectDetailDto['workItems']> =>
   items.flatMap((item) => [item, ...(item.children || [])]);
 
@@ -60,7 +66,7 @@ const draftTemplate = (userId: string): CreateProjectExpenseDto => ({
   userId,
   expenseDate: today(),
   category: 'General',
-  currency: 'USD',
+  currency: '',
   amount: 0,
   taxAmount: 0,
   isBillable: false,
@@ -74,6 +80,7 @@ export default function DevelopmentExpensesPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [expenseCategoryCatalog, setExpenseCategoryCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('none');
   const [project, setProject] = useState<ProjectDetailDto | null>(null);
   const [myEntries, setMyEntries] = useState<ProjectExpenseDto[]>([]);
@@ -93,13 +100,8 @@ export default function DevelopmentExpensesPage() {
     [activeUsers],
   );
   const currencyOptions = useMemo(() => {
-    const codes = currencies
-      .filter((currency) => currency.isActive)
-      .map((currency) => currency.code.trim().toUpperCase())
-      .filter(Boolean);
-    const values = codes.length > 0 ? codes : DEFAULT_CURRENCIES;
-    return draft.currency && !values.includes(draft.currency) ? [draft.currency, ...values] : values;
-  }, [currencies, draft.currency]);
+    return buildProjectCurrencyOptions(currencies, baseCurrency, draft.currency);
+  }, [baseCurrency, currencies, draft.currency]);
   const expenseCategoryOptions = useMemo(
     () => resolveCatalogOptions(expenseCategoryCatalog, DEFAULT_EXPENSE_CATEGORIES, draft.category),
     [expenseCategoryCatalog, draft.category],
@@ -108,20 +110,21 @@ export default function DevelopmentExpensesPage() {
   const load = async (projectId?: string) => {
     try {
       setLoading(true);
-      const [projectItems, mine, queue, loadedUsers, loadedCategories, loadedCurrencies] = await Promise.all([
+      const [projectItems, mine, queue, loadedUsers, loadedCategories, currencyContext] = await Promise.all([
         projectService.lookupProjects(),
         projectService.getMyExpenses(),
         projectService.getExpenseApprovalQueue(undefined, queueStatus === 'all' ? undefined : queueStatus, undefined, 100),
         userService.searchUsers('').catch(() => []),
         projectService.getCatalogEntries('expense-categories').catch(() => []),
-        currencyService.getActive().catch(() => []),
+        loadProjectCurrencyContext(),
       ]);
       setProjects(projectItems);
       setMyEntries(mine);
       setApprovalQueue(queue);
       setUsers(loadedUsers);
       setExpenseCategoryCatalog(loadedCategories);
-      setCurrencies(loadedCurrencies);
+      setCurrencies(currencyContext.activeCurrencies);
+      setBaseCurrency(currencyContext.baseCurrency);
 
       const resolvedProjectId = projectId && projectId !== 'none'
         ? projectId
@@ -185,6 +188,7 @@ export default function DevelopmentExpensesPage() {
     try {
       const payload = {
         ...draft,
+        currency: draft.currency || baseCurrency.code,
         userId: draft.userId || currentUserId,
         status: submitAfterSave ? 'Submitted' : 'Draft',
       };
@@ -233,6 +237,8 @@ export default function DevelopmentExpensesPage() {
       toast.error(error.message || `Failed to ${action} expense`);
     }
   };
+
+  const formatMoney = (value: number, currency?: string | null) => formatProjectMoney(value, currency, baseCurrency.code);
 
   return (
     <div className="space-y-6">
@@ -314,14 +320,14 @@ export default function DevelopmentExpensesPage() {
               </div>
               <div className="grid gap-2">
                 <Label>Currency</Label>
-                <Select value={draft.currency || currencyOptions[0]} onValueChange={(value) => setDraft((current) => ({ ...current, currency: value }))}>
+                <Select value={draft.currency || currencyOptions[0] || baseCurrency.code} onValueChange={(value) => setDraft((current) => ({ ...current, currency: value }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {currencyOptions.map((code) => {
-                      const currency = currencies.find((item) => item.code.toUpperCase() === code.toUpperCase());
+                      const currency = findProjectCurrency(currencies, code, baseCurrency);
                       return (
                         <SelectItem key={code} value={code}>
-                          {currency ? formatCurrencyLabel(currency) : code}
+                          {formatProjectCurrencyLabel(currency, code)}
                         </SelectItem>
                       );
                     })}
@@ -374,7 +380,7 @@ export default function DevelopmentExpensesPage() {
                   <div key={entry.id} className="rounded-lg border p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="font-semibold">{entry.projectCode || entry.projectId} | {entry.currency} {(entry.amount + entry.taxAmount).toLocaleString()}</div>
+                        <div className="font-semibold">{entry.projectCode || entry.projectId} | {formatMoney(entry.amount + entry.taxAmount, entry.currency)}</div>
                         <div className="text-sm text-muted-foreground">
                           {new Date(entry.expenseDate).toLocaleDateString()} | {entry.category} | {entry.workItemTitle || 'Project level'}
                         </div>
@@ -420,7 +426,7 @@ export default function DevelopmentExpensesPage() {
                   <div key={entry.expenseId} className="rounded-lg border p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="font-semibold">{entry.projectCode} | {entry.currency} {entry.totalAmount.toLocaleString()}</div>
+                        <div className="font-semibold">{entry.projectCode} | {formatMoney(entry.totalAmount, entry.currency)}</div>
                         <div className="text-sm text-muted-foreground">
                           {new Date(entry.expenseDate).toLocaleDateString()} | {entry.category} | {entry.workItemTitle || 'Project level'}
                         </div>

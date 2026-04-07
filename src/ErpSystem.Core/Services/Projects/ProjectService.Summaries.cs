@@ -240,27 +240,90 @@ public partial class ProjectService
         var invoiceRequests = (await _unitOfWork.Repository<ProjectInvoiceRequest>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var revenueRecognitions = (await _unitOfWork.Repository<ProjectRevenueRecognition>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var materialExceptions = ledgerEntries.Count(x => x.HasMissingSourceLink || x.HasReversalGap);
+        var businessPartnerName = project.BusinessPartnerId.HasValue
+            ? (await _businessPartnerService.GetByIdAsync(project.BusinessPartnerId.Value))?.PartnerName
+            : null;
+        var contractLabel = project.ContractId.HasValue
+            ? (await _contractService.GetByIdAsync(project.ContractId.Value)) is { } contract
+                ? $"{contract.ContractNumber} - {contract.ContractTitle}".Trim().TrimEnd('-').Trim()
+                : null
+            : null;
+        var portfolioName = project.PortfolioId.HasValue
+            ? !string.IsNullOrWhiteSpace(project.Portfolio?.Name)
+                ? project.Portfolio.Name
+                : (await _projectPortfolioRepository.GetByIdAsync(project.PortfolioId.Value))?.Name
+            : null;
+        var programName = project.ProgramId.HasValue
+            ? !string.IsNullOrWhiteSpace(project.Program?.Name)
+                ? project.Program.Name
+                : (await _projectProgramRepository.GetByIdAsync(project.ProgramId.Value))?.Name
+            : null;
+        var tenderReference = project.TenderId.HasValue
+            ? (await _unitOfWork.Repository<Tender>().FirstOrDefaultAsync(x => x.Id == project.TenderId.Value && x.TenantId == _currentUserProvider.TenantId)) is { } tender
+                ? $"{tender.TenderNumber} - {tender.Title}".Trim().TrimEnd('-').Trim()
+                : null
+            : null;
+        var inventoryCurrencyCode = await GetProjectBaseCurrencyCodeAsync();
+        var warehouseIds = inventoryRequisitions.Select(x => x.WarehouseId).Distinct().ToList();
+        var warehouses = warehouseIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await _unitOfWork.Repository<Warehouse>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && warehouseIds.Contains(x.Id)))
+                .ToDictionary(x => x.Id, x => x.Name);
+        var locationIds = inventoryRequisitions
+            .Where(x => x.LocationId.HasValue)
+            .Select(x => x.LocationId!.Value)
+            .Distinct()
+            .ToList();
+        var locations = locationIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await _unitOfWork.Repository<WarehouseLocation>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && locationIds.Contains(x.Id)))
+                .ToDictionary(x => x.Id, x => string.IsNullOrWhiteSpace(x.Name) ? x.LocationCode : x.Name);
 
         var links = new List<ProjectIntegrationLinkDto>();
         if (project.BusinessPartnerId.HasValue)
         {
-            links.Add(new ProjectIntegrationLinkDto { LinkType = "BusinessPartner", Status = "Linked", Reference = project.BusinessPartnerId.Value.ToString() });
+            links.Add(new ProjectIntegrationLinkDto
+            {
+                LinkType = "BusinessPartner",
+                Status = "Linked",
+                Reference = string.IsNullOrWhiteSpace(businessPartnerName) ? project.BusinessPartnerId.Value.ToString() : businessPartnerName
+            });
         }
         if (project.ContractId.HasValue)
         {
-            links.Add(new ProjectIntegrationLinkDto { LinkType = "Contract", Status = "Linked", Reference = project.ContractId.Value.ToString() });
+            links.Add(new ProjectIntegrationLinkDto
+            {
+                LinkType = "Contract",
+                Status = "Linked",
+                Reference = string.IsNullOrWhiteSpace(contractLabel) ? project.ContractId.Value.ToString() : contractLabel
+            });
         }
         if (project.TenderId.HasValue)
         {
-            links.Add(new ProjectIntegrationLinkDto { LinkType = "Tender", Status = "Linked", Reference = project.TenderId.Value.ToString() });
+            links.Add(new ProjectIntegrationLinkDto
+            {
+                LinkType = "Tender",
+                Status = "Linked",
+                Reference = string.IsNullOrWhiteSpace(tenderReference) ? project.TenderId.Value.ToString() : tenderReference
+            });
         }
         if (project.PortfolioId.HasValue)
         {
-            links.Add(new ProjectIntegrationLinkDto { LinkType = "Portfolio", Status = "Linked", Reference = project.PortfolioId.Value.ToString() });
+            links.Add(new ProjectIntegrationLinkDto
+            {
+                LinkType = "Portfolio",
+                Status = "Linked",
+                Reference = string.IsNullOrWhiteSpace(portfolioName) ? project.PortfolioId.Value.ToString() : portfolioName
+            });
         }
         if (project.ProgramId.HasValue)
         {
-            links.Add(new ProjectIntegrationLinkDto { LinkType = "Program", Status = "Linked", Reference = project.ProgramId.Value.ToString() });
+            links.Add(new ProjectIntegrationLinkDto
+            {
+                LinkType = "Program",
+                Status = "Linked",
+                Reference = string.IsNullOrWhiteSpace(programName) ? project.ProgramId.Value.ToString() : programName
+            });
         }
 
         links.AddRange(assetLinks.Select(x => new ProjectIntegrationLinkDto
@@ -299,7 +362,16 @@ public partial class ProjectService
             {
                 LinkType = "InventoryRequisition",
                 Status = x.Status.ToString(),
-                Reference = $"{x.RequisitionNumber} | {x.TotalValue:N2}"
+                Reference = string.Join(" | ", new[]
+                {
+                    x.RequisitionNumber,
+                    warehouses.TryGetValue(x.WarehouseId, out var warehouseName)
+                        ? x.LocationId.HasValue && locations.TryGetValue(x.LocationId.Value, out var locationName)
+                            ? $"{warehouseName} / {locationName}"
+                            : warehouseName
+                        : null,
+                    $"{inventoryCurrencyCode} {x.TotalValue:N2}",
+                }.Where(value => !string.IsNullOrWhiteSpace(value)))
             }));
 
         var warnings = new List<string>();

@@ -27,6 +27,7 @@ public class SalesOrderSummaryDto
     public int LineCount { get; set; }
     public string? PropertyReference { get; set; }
     public PropertyType? PropertyType { get; set; }
+    public SalesLinkedProjectUnitContextDto? ProjectUnitContext { get; set; }
 }
 
 /// <summary>

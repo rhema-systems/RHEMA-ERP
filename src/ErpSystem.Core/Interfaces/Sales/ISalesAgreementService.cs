@@ -18,7 +18,9 @@ public interface ISalesAgreementService
         string? agreementType = null,
         Guid? customerId = null,
         DateTime? startDateFrom = null,
-        DateTime? startDateTo = null);
+        DateTime? startDateTo = null,
+        bool projectLinkedOnly = false,
+        bool releasedUnitsOnly = false);
 
     Task<SalesAgreementDetailDto> CreateAsync(CreateSalesAgreementDto dto);
     Task<SalesAgreementDetailDto> UpdateAsync(Guid id, UpdateSalesAgreementDto dto);

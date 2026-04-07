@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -11,13 +12,16 @@ public class CashTransactionService : ICashTransactionService
 {
     private readonly ApplicationDbContext _context;
     private readonly IBankAccountService _bankAccountService;
+    private readonly ITenantSettingsService _tenantSettingsService;
 
     public CashTransactionService(
         ApplicationDbContext context,
-        IBankAccountService bankAccountService)
+        IBankAccountService bankAccountService,
+        ITenantSettingsService tenantSettingsService)
     {
         _context = context;
         _bankAccountService = bankAccountService;
+        _tenantSettingsService = tenantSettingsService;
     }
 
     public async Task<CashTransactionDto?> GetByIdAsync(Guid id)
@@ -138,6 +142,8 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto> CreateReceiptAsync(CreateCashReceiptDto dto)
     {
         var transactionNumber = await GenerateTransactionNumberAsync("RCT");
+        var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+        var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
 
         var transaction = new CashTransaction
         {
@@ -146,7 +152,7 @@ public class CashTransactionService : ICashTransactionService
             TransactionType = CashTransactionType.Receipt,
             BankAccountId = dto.BankAccountId,
             Amount = dto.Amount,
-            Currency = dto.Currency,
+            Currency = transactionCurrency,
             BaseAmount = dto.Amount, // TODO: Apply exchange rate if needed
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
@@ -169,6 +175,8 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto> CreatePaymentAsync(CreateCashPaymentDto dto)
     {
         var transactionNumber = await GenerateTransactionNumberAsync("PMT");
+        var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+        var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
 
         var transaction = new CashTransaction
         {
@@ -177,7 +185,7 @@ public class CashTransactionService : ICashTransactionService
             TransactionType = CashTransactionType.Payment,
             BankAccountId = dto.BankAccountId,
             Amount = dto.Amount,
-            Currency = dto.Currency,
+            Currency = transactionCurrency,
             BaseAmount = dto.Amount, // TODO: Apply exchange rate if needed
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
@@ -201,6 +209,11 @@ public class CashTransactionService : ICashTransactionService
     public async Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(CreateBankTransferDto dto)
     {
         var transactionNumber = await GenerateTransactionNumberAsync("TRF");
+        var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+        var fromBankAccount = await _context.Set<BankAccount>().FindAsync(dto.FromBankAccountId);
+        var toBankAccount = await _context.Set<BankAccount>().FindAsync(dto.ToBankAccountId);
+        var fromCurrencyCode = string.IsNullOrWhiteSpace(fromBankAccount?.Currency) ? baseCurrencyCode : fromBankAccount.Currency.Trim().ToUpperInvariant();
+        var toCurrencyCode = string.IsNullOrWhiteSpace(toBankAccount?.Currency) ? baseCurrencyCode : toBankAccount.Currency.Trim().ToUpperInvariant();
 
         // Create debit transaction (from account)
         var fromTransaction = new CashTransaction
@@ -211,7 +224,7 @@ public class CashTransactionService : ICashTransactionService
             BankAccountId = dto.FromBankAccountId,
             ToBankAccountId = dto.ToBankAccountId,
             Amount = dto.Amount,
-            Currency = "GHS", // TODO: Get from bank account
+            Currency = fromCurrencyCode,
             BaseAmount = dto.Amount,
             ReferenceNumber = dto.ReferenceNumber,
             Description = dto.Description,
@@ -228,7 +241,7 @@ public class CashTransactionService : ICashTransactionService
             BankAccountId = dto.ToBankAccountId,
             ToBankAccountId = dto.FromBankAccountId,
             Amount = dto.Amount,
-            Currency = "GHS", // TODO: Get from bank account
+            Currency = toCurrencyCode,
             BaseAmount = dto.Amount,
             ReferenceNumber = dto.ReferenceNumber,
             Description = dto.Description,

@@ -34,7 +34,7 @@ public class VendorInvoiceDto
     public decimal PaidAmount { get; set; }
     public decimal BalanceAmount { get; set; }
 
-    public string CurrencyCode { get; set; } = "USD";
+    public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public decimal BaseCurrencyAmount { get; set; }
 
@@ -89,7 +89,7 @@ public class VendorInvoiceCreateDto
     public DateTime? ReceivedDate { get; set; }
     public DateTime? DueDate { get; set; }
 
-    public string CurrencyCode { get; set; } = "USD";
+    public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
 
     public int PaymentTermsDays { get; set; } = 30;

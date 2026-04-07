@@ -19,17 +19,20 @@ namespace ErpSystem.Api.Services.Finance.AR
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
+        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly ILogger<PaymentService> _logger;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            ITenantSettingsService tenantSettingsService,
             ISubledgerPostingService subledgerPostingService,
             ILogger<PaymentService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _tenantSettingsService = tenantSettingsService;
             _subledgerPostingService = subledgerPostingService;
             _logger = logger;
         }
@@ -133,6 +136,10 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             // Generate payment number
             var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            var paymentCurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode)
+                ? baseCurrencyCode
+                : dto.CurrencyCode.Trim().ToUpperInvariant();
 
             var now = DateTime.UtcNow;
             var payment = new CustomerPayment
@@ -145,7 +152,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 TotalAmount = dto.TotalAmount,
                 AllocatedAmount = 0,
                 PaymentMethod = dto.PaymentMethod,
-                CurrencyCode = dto.CurrencyCode,
+                CurrencyCode = paymentCurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
                 BankAccountId = dto.BankAccountId,
                 CheckNumber = dto.CheckNumber,
@@ -568,6 +575,8 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<CustomerPaymentDto> CreateCreditNoteAsync(CreditNoteCreateDto dto, CancellationToken cancellationToken = default)
         {
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+
             // Create a negative payment (credit note)
             var paymentDto = new PaymentCreateDto
             {
@@ -575,7 +584,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 PaymentDate = dto.CreditNoteDate,
                 TotalAmount = dto.Amount,
                 PaymentMethod = "CreditNote",
-                CurrencyCode = "USD",
+                CurrencyCode = baseCurrencyCode,
                 ExchangeRate = 1.0m,
                 TransactionReference = dto.Reference,
                 Notes = $"Credit Note: {dto.Reason}\n{dto.Notes}",

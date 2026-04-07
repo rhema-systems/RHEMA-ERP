@@ -8,6 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
 import { CreateProjectTimesheetEntryDto, ProjectApprovalQueueSummaryDto, ProjectCatalogEntryDto, ProjectDetailDto, ProjectLookupDto, ProjectTimesheetApprovalQueueItemDto, ProjectTimesheetEntryDto, projectService } from '@/services/projectService';
 import { userService } from '@/services/user';
 import type { User } from '@/types';
@@ -77,6 +83,7 @@ export default function DevelopmentTimesheetsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [queueStatus, setQueueStatus] = useState<string>('Submitted');
   const [draft, setDraft] = useState<CreateProjectTimesheetEntryDto>(draftTemplate(currentUserId));
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const activeUsers = useMemo(() => users.filter((user) => user.isActive), [users]);
   const activeWorkItems = useMemo(() => flattenWorkItems(project?.workItems), [project?.workItems]);
   const userLabels = useMemo(
@@ -94,18 +101,20 @@ export default function DevelopmentTimesheetsPage() {
   const load = async (projectId?: string) => {
     try {
       setLoading(true);
-      const [projectItems, mine, queue, loadedUsers, loadedWorkTypes] = await Promise.all([
+      const [projectItems, mine, queue, loadedUsers, loadedWorkTypes, currencyContext] = await Promise.all([
         projectService.lookupProjects(),
         projectService.getMyTimesheets(),
         projectService.getTimesheetApprovalQueue(undefined, queueStatus === 'all' ? undefined : queueStatus, undefined, 100),
         userService.searchUsers('').catch(() => []),
         projectService.getCatalogEntries('timesheet-work-types').catch(() => []),
+        loadProjectCurrencyContext(),
       ]);
       setProjects(projectItems);
       setMyEntries(mine);
       setApprovalQueue(queue);
       setUsers(loadedUsers);
       setTimesheetWorkTypeCatalog(loadedWorkTypes);
+      setBaseCurrency(currencyContext.baseCurrency);
 
       const resolvedProjectId = projectId && projectId !== 'none'
         ? projectId
@@ -137,6 +146,8 @@ export default function DevelopmentTimesheetsPage() {
   useEffect(() => {
     load(selectedProjectId !== 'none' ? selectedProjectId : undefined);
   }, [queueStatus]);
+
+  const formatMoney = (value: number, currency?: string | null) => formatProjectMoney(value, currency, baseCurrency.code);
 
   const startCreate = () => {
     setEditingId(null);
@@ -342,7 +353,7 @@ export default function DevelopmentTimesheetsPage() {
                       <div>
                         <div className="font-semibold">{entry.projectCode || entry.projectId} | {entry.hours}h</div>
                         <div className="text-sm text-muted-foreground">
-                          {new Date(entry.entryDate).toLocaleDateString()} | {entry.workType} | cost {entry.costAmount.toLocaleString()}
+                          {new Date(entry.entryDate).toLocaleDateString()} | {entry.workType} | cost {formatMoney(entry.costAmount)}
                         </div>
                         {entry.notes ? <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">{entry.notes}</div> : null}
                       </div>

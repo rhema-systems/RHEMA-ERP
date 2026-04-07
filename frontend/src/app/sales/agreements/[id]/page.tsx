@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   FileText, ArrowLeft, CheckCircle, XCircle, Send, Pause, Play,
-  RefreshCw, Ban, AlertTriangle, Clock, Calendar
+  RefreshCw, Ban, AlertTriangle, Clock, Calendar, Building2, Home
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -114,6 +114,7 @@ export default function SalesAgreementDetailPage() {
 
   const formatDate = (d?: string) => { if (!d) return '-'; try { return format(new Date(d), 'dd MMM yyyy'); } catch { return d; } };
   const formatCurrency = (n: number) => `${agreement?.currency || 'GHS'} ${n.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  const formatLabel = (value?: string) => value ? value.replace(/([A-Z])/g, ' $1').trim() : '-';
   const getStatusBadge = (s: string) => {
     const c = STATUS_CONFIG[s] || { variant: 'outline' as const, className: '' };
     return <Badge variant={c.variant} className={c.className}>{s.replace(/([A-Z])/g, ' $1').trim()}</Badge>;
@@ -197,6 +198,64 @@ export default function SalesAgreementDetailPage() {
           )}
         </div>
       </div>
+
+      {agreement.projectUnitContext && (
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardContent className="flex flex-col gap-4 pt-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
+                <Building2 className="h-4 w-4" />
+                Project-Linked Unit
+              </div>
+              <div>
+                <p className="text-base font-semibold text-slate-900">
+                  {agreement.projectUnitContext.projectCode}
+                  {agreement.projectUnitContext.projectTitle ? ` • ${agreement.projectUnitContext.projectTitle}` : ''}
+                </p>
+                <p className="text-sm text-slate-600">
+                  {agreement.projectUnitContext.projectUnitCode || agreement.projectUnitContext.projectUnitName}
+                  {agreement.projectUnitContext.projectUnitCode && agreement.projectUnitContext.projectUnitName
+                    ? ` • ${agreement.projectUnitContext.projectUnitName}`
+                    : ''}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">{formatLabel(agreement.projectUnitContext.projectUnitType)}</Badge>
+                <Badge variant="outline">{formatLabel(agreement.projectUnitContext.projectUnitStatus)}</Badge>
+                <Badge variant="secondary">{formatLabel(agreement.projectUnitContext.projectUnitCommercialStatus)}</Badge>
+                <Badge variant="outline">{formatLabel(agreement.projectUnitContext.projectUnitHandoverStatus)}</Badge>
+              </div>
+              <div className="grid gap-3 text-sm text-slate-600 md:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Market Release</p>
+                  <p className="font-medium text-slate-900">{agreement.projectUnitContext.isReleasedForMarket ? 'Released' : 'Not Released'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Handover</p>
+                  <p className="font-medium text-slate-900">{formatDate(agreement.projectUnitContext.handoverDate)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Unit Name</p>
+                  <p className="font-medium text-slate-900">{agreement.projectUnitContext.projectUnitName}</p>
+                </div>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              className="w-full lg:w-auto"
+              onClick={() => {
+                const projectId = agreement.projectUnitContext?.projectId;
+                if (projectId) {
+                  router.push(`/development/projects/${projectId}/units`);
+                }
+              }}
+            >
+              <Home className="mr-2 h-4 w-4" />
+              Open Project Unit
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Details */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

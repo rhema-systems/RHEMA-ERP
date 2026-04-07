@@ -13,19 +13,24 @@ namespace ErpSystem.Api.Services.Finance.Settings
     {
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ITenantSettingsService _tenantSettingsService;
 
         public FinanceSettingsService(
             ApplicationDbContext context,
-            ICurrentUserService currentUserService)
+            ICurrentUserService currentUserService,
+            ITenantSettingsService tenantSettingsService)
         {
             _context = context;
             _currentUserService = currentUserService;
+            _tenantSettingsService = tenantSettingsService;
         }
 
         public async Task<FinanceSettingsDto> GetSettingsAsync()
         {
             var tenantId = _currentUserService.TenantId 
                 ?? throw new InvalidOperationException("Tenant context is required.");
+
+            var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
 
             var settings = await _context.FinanceSettings
                 .FirstOrDefaultAsync(s => s.TenantId == tenantId);
@@ -39,14 +44,14 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     TenantId = tenantId,
                     CoaType = "Segmented",
                     CoaConfigurationLocked = false,
-                    BaseCurrency = "GHS"
+                    BaseCurrency = baseCurrency.CurrencyCode
                 };
 
                 _context.FinanceSettings.Add(settings);
                 await _context.SaveChangesAsync();
             }
 
-            return MapToDto(settings);
+            return MapToDto(settings, baseCurrency);
         }
 
         public async Task<FinanceSettingsDto> UpdateSettingsAsync(UpdateFinanceSettingsDto dto)
@@ -98,7 +103,31 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             // Update other settings
             if (dto.BaseCurrency != null)
-                settings.BaseCurrency = dto.BaseCurrency;
+            {
+                var requestedBaseCurrency = dto.BaseCurrency.Trim().ToUpperInvariant();
+                var targetCurrency = await _context.Currencies
+                    .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.CurrencyCode == requestedBaseCurrency && !c.IsDeleted);
+
+                if (targetCurrency == null)
+                {
+                    throw new InvalidOperationException($"Currency '{requestedBaseCurrency}' was not found in the finance multi-currency setup.");
+                }
+
+                var existingBaseCurrencies = await _context.Currencies
+                    .Where(c => c.TenantId == tenantId && c.IsBaseCurrency && c.Id != targetCurrency.Id && !c.IsDeleted)
+                    .ToListAsync();
+
+                foreach (var existingBaseCurrency in existingBaseCurrencies)
+                {
+                    existingBaseCurrency.IsBaseCurrency = false;
+                }
+
+                targetCurrency.IsBaseCurrency = true;
+                targetCurrency.IsActive = true;
+                settings.BaseCurrency = targetCurrency.CurrencyCode;
+
+                await SyncTenantCurrencySettingsAsync(tenantId, targetCurrency);
+            }
 
             if (dto.AccountSeparator != null)
                 settings.AccountSeparator = dto.AccountSeparator;
@@ -123,7 +152,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             await _context.SaveChangesAsync();
 
-            return MapToDto(settings);
+            var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
+            return MapToDto(settings, baseCurrency);
         }
 
         public async Task<bool> CanChangeCOATypeAsync()
@@ -141,7 +171,23 @@ namespace ErpSystem.Api.Services.Finance.Settings
             return !accountsExist;
         }
 
-        private FinanceSettingsDto MapToDto(FinanceSettings settings)
+        private async Task SyncTenantCurrencySettingsAsync(Guid tenantId, Currency currency)
+        {
+            var tenant = await _context.Tenants
+                .FirstOrDefaultAsync(t => t.Id == tenantId);
+
+            if (tenant == null)
+            {
+                return;
+            }
+
+            tenant.BaseCurrency = currency.CurrencyCode;
+            tenant.BaseCurrencyName = currency.CurrencyName;
+            tenant.CurrencySymbol = currency.CurrencySymbol;
+            tenant.CurrencyDecimalPlaces = currency.DecimalPlaces;
+        }
+
+        private static FinanceSettingsDto MapToDto(FinanceSettings settings, BaseCurrencyReferenceDto baseCurrency)
         {
             return new FinanceSettingsDto
             {
@@ -149,7 +195,10 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 TenantId = settings.TenantId,
                 CoaType = settings.CoaType,
                 CoaConfigurationLocked = settings.CoaConfigurationLocked,
-                BaseCurrency = settings.BaseCurrency,
+                BaseCurrency = baseCurrency.CurrencyCode,
+                BaseCurrencyName = baseCurrency.CurrencyName,
+                BaseCurrencySymbol = baseCurrency.CurrencySymbol,
+                BaseCurrencyDecimalPlaces = baseCurrency.DecimalPlaces,
                 AccountSeparator = settings.AccountSeparator,
                 RetainedEarningsAccountId = settings.RetainedEarningsAccountId,
                 UnrealizedGainLossAccountId = settings.UnrealizedGainLossAccountId,

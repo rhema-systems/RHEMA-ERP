@@ -1,10 +1,12 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Sales;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Services.Projects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -253,7 +255,8 @@ public class SalesOrderService : ISalesOrderService
 
             if (so == null) return null;
 
-            return MapToDetailDto(so);
+            var projectUnitContext = await GetProjectUnitContextAsync(so.Id, so.TenantId);
+            return MapToDetailDto(so, projectUnitContext);
         }
         catch (Exception ex)
         {
@@ -271,14 +274,31 @@ public class SalesOrderService : ISalesOrderService
         SalesOrderType? orderType = null,
         DateTime? startDate = null,
         DateTime? endDate = null,
-        string? orderPriority = null)
+        string? orderPriority = null,
+        bool projectLinkedOnly = false,
+        bool releasedUnitsOnly = false)
     {
         try
         {
             var query = _salesOrderRepo.GetQueryable();
 
             if (!string.IsNullOrEmpty(search))
-                query = query.Where(s => s.DocumentNumber.Contains(search) || s.CustomerName.Contains(search));
+            {
+                var normalizedSearch = search.ToLower();
+                query = query.Where(s =>
+                    s.DocumentNumber.ToLower().Contains(normalizedSearch)
+                    || s.CustomerName.ToLower().Contains(normalizedSearch)
+                    || (s.PropertyReference != null && s.PropertyReference.ToLower().Contains(normalizedSearch))
+                    || _unitOfWork.Repository<ProjectUnit>().GetQueryable().Any(unit =>
+                        unit.TenantId == s.TenantId
+                        && unit.SalesOrderId == s.Id
+                        && !unit.IsDeleted
+                        && (
+                            (unit.Code != null && unit.Code.ToLower().Contains(normalizedSearch))
+                            || unit.Name.ToLower().Contains(normalizedSearch)
+                            || unit.Project.ProjectCode.ToLower().Contains(normalizedSearch)
+                            || unit.Project.Title.ToLower().Contains(normalizedSearch))));
+            }
             if (status.HasValue)
                 query = query.Where(s => s.OrderStatus == status.Value);
             if (customerId.HasValue)
@@ -293,6 +313,17 @@ public class SalesOrderService : ISalesOrderService
                 query = query.Where(s => s.DocumentDate <= endDate.Value);
             if (!string.IsNullOrEmpty(orderPriority))
                 query = query.Where(s => s.OrderPriority == orderPriority);
+            if (projectLinkedOnly)
+                query = query.Where(s => _unitOfWork.Repository<ProjectUnit>().GetQueryable().Any(unit =>
+                    unit.TenantId == s.TenantId
+                    && unit.SalesOrderId == s.Id
+                    && !unit.IsDeleted));
+            if (releasedUnitsOnly)
+                query = query.Where(s => _unitOfWork.Repository<ProjectUnit>().GetQueryable().Any(unit =>
+                    unit.TenantId == s.TenantId
+                    && unit.SalesOrderId == s.Id
+                    && unit.IsReleasedForMarket
+                    && !unit.IsDeleted));
 
             var totalCount = await query.CountAsync();
             var items = await query
@@ -304,9 +335,15 @@ public class SalesOrderService : ISalesOrderService
                 .Take(pageSize)
                 .ToListAsync();
 
+            var projectUnitContextLookup = await GetProjectUnitContextsBySalesOrderIdsAsync(
+                items.Select(item => item.Id),
+                items.FirstOrDefault()?.TenantId);
+
             return new PagedResult<SalesOrderSummaryDto>
             {
-                Items = items.Select(MapToSummaryDto).ToList(),
+                Items = items.Select(item => MapToSummaryDto(
+                    item,
+                    projectUnitContextLookup.TryGetValue(item.Id, out var context) ? context : null)).ToList(),
                 TotalCount = totalCount,
                 Page = page,
                 PageSize = pageSize
@@ -340,6 +377,7 @@ public class SalesOrderService : ISalesOrderService
 
             await _salesOrderRepo.UpdateAsync(so);
             await RecordStatusChangeAsync(so.Id, SalesOrderStatus.Draft, SalesOrderStatus.PendingApproval, "Submitted for approval", so.TenantId);
+            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Sales Order {OrderNumber} submitted for approval", so.DocumentNumber);
@@ -382,6 +420,7 @@ public class SalesOrderService : ISalesOrderService
             }
 
             await _salesOrderRepo.UpdateAsync(so);
+            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
             return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -419,6 +458,7 @@ public class SalesOrderService : ISalesOrderService
 
             await _salesOrderRepo.UpdateAsync(so);
             await RecordStatusChangeAsync(so.Id, previousStatus, SalesOrderStatus.Confirmed, "Sales Order confirmed — stock reserved", so.TenantId);
+            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Sales Order {OrderNumber} confirmed", so.DocumentNumber);
@@ -448,6 +488,7 @@ public class SalesOrderService : ISalesOrderService
 
             await _salesOrderRepo.UpdateAsync(so);
             await RecordStatusChangeAsync(so.Id, previousStatus, SalesOrderStatus.Cancelled, dto.Reason, so.TenantId);
+            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Sales Order {OrderNumber} cancelled: {Reason}", so.DocumentNumber, dto.Reason);
@@ -472,6 +513,7 @@ public class SalesOrderService : ISalesOrderService
 
             await _salesOrderRepo.UpdateAsync(so);
             await RecordStatusChangeAsync(so.Id, previousStatus, SalesOrderStatus.OnHold, reason ?? "Put on hold", so.TenantId);
+            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
             return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -496,6 +538,7 @@ public class SalesOrderService : ISalesOrderService
             so.OrderStatus = SalesOrderStatus.Confirmed;
             await _salesOrderRepo.UpdateAsync(so);
             await RecordStatusChangeAsync(so.Id, SalesOrderStatus.OnHold, SalesOrderStatus.Confirmed, "Released from hold", so.TenantId);
+            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
             return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -521,6 +564,7 @@ public class SalesOrderService : ISalesOrderService
             so.OrderStatus = SalesOrderStatus.Closed;
             await _salesOrderRepo.UpdateAsync(so);
             await RecordStatusChangeAsync(so.Id, previousStatus, SalesOrderStatus.Closed, "Sales Order closed", so.TenantId);
+            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
             return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -639,6 +683,60 @@ public class SalesOrderService : ISalesOrderService
 
     #region Private Helpers
 
+    private async Task SyncLinkedProjectUnitsForSalesOrderAsync(SalesOrder salesOrder)
+    {
+        var projectUnitRepository = _unitOfWork.Repository<ProjectUnit>();
+        if (projectUnitRepository == null)
+        {
+            return;
+        }
+
+        var linkedUnits = (await projectUnitRepository.FindAsync(unit =>
+                unit.TenantId == salesOrder.TenantId
+                && unit.SalesOrderId == salesOrder.Id
+                && !unit.IsDeleted))
+            ?.ToList() ?? [];
+
+        if (linkedUnits.Count == 0)
+        {
+            return;
+        }
+
+        var agreementIds = linkedUnits
+            .Where(unit => unit.SalesAgreementId.HasValue)
+            .Select(unit => unit.SalesAgreementId!.Value)
+            .Distinct()
+            .ToList();
+        var salesAgreementRepository = _unitOfWork.Repository<SalesAgreement>();
+
+        var linkedAgreementLookup = agreementIds.Count == 0
+            || salesAgreementRepository == null
+            ? new Dictionary<Guid, SalesAgreement>()
+            : ((await salesAgreementRepository.FindAsync(agreement =>
+                    agreement.TenantId == salesOrder.TenantId
+                    && agreementIds.Contains(agreement.Id)))
+                ?? Enumerable.Empty<SalesAgreement>())
+                .ToDictionary(agreement => agreement.Id);
+
+        foreach (var unit in linkedUnits)
+        {
+            linkedAgreementLookup.TryGetValue(unit.SalesAgreementId ?? Guid.Empty, out var linkedAgreement);
+            var nextStatus = ProjectUnitSalesSyncRules.ResolveStatusFromOrder(
+                unit.Status,
+                unit.IsReleasedForMarket,
+                salesOrder.OrderType,
+                salesOrder.OrderStatus,
+                linkedAgreement?.AgreementType,
+                linkedAgreement?.AgreementStatus);
+
+            if (!string.Equals(unit.Status, nextStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                unit.Status = nextStatus;
+                await projectUnitRepository.UpdateAsync(unit);
+            }
+        }
+    }
+
     private async Task RecordStatusChangeAsync(Guid salesOrderId, SalesOrderStatus? from, SalesOrderStatus to, string? notes, Guid tenantId)
     {
         var history = new SalesOrderStatusHistory
@@ -654,7 +752,63 @@ public class SalesOrderService : ISalesOrderService
         await _historyRepo.AddAsync(history);
     }
 
-    private SalesOrderSummaryDto MapToSummaryDto(SalesOrder so) => new()
+    private async Task<SalesLinkedProjectUnitContextDto?> GetProjectUnitContextAsync(Guid salesOrderId, Guid tenantId)
+    {
+        var projectUnitRepository = _unitOfWork.Repository<ProjectUnit>();
+        if (projectUnitRepository == null)
+        {
+            return null;
+        }
+
+        var linkedUnit = await projectUnitRepository.GetQueryable()
+            .Include(unit => unit.Project)
+            .Include(unit => unit.SalesAgreement)
+            .Include(unit => unit.SalesOrder)
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId
+                && unit.SalesOrderId == salesOrderId
+                && !unit.IsDeleted);
+
+        return linkedUnit == null
+            ? null
+            : ProjectUnitPresentationRules.BuildSalesLinkedProjectUnitContext(linkedUnit);
+    }
+
+    private async Task<Dictionary<Guid, SalesLinkedProjectUnitContextDto>> GetProjectUnitContextsBySalesOrderIdsAsync(
+        IEnumerable<Guid> salesOrderIds,
+        Guid? tenantId)
+    {
+        var distinctIds = salesOrderIds.Distinct().ToList();
+        if (distinctIds.Count == 0 || !tenantId.HasValue)
+        {
+            return new Dictionary<Guid, SalesLinkedProjectUnitContextDto>();
+        }
+
+        var projectUnitRepository = _unitOfWork.Repository<ProjectUnit>();
+        if (projectUnitRepository == null)
+        {
+            return new Dictionary<Guid, SalesLinkedProjectUnitContextDto>();
+        }
+
+        var linkedUnits = await projectUnitRepository.GetQueryable()
+            .Include(unit => unit.Project)
+            .Include(unit => unit.SalesAgreement)
+            .Include(unit => unit.SalesOrder)
+            .Where(unit =>
+                unit.TenantId == tenantId.Value
+                && unit.SalesOrderId.HasValue
+                && distinctIds.Contains(unit.SalesOrderId.Value)
+                && !unit.IsDeleted)
+            .ToListAsync();
+
+        return linkedUnits
+            .GroupBy(unit => unit.SalesOrderId!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => ProjectUnitPresentationRules.BuildSalesLinkedProjectUnitContext(group.First()));
+    }
+
+    private SalesOrderSummaryDto MapToSummaryDto(SalesOrder so, SalesLinkedProjectUnitContextDto? projectUnitContext = null) => new()
     {
         Id = so.Id,
         DocumentNumber = so.DocumentNumber,
@@ -672,10 +826,11 @@ public class SalesOrderService : ISalesOrderService
         ApprovalStatus = so.ApprovalStatus,
         LineCount = so.Lines?.Count ?? 0,
         PropertyReference = so.PropertyReference,
-        PropertyType = so.PropertyType
+        PropertyType = so.PropertyType,
+        ProjectUnitContext = projectUnitContext
     };
 
-    private SalesOrderDetailDto MapToDetailDto(SalesOrder so) => new()
+    private SalesOrderDetailDto MapToDetailDto(SalesOrder so, SalesLinkedProjectUnitContextDto? projectUnitContext = null) => new()
     {
         Id = so.Id,
         DocumentNumber = so.DocumentNumber,
@@ -783,7 +938,8 @@ public class SalesOrderService : ISalesOrderService
             CarrierName = d.CarrierName,
             TrackingNumber = d.TrackingNumber,
             LineCount = d.Lines?.Count ?? 0
-        }).ToList() ?? new()
+        }).ToList() ?? new(),
+        ProjectUnitContext = projectUnitContext
     };
 
     #endregion

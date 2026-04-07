@@ -18,7 +18,7 @@ namespace ErpSystem.Core.Interfaces
 
         #region Transaction Processing
         Task<JournalEntry> PostJournalEntryAsync(CreateJournalEntryDto entryDto);
-        Task<decimal> GetAccountBalanceAsync(Guid accountId, string currencyCode);
+        Task<decimal> GetAccountBalanceAsync(Guid accountId, string? currencyCode);
         Task<string> GenerateJournalEntryNumberAsync(CancellationToken cancellationToken = default);
         #endregion
 

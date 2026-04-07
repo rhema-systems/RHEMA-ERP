@@ -17,13 +17,13 @@ public class JwtBlacklistMiddleware
     public async Task InvokeAsync(HttpContext context, IJwtBlacklistService jwtBlacklistService)
     {
         var requestPath = context.Request.Path;
-        _logger.LogInformation("🔍 JWT Blacklist Middleware processing request: {Path}", requestPath);
+        _logger.LogDebug("JWT blacklist middleware processing request: {Path}", requestPath);
 
         // Only check JWT tokens for authenticated endpoints
         if (context.Request.Headers.TryGetValue("Authorization", out Microsoft.Extensions.Primitives.StringValues value))
         {
             var authHeader = value.FirstOrDefault();
-            _logger.LogInformation("🔍 Found Authorization header: {Header}", authHeader?.Substring(0, Math.Min(20, authHeader?.Length ?? 0)) + "...");
+            _logger.LogDebug("Found Authorization header for request: {Path}", requestPath);
 
             if (authHeader?.StartsWith("Bearer ") == true)
             {
@@ -57,25 +57,21 @@ public class JwtBlacklistMiddleware
                             var jsonToken = tokenHandler.ReadJwtToken(jwt);
                             var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
 
-                            _logger.LogInformation("🔍 Extracted JTI from token: {Jti}", jti);
+                            _logger.LogDebug("Extracted JTI from token: {Jti}", jti);
 
                             if (!string.IsNullOrEmpty(jti))
                             {
-                                _logger.LogInformation("🔍 Checking if JTI {Jti} is blacklisted...", jti);
+                                _logger.LogDebug("Checking blacklist status for JTI {Jti}", jti);
                                 var isBlacklisted = await jwtBlacklistService.IsTokenBlacklistedAsync(jti);
-                                _logger.LogInformation("🔍 JTI {Jti} blacklist status: {IsBlacklisted}", jti, isBlacklisted);
+                                _logger.LogDebug("JTI {Jti} blacklist status: {IsBlacklisted}", jti, isBlacklisted);
 
                                 if (isBlacklisted)
                                 {
-                                    _logger.LogWarning("🚫 BLOCKED REQUEST: Blacklisted JWT token (JTI: {Jti}) for path: {Path}", jti, requestPath);
+                                    _logger.LogWarning("Blocked request with blacklisted JWT token {Jti} for path {Path}", jti, requestPath);
                                     context.Response.StatusCode = 401;
                                     context.Response.ContentType = "application/json";
                                     await context.Response.WriteAsync("{\"error\": \"Token has been revoked\", \"code\": \"TOKEN_BLACKLISTED\"}");
                                     return;
-                                }
-                                else
-                                {
-                                    _logger.LogInformation("✅ Token {Jti} is valid, continuing request to {Path}", jti, requestPath);
                                 }
                             }
                             else

@@ -47,7 +47,7 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         [Required]
         [StringLength(3)]
-        public string CurrencyCode { get; set; } = "GHS";
+        public string CurrencyCode { get; set; } = string.Empty;
 
         /// <summary>
         /// Whether generated accounts should support multi-currency

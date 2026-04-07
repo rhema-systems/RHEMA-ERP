@@ -18,17 +18,20 @@ namespace ErpSystem.Api.Services.Finance.GL
     {
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly IJournalEntryService _journalEntryService;
         private readonly ILogger<SubledgerPostingService> _logger;
 
         public SubledgerPostingService(
             ApplicationDbContext context,
             ICurrentUserService currentUserService,
+            ITenantSettingsService tenantSettingsService,
             IJournalEntryService journalEntryService,
             ILogger<SubledgerPostingService> logger)
         {
             _context = context;
             _currentUserService = currentUserService;
+            _tenantSettingsService = tenantSettingsService;
             _journalEntryService = journalEntryService;
             _logger = logger;
         }
@@ -226,6 +229,11 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (invoice == null) throw new ArgumentException($"AR Invoice {invoiceId} not found.");
 
             var settings = await GetSettingsAsync(cancellationToken);
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            var invoiceCurrencyCode = string.IsNullOrWhiteSpace(invoice.CurrencyCode)
+                ? baseCurrencyCode
+                : invoice.CurrencyCode.Trim().ToUpperInvariant();
+            var invoiceExchangeRate = invoice.ExchangeRate <= 0 ? 1m : invoice.ExchangeRate;
             
             var arAccountId = settings.ControlAccountArId; // Or BusinessPartner.DefaultArAccountId
             if (arAccountId == null) throw new InvalidOperationException("AR Control Account not configured.");
@@ -238,8 +246,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     Description = $"AR Invoice {invoice.InvoiceNumber}",
                     TransactionType = "Debit",
                     Amount = invoice.TotalAmount,
-                    CurrencyCode = "USD", // Example
-                    ExchangeRate = 1m,
+                    CurrencyCode = invoiceCurrencyCode,
+                    ExchangeRate = invoiceExchangeRate,
                     ForeignAmount = invoice.TotalAmount
                 }
             };
@@ -261,8 +269,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                             Description = $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
                             TransactionType = "Credit",
                             Amount = lineAmount,
-                            CurrencyCode = "USD",
-                            ExchangeRate = 1m,
+                            CurrencyCode = invoiceCurrencyCode,
+                            ExchangeRate = invoiceExchangeRate,
                             ForeignAmount = lineAmount
                         });
                     }
@@ -280,8 +288,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                             Description = $"COGS - {invoice.InvoiceNumber} - {line.Description}",
                             TransactionType = "Debit",
                             Amount = costAmount,
-                            CurrencyCode = "USD",
-                            ExchangeRate = 1m,
+                            CurrencyCode = invoiceCurrencyCode,
+                            ExchangeRate = invoiceExchangeRate,
                             ForeignAmount = costAmount
                         });
 
@@ -291,8 +299,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                             Description = $"Inventory Issue - {invoice.InvoiceNumber} - {line.Description}",
                             TransactionType = "Credit",
                             Amount = costAmount,
-                            CurrencyCode = "USD",
-                            ExchangeRate = 1m,
+                            CurrencyCode = invoiceCurrencyCode,
+                            ExchangeRate = invoiceExchangeRate,
                             ForeignAmount = costAmount
                         });
                     }
@@ -308,8 +316,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         Description = $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
                         TransactionType = "Credit",
                         Amount = lineAmount,
-                        CurrencyCode = "USD",
-                        ExchangeRate = 1m,
+                        CurrencyCode = invoiceCurrencyCode,
+                        ExchangeRate = invoiceExchangeRate,
                         ForeignAmount = lineAmount
                     });
                 }
@@ -326,8 +334,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     Description = $"Output Tax - {invoice.InvoiceNumber}",
                     TransactionType = "Credit",
                     Amount = invoice.TaxAmount,
-                    CurrencyCode = "USD",
-                    ExchangeRate = 1m,
+                    CurrencyCode = invoiceCurrencyCode,
+                    ExchangeRate = invoiceExchangeRate,
                     ForeignAmount = invoice.TaxAmount
                 });
             }

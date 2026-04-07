@@ -22,17 +22,20 @@ namespace ErpSystem.Api.Services.Finance.AP
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
+        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<VendorPaymentService> _logger;
         private readonly ISubledgerPostingService _subledgerPostingService;
 
         public VendorPaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            ITenantSettingsService tenantSettingsService,
             ISubledgerPostingService subledgerPostingService,
             ILogger<VendorPaymentService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _tenantSettingsService = tenantSettingsService;
             _subledgerPostingService = subledgerPostingService;
             _logger = logger;
         }
@@ -136,6 +139,10 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            var paymentCurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode)
+                ? baseCurrencyCode
+                : dto.CurrencyCode.Trim().ToUpperInvariant();
 
             // Calculate WHT
             decimal whtAmount = 0;
@@ -154,7 +161,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TotalAmount = dto.TotalAmount,
                 AllocatedAmount = 0,
                 PaymentMethod = dto.PaymentMethod,
-                CurrencyCode = dto.CurrencyCode,
+                CurrencyCode = paymentCurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
                 BankAccountId = dto.BankAccountId,
                 ChequeNumber = dto.ChequeNumber,
@@ -597,6 +604,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var bySupplier = invoices.GroupBy(i => i.SupplierId);
             decimal totalAmount = 0;
             int paymentCount = 0;
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             foreach (var group in bySupplier)
             {
@@ -614,7 +622,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     TotalAmount = supplierTotal,
                     AllocatedAmount = 0,
                     PaymentMethod = dto.PaymentMethod,
-                    CurrencyCode = "USD",
+                    CurrencyCode = group
+                        .Select(i => i.CurrencyCode)
+                        .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code))?
+                        .Trim()
+                        .ToUpperInvariant() ?? baseCurrencyCode,
                     ExchangeRate = 1.0m,
                     BankAccountId = dto.BankAccountId,
                     PaymentBatchId = batch.Id,

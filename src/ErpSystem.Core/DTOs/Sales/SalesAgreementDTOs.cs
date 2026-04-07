@@ -4,6 +4,22 @@ namespace ErpSystem.Core.DTOs.Sales;
 
 #region Summary & Detail
 
+public class SalesLinkedProjectUnitContextDto
+{
+    public Guid ProjectId { get; set; }
+    public string ProjectCode { get; set; } = string.Empty;
+    public string ProjectTitle { get; set; } = string.Empty;
+    public Guid ProjectUnitId { get; set; }
+    public string? ProjectUnitCode { get; set; }
+    public string ProjectUnitName { get; set; } = string.Empty;
+    public string ProjectUnitType { get; set; } = string.Empty;
+    public string ProjectUnitStatus { get; set; } = string.Empty;
+    public string ProjectUnitCommercialStatus { get; set; } = string.Empty;
+    public string ProjectUnitHandoverStatus { get; set; } = string.Empty;
+    public bool IsReleasedForMarket { get; set; }
+    public DateTime? HandoverDate { get; set; }
+}
+
 public class SalesAgreementSummaryDto
 {
     public Guid Id { get; set; }
@@ -24,6 +40,7 @@ public class SalesAgreementSummaryDto
     public int CompletedMilestones { get; set; }
     public int TotalMilestones { get; set; }
     public DateTime CreatedAt { get; set; }
+    public SalesLinkedProjectUnitContextDto? ProjectUnitContext { get; set; }
 }
 
 public class SalesAgreementDetailDto
@@ -81,6 +98,7 @@ public class SalesAgreementDetailDto
     public List<SalesAgreementMilestoneDto> Milestones { get; set; } = new();
     public List<SalesAgreementRenewalDto> Renewals { get; set; } = new();
     public List<SalesAgreementDocumentDto> Documents { get; set; } = new();
+    public SalesLinkedProjectUnitContextDto? ProjectUnitContext { get; set; }
 
     // Audit
     public DateTime CreatedAt { get; set; }

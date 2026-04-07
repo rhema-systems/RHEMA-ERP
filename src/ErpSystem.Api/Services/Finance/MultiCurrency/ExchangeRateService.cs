@@ -16,15 +16,18 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<ExchangeRateService> _logger;
 
         public ExchangeRateService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
+            ITenantSettingsService tenantSettingsService,
             ILogger<ExchangeRateService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
+            _tenantSettingsService = tenantSettingsService;
             _logger = logger;
         }
 
@@ -78,9 +81,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         {
             if (string.IsNullOrEmpty(baseCurrencyCode))
             {
-                var settings = await _unitOfWork.Repository<FinanceSettings>()
-                    .FirstOrDefaultAsync(s => s.TenantId == TenantId);
-                baseCurrencyCode = settings?.BaseCurrency ?? "GHS";
+                baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
             }
 
             var date = effectiveDate?.Date ?? DateTime.UtcNow.Date;

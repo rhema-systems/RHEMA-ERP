@@ -21,15 +21,18 @@ namespace ErpSystem.Api.Services.Finance.AP
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
+        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<ApReportsService> _logger;
 
         public ApReportsService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            ITenantSettingsService tenantSettingsService,
             ILogger<ApReportsService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _tenantSettingsService = tenantSettingsService;
             _logger = logger;
         }
 
@@ -43,6 +46,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default)
         {
             var date = asOfDate ?? DateTime.UtcNow;
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             var queryable = _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
@@ -59,7 +63,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var report = new ApAgingReportDto
             {
                 AsOfDate = date,
-                CurrencyCode = "USD"
+                CurrencyCode = baseCurrencyCode
             };
 
             // Group by supplier
@@ -169,6 +173,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var now = asOfDate ?? DateTime.UtcNow;
             var today = now.Date;
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             var invoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
@@ -182,7 +187,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var forecast = new CashRequirementForecastDto
             {
                 AsOfDate = today,
-                CurrencyCode = "USD",
+                CurrencyCode = baseCurrencyCode,
                 TotalPayable = invoices.Sum(i => i.TotalAmount - i.PaidAmount)
             };
 
@@ -242,6 +247,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var supplier = await _unitOfWork.Repository<Supplier>()
                 .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.Id == supplierId);
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             if (supplier == null)
                 throw new KeyNotFoundException($"Supplier with Id '{supplierId}' not found.");
@@ -253,7 +259,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 SupplierCode = supplier.SupplierCode,
                 FromDate = fromDate,
                 ToDate = toDate,
-                CurrencyCode = "USD"
+                CurrencyCode = baseCurrencyCode
             };
 
             // Calculate opening balance — sum of unpaid invoices before fromDate
@@ -365,12 +371,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                     p.WithholdingTaxAmount > 0)
                 .Include(p => p.Supplier)
                 .ToListAsync(cancellationToken);
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             var summary = new WithholdingTaxSummaryDto
             {
                 FromDate = fromDate,
                 ToDate = toDate,
-                CurrencyCode = "USD",
+                CurrencyCode = baseCurrencyCode,
                 TotalWithheld = payments.Sum(p => p.WithholdingTaxAmount),
                 TransactionCount = payments.Count,
                 SupplierCount = payments.Select(p => p.SupplierId).Distinct().Count()

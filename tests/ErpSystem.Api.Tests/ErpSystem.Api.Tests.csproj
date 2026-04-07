@@ -33,6 +33,7 @@
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
+    <Compile Include="Services\TenantSettingsServiceTests.cs" />
   </ItemGroup>
 
 </Project>

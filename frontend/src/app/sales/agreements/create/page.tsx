@@ -10,12 +10,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, Plus, Save, Trash2, FileText, Calendar, DollarSign, MapPin, Milestone } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Trash2, FileText, DollarSign, MapPin, Milestone, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   salesAgreementService, type CreateSalesAgreementDto,
   type CreateSalesAgreementLineDto, type CreateSalesAgreementMilestoneDto
 } from '@/services/salesAgreementService';
+import { projectService, type ProjectReleasedUnitSalesLookupDto } from '@/services/projectService';
 import apiService from '@/services/api.service';
 
 interface CustomerOption {
@@ -24,9 +25,25 @@ interface CustomerOption {
   partnerCode: string;
 }
 
+interface LinkedProjectContext {
+  projectId: string;
+  projectCode?: string;
+  projectTitle?: string;
+  projectUnitId?: string;
+  projectUnitCode?: string;
+  projectUnitName?: string;
+}
+
+type AgreementQuickStartIntent = 'agreement' | 'lease';
+
 export default function CreateSalesAgreementPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [linkedProjectContext, setLinkedProjectContext] = useState<LinkedProjectContext | null>(null);
+  const [releasedUnits, setReleasedUnits] = useState<ProjectReleasedUnitSalesLookupDto[]>([]);
+  const [releasedUnitsLoading, setReleasedUnitsLoading] = useState(false);
+  const [releasedUnitsSearch, setReleasedUnitsSearch] = useState('');
+  const [selectedReleasedUnitId, setSelectedReleasedUnitId] = useState('');
 
   // Customer search
   const [customerSearch, setCustomerSearch] = useState('');
@@ -79,6 +96,104 @@ export default function CreateSalesAgreementPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [customerSearch]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    const projectCode = params.get('projectCode') || undefined;
+    const projectTitle = params.get('projectTitle') || undefined;
+    const projectUnitId = params.get('projectUnitId') || undefined;
+    const projectUnitCode = params.get('projectUnitCode') || undefined;
+    const projectUnitName = params.get('projectUnitName') || undefined;
+    const customerId = params.get('customerId');
+    const customerName = params.get('customerName');
+    const propertyReference = params.get('propertyReference');
+    const agreementType = params.get('agreementType');
+
+    if (projectId) {
+      setLinkedProjectContext({
+        projectId,
+        projectCode,
+        projectTitle,
+        projectUnitId,
+        projectUnitCode,
+        projectUnitName,
+      });
+    }
+
+    setForm((current) => ({
+      ...current,
+      businessPartnerId: customerId || current.businessPartnerId,
+      customerName: customerName || current.customerName,
+      agreementType: agreementType || current.agreementType,
+      propertyReference: propertyReference || current.propertyReference,
+    }));
+
+    if (customerName) {
+      setCustomerSearch(customerName);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (linkedProjectContext) {
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setReleasedUnitsLoading(true);
+        const items = await projectService.getReleasedProjectUnitsForSales(releasedUnitsSearch, 50);
+        setReleasedUnits(items.filter((item) => item.canCreateSalesAgreement || item.canCreateLeaseAgreement));
+      } catch {
+        setReleasedUnits([]);
+      } finally {
+        setReleasedUnitsLoading(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [linkedProjectContext, releasedUnitsSearch]);
+
+  const selectedReleasedUnit = releasedUnits.find((item) => item.projectUnitId === selectedReleasedUnitId);
+
+  const applyReleasedUnit = (unit: ProjectReleasedUnitSalesLookupDto, intent: AgreementQuickStartIntent) => {
+    const isLeaseIntent = intent === 'lease';
+    setLinkedProjectContext({
+      projectId: unit.projectId,
+      projectCode: unit.projectCode,
+      projectTitle: unit.projectTitle,
+      projectUnitId: unit.projectUnitId,
+      projectUnitCode: unit.projectUnitCode,
+      projectUnitName: unit.projectUnitName,
+    });
+    setForm((current) => ({
+      ...current,
+      businessPartnerId: unit.customerBusinessPartnerId || current.businessPartnerId,
+      customerName: unit.customerBusinessPartnerName || current.customerName,
+      propertyReference: unit.propertyReference || current.propertyReference,
+      propertyType: unit.suggestedPropertyType || current.propertyType,
+      propertyDescription: unit.suggestedPropertyDescription || current.propertyDescription,
+      propertyLocation: unit.suggestedPropertyLocation || current.propertyLocation,
+      agreedValue: unit.basePrice ?? current.agreedValue,
+      minimumCommitment: unit.basePrice ?? current.minimumCommitment,
+      maximumCommitment: unit.basePrice ?? current.maximumCommitment,
+      currency: unit.currency || current.currency,
+      agreementType: isLeaseIntent
+        ? unit.suggestedLeaseAgreementType || current.agreementType
+        : unit.suggestedAgreementType || current.agreementType,
+      agreementTitle: current.agreementTitle || (isLeaseIntent
+        ? unit.suggestedLeaseAgreementTitle || `${unit.projectTitle} - ${unit.projectUnitName} Lease`
+        : unit.suggestedAgreementTitle || `${unit.projectTitle} - ${unit.projectUnitName} Agreement`),
+    }));
+    if (unit.customerBusinessPartnerName) {
+      setCustomerSearch(unit.customerBusinessPartnerName);
+    }
+    setSelectedReleasedUnitId(unit.projectUnitId);
+  };
 
   const selectCustomer = (c: CustomerOption) => {
     setForm({ ...form, businessPartnerId: c.id, customerName: c.companyName });
@@ -137,6 +252,13 @@ export default function CreateSalesAgreementPage() {
       };
 
       const result = await salesAgreementService.createAgreement(data);
+      if (linkedProjectContext?.projectUnitId) {
+        try {
+          await projectService.linkSalesAgreementToProjectUnit(linkedProjectContext.projectUnitId, result.id);
+        } catch (linkError: any) {
+          toast.warning(linkError?.message || 'Agreement created, but the project unit could not be linked automatically.');
+        }
+      }
       toast.success('Agreement created successfully');
       router.push(`/sales/agreements/${result.id}`);
     } catch (error: any) {
@@ -161,6 +283,99 @@ export default function CreateSalesAgreementPage() {
         </div>
         <Button onClick={handleSubmit} disabled={loading}><Save className="h-4 w-4 mr-2" />{loading ? 'Saving...' : 'Save Draft'}</Button>
       </div>
+
+      {linkedProjectContext && (
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
+              <Building2 className="h-4 w-4" />
+              Creating Agreement For Project-Linked Unit
+            </div>
+            <div className="mt-2 text-sm text-slate-700">
+              <p className="font-semibold">
+                {linkedProjectContext.projectCode}
+                {linkedProjectContext.projectTitle ? ` • ${linkedProjectContext.projectTitle}` : ''}
+              </p>
+              <p>
+                {linkedProjectContext.projectUnitCode || linkedProjectContext.projectUnitName || 'Linked project unit'}
+                {linkedProjectContext.projectUnitCode && linkedProjectContext.projectUnitName
+                  ? ` • ${linkedProjectContext.projectUnitName}`
+                  : ''}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!linkedProjectContext && (
+        <Card className="border-dashed border-blue-200">
+          <CardHeader>
+            <CardTitle className="text-base">Start From Released Project Unit</CardTitle>
+            <CardDescription>Pick a released unit to prefill customer and property context before drafting the agreement.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+              <Input
+                placeholder="Search by project code, title, unit, or customer..."
+                value={releasedUnitsSearch}
+                onChange={(event) => setReleasedUnitsSearch(event.target.value)}
+              />
+              <Select value={selectedReleasedUnitId || 'none'} onValueChange={(value) => setSelectedReleasedUnitId(value === 'none' ? '' : value)}>
+                <SelectTrigger><SelectValue placeholder="Select released unit" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select released unit</SelectItem>
+                  {releasedUnits.map((unit) => (
+                    <SelectItem key={unit.projectUnitId} value={unit.projectUnitId}>
+                      {unit.projectCode} - {unit.projectUnitCode || unit.projectUnitName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {releasedUnitsLoading ? (
+              <p className="text-sm text-muted-foreground">Loading released units...</p>
+            ) : null}
+            {!releasedUnitsLoading && releasedUnits.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No released project units are currently ready for agreement handoff.</p>
+            ) : null}
+            {selectedReleasedUnit ? (
+              <div className="rounded-lg border bg-slate-50 p-4 text-sm text-slate-700">
+                <div className="font-semibold text-slate-900">
+                  {selectedReleasedUnit.projectCode}
+                  {selectedReleasedUnit.projectTitle ? ` • ${selectedReleasedUnit.projectTitle}` : ''}
+                </div>
+                <div className="mt-1">
+                  {selectedReleasedUnit.projectUnitCode || selectedReleasedUnit.projectUnitName}
+                  {selectedReleasedUnit.projectUnitCode && selectedReleasedUnit.projectUnitName
+                    ? ` • ${selectedReleasedUnit.projectUnitName}`
+                    : ''}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {selectedReleasedUnit.customerBusinessPartnerName || 'No customer assigned'}
+                  {selectedReleasedUnit.basePrice != null ? ` • ${selectedReleasedUnit.currency} ${selectedReleasedUnit.basePrice.toLocaleString()}` : ''}
+                  {selectedReleasedUnit.suggestedLeaseAgreementType ? ` • Lease form: ${selectedReleasedUnit.suggestedLeaseAgreementType}` : ''}
+                </div>
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateSalesAgreement}
+                onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit, 'agreement')}
+              >
+                Use For Agreement
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateLeaseAgreement}
+                onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit, 'lease')}
+              >
+                Use For {selectedReleasedUnit?.suggestedLeaseAgreementType || 'Lease'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Customer & Type */}
       <Card>

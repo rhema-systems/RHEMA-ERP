@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   ShoppingCart, ArrowLeft, CheckCircle, XCircle, Send, Pause, Play,
-  Lock, Truck, Clock, FileText, AlertTriangle, Printer
+  Lock, Truck, Clock, FileText, AlertTriangle, Printer, Building2, Home
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { salesOrderService, type SalesOrderDetailDto } from '@/services/salesOrderService';
@@ -128,6 +128,7 @@ export default function SalesOrderDetailPage() {
 
   const formatCurrency = (amount: number) =>
     `${order?.currency || 'GHS'} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  const formatLabel = (value?: string) => value ? value.replace(/([A-Z])/g, ' $1').trim() : '-';
 
   const getStatusBadge = (status: string) => {
     const c = STATUS_CONFIG[status] || { variant: 'outline' as const, className: '' };
@@ -276,6 +277,64 @@ export default function SalesOrderDetailPage() {
           )}
         </div>
       </div>
+
+      {order.projectUnitContext && (
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardContent className="flex flex-col gap-4 pt-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+                <Building2 className="h-4 w-4" />
+                Project-Linked Unit
+              </div>
+              <div>
+                <p className="text-base font-semibold text-slate-900">
+                  {order.projectUnitContext.projectCode}
+                  {order.projectUnitContext.projectTitle ? ` • ${order.projectUnitContext.projectTitle}` : ''}
+                </p>
+                <p className="text-sm text-slate-600">
+                  {order.projectUnitContext.projectUnitCode || order.projectUnitContext.projectUnitName}
+                  {order.projectUnitContext.projectUnitCode && order.projectUnitContext.projectUnitName
+                    ? ` • ${order.projectUnitContext.projectUnitName}`
+                    : ''}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">{formatLabel(order.projectUnitContext.projectUnitType)}</Badge>
+                <Badge variant="outline">{formatLabel(order.projectUnitContext.projectUnitStatus)}</Badge>
+                <Badge variant="secondary">{formatLabel(order.projectUnitContext.projectUnitCommercialStatus)}</Badge>
+                <Badge variant="outline">{formatLabel(order.projectUnitContext.projectUnitHandoverStatus)}</Badge>
+              </div>
+              <div className="grid gap-3 text-sm text-slate-600 md:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Market Release</p>
+                  <p className="font-medium text-slate-900">{order.projectUnitContext.isReleasedForMarket ? 'Released' : 'Not Released'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Handover</p>
+                  <p className="font-medium text-slate-900">{formatDate(order.projectUnitContext.handoverDate)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Unit Name</p>
+                  <p className="font-medium text-slate-900">{order.projectUnitContext.projectUnitName}</p>
+                </div>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              className="w-full lg:w-auto"
+              onClick={() => {
+                const projectId = order.projectUnitContext?.projectId;
+                if (projectId) {
+                  router.push(`/development/projects/${projectId}/units`);
+                }
+              }}
+            >
+              <Home className="mr-2 h-4 w-4" />
+              Open Project Unit
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Order Details */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

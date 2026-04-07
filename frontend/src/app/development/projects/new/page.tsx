@@ -28,6 +28,11 @@ import { toast } from 'sonner';
 
 const DEFAULT_METHODOLOGIES = ['Waterfall', 'Agile', 'Hybrid', 'Program', 'Internal'];
 const DEFAULT_FUNDING_SOURCES = ['Customer Contract', 'Internal Budget', 'Capex Allocation', 'Grant Funding', 'Department Allocation'];
+const DELIVERY_STRUCTURES = ['WholeDevelopment', 'SingleUnit', 'MultiUnit'];
+const DEVELOPMENT_TYPES = ['Residential', 'Commercial', 'Industrial', 'MixedUse', 'Hospitality', 'Institutional', 'Infrastructure', 'Renovation'];
+const PROCUREMENT_ROUTES = ['Traditional', 'DesignBuild', 'ConstructionManagement', 'DirectLabour', 'Negotiated', 'FrameworkCallOff'];
+const CONTRACT_STRATEGIES = ['LumpSum', 'MeasuredWorks', 'CostPlus', 'TargetCost', 'ManagementContract', 'SubcontractPackages'];
+const HANDOVER_STRATEGIES = ['SingleHandover', 'PhasedHandover', 'UnitByUnitHandover', 'ShellAndCore', 'Turnkey'];
 
 const formatCatalogLabel = (value: string) =>
   value
@@ -65,6 +70,9 @@ const initialForm: CreateProjectDto = {
   startDate: '',
   targetEndDate: '',
   approvalRequired: true,
+  developmentProfile: {
+    deliveryStructure: 'WholeDevelopment',
+  },
 };
 
 export default function NewProjectPage() {
@@ -147,6 +155,17 @@ export default function NewProjectPage() {
 
     loadPrograms();
   }, [form.portfolioId]);
+
+  const updateDevelopmentProfile = (updates: Partial<NonNullable<CreateProjectDto['developmentProfile']>>) => {
+    setForm((prev) => ({
+      ...prev,
+      developmentProfile: {
+        deliveryStructure: prev.developmentProfile?.deliveryStructure || 'WholeDevelopment',
+        ...prev.developmentProfile,
+        ...updates,
+      },
+    }));
+  };
 
   const saveProject = async () => {
     try {
@@ -255,6 +274,59 @@ export default function NewProjectPage() {
             </Select>
           </div>
           <div className="grid gap-2">
+            <Label>Delivery Structure</Label>
+            <Select value={form.developmentProfile?.deliveryStructure || 'WholeDevelopment'} onValueChange={(value) => updateDevelopmentProfile({ deliveryStructure: value })}>
+              <SelectTrigger><SelectValue placeholder="Select delivery structure" /></SelectTrigger>
+              <SelectContent>
+                {DELIVERY_STRUCTURES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>Development Type</Label>
+            <Select value={form.developmentProfile?.developmentType || 'none'} onValueChange={(value) => updateDevelopmentProfile({ developmentType: value === 'none' ? undefined : value })}>
+              <SelectTrigger><SelectValue placeholder="Select development type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No development type</SelectItem>
+                {DEVELOPMENT_TYPES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="site-name">Site Name</Label>
+            <Input id="site-name" value={form.developmentProfile?.siteName || ''} onChange={(e) => updateDevelopmentProfile({ siteName: e.target.value || undefined })} />
+          </div>
+          <div className="grid gap-2">
+            <Label>Procurement Route</Label>
+            <Select value={form.developmentProfile?.procurementRoute || 'none'} onValueChange={(value) => updateDevelopmentProfile({ procurementRoute: value === 'none' ? undefined : value })}>
+              <SelectTrigger><SelectValue placeholder="Select procurement route" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No procurement route</SelectItem>
+                {PROCUREMENT_ROUTES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>Contract Strategy</Label>
+            <Select value={form.developmentProfile?.contractStrategy || 'none'} onValueChange={(value) => updateDevelopmentProfile({ contractStrategy: value === 'none' ? undefined : value })}>
+              <SelectTrigger><SelectValue placeholder="Select contract strategy" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No contract strategy</SelectItem>
+                {CONTRACT_STRATEGIES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>Handover Strategy</Label>
+            <Select value={form.developmentProfile?.handoverStrategy || 'none'} onValueChange={(value) => updateDevelopmentProfile({ handoverStrategy: value === 'none' ? undefined : value })}>
+              <SelectTrigger><SelectValue placeholder="Select handover strategy" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No handover strategy</SelectItem>
+                {HANDOVER_STRATEGIES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
             <Label htmlFor="start-date">Start Date</Label>
             <Input id="start-date" type="date" value={form.startDate || ''} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value || undefined }))} />
           </div>
@@ -333,8 +405,28 @@ export default function NewProjectPage() {
             <Textarea id="scope" rows={3} value={form.scopeStatement || ''} onChange={(e) => setForm((prev) => ({ ...prev, scopeStatement: e.target.value }))} />
           </div>
           <div className="grid gap-2 md:col-span-2">
+            <Label htmlFor="site-address">Site Address</Label>
+            <Textarea id="site-address" rows={2} value={form.developmentProfile?.siteAddress || ''} onChange={(e) => updateDevelopmentProfile({ siteAddress: e.target.value || undefined })} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="land-reference">Land Reference</Label>
+            <Input id="land-reference" value={form.developmentProfile?.landReference || ''} onChange={(e) => updateDevelopmentProfile({ landReference: e.target.value || undefined })} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="funding-arrangement">Funding Arrangement</Label>
+            <Input id="funding-arrangement" value={form.developmentProfile?.fundingArrangement || ''} onChange={(e) => updateDevelopmentProfile({ fundingArrangement: e.target.value || undefined })} />
+          </div>
+          <div className="grid gap-2 md:col-span-2">
             <Label htmlFor="benefits">Expected Benefits</Label>
             <Textarea id="benefits" rows={3} value={form.expectedBenefits || ''} onChange={(e) => setForm((prev) => ({ ...prev, expectedBenefits: e.target.value }))} />
+          </div>
+          <div className="grid gap-2 md:col-span-2">
+            <Label htmlFor="consultant-team">Consultant Team</Label>
+            <Textarea id="consultant-team" rows={2} value={form.developmentProfile?.consultantTeam || ''} onChange={(e) => updateDevelopmentProfile({ consultantTeam: e.target.value || undefined })} />
+          </div>
+          <div className="grid gap-2 md:col-span-2">
+            <Label htmlFor="construction-notes">Construction Notes</Label>
+            <Textarea id="construction-notes" rows={3} value={form.developmentProfile?.notes || ''} onChange={(e) => updateDevelopmentProfile({ notes: e.target.value || undefined })} />
           </div>
           <div className="md:col-span-2 flex items-center justify-between rounded-md border p-4">
             <div>

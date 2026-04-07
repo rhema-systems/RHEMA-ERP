@@ -668,6 +668,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectProgram> ProjectPrograms { get; set; }
     public DbSet<ProjectManagementSettings> ProjectManagementSettings { get; set; }
     public DbSet<ProjectCatalogEntry> ProjectCatalogEntries { get; set; }
+    public DbSet<ProjectDevelopmentProfile> ProjectDevelopmentProfiles { get; set; }
+    public DbSet<ProjectPhase> ProjectPhases { get; set; }
+    public DbSet<ProjectPackage> ProjectPackages { get; set; }
+    public DbSet<ProjectBoqItem> ProjectBoqItems { get; set; }
+    public DbSet<ProjectApprovalRegisterItem> ProjectApprovalRegisterItems { get; set; }
+    public DbSet<ProjectUnit> ProjectUnits { get; set; }
+    public DbSet<ProjectCustomerVariation> ProjectCustomerVariations { get; set; }
+    public DbSet<ProjectCommissioningItem> ProjectCommissioningItems { get; set; }
+    public DbSet<ProjectHandoverItem> ProjectHandoverItems { get; set; }
+    public DbSet<ProjectSnagItem> ProjectSnagItems { get; set; }
+    public DbSet<ProjectDefectLiabilityCase> ProjectDefectLiabilityCases { get; set; }
     public DbSet<ProjectInitiationVersion> ProjectInitiationVersions { get; set; }
     public DbSet<ProjectMember> ProjectMembers { get; set; }
     public DbSet<ProjectWorkItem> ProjectWorkItems { get; set; }
@@ -1543,6 +1554,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectManagementSettingsConfiguration());
         builder.ApplyConfiguration(new ProjectCatalogEntryConfiguration());
         builder.ApplyConfiguration(new ProjectConfiguration());
+        builder.ApplyConfiguration(new ProjectDevelopmentProfileConfiguration());
+        builder.ApplyConfiguration(new ProjectPhaseConfiguration());
+        builder.ApplyConfiguration(new ProjectPackageConfiguration());
+        builder.ApplyConfiguration(new ProjectBoqItemConfiguration());
+        builder.ApplyConfiguration(new ProjectApprovalRegisterItemConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitConfiguration());
+        builder.ApplyConfiguration(new ProjectCustomerVariationConfiguration());
+        builder.ApplyConfiguration(new ProjectCommissioningItemConfiguration());
+        builder.ApplyConfiguration(new ProjectHandoverItemConfiguration());
+        builder.ApplyConfiguration(new ProjectSnagItemConfiguration());
+        builder.ApplyConfiguration(new ProjectDefectLiabilityCaseConfiguration());
         builder.ApplyConfiguration(new ProjectInitiationVersionConfiguration());
         builder.ApplyConfiguration(new ProjectMemberConfiguration());
         builder.ApplyConfiguration(new ProjectWorkItemConfiguration());

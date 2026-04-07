@@ -2,9 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Services.Projects;
 using ErpSystem.Data;
 
 namespace ErpSystem.Api.Services.Sales;
@@ -39,13 +41,15 @@ public class SalesAgreementService : ISalesAgreementService
             .FirstOrDefaultAsync(a => a.Id == id)
             ?? throw new KeyNotFoundException($"Sales Agreement {id} not found");
 
-        return MapToDetail(agreement);
+        var projectUnitContext = await GetProjectUnitContextAsync(agreement.Id, agreement.TenantId);
+        return MapToDetail(agreement, projectUnitContext);
     }
 
     public async Task<(List<SalesAgreementSummaryDto> Items, int TotalCount)> GetAllAsync(
         int page = 1, int pageSize = 20,
         string? search = null, string? status = null, string? agreementType = null,
-        Guid? customerId = null, DateTime? startDateFrom = null, DateTime? startDateTo = null)
+        Guid? customerId = null, DateTime? startDateFrom = null, DateTime? startDateTo = null,
+        bool projectLinkedOnly = false, bool releasedUnitsOnly = false)
     {
         var query = _context.Set<SalesAgreement>()
             .Include(a => a.BusinessPartner)
@@ -60,7 +64,16 @@ public class SalesAgreementService : ISalesAgreementService
                 a.DocumentNumber.ToLower().Contains(s) ||
                 a.AgreementTitle.ToLower().Contains(s) ||
                 a.CustomerName.ToLower().Contains(s) ||
-                (a.PropertyReference != null && a.PropertyReference.ToLower().Contains(s)));
+                (a.PropertyReference != null && a.PropertyReference.ToLower().Contains(s)) ||
+                _context.Set<ProjectUnit>().Any(unit =>
+                    unit.TenantId == a.TenantId
+                    && unit.SalesAgreementId == a.Id
+                    && !unit.IsDeleted
+                    && (
+                        (unit.Code != null && unit.Code.ToLower().Contains(s))
+                        || unit.Name.ToLower().Contains(s)
+                        || unit.Project.ProjectCode.ToLower().Contains(s)
+                        || unit.Project.Title.ToLower().Contains(s))));
         }
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<SalesAgreementStatus>(status, out var statusEnum))
@@ -78,35 +91,54 @@ public class SalesAgreementService : ISalesAgreementService
         if (startDateTo.HasValue)
             query = query.Where(a => a.StartDate <= startDateTo.Value);
 
+        if (projectLinkedOnly)
+            query = query.Where(a => _context.Set<ProjectUnit>().Any(unit =>
+                unit.TenantId == a.TenantId
+                && unit.SalesAgreementId == a.Id
+                && !unit.IsDeleted));
+
+        if (releasedUnitsOnly)
+            query = query.Where(a => _context.Set<ProjectUnit>().Any(unit =>
+                unit.TenantId == a.TenantId
+                && unit.SalesAgreementId == a.Id
+                && unit.IsReleasedForMarket
+                && !unit.IsDeleted));
+
         var totalCount = await query.CountAsync();
         var items = await query
             .OrderByDescending(a => a.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(a => new SalesAgreementSummaryDto
-            {
-                Id = a.Id,
-                DocumentNumber = a.DocumentNumber,
-                AgreementTitle = a.AgreementTitle,
-                CustomerName = a.CustomerName,
-                BusinessPartnerId = a.BusinessPartnerId,
-                AgreementType = a.AgreementType.ToString(),
-                AgreementStatus = a.AgreementStatus.ToString(),
-                StartDate = a.StartDate,
-                EndDate = a.EndDate,
-                AgreedValue = a.AgreedValue,
-                UtilizedValue = a.UtilizedValue,
-                Currency = a.Currency,
-                PropertyReference = a.PropertyReference,
-                SalesRepName = a.SalesRep != null ? a.SalesRep.FirstName + " " + a.SalesRep.LastName : null,
-                AutoRenew = a.AutoRenew,
-                CompletedMilestones = a.Milestones.Count(m => m.Status == "Completed" || m.Status == "Paid"),
-                TotalMilestones = a.Milestones.Count,
-                CreatedAt = a.CreatedAt
-            })
             .ToListAsync();
 
-        return (items, totalCount);
+        var projectUnitContextLookup = await GetProjectUnitContextsByAgreementIdsAsync(
+            items.Select(item => item.Id),
+            items.FirstOrDefault()?.TenantId);
+
+        var summaries = items.Select(item => new SalesAgreementSummaryDto
+        {
+            Id = item.Id,
+            DocumentNumber = item.DocumentNumber,
+            AgreementTitle = item.AgreementTitle,
+            CustomerName = item.CustomerName,
+            BusinessPartnerId = item.BusinessPartnerId,
+            AgreementType = item.AgreementType.ToString(),
+            AgreementStatus = item.AgreementStatus.ToString(),
+            StartDate = item.StartDate,
+            EndDate = item.EndDate,
+            AgreedValue = item.AgreedValue,
+            UtilizedValue = item.UtilizedValue,
+            Currency = item.Currency,
+            PropertyReference = item.PropertyReference,
+            SalesRepName = item.SalesRep != null ? item.SalesRep.FirstName + " " + item.SalesRep.LastName : null,
+            AutoRenew = item.AutoRenew,
+            CompletedMilestones = item.Milestones.Count(m => m.Status == "Completed" || m.Status == "Paid"),
+            TotalMilestones = item.Milestones.Count,
+            CreatedAt = item.CreatedAt,
+            ProjectUnitContext = projectUnitContextLookup.TryGetValue(item.Id, out var context) ? context : null
+        }).ToList();
+
+        return (summaries, totalCount);
     }
 
     public async Task<SalesAgreementDetailDto> CreateAsync(CreateSalesAgreementDto dto)
@@ -228,6 +260,7 @@ public class SalesAgreementService : ISalesAgreementService
         if (dto.InternalNotes != null) agreement.InternalNotes = dto.InternalNotes;
         if (dto.TermsAndConditions != null) agreement.TermsAndConditions = dto.TermsAndConditions;
 
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         return await GetByIdAsync(id);
     }
@@ -243,6 +276,7 @@ public class SalesAgreementService : ISalesAgreementService
             throw new InvalidOperationException("Only Draft agreements can be submitted for approval");
 
         agreement.AgreementStatus = SalesAgreementStatus.PendingApproval;
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         _logger.LogInformation("Sales Agreement {Number} submitted for approval", agreement.DocumentNumber);
 
@@ -271,6 +305,7 @@ public class SalesAgreementService : ISalesAgreementService
             _logger.LogInformation("Sales Agreement {Number} rejected", agreement.DocumentNumber);
         }
 
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         return await GetByIdAsync(id);
     }
@@ -285,6 +320,7 @@ public class SalesAgreementService : ISalesAgreementService
             throw new InvalidOperationException("Agreement cannot be activated from current status");
 
         agreement.AgreementStatus = SalesAgreementStatus.Active;
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         return await GetByIdAsync(id);
     }
@@ -299,6 +335,7 @@ public class SalesAgreementService : ISalesAgreementService
 
         agreement.AgreementStatus = SalesAgreementStatus.Suspended;
         if (reason != null) agreement.InternalNotes = $"{agreement.InternalNotes}\n[Suspended] {reason}".Trim();
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         _logger.LogInformation("Sales Agreement {Number} suspended", agreement.DocumentNumber);
 
@@ -314,6 +351,7 @@ public class SalesAgreementService : ISalesAgreementService
             throw new InvalidOperationException("Only Suspended agreements can be resumed");
 
         agreement.AgreementStatus = SalesAgreementStatus.Active;
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         _logger.LogInformation("Sales Agreement {Number} resumed", agreement.DocumentNumber);
 
@@ -332,6 +370,7 @@ public class SalesAgreementService : ISalesAgreementService
         agreement.AgreementStatus = SalesAgreementStatus.Terminated;
         agreement.TerminatedDate = DateTime.UtcNow;
         agreement.TerminationReason = dto.Reason;
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         _logger.LogInformation("Sales Agreement {Number} terminated: {Reason}", agreement.DocumentNumber, dto.Reason);
 
@@ -378,6 +417,7 @@ public class SalesAgreementService : ISalesAgreementService
         agreement.AgreementStatus = SalesAgreementStatus.Active;
         agreement.UtilizedValue = 0; // Reset utilization for new period
 
+        await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         _logger.LogInformation("Sales Agreement {Number} renewed to {EndDate}", agreement.DocumentNumber, dto.NewEndDate);
 
@@ -445,7 +485,92 @@ public class SalesAgreementService : ISalesAgreementService
         return $"SA-{year}-{(count + 1):D5}";
     }
 
-    private static SalesAgreementDetailDto MapToDetail(SalesAgreement a)
+    private async Task SyncLinkedProjectUnitsAsync(SalesAgreement agreement)
+    {
+        var linkedUnits = await _context.Set<ProjectUnit>()
+            .Where(unit => unit.TenantId == agreement.TenantId && unit.SalesAgreementId == agreement.Id && !unit.IsDeleted)
+            .ToListAsync();
+
+        if (linkedUnits.Count == 0)
+        {
+            return;
+        }
+
+        var linkedOrderIds = linkedUnits
+            .Where(unit => unit.SalesOrderId.HasValue)
+            .Select(unit => unit.SalesOrderId!.Value)
+            .Distinct()
+            .ToList();
+
+        var linkedOrders = linkedOrderIds.Count == 0
+            ? new Dictionary<Guid, SalesOrder>()
+            : await _context.Set<SalesOrder>()
+                .Where(order => order.TenantId == agreement.TenantId && linkedOrderIds.Contains(order.Id))
+                .ToDictionaryAsync(order => order.Id);
+
+        foreach (var unit in linkedUnits)
+        {
+            linkedOrders.TryGetValue(unit.SalesOrderId ?? Guid.Empty, out var linkedOrder);
+            var nextStatus = ProjectUnitSalesSyncRules.ResolveStatusFromAgreement(
+                unit.Status,
+                unit.IsReleasedForMarket,
+                agreement.AgreementType,
+                agreement.AgreementStatus,
+                linkedOrder?.OrderType,
+                linkedOrder?.OrderStatus);
+
+            if (!string.Equals(unit.Status, nextStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                unit.Status = nextStatus;
+            }
+        }
+    }
+
+    private async Task<SalesLinkedProjectUnitContextDto?> GetProjectUnitContextAsync(Guid salesAgreementId, Guid tenantId)
+    {
+        var linkedUnit = await _context.Set<ProjectUnit>()
+            .Include(unit => unit.Project)
+            .Include(unit => unit.SalesAgreement)
+            .Include(unit => unit.SalesOrder)
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId
+                && unit.SalesAgreementId == salesAgreementId
+                && !unit.IsDeleted);
+
+        return linkedUnit == null
+            ? null
+            : ProjectUnitPresentationRules.BuildSalesLinkedProjectUnitContext(linkedUnit);
+    }
+
+    private async Task<Dictionary<Guid, SalesLinkedProjectUnitContextDto>> GetProjectUnitContextsByAgreementIdsAsync(
+        IEnumerable<Guid> salesAgreementIds,
+        Guid? tenantId)
+    {
+        var distinctIds = salesAgreementIds.Distinct().ToList();
+        if (distinctIds.Count == 0 || !tenantId.HasValue)
+        {
+            return new Dictionary<Guid, SalesLinkedProjectUnitContextDto>();
+        }
+
+        var linkedUnits = await _context.Set<ProjectUnit>()
+            .Include(unit => unit.Project)
+            .Include(unit => unit.SalesAgreement)
+            .Include(unit => unit.SalesOrder)
+            .Where(unit =>
+                unit.TenantId == tenantId.Value
+                && unit.SalesAgreementId.HasValue
+                && distinctIds.Contains(unit.SalesAgreementId.Value)
+                && !unit.IsDeleted)
+            .ToListAsync();
+
+        return linkedUnits
+            .GroupBy(unit => unit.SalesAgreementId!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => ProjectUnitPresentationRules.BuildSalesLinkedProjectUnitContext(group.First()));
+    }
+
+    private static SalesAgreementDetailDto MapToDetail(SalesAgreement a, SalesLinkedProjectUnitContextDto? projectUnitContext = null)
     {
         return new SalesAgreementDetailDto
         {
@@ -522,6 +647,7 @@ public class SalesAgreementService : ISalesAgreementService
                 UploadedByName = d.UploadedBy != null ? $"{d.UploadedBy.FirstName} {d.UploadedBy.LastName}" : null,
                 CreatedAt = d.CreatedAt,
             }).ToList(),
+            ProjectUnitContext = projectUnitContext
         };
     }
 }

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using ErpSystem.Api.Services;
 using ErpSystem.Core.DTOs.Dashboard;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
@@ -13,15 +14,18 @@ namespace ErpSystem.Api.Controllers
     public class DashboardController : ControllerBase
     {
         private readonly IDashboardService _dashboardService;
+        private readonly EnterpriseDashboardService _enterpriseDashboardService;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<DashboardController> _logger;
 
         public DashboardController(
             IDashboardService dashboardService,
+            EnterpriseDashboardService enterpriseDashboardService,
             ICurrentUserService currentUserService,
             ILogger<DashboardController> logger)
         {
             _dashboardService = dashboardService;
+            _enterpriseDashboardService = enterpriseDashboardService;
             _currentUserService = currentUserService;
             _logger = logger;
         }
@@ -51,6 +55,24 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error retrieving dashboard data");
                 return StatusCode(500, "An error occurred while retrieving dashboard data");
+            }
+        }
+
+        /// <summary>
+        /// Get the enterprise business dashboard aggregate used by the main dashboard page.
+        /// </summary>
+        [HttpGet("enterprise")]
+        public async Task<ActionResult<EnterpriseDashboardDto>> GetEnterpriseDashboard()
+        {
+            try
+            {
+                var data = await _enterpriseDashboardService.GetEnterpriseDashboardAsync();
+                return Ok(data);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving enterprise dashboard data");
+                return StatusCode(500, "An error occurred while retrieving enterprise dashboard data");
             }
         }
 

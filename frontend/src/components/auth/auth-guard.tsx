@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../../services/auth';
 import { useAuth } from '../../hooks/use-auth';
 import { buildLoginRedirectUrl, getCurrentRelativeUrl } from '../../lib/auth-redirect';
+import { hasAnyPermissionAccess } from '../../lib/permissions';
 
 interface AuthGuardProps {
   children: ReactNode;
@@ -27,7 +28,7 @@ export function AuthGuard({
   const effectiveUser = user ?? storedUser;
   const permissionsResolved = !requiredPermissions?.length || !!effectiveUser || !isLoading;
   const hasRequiredPermission = requiredPermissions?.length
-    ? (effectiveUser?.permissions?.some(permission => requiredPermissions.includes(permission)) ?? false)
+    ? hasAnyPermissionAccess(effectiveUser, requiredPermissions)
     : true;
 
   useEffect(() => {

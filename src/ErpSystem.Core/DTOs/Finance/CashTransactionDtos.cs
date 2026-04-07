@@ -15,7 +15,7 @@ public class CashTransactionDto
     public Guid? ToBankAccountId { get; set; }
     public string? ToBankAccountName { get; set; }
     public decimal Amount { get; set; }
-    public string Currency { get; set; } = "GHS";
+    public string Currency { get; set; } = string.Empty;
     public decimal? ExchangeRate { get; set; }
     public decimal BaseAmount { get; set; }
     public Guid? PaymentMethodId { get; set; }
@@ -41,7 +41,7 @@ public class CreateCashReceiptDto
     public DateTime TransactionDate { get; set; }
     public Guid BankAccountId { get; set; }
     public decimal Amount { get; set; }
-    public string Currency { get; set; } = "GHS";
+    public string Currency { get; set; } = string.Empty;
     public Guid? PaymentMethodId { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? PayerName { get; set; }
@@ -54,7 +54,7 @@ public class CreateCashPaymentDto
     public DateTime TransactionDate { get; set; }
     public Guid BankAccountId { get; set; }
     public decimal Amount { get; set; }
-    public string Currency { get; set; } = "GHS";
+    public string Currency { get; set; } = string.Empty;
     public Guid? PaymentMethodId { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? PayeeName { get; set; }

@@ -86,7 +86,18 @@ public class ProjectDetailDto : ProjectDto
     public string? ActiveBaselineName { get; set; }
     public DateTime? ActiveBaselineCreatedOn { get; set; }
     public bool HasLockedBaseline { get; set; }
+    public ProjectDevelopmentProfileDto? DevelopmentProfile { get; set; }
     public List<ProjectMemberDto> Members { get; set; } = new();
+    public List<ProjectPhaseDto> Phases { get; set; } = new();
+    public List<ProjectPackageDto> Packages { get; set; } = new();
+    public List<ProjectBoqItemDto> BoqItems { get; set; } = new();
+    public List<ProjectApprovalRegisterItemDto> ApprovalRegister { get; set; } = new();
+    public List<ProjectUnitDto> Units { get; set; } = new();
+    public List<ProjectCustomerVariationDto> CustomerVariations { get; set; } = new();
+    public List<ProjectCommissioningItemDto> CommissioningItems { get; set; } = new();
+    public List<ProjectHandoverItemDto> HandoverItems { get; set; } = new();
+    public List<ProjectSnagItemDto> SnagItems { get; set; } = new();
+    public List<ProjectDefectLiabilityCaseDto> DefectLiabilityCases { get; set; } = new();
     public List<ProjectWorkItemDto> WorkItems { get; set; } = new();
     public List<ProjectMilestoneDto> Milestones { get; set; } = new();
     public List<ProjectResourceAllocationDto> ResourceAllocations { get; set; } = new();
@@ -114,6 +125,633 @@ public class ProjectDetailDto : ProjectDto
     public List<ProjectCommentDto> Comments { get; set; } = new();
     public List<ProjectInitiationVersionDto> InitiationVersions { get; set; } = new();
     public ProjectClosureDto? Closure { get; set; }
+}
+
+public class ProjectDevelopmentProfileDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public string DeliveryStructure { get; set; } = string.Empty;
+    public string? DevelopmentType { get; set; }
+    public string? SiteName { get; set; }
+    public string? SiteAddress { get; set; }
+    public string? LandReference { get; set; }
+    public string? ProcurementRoute { get; set; }
+    public string? ContractStrategy { get; set; }
+    public string? ConsultantTeam { get; set; }
+    public string? FundingArrangement { get; set; }
+    public string? HandoverStrategy { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpsertProjectDevelopmentProfileDto
+{
+    [Required]
+    public string DeliveryStructure { get; set; } = "WholeDevelopment";
+
+    public string? DevelopmentType { get; set; }
+    public string? SiteName { get; set; }
+    public string? SiteAddress { get; set; }
+    public string? LandReference { get; set; }
+    public string? ProcurementRoute { get; set; }
+    public string? ContractStrategy { get; set; }
+    public string? ConsultantTeam { get; set; }
+    public string? FundingArrangement { get; set; }
+    public string? HandoverStrategy { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class ProjectPhaseDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ParentPhaseId { get; set; }
+    public string? Code { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsOptional { get; set; }
+    public bool IsStageGateRequired { get; set; }
+    public bool IsTemplateSeeded { get; set; }
+    public DateTime? PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
+    public DateTime? ActualStartDate { get; set; }
+    public DateTime? ActualEndDate { get; set; }
+    public List<ProjectPhaseDto> Children { get; set; } = new();
+}
+
+public class CreateProjectPhaseDto
+{
+    public Guid? ParentPhaseId { get; set; }
+    public string? Code { get; set; }
+
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+    public string Status { get; set; } = "NotStarted";
+    public int? SortOrder { get; set; }
+    public bool IsOptional { get; set; }
+    public bool IsStageGateRequired { get; set; }
+    public DateTime? PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
+    public DateTime? ActualStartDate { get; set; }
+    public DateTime? ActualEndDate { get; set; }
+}
+
+public class UpdateProjectPhaseDto : CreateProjectPhaseDto
+{
+}
+
+public class ProjectPackageDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public string? ProjectPhaseName { get; set; }
+    public string? Code { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string PackageType { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public string? ProcurementRoute { get; set; }
+    public string? ContractStrategy { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
+    public string? BusinessPartnerName { get; set; }
+    public Guid? TenderId { get; set; }
+    public string? TenderNumber { get; set; }
+    public string? TenderTitle { get; set; }
+    public Guid? ContractId { get; set; }
+    public string? ContractNumber { get; set; }
+    public string? ContractTitle { get; set; }
+    public Guid? ProcurementPlanItemId { get; set; }
+    public string? ProcurementPlanItemLabel { get; set; }
+    public Guid? PurchaseRequisitionId { get; set; }
+    public string? PurchaseRequisitionNumber { get; set; }
+    public Guid? PurchaseOrderId { get; set; }
+    public string? PurchaseOrderNumber { get; set; }
+    public decimal? BudgetAmount { get; set; }
+    public decimal? CommittedAmount { get; set; }
+    public decimal? ActualAmount { get; set; }
+    public decimal? ForecastAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public List<ProjectBoqItemDto> BoqItems { get; set; } = new();
+}
+
+public class CreateProjectPackageDto
+{
+    public Guid? ProjectPhaseId { get; set; }
+    public string? Code { get; set; }
+
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+    public string PackageType { get; set; } = "WorkPackage";
+    public string Status { get; set; } = "Planned";
+    public int? SortOrder { get; set; }
+    public string? ProcurementRoute { get; set; }
+    public string? ContractStrategy { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
+    public Guid? TenderId { get; set; }
+    public Guid? ContractId { get; set; }
+    public Guid? ProcurementPlanItemId { get; set; }
+    public Guid? PurchaseRequisitionId { get; set; }
+    public Guid? PurchaseOrderId { get; set; }
+    public decimal? BudgetAmount { get; set; }
+    public decimal? CommittedAmount { get; set; }
+    public decimal? ActualAmount { get; set; }
+    public decimal? ForecastAmount { get; set; }
+    public string? Currency { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectPackageDto : CreateProjectPackageDto
+{
+}
+
+public class ProjectBoqItemDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid ProjectPackageId { get; set; }
+    public string? PackageCode { get; set; }
+    public string? PackageName { get; set; }
+    public string? LineNumber { get; set; }
+    public string? ItemCode { get; set; }
+    public string ItemType { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public decimal? UnitRate { get; set; }
+    public decimal? BudgetAmount { get; set; }
+    public decimal? CommittedAmount { get; set; }
+    public decimal? ActualAmount { get; set; }
+    public decimal? ForecastAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public Guid? InventoryItemId { get; set; }
+    public Guid? TenderItemId { get; set; }
+    public Guid? ProcurementPlanItemId { get; set; }
+    public Guid? PurchaseRequisitionItemId { get; set; }
+    public Guid? PurchaseOrderItemId { get; set; }
+    public string? Notes { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class CreateProjectBoqItemDto
+{
+    [Required]
+    public Guid ProjectPackageId { get; set; }
+
+    public string? LineNumber { get; set; }
+    public string? ItemCode { get; set; }
+    public string ItemType { get; set; } = "Item";
+
+    [Required]
+    public string Description { get; set; } = string.Empty;
+
+    public decimal Quantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public decimal? UnitRate { get; set; }
+    public decimal? BudgetAmount { get; set; }
+    public decimal? CommittedAmount { get; set; }
+    public decimal? ActualAmount { get; set; }
+    public decimal? ForecastAmount { get; set; }
+    public string? Currency { get; set; }
+    public Guid? InventoryItemId { get; set; }
+    public Guid? TenderItemId { get; set; }
+    public Guid? ProcurementPlanItemId { get; set; }
+    public Guid? PurchaseRequisitionItemId { get; set; }
+    public Guid? PurchaseOrderItemId { get; set; }
+    public string? Notes { get; set; }
+    public int? SortOrder { get; set; }
+}
+
+public class UpdateProjectBoqItemDto : CreateProjectBoqItemDto
+{
+}
+
+public class ProjectApprovalRegisterItemDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public string? ProjectPhaseName { get; set; }
+    public string ApprovalType { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? AuthorityName { get; set; }
+    public string? ReferenceNumber { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public bool IsRequired { get; set; }
+    public DateTime? SubmittedDate { get; set; }
+    public DateTime? TargetDecisionDate { get; set; }
+    public DateTime? ApprovedDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public string? ConditionSummary { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class CreateProjectApprovalRegisterItemDto
+{
+    public Guid? ProjectPhaseId { get; set; }
+    public string ApprovalType { get; set; } = "Other";
+
+    [Required]
+    public string Title { get; set; } = string.Empty;
+
+    public string? AuthorityName { get; set; }
+    public string? ReferenceNumber { get; set; }
+    public string Status { get; set; } = "Planned";
+    public bool IsRequired { get; set; } = true;
+    public DateTime? SubmittedDate { get; set; }
+    public DateTime? TargetDecisionDate { get; set; }
+    public DateTime? ApprovedDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public string? ConditionSummary { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectApprovalRegisterItemDto : CreateProjectApprovalRegisterItemDto
+{
+}
+
+public class ProjectUnitDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public bool IsReleasedForMarket { get; set; }
+    public DateTime? ReleasedAt { get; set; }
+    public string? ReleasedByDisplayName { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? CustomerBusinessPartnerName { get; set; }
+    public Guid? SalesAgreementId { get; set; }
+    public string? SalesAgreementNumber { get; set; }
+    public string? SalesAgreementTitle { get; set; }
+    public string? SalesAgreementType { get; set; }
+    public string? SalesAgreementStatus { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public string? SalesOrderNumber { get; set; }
+    public string? SalesOrderStatus { get; set; }
+    public string CommercialStatus { get; set; } = string.Empty;
+    public string? CommercialIntent { get; set; }
+    public string HandoverStatus { get; set; } = string.Empty;
+    public string? Code { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string UnitType { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? BlockName { get; set; }
+    public string? FloorLabel { get; set; }
+    public decimal? AreaSquareMeters { get; set; }
+    public decimal? ValuationRate { get; set; }
+    public decimal? BasePrice { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public DateTime? HandoverDate { get; set; }
+    public int SortOrder { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class ProjectReleasedUnitSalesLookupDto
+{
+    public Guid ProjectId { get; set; }
+    public string ProjectCode { get; set; } = string.Empty;
+    public string ProjectTitle { get; set; } = string.Empty;
+    public Guid ProjectUnitId { get; set; }
+    public string? ProjectUnitCode { get; set; }
+    public string ProjectUnitName { get; set; } = string.Empty;
+    public string ProjectUnitType { get; set; } = string.Empty;
+    public string ProjectUnitStatus { get; set; } = string.Empty;
+    public string CommercialStatus { get; set; } = string.Empty;
+    public string? CommercialIntent { get; set; }
+    public string HandoverStatus { get; set; } = string.Empty;
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? CustomerBusinessPartnerName { get; set; }
+    public decimal? AreaSquareMeters { get; set; }
+    public decimal? BasePrice { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public string? PropertyReference { get; set; }
+    public string? SuggestedAgreementTitle { get; set; }
+    public string? SuggestedAgreementType { get; set; }
+    public string? SuggestedLeaseAgreementTitle { get; set; }
+    public string? SuggestedLeaseAgreementType { get; set; }
+    public string? SuggestedOrderType { get; set; }
+    public string? SuggestedPropertyType { get; set; }
+    public string? SuggestedPropertyDescription { get; set; }
+    public string? SuggestedPropertyLocation { get; set; }
+    public string? SuggestedSalesOrderLineDescription { get; set; }
+    public bool CanCreateSalesAgreement { get; set; }
+    public bool CanCreateLeaseAgreement { get; set; }
+    public bool CanCreateSalesOrder { get; set; }
+    public string? SalesAgreementNumber { get; set; }
+    public string? SalesOrderNumber { get; set; }
+}
+
+public class LinkProjectUnitSalesAgreementDto
+{
+    [Required]
+    public Guid SalesAgreementId { get; set; }
+}
+
+public class LinkProjectUnitSalesOrderDto
+{
+    [Required]
+    public Guid SalesOrderId { get; set; }
+}
+
+public class CreateProjectUnitDto
+{
+    public bool IsReleasedForMarket { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public Guid? SalesAgreementId { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public string? Code { get; set; }
+
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string UnitType { get; set; } = "Unit";
+    public string Status { get; set; } = "Planned";
+    public string? BlockName { get; set; }
+    public string? FloorLabel { get; set; }
+    public decimal? AreaSquareMeters { get; set; }
+    public decimal? ValuationRate { get; set; }
+    public decimal? BasePrice { get; set; }
+    public string? Currency { get; set; }
+    public DateTime? HandoverDate { get; set; }
+    public int? SortOrder { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectUnitDto : CreateProjectUnitDto
+{
+}
+
+public class ProjectCustomerVariationDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+    public string? ProjectUnitCode { get; set; }
+    public string? ProjectUnitName { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? CustomerBusinessPartnerName { get; set; }
+    public Guid? SalesAgreementId { get; set; }
+    public string? SalesAgreementNumber { get; set; }
+    public string? SalesAgreementTitle { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public string? SalesOrderNumber { get; set; }
+    public string? SalesOrderStatus { get; set; }
+    public Guid? JobCardId { get; set; }
+    public string? JobCardNumber { get; set; }
+    public string? JobCardTitle { get; set; }
+    public Guid? WorkOrderId { get; set; }
+    public string? WorkOrderNumber { get; set; }
+    public string? WorkOrderTitle { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? VariationType { get; set; }
+    public string Timing { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime RequestDate { get; set; }
+    public DateTime? TargetCompletionDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public decimal? EstimatedAmount { get; set; }
+    public decimal? QuotedAmount { get; set; }
+    public decimal? ApprovedAmount { get; set; }
+    public decimal? BilledAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public bool RequiresScheduleAdjustment { get; set; }
+    public int? ScheduleImpactDays { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class CreateProjectCustomerVariationDto
+{
+    public Guid? ProjectUnitId { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public Guid? SalesAgreementId { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public Guid? JobCardId { get; set; }
+    public Guid? WorkOrderId { get; set; }
+
+    [Required]
+    public string Title { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+    public string? VariationType { get; set; }
+    public string Timing { get; set; } = "PreHandover";
+    public string Status { get; set; } = "Requested";
+    public DateTime? RequestDate { get; set; }
+    public DateTime? TargetCompletionDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public decimal? EstimatedAmount { get; set; }
+    public decimal? QuotedAmount { get; set; }
+    public decimal? ApprovedAmount { get; set; }
+    public decimal? BilledAmount { get; set; }
+    public string? Currency { get; set; }
+    public bool RequiresScheduleAdjustment { get; set; }
+    public int? ScheduleImpactDays { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectCustomerVariationDto : CreateProjectCustomerVariationDto
+{
+}
+
+public class CreateProjectMaintenanceFollowThroughDto
+{
+    public Guid? MaintenanceAssetId { get; set; }
+    public Guid? MaintenanceTypeId { get; set; }
+    public Guid? PriorityLevelId { get; set; }
+    public Guid? WorkOrderTypeId { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+    public Guid? AssignedTeamId { get; set; }
+    public string? BillingType { get; set; }
+}
+
+public class ProjectCommissioningItemDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+    public string? ProjectUnitCode { get; set; }
+    public string? ProjectUnitName { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? SystemArea { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public bool RequiresRegulatoryInspection { get; set; }
+    public DateTime? PlannedDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public string? CertificateReference { get; set; }
+    public string? ResponsibleParty { get; set; }
+    public int SortOrder { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class CreateProjectCommissioningItemDto
+{
+    public Guid? ProjectUnitId { get; set; }
+
+    [Required]
+    public string Title { get; set; } = string.Empty;
+
+    public string? SystemArea { get; set; }
+    public string Status { get; set; } = "Planned";
+    public bool RequiresRegulatoryInspection { get; set; }
+    public DateTime? PlannedDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public string? CertificateReference { get; set; }
+    public string? ResponsibleParty { get; set; }
+    public int? SortOrder { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectCommissioningItemDto : CreateProjectCommissioningItemDto
+{
+}
+
+public class ProjectHandoverItemDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+    public string? ProjectUnitCode { get; set; }
+    public string? ProjectUnitName { get; set; }
+    public string HandoverType { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? ResponsibleParty { get; set; }
+    public string? ReferenceNumber { get; set; }
+    public DateTime? TargetDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public int SortOrder { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class CreateProjectHandoverItemDto
+{
+    public Guid? ProjectUnitId { get; set; }
+    public string HandoverType { get; set; } = "Other";
+
+    [Required]
+    public string Title { get; set; } = string.Empty;
+
+    public string Status { get; set; } = "Planned";
+    public string? ResponsibleParty { get; set; }
+    public string? ReferenceNumber { get; set; }
+    public DateTime? TargetDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public int? SortOrder { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectHandoverItemDto : CreateProjectHandoverItemDto
+{
+}
+
+public class ProjectSnagItemDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+    public string? ProjectUnitCode { get; set; }
+    public string? ProjectUnitName { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Severity { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime ReportedDate { get; set; }
+    public DateTime? TargetClosureDate { get; set; }
+    public DateTime? ClosedDate { get; set; }
+    public string? RaisedByName { get; set; }
+    public string? ResponsibleParty { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class CreateProjectSnagItemDto
+{
+    public Guid? ProjectUnitId { get; set; }
+
+    [Required]
+    public string Title { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+    public string Severity { get; set; } = "Medium";
+    public string Status { get; set; } = "Open";
+    public DateTime? ReportedDate { get; set; }
+    public DateTime? TargetClosureDate { get; set; }
+    public DateTime? ClosedDate { get; set; }
+    public string? RaisedByName { get; set; }
+    public string? ResponsibleParty { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectSnagItemDto : CreateProjectSnagItemDto
+{
+}
+
+public class ProjectDefectLiabilityCaseDto
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid? ProjectUnitId { get; set; }
+    public string? ProjectUnitCode { get; set; }
+    public string? ProjectUnitName { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? CustomerBusinessPartnerName { get; set; }
+    public Guid? JobCardId { get; set; }
+    public string? JobCardNumber { get; set; }
+    public string? JobCardTitle { get; set; }
+    public Guid? WorkOrderId { get; set; }
+    public string? WorkOrderNumber { get; set; }
+    public string? WorkOrderTitle { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime ReportedDate { get; set; }
+    public DateTime? TargetResolutionDate { get; set; }
+    public DateTime? ResolvedDate { get; set; }
+    public bool IsWarrantyRelated { get; set; }
+    public DateTime? WarrantyExpiryDate { get; set; }
+    public decimal? RectificationCost { get; set; }
+    public decimal? ChargeableAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+}
+
+public class CreateProjectDefectLiabilityCaseDto
+{
+    public Guid? ProjectUnitId { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public Guid? JobCardId { get; set; }
+    public Guid? WorkOrderId { get; set; }
+
+    [Required]
+    public string Title { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+    public string Status { get; set; } = "Reported";
+    public DateTime? ReportedDate { get; set; }
+    public DateTime? TargetResolutionDate { get; set; }
+    public DateTime? ResolvedDate { get; set; }
+    public bool IsWarrantyRelated { get; set; }
+    public DateTime? WarrantyExpiryDate { get; set; }
+    public decimal? RectificationCost { get; set; }
+    public decimal? ChargeableAmount { get; set; }
+    public string? Currency { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateProjectDefectLiabilityCaseDto : CreateProjectDefectLiabilityCaseDto
+{
+}
+
+public class ReorderProjectPhasesDto
+{
+    public Guid? ParentPhaseId { get; set; }
+    public List<Guid> OrderedIds { get; set; } = new();
 }
 
 public class CreateProjectDto
@@ -152,6 +790,7 @@ public class CreateProjectDto
     public bool? ApprovalRequired { get; set; }
     public bool? ExternalPortalAccessEnabled { get; set; }
     public bool? ExternalCollaborationEnabled { get; set; }
+    public UpsertProjectDevelopmentProfileDto? DevelopmentProfile { get; set; }
 }
 
 public class UpdateProjectDto : CreateProjectDto
@@ -400,7 +1039,7 @@ public class ProjectInvoiceRequestDto
     public Guid? ContractId { get; set; }
     public string RequestNumber { get; set; } = string.Empty;
     public decimal RequestedAmount { get; set; }
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public DateTime RequestedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
@@ -413,7 +1052,7 @@ public class CreateProjectInvoiceRequestDto
     public Guid? BillingScheduleId { get; set; }
     public Guid? ContractId { get; set; }
     public decimal RequestedAmount { get; set; }
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = string.Empty;
     public string Status { get; set; } = "Draft";
     public string? ExternalReference { get; set; }
     public string? Notes { get; set; }
@@ -889,7 +1528,7 @@ public class CreateProjectExpenseDto
     public Guid UserId { get; set; }
     public DateTime ExpenseDate { get; set; }
     public string Category { get; set; } = "General";
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public decimal TaxAmount { get; set; }
     public bool IsBillable { get; set; }
@@ -940,7 +1579,7 @@ public class ProjectExpenseApprovalQueueItemDto
     public string? WorkItemTitle { get; set; }
     public DateTime ExpenseDate { get; set; }
     public string Category { get; set; } = string.Empty;
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal TotalAmount { get; set; }
@@ -1452,6 +2091,68 @@ public class ProjectDashboardDto
     public List<ProjectDto> AtRiskProjects { get; set; } = new();
 }
 
+public class ProjectWorkspaceDto
+{
+    public ProjectDetailDto Project { get; set; } = new();
+    public ProjectFinancialControlSummaryDto? FinancialSummary { get; set; }
+    public ProjectCommercialSummaryDto? CommercialSummary { get; set; }
+    public ProjectIntegrationSummaryDto? IntegrationSummary { get; set; }
+    public ProjectGovernanceSummaryDto? GovernanceSummary { get; set; }
+    public ProjectLinkOptionsDto LinkOptions { get; set; } = new();
+}
+
+public class ProjectSalesAgreementLinkOptionDto
+{
+    public Guid Id { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public string DocumentNumber { get; set; } = string.Empty;
+    public string AgreementTitle { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public string? PropertyReference { get; set; }
+    public string AgreementType { get; set; } = string.Empty;
+    public string AgreementStatus { get; set; } = string.Empty;
+}
+
+public class ProjectSalesOrderLinkOptionDto
+{
+    public Guid Id { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public string OrderNumber { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public string? PropertyReference { get; set; }
+    public string Status { get; set; } = string.Empty;
+}
+
+public class ProjectJobCardLinkOptionDto
+{
+    public Guid Id { get; set; }
+    public Guid AssetId { get; set; }
+    public string JobCardNumber { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? AssetName { get; set; }
+}
+
+public class ProjectWorkOrderLinkOptionDto
+{
+    public Guid Id { get; set; }
+    public Guid AssetId { get; set; }
+    public string WorkOrderNumber { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? AssetName { get; set; }
+    public Guid? JobCardId { get; set; }
+    public string? JobCardNumber { get; set; }
+}
+
+public class ProjectLinkOptionsDto
+{
+    public List<ProjectSalesAgreementLinkOptionDto> SalesAgreements { get; set; } = new();
+    public List<ProjectSalesOrderLinkOptionDto> SalesOrders { get; set; } = new();
+    public List<ProjectJobCardLinkOptionDto> JobCards { get; set; } = new();
+    public List<ProjectWorkOrderLinkOptionDto> WorkOrders { get; set; } = new();
+}
+
 public class ProjectTaskAgingReportItemDto
 {
     public Guid ProjectId { get; set; }
@@ -1615,7 +2316,7 @@ public class ProjectInvoiceRequestQueueItemDto
     public Guid? ContractId { get; set; }
     public string Status { get; set; } = string.Empty;
     public decimal RequestedAmount { get; set; }
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = string.Empty;
     public DateTime RequestedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
     public string? ExternalReference { get; set; }
@@ -1668,7 +2369,47 @@ public class ProjectContractLookupDto
     public string BusinessPartnerName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public decimal ContractValue { get; set; }
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = string.Empty;
+}
+
+public class ProjectTenderLookupDto
+{
+    public Guid Id { get; set; }
+    public string TenderNumber { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Currency { get; set; }
+    public decimal? EstimatedValue { get; set; }
+}
+
+public class ProjectProcurementPlanItemLookupDto
+{
+    public Guid Id { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public string ItemDescription { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Currency { get; set; }
+    public decimal? EstimatedTotalCost { get; set; }
+}
+
+public class ProjectPurchaseRequisitionLookupDto
+{
+    public Guid Id { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Currency { get; set; }
+    public decimal TotalAmount { get; set; }
+}
+
+public class ProjectPurchaseOrderLookupDto
+{
+    public Guid Id { get; set; }
+    public string OrderNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Currency { get; set; }
+    public decimal TotalAmount { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
+    public string? BusinessPartnerName { get; set; }
 }
 
 public class ProjectContractMilestoneLookupDto
@@ -1864,7 +2605,7 @@ public class ProjectMaterialCostEntryDto
     public string? UnitOfMeasure { get; set; }
     public decimal UnitCost { get; set; }
     public decimal Amount { get; set; }
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = string.Empty;
     public bool HasMissingSourceLink { get; set; }
     public bool HasReversalGap { get; set; }
     public string? Notes { get; set; }

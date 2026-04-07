@@ -38,6 +38,48 @@ public class ProjectFinancialAlertDto
     public string Message { get; set; } = string.Empty;
 }
 
+public class ProjectCommercialAlertDto
+{
+    public string Severity { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+}
+
+public class ProjectPhaseCommercialRollupDto
+{
+    public Guid? ProjectPhaseId { get; set; }
+    public string PhaseName { get; set; } = string.Empty;
+    public int PhaseSortOrder { get; set; }
+    public int PackageCount { get; set; }
+    public int BoqItemCount { get; set; }
+    public decimal BudgetAmount { get; set; }
+    public decimal CommittedAmount { get; set; }
+    public decimal ActualAmount { get; set; }
+    public decimal ForecastAmount { get; set; }
+    public decimal VarianceAmount { get; set; }
+}
+
+public class ProjectCommercialSummaryDto
+{
+    public Guid ProjectId { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public decimal EstimatedBudget { get; set; }
+    public decimal ApprovedBudget { get; set; }
+    public decimal PackageBudgetAmount { get; set; }
+    public decimal PackageCommittedAmount { get; set; }
+    public decimal PackageActualAmount { get; set; }
+    public decimal PackageForecastAmount { get; set; }
+    public decimal ForecastVarianceAmount { get; set; }
+    public int PackageCount { get; set; }
+    public int BoqItemCount { get; set; }
+    public int UnassignedPackageCount { get; set; }
+    public int TenderLinkedPackageCount { get; set; }
+    public int ContractLinkedPackageCount { get; set; }
+    public int PurchaseRequisitionLinkedPackageCount { get; set; }
+    public int PurchaseOrderLinkedPackageCount { get; set; }
+    public List<ProjectPhaseCommercialRollupDto> PhaseRollups { get; set; } = new();
+    public List<ProjectCommercialAlertDto> Alerts { get; set; } = new();
+}
+
 public class ProjectFinancialControlSummaryDto
 {
     public Guid ProjectId { get; set; }

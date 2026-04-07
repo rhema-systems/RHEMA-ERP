@@ -23,7 +23,9 @@ public interface ISalesOrderService
         SalesOrderType? orderType = null,
         DateTime? startDate = null,
         DateTime? endDate = null,
-        string? orderPriority = null);
+        string? orderPriority = null,
+        bool projectLinkedOnly = false,
+        bool releasedUnitsOnly = false);
 
     // ── Lifecycle Actions ───────────────────────────────────────────────
 

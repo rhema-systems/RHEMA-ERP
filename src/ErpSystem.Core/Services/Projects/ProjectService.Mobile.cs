@@ -26,6 +26,7 @@ public partial class ProjectService
     public async Task<ProjectExpenseDto> SubmitMobileExpenseAsync(Guid projectId, Guid workItemId, CreateProjectExpenseDto dto, Guid userId)
     {
         await RequireMobileAssignmentAsync(projectId, workItemId, userId);
+        var currencyCode = await ResolveProjectCurrencyAsync(dto.Currency);
 
         return await AddExpenseAsync(projectId, new CreateProjectExpenseDto
         {
@@ -33,7 +34,7 @@ public partial class ProjectService
             UserId = userId,
             ExpenseDate = dto.ExpenseDate,
             Category = string.IsNullOrWhiteSpace(dto.Category) ? "Travel" : dto.Category,
-            Currency = string.IsNullOrWhiteSpace(dto.Currency) ? "USD" : dto.Currency,
+            Currency = currencyCode,
             Amount = dto.Amount,
             TaxAmount = dto.TaxAmount,
             IsBillable = dto.IsBillable,

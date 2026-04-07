@@ -12,6 +12,12 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
+import {
   CreateProjectExpenseDto,
   CreateProjectTimesheetEntryDto,
   ProjectCatalogEntryDto,
@@ -78,11 +84,12 @@ export default function ProjectMobilePage() {
   const [expenseCategoryCatalog, setExpenseCategoryCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [documentCategoryCatalog, setDocumentCategoryCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [documentTypeCatalog, setDocumentTypeCatalog] = useState<ProjectCatalogEntryDto[]>([]);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
 
   const load = async () => {
     try {
       setLoading(true);
-      const [summaryResult, catalogResults] = await Promise.all([
+      const [summaryResult, catalogResults, currencyContext] = await Promise.all([
         projectService.getMobileSummary(),
         Promise.allSettled([
           projectService.getCatalogEntries('task-statuses'),
@@ -91,6 +98,7 @@ export default function ProjectMobilePage() {
           projectService.getCatalogEntries('document-categories'),
           projectService.getCatalogEntries('document-types'),
         ]),
+        loadProjectCurrencyContext(),
       ]);
 
       const taskStatuses = catalogResults[0].status === 'fulfilled' ? catalogResults[0].value : [];
@@ -105,6 +113,7 @@ export default function ProjectMobilePage() {
       setExpenseCategoryCatalog(expenseCategories);
       setDocumentCategoryCatalog(documentCategories);
       setDocumentTypeCatalog(documentTypes);
+      setBaseCurrency(currencyContext.baseCurrency);
 
       const workTypeOptions = resolveCatalogOptions(workTypes, DEFAULT_WORK_TYPES);
       const expenseCategoryOptions = resolveCatalogOptions(expenseCategories, DEFAULT_EXPENSE_CATEGORIES);
@@ -128,7 +137,7 @@ export default function ProjectMobilePage() {
           userId,
           expenseDate: today(),
           category: pickPreferredOption(expenseCategoryOptions, ['Travel', 'Supplies', 'Other']),
-          currency: 'USD',
+          currency: currencyContext.baseCurrency.code,
           amount: 0,
           taxAmount: 0,
           isBillable: false,
@@ -209,6 +218,9 @@ export default function ProjectMobilePage() {
     [documentTypeCatalog],
   );
 
+  const formatMoney = (value: number, currency?: string | null) =>
+    formatProjectMoney(value, currency, baseCurrency.code);
+
   const submitTimesheet = async (projectId: string, workItemId: string) => {
     try {
       const draft = timesheetDrafts[workItemId] || {
@@ -246,7 +258,7 @@ export default function ProjectMobilePage() {
         userId,
         expenseDate: today(),
         category: pickPreferredOption(expenseCategoryOptions, ['Travel', 'Supplies']),
-        currency: 'USD',
+        currency: baseCurrency.code,
         amount: 0,
         taxAmount: 0,
         isBillable: false,
@@ -259,7 +271,7 @@ export default function ProjectMobilePage() {
           userId,
           expenseDate: today(),
           category: draft.category,
-          currency: 'USD',
+          currency: baseCurrency.code,
           amount: 0,
           taxAmount: 0,
           isBillable: false,
@@ -327,7 +339,7 @@ export default function ProjectMobilePage() {
           <div><div className="text-sm text-muted-foreground">Assignments</div><div className="text-2xl font-semibold">{summary.assignmentCount}</div></div>
           <div><div className="text-sm text-muted-foreground">Overdue</div><div className="text-2xl font-semibold">{summary.overdueCount}</div></div>
           <div><div className="text-sm text-muted-foreground">Pending Hours</div><div className="text-2xl font-semibold">{summary.pendingHours}</div></div>
-          <div><div className="text-sm text-muted-foreground">Pending Expenses</div><div className="text-2xl font-semibold">{summary.pendingExpenses}</div></div>
+          <div><div className="text-sm text-muted-foreground">Pending Expenses</div><div className="text-2xl font-semibold">{formatMoney(summary.pendingExpenses)}</div></div>
         </CardContent>
       </Card>
 
@@ -491,7 +503,7 @@ export default function ProjectMobilePage() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
-                <Label>Expense Amount</Label>
+                <Label>Expense Amount ({baseCurrency.code})</Label>
                 <Input
                   type="number"
                   value={expenseDrafts[item.workItemId]?.amount ?? 0}
@@ -502,7 +514,7 @@ export default function ProjectMobilePage() {
                       userId,
                       expenseDate: today(),
                       category: pickPreferredOption(expenseCategoryOptions, ['Travel', 'Supplies']),
-                      currency: 'USD',
+                      currency: baseCurrency.code,
                       amount: Number(e.target.value || '0'),
                       taxAmount: 0,
                       isBillable: false,
@@ -522,7 +534,7 @@ export default function ProjectMobilePage() {
                       userId,
                       expenseDate: today(),
                       category: value,
-                      currency: 'USD',
+                      currency: baseCurrency.code,
                       amount: 0,
                       taxAmount: 0,
                       isBillable: false,

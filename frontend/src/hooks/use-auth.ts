@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../services/auth';
 import { QUERY_KEYS } from '../config/api';
 import type { User, LoginRequest } from '../types';
+import { hasAllPermissionsAccess, hasAnyPermissionAccess, hasPermissionAccess } from '../lib/permissions';
 
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -68,9 +69,9 @@ export function useAuth() {
   const hasRole = (role: string) => currentUser?.roles?.includes(role) ?? false;
   const hasAnyRole = (roles: string[]) => roles.some(role => currentUser?.roles?.includes(role));
   const hasAllRoles = (roles: string[]) => roles.every(role => currentUser?.roles?.includes(role));
-  const hasPermission = (permission: string) => currentUser?.permissions?.includes(permission) ?? false;
-  const hasAnyPermission = (permissions: string[]) => permissions.some(permission => currentUser?.permissions?.includes(permission));
-  const hasAllPermissions = (permissions: string[]) => permissions.every(permission => currentUser?.permissions?.includes(permission));
+  const hasPermission = (permission: string) => hasPermissionAccess(currentUser, permission);
+  const hasAnyPermission = (permissions: string[]) => hasAnyPermissionAccess(currentUser, permissions);
+  const hasAllPermissions = (permissions: string[]) => hasAllPermissionsAccess(currentUser, permissions);
 
   return {
     // State

@@ -253,7 +253,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - When a non-base currency is specified, the balance reflects translated amounts using the currency revaluation rates
         ///
         /// **Business Rules:**
-        /// - The currency code defaults to "GHS" (Ghanaian Cedi) if not specified
+        /// - The currency code defaults to the base currency configured in Finance multi-currency setup if not specified
         /// - Balance includes only posted (not draft or pending) journal entry lines
         /// - The balance reflects all periods up to and including the current open period
         /// - Requesting a balance in a currency not linked to the account may return zero or trigger a translation
@@ -261,14 +261,14 @@ namespace ErpSystem.Api.Controllers.Finance
         /// **Authorization:** Requires authenticated user with Finance module read access
         /// </remarks>
         /// <param name="id">The unique identifier (GUID) of the GL account.</param>
-        /// <param name="currencyCode">The ISO 4217 currency code for the balance inquiry. Defaults to "GHS".</param>
+        /// <param name="currencyCode">The ISO 4217 currency code for the balance inquiry. Defaults to the configured finance base currency when omitted.</param>
         /// <returns>The account balance details including debit total, credit total, and net balance in the requested currency.</returns>
         /// <response code="200">Balance retrieved successfully.</response>
         /// <response code="401">Not authenticated.</response>
         /// <response code="404">No account exists with the specified ID.</response>
         /// <response code="500">Internal server error.</response>
         [HttpGet("{id}/balance")]
-        public async Task<IActionResult> GetAccountBalance(Guid id, [FromQuery] string currencyCode = "GHS")
+        public async Task<IActionResult> GetAccountBalance(Guid id, [FromQuery] string? currencyCode = null)
         {
             var balance = await _glService.GetAccountBalanceAsync(id, currencyCode);
             return Ok(balance);

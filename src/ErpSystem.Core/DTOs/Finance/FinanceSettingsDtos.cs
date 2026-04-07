@@ -9,6 +9,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public string CoaType { get; set; } = "Standard";
         public bool CoaConfigurationLocked { get; set; }
         public string BaseCurrency { get; set; } = "GHS";
+        public string BaseCurrencyName { get; set; } = "Ghana Cedi";
+        public string BaseCurrencySymbol { get; set; } = "₵";
+        public int BaseCurrencyDecimalPlaces { get; set; } = 2;
         public string AccountSeparator { get; set; } = "-";
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }

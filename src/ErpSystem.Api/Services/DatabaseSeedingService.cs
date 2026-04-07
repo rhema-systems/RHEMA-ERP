@@ -525,6 +525,7 @@ namespace ErpSystem.Web.Services
 
             await _context.SaveChangesAsync();
             await NormalizeProjectDemoFundingSourcesAsync(tenantId);
+            var baseCurrencyCode = await ResolveBaseCurrencyCodeAsync(tenantId);
 
             await EnsureProjectDemoSeededAsync(
                 tenantId,
@@ -543,6 +544,7 @@ namespace ErpSystem.Web.Services
                     department,
                     location,
                     customer,
+                    baseCurrencyCode,
                     now));
 
             await EnsureProjectDemoSeededAsync(
@@ -560,6 +562,7 @@ namespace ErpSystem.Web.Services
                     financeOwner,
                     department,
                     location,
+                    baseCurrencyCode,
                     now));
 
             await EnsureProjectDemoSeededAsync(
@@ -577,6 +580,7 @@ namespace ErpSystem.Web.Services
                     department,
                     location,
                     customer,
+                    baseCurrencyCode,
                     now));
 
             await EnsureProjectDemoInterdependenciesSeededAsync(tenantId, projectManager, financeOwner, now);
@@ -927,6 +931,7 @@ namespace ErpSystem.Web.Services
             {
                 return;
             }
+            var baseCurrencyCode = await ResolveBaseCurrencyCodeAsync(tenantId);
 
             var effectiveDepartment = department
                 ?? await _context.Departments
@@ -1026,7 +1031,7 @@ namespace ErpSystem.Web.Services
                     ProjectId = implementationProject.Id,
                     ProjectCode = implementationProject.ProjectCode,
                     ProjectName = implementationProject.Title,
-                    Currency = "USD",
+                    Currency = baseCurrencyCode,
                     PreferredBusinessPartnerId = customer.Id,
                     TotalAmount = 3200m,
                     CreatedAt = now.AddDays(-6),
@@ -1061,7 +1066,7 @@ namespace ErpSystem.Web.Services
                     ProjectId = implementationProject.Id,
                     ProjectCode = implementationProject.ProjectCode,
                     ProjectName = implementationProject.Title,
-                    Currency = "USD",
+                    Currency = baseCurrencyCode,
                     PreferredBusinessPartnerId = customer.Id,
                     ApprovedById = financeOwner.Id,
                     ApprovedAt = now.AddDays(-11),
@@ -1207,7 +1212,7 @@ namespace ErpSystem.Web.Services
                     UserId = financeOwner.Id,
                     ExpenseDate = now.AddDays(-2),
                     Category = "Materials",
-                    Currency = "USD",
+                    Currency = baseCurrencyCode,
                     Amount = 3500m,
                     TaxAmount = 0m,
                     IsBillable = true,
@@ -1235,7 +1240,7 @@ namespace ErpSystem.Web.Services
                     UserId = financeOwner.Id,
                     ExpenseDate = now.AddDays(-1),
                     Category = "Materials",
-                    Currency = "USD",
+                    Currency = baseCurrencyCode,
                     Amount = -500m,
                     TaxAmount = 0m,
                     IsBillable = false,
@@ -1265,6 +1270,7 @@ namespace ErpSystem.Web.Services
             Department? department,
             Location? location,
             BusinessPartner customer,
+            string baseCurrencyCode,
             DateTime now)
         {
             var projectId = Guid.NewGuid();
@@ -1684,7 +1690,7 @@ namespace ErpSystem.Web.Services
                 BillingScheduleId = scheduleId,
                 RequestNumber = "INVREQ-PRJ-DEMO-1001-01",
                 RequestedAmount = 45000m,
-                Currency = "USD",
+                Currency = baseCurrencyCode,
                 Status = "SentToFinance",
                 RequestedAt = now.AddDays(-1),
                 SubmittedAt = now.AddDays(-1),
@@ -1745,7 +1751,7 @@ namespace ErpSystem.Web.Services
                 UserId = financeOwner.Id,
                 ExpenseDate = now.Date.AddDays(-4),
                 Category = "Travel",
-                Currency = "USD",
+                Currency = baseCurrencyCode,
                 Amount = 1420m,
                 TaxAmount = 80m,
                 IsBillable = true,
@@ -1946,6 +1952,7 @@ namespace ErpSystem.Web.Services
             ApplicationUser financeOwner,
             Department? department,
             Location? location,
+            string baseCurrencyCode,
             DateTime now)
         {
             var projectId = Guid.NewGuid();
@@ -2207,6 +2214,7 @@ namespace ErpSystem.Web.Services
             Department? department,
             Location? location,
             BusinessPartner customer,
+            string baseCurrencyCode,
             DateTime now)
         {
             var projectId = Guid.NewGuid();
@@ -2401,7 +2409,7 @@ namespace ErpSystem.Web.Services
                 ProjectId = projectId,
                 RequestNumber = "INVREQ-PRJ-DEMO-1003-01",
                 RequestedAmount = 128000m,
-                Currency = "USD",
+                Currency = baseCurrencyCode,
                 Status = "Paid",
                 RequestedAt = now.AddMonths(-2).AddDays(-10),
                 SubmittedAt = now.AddMonths(-2).AddDays(-9),
@@ -2456,7 +2464,7 @@ namespace ErpSystem.Web.Services
                 UserId = financeOwner.Id,
                 ExpenseDate = now.Date.AddMonths(-4),
                 Category = "Materials",
-                Currency = "USD",
+                Currency = baseCurrencyCode,
                 Amount = 22400m,
                 TaxAmount = 0m,
                 IsBillable = false,
@@ -2607,6 +2615,30 @@ namespace ErpSystem.Web.Services
                 CreatedAt = now.AddMonths(-3),
                 CreatedBy = "System"
             });
+        }
+
+        private async Task<string> ResolveBaseCurrencyCodeAsync(Guid tenantId)
+        {
+            var currency = await _context.Currencies
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.IsBaseCurrency && !item.IsDeleted)
+                .OrderByDescending(item => item.IsActive)
+                .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .Select(item => item.CurrencyCode)
+                .FirstOrDefaultAsync();
+
+            if (!string.IsNullOrWhiteSpace(currency))
+            {
+                return currency.Trim().ToUpperInvariant();
+            }
+
+            var tenantCurrency = await _context.Tenants
+                .AsNoTracking()
+                .Where(item => item.Id == tenantId)
+                .Select(item => item.BaseCurrency)
+                .FirstOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(tenantCurrency) ? "GHS" : tenantCurrency.Trim().ToUpperInvariant();
         }
 
         private async Task EnsureWorkflowDefinitionSeededAsync(

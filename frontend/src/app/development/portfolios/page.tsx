@@ -8,6 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
+import {
   ProjectDependencyWatchReportItemDto,
   CreateProjectPortfolioDto,
   ProjectPortfolioDto,
@@ -37,22 +43,25 @@ export default function ProjectPortfoliosPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
 
   const load = async () => {
     try {
       setLoading(true);
-      const [portfolioResult, summaryResult, prioritizationResult, strategicResult, dependencyResult] = await Promise.all([
+      const [portfolioResult, summaryResult, prioritizationResult, strategicResult, dependencyResult, currencyContext] = await Promise.all([
         projectService.getPortfolios(),
         projectService.getPortfolioSummaryReport(8),
         projectService.getPortfolioPrioritizationReport(undefined, 20),
         projectService.getStrategicInitiativeReport(undefined, 8),
         projectService.getDependencyWatchReport(undefined, undefined, 8),
+        loadProjectCurrencyContext(),
       ]);
       setPortfolios(portfolioResult);
       setSummary(summaryResult);
       setPrioritization(prioritizationResult);
       setStrategicInitiatives(strategicResult);
       setDependencyWatch(dependencyResult);
+      setBaseCurrency(currencyContext.baseCurrency);
     } catch (error: any) {
       toast.error(error.message || 'Failed to load portfolios');
     } finally {
@@ -108,6 +117,7 @@ export default function ProjectPortfoliosPage() {
   const dependencyAlerts = dependencyWatch.filter((item) => item.coordinationState !== 'Resolved').length;
   const topPortfolios = [...summary].sort((a, b) => b.totalEstimatedBudget - a.totalEstimatedBudget).slice(0, 3);
   const prioritizationBoard = [...prioritization].slice(0, 6);
+  const formatMoney = (value: number, currency?: string | null) => formatProjectMoney(value, currency, baseCurrency.code);
 
   return (
     <div className="space-y-6">
@@ -119,8 +129,8 @@ export default function ProjectPortfoliosPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <Card><CardHeader className="pb-2"><CardDescription>Portfolios</CardDescription><CardTitle>{portfolios.length}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Projects in Portfolios</CardDescription><CardTitle>{totalProjects}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Total Portfolio Budget</CardDescription><CardTitle>{totalBudget.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Total Actual Cost</CardDescription><CardTitle>{totalActualCost.toLocaleString()}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Total Portfolio Budget</CardDescription><CardTitle>{formatMoney(totalBudget)}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Total Actual Cost</CardDescription><CardTitle>{formatMoney(totalActualCost)}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>High-Risk Projects</CardDescription><CardTitle>{highRiskProjects}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Dependency Watch</CardDescription><CardTitle>{dependencyAlerts}</CardTitle></CardHeader></Card>
       </div>
@@ -138,7 +148,7 @@ export default function ProjectPortfoliosPage() {
                   <div key={`highlight-${item.portfolioId}`} className="rounded-lg border bg-slate-50 p-4 dark:bg-slate-900/40">
                     <div className="font-semibold">{item.portfolioName}</div>
                     <div className="mt-1 text-sm text-muted-foreground">{item.portfolioCode}</div>
-                    <div className="mt-3 text-2xl font-semibold">{item.totalEstimatedBudget.toLocaleString()}</div>
+                    <div className="mt-3 text-2xl font-semibold">{formatMoney(item.totalEstimatedBudget)}</div>
                     <div className="mt-1 text-sm text-muted-foreground">Estimated budget</div>
                   </div>
                 ))}
@@ -156,8 +166,8 @@ export default function ProjectPortfoliosPage() {
                 <div className="mt-3 grid gap-2 text-sm md:grid-cols-4">
                   <div>Programs: {item.programCount}</div>
                   <div>Active: {item.activeProjectCount}</div>
-                  <div>Budget: {item.totalEstimatedBudget.toLocaleString()}</div>
-                  <div>Actual: {item.totalActualCost.toLocaleString()}</div>
+                  <div>Budget: {formatMoney(item.totalEstimatedBudget)}</div>
+                  <div>Actual: {formatMoney(item.totalActualCost)}</div>
                   <div>High risk: {item.highRiskProjectCount}</div>
                 </div>
               </div>
@@ -251,7 +261,7 @@ export default function ProjectPortfoliosPage() {
                 <div className="mt-3 grid gap-2 text-sm md:grid-cols-4">
                   <div>Active: {item.activeProjectCount}</div>
                   <div>At risk: {item.atRiskProjectCount}</div>
-                  <div>Budget: {item.totalEstimatedBudget.toLocaleString()}</div>
+                  <div>Budget: {formatMoney(item.totalEstimatedBudget)}</div>
                   <div>Progress: {item.averageProgressPercent.toFixed(2)}%</div>
                 </div>
               </div>
@@ -312,7 +322,7 @@ export default function ProjectPortfoliosPage() {
                   </div>
                   <div className="mt-1 text-sm text-muted-foreground">{item.description || 'No description'}</div>
                   <div className="mt-2 text-sm text-muted-foreground">
-                    {item.programCount} programs | {item.projectCount} projects | Actual cost {item.totalActualCost.toLocaleString()} | Budget cap {(item.budgetCap ?? 0).toLocaleString()}
+                    {item.programCount} programs | {item.projectCount} projects | Actual cost {formatMoney(item.totalActualCost)} | Budget cap {formatMoney(item.budgetCap ?? 0)}
                   </div>
                 </div>
                 <div className="flex gap-2">

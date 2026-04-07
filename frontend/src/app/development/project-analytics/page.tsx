@@ -5,6 +5,12 @@ import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
 import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -48,29 +54,32 @@ const emptyState: AnalyticsState = {
   dependencyWatch: [],
 };
 
-const currency = (value: number | undefined) => (value ?? 0).toLocaleString();
-
 const percent = (value: number | undefined) => `${(value ?? 0).toFixed(2)}%`;
 
 export default function ProjectAnalyticsPage() {
   const [state, setState] = useState<AnalyticsState>(emptyState);
   const [loading, setLoading] = useState(true);
   const [secondaryLoading, setSecondaryLoading] = useState(true);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         setSecondaryLoading(true);
-        const primaryResults = await Promise.allSettled([
-          projectService.getPerformanceAnalyticsReport(150),
-          projectService.getPortfolioSummaryReport(20),
-          projectService.getProgramSummaryReport(undefined, 30),
-          projectService.getBudgetActualReport(150),
-          projectService.getBillingSummaryReport(150),
-          projectService.getInvoiceRequestQueueReport(100),
-          projectService.getWorkflowApprovalQueueReport(100),
+        const [primaryResults, currencyContext] = await Promise.all([
+          Promise.allSettled([
+            projectService.getPerformanceAnalyticsReport(150),
+            projectService.getPortfolioSummaryReport(20),
+            projectService.getProgramSummaryReport(undefined, 30),
+            projectService.getBudgetActualReport(150),
+            projectService.getBillingSummaryReport(150),
+            projectService.getInvoiceRequestQueueReport(100),
+            projectService.getWorkflowApprovalQueueReport(100),
+          ]),
+          loadProjectCurrencyContext(),
         ]);
+        setBaseCurrency(currencyContext.baseCurrency);
 
         setState((current) => ({
           ...current,
@@ -106,6 +115,9 @@ export default function ProjectAnalyticsPage() {
 
     void load();
   }, []);
+
+  const formatMoney = (value: number | undefined, currency?: string | null) =>
+    formatProjectMoney(value ?? 0, currency, baseCurrency.code);
 
   const watchItems = state.performance.filter((item) => item.healthStatus === 'Watch');
   const profitableItems = state.billing.filter((item) => item.marginAmount > 0);
@@ -158,25 +170,25 @@ export default function ProjectAnalyticsPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Budget Baseline</CardDescription>
-            <CardTitle>{currency(totalBaseline)}</CardTitle>
+            <CardTitle>{formatMoney(totalBaseline)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Actual Cost</CardDescription>
-            <CardTitle>{currency(totalActualCost)}</CardTitle>
+            <CardTitle>{formatMoney(totalActualCost)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Forecast at Completion</CardDescription>
-            <CardTitle>{currency(totalForecast)}</CardTitle>
+            <CardTitle>{formatMoney(totalForecast)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Projected Variance</CardDescription>
-            <CardTitle className={totalProjectedVariance < 0 ? 'text-red-600' : ''}>{currency(totalProjectedVariance)}</CardTitle>
+            <CardTitle className={totalProjectedVariance < 0 ? 'text-red-600' : ''}>{formatMoney(totalProjectedVariance)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -188,7 +200,7 @@ export default function ProjectAnalyticsPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Collected Cash</CardDescription>
-            <CardTitle>{currency(totalCollectedCash)}</CardTitle>
+            <CardTitle>{formatMoney(totalCollectedCash)}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -361,7 +373,7 @@ export default function ProjectAnalyticsPage() {
                   <div>Active: {item.activeProjectCount}</div>
                   <div>Delayed: {item.delayedProjectCount}</div>
                   <div>High risk items: {item.highRiskItemCount}</div>
-                  <div>Budget: {currency(item.totalEstimatedBudget)}</div>
+                  <div>Budget: {formatMoney(item.totalEstimatedBudget)}</div>
                 </div>
               </div>
             ))}
@@ -433,7 +445,7 @@ export default function ProjectAnalyticsPage() {
                     <div>Programs: {item.programCount}</div>
                     <div>Projects: {item.projectCount}</div>
                     <div>Active: {item.activeProjectCount}</div>
-                    <div>Budget: {currency(item.totalEstimatedBudget)}</div>
+                    <div>Budget: {formatMoney(item.totalEstimatedBudget)}</div>
                   </div>
                 </div>
               );
@@ -463,7 +475,7 @@ export default function ProjectAnalyticsPage() {
                 </div>
                 <div className="mt-3 grid gap-2 text-sm md:grid-cols-3">
                   <div>Active: {item.activeProjectCount}</div>
-                  <div>Budget: {currency(item.totalEstimatedBudget)}</div>
+                  <div>Budget: {formatMoney(item.totalEstimatedBudget)}</div>
                   <div>Avg progress: {percent(item.averageProgressPercent)}</div>
                 </div>
               </div>
@@ -502,12 +514,12 @@ export default function ProjectAnalyticsPage() {
                         <div className="font-medium">{item.projectCode}</div>
                         <div className="text-sm text-muted-foreground">{item.projectTitle}</div>
                       </TableCell>
-                      <TableCell>{currency(item.scheduledBillingAmount)}</TableCell>
-                      <TableCell>{currency(item.invoiceRequestedAmount)}</TableCell>
-                      <TableCell>{currency(item.collectedCashAmount)}</TableCell>
-                      <TableCell>{currency(item.actualCost)}</TableCell>
+                      <TableCell>{formatMoney(item.scheduledBillingAmount)}</TableCell>
+                      <TableCell>{formatMoney(item.invoiceRequestedAmount)}</TableCell>
+                      <TableCell>{formatMoney(item.collectedCashAmount)}</TableCell>
+                      <TableCell>{formatMoney(item.actualCost)}</TableCell>
                       <TableCell>
-                        <div className={item.marginAmount < 0 ? 'text-red-600' : ''}>{currency(item.marginAmount)}</div>
+                        <div className={item.marginAmount < 0 ? 'text-red-600' : ''}>{formatMoney(item.marginAmount)}</div>
                         <div className="text-xs text-muted-foreground">{percent(item.marginPercent)}</div>
                       </TableCell>
                     </TableRow>
@@ -536,10 +548,10 @@ export default function ProjectAnalyticsPage() {
                   <Badge variant={item.budgetVariance < 0 ? 'destructive' : 'outline'}>{item.status}</Badge>
                 </div>
                 <div className="mt-3 grid gap-2 text-sm md:grid-cols-4">
-                  <div>Approved: {currency(item.approvedBudget)}</div>
-                  <div>Actual: {currency(item.actualCost)}</div>
+                  <div>Approved: {formatMoney(item.approvedBudget)}</div>
+                  <div>Actual: {formatMoney(item.actualCost)}</div>
                   <div>Progress: {percent(item.progressPercent)}</div>
-                  <div className={item.budgetVariance < 0 ? 'text-red-600 font-medium' : ''}>Variance: {currency(item.budgetVariance)}</div>
+                  <div className={item.budgetVariance < 0 ? 'text-red-600 font-medium' : ''}>Variance: {formatMoney(item.budgetVariance)}</div>
                 </div>
               </div>
             ))}
@@ -586,7 +598,7 @@ export default function ProjectAnalyticsPage() {
                         {item.queueStage}
                       </Badge>
                     </TableCell>
-                    <TableCell>{item.currency} {currency(item.requestedAmount)}</TableCell>
+                    <TableCell>{formatMoney(item.requestedAmount, item.currency)}</TableCell>
                     <TableCell>
                       <span className={item.daysOutstanding > 7 && item.status !== 'SentToFinance' ? 'font-medium text-red-600' : ''}>
                         {item.daysOutstanding} day{item.daysOutstanding === 1 ? '' : 's'}
@@ -643,18 +655,18 @@ export default function ProjectAnalyticsPage() {
                           <span className="text-sm text-muted-foreground">{item.status}</span>
                         </div>
                       </TableCell>
-                      <TableCell>{currency(item.budgetBaseline)}</TableCell>
+                      <TableCell>{formatMoney(item.budgetBaseline)}</TableCell>
                       <TableCell>
-                        <div>{currency(item.earnedValue)}</div>
-                        <div className="text-xs text-muted-foreground">PV {currency(item.plannedValue)}</div>
+                        <div>{formatMoney(item.earnedValue)}</div>
+                        <div className="text-xs text-muted-foreground">PV {formatMoney(item.plannedValue)}</div>
                       </TableCell>
                       <TableCell>{item.costPerformanceIndex?.toFixed(2) ?? 'N/A'}</TableCell>
                       <TableCell>
-                        <div>{currency(item.estimateAtCompletion)}</div>
-                        <div className="text-xs text-muted-foreground">ETC {currency(item.estimateToComplete)}</div>
+                        <div>{formatMoney(item.estimateAtCompletion)}</div>
+                        <div className="text-xs text-muted-foreground">ETC {formatMoney(item.estimateToComplete)}</div>
                       </TableCell>
                       <TableCell className={item.projectedVariance < 0 ? 'text-red-600 font-medium' : ''}>
-                        {currency(item.projectedVariance)}
+                        {formatMoney(item.projectedVariance)}
                       </TableCell>
                     </TableRow>
                   ))}

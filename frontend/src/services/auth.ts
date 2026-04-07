@@ -1,5 +1,6 @@
 import { apiService } from './api.service';
 import type { LoginRequest, LoginResponse, RequestLoginOtpRequest, RequestLoginOtpResponse, VerifyLoginOtpRequest, User, Tenant } from '../types';
+import { hasAllPermissionsAccess, hasAnyPermissionAccess, hasPermissionAccess } from '../lib/permissions';
 
 const SESSION_ACTIVITY_STORAGE_KEY = 'erp-session-last-activity';
 
@@ -196,21 +197,17 @@ export class AuthService {
 
   hasPermission(permission: string): boolean {
     const user = this.getStoredUser();
-    return user?.permissions?.includes(permission) ?? false;
+    return hasPermissionAccess(user, permission);
   }
 
   hasAnyPermission(permissions: string[]): boolean {
     const user = this.getStoredUser();
-    if (!user?.permissions) return false;
-
-    return permissions.some(permission => user.permissions?.includes(permission));
+    return hasAnyPermissionAccess(user, permissions);
   }
 
   hasAllPermissions(permissions: string[]): boolean {
     const user = this.getStoredUser();
-    if (!user?.permissions) return false;
-
-    return permissions.every(permission => user.permissions?.includes(permission));
+    return hasAllPermissionsAccess(user, permissions);
   }
 }
 

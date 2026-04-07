@@ -6,6 +6,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProjectBaselineComparisonDto, ProjectDetailDto, ProjectLookupDto, ProjectScheduleAnalysisDto, ProjectWorkItemDto, projectService } from '@/services/projectService';
@@ -32,12 +38,17 @@ export default function DevelopmentTimelinePage() {
   const [baselineName, setBaselineName] = useState('');
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, TimelineDraft>>({});
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
 
   const load = async (projectId?: string) => {
     try {
       setLoading(true);
-      const projectItems = await projectService.lookupProjects();
+      const [projectItems, currencyContext] = await Promise.all([
+        projectService.lookupProjects(),
+        loadProjectCurrencyContext(),
+      ]);
       setProjects(projectItems);
+      setBaseCurrency(currencyContext.baseCurrency);
 
       const resolvedProjectId = projectId && projectId !== 'all'
         ? projectId
@@ -116,6 +127,8 @@ export default function DevelopmentTimelinePage() {
       },
     }));
   };
+
+  const formatMoney = (value: number, currency?: string | null) => formatProjectMoney(value, currency, baseCurrency.code);
 
   const saveDates = async (item: ProjectWorkItemDto) => {
     const draft = drafts[item.id];
@@ -324,7 +337,7 @@ export default function DevelopmentTimelinePage() {
                 </div>
                 <div className="rounded-lg border p-4">
                   <div className="text-sm text-muted-foreground">Budget Variance</div>
-                  <div className="text-2xl font-semibold">{baselineComparison.budgetVariance.toLocaleString()}</div>
+                  <div className="text-2xl font-semibold">{formatMoney(baselineComparison.budgetVariance)}</div>
                 </div>
                 <div className="rounded-lg border p-4">
                   <div className="text-sm text-muted-foreground">Changed Work Items</div>

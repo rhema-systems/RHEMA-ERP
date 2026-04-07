@@ -9,7 +9,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { currencyService, type CurrencyListDto } from '@/services/financeCommonService';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  buildProjectCurrencyOptions,
+  findProjectCurrency,
+  formatProjectCurrencyLabel,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
+import { type CurrencyListDto } from '@/services/financeCommonService';
 import {
   CreateProjectBillingScheduleDto,
   CreateProjectInvoiceRequestDto,
@@ -24,9 +33,6 @@ import {
 } from '@/services/projectService';
 import { toast } from 'sonner';
 
-const DEFAULT_CURRENCIES = ['USD'];
-const formatCurrencyLabel = (currency: CurrencyListDto) => `${currency.code} | ${currency.name}`;
-
 const emptySchedule: CreateProjectBillingScheduleDto = {
   name: '',
   billingType: 'Milestone',
@@ -39,7 +45,7 @@ const emptySchedule: CreateProjectBillingScheduleDto = {
 
 const emptyInvoice: CreateProjectInvoiceRequestDto = {
   requestedAmount: 0,
-  currency: 'USD',
+  currency: '',
   status: 'Draft',
   notes: '',
 };
@@ -53,6 +59,7 @@ export default function ProjectBillingPage() {
   const [contracts, setContracts] = useState<ProjectContractLookupDto[]>([]);
   const [contractMilestones, setContractMilestones] = useState<ProjectContractMilestoneLookupDto[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [loading, setLoading] = useState(true);
   const [queueFilter, setQueueFilter] = useState<string>('all');
   const [schedule, setSchedule] = useState<CreateProjectBillingScheduleDto>(emptySchedule);
@@ -60,28 +67,24 @@ export default function ProjectBillingPage() {
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const currencyOptions = useMemo(() => {
-    const codes = currencies
-      .filter((currency) => currency.isActive)
-      .map((currency) => currency.code.trim().toUpperCase())
-      .filter(Boolean);
-    const values = codes.length > 0 ? codes : DEFAULT_CURRENCIES;
-    return invoice.currency && !values.includes(invoice.currency) ? [invoice.currency, ...values] : values;
-  }, [currencies, invoice.currency]);
+    return buildProjectCurrencyOptions(currencies, baseCurrency, invoice.currency);
+  }, [baseCurrency, currencies, invoice.currency]);
 
   const load = async (projectId?: string) => {
     try {
       setLoading(true);
-      const [projectItems, summaryItems, queueItems, loadedCurrencies] = await Promise.all([
+      const [projectItems, summaryItems, queueItems, currencyContext] = await Promise.all([
         projectService.lookupProjects(),
         projectService.getBillingSummaryReport(50),
         projectService.getInvoiceRequestQueueReport(200, queueFilter === 'all' ? undefined : queueFilter),
-        currencyService.getActive().catch(() => []),
+        loadProjectCurrencyContext(),
       ]);
 
       setProjects(projectItems);
       setSummary(summaryItems);
       setInvoiceQueue(queueItems);
-      setCurrencies(loadedCurrencies);
+      setCurrencies(currencyContext.activeCurrencies);
+      setBaseCurrency(currencyContext.baseCurrency);
 
       const resolvedProjectId = projectId === 'all'
         ? undefined
@@ -178,7 +181,7 @@ export default function ProjectBillingPage() {
 
     try {
       setSavingInvoice(true);
-      await projectService.createInvoiceRequest(project.id, invoice);
+      await projectService.createInvoiceRequest(project.id, { ...invoice, currency: invoice.currency || baseCurrency.code });
       setInvoice(emptyInvoice);
       await load(project.id);
       toast.success('Invoice request created');
@@ -234,6 +237,8 @@ export default function ProjectBillingPage() {
 
     return { totalScheduled, totalRequested, collectedCash, readyToBill, overdueSchedules, draftRequests, submittedRequests, sentToFinance, invoicedRequests, paidRequests, recognizedRevenue, totalMargin, marginPressure };
   }, [summary]);
+
+  const formatMoney = (value: number, currency?: string | null) => formatProjectMoney(value, currency, baseCurrency.code);
 
   const selectedSummary = useMemo(
     () => (project ? summary.find((item) => item.projectId === project.id) ?? null : null),
@@ -347,10 +352,10 @@ export default function ProjectBillingPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <Card><CardHeader className="pb-2"><CardDescription>Projects Tracked</CardDescription><CardTitle>{summary.length}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Scheduled Amount</CardDescription><CardTitle>{cards.totalScheduled.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Invoice Requests</CardDescription><CardTitle>{cards.totalRequested.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Collected Cash</CardDescription><CardTitle>{cards.collectedCash.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Recognized Revenue</CardDescription><CardTitle>{cards.recognizedRevenue.toLocaleString()}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Scheduled Amount</CardDescription><CardTitle>{formatMoney(cards.totalScheduled)}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Invoice Requests</CardDescription><CardTitle>{formatMoney(cards.totalRequested)}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Collected Cash</CardDescription><CardTitle>{formatMoney(cards.collectedCash)}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Recognized Revenue</CardDescription><CardTitle>{formatMoney(cards.recognizedRevenue)}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Margin Pressure</CardDescription><CardTitle>{cards.marginPressure}</CardTitle></CardHeader></Card>
       </div>
 
@@ -390,7 +395,7 @@ export default function ProjectBillingPage() {
           </div>
           <div className="rounded-lg border p-4">
             <div className="text-sm text-muted-foreground">Total Margin</div>
-            <div className={`mt-1 text-2xl font-semibold ${cards.totalMargin < 0 ? 'text-red-600' : ''}`}>{cards.totalMargin.toLocaleString()}</div>
+            <div className={`mt-1 text-2xl font-semibold ${cards.totalMargin < 0 ? 'text-red-600' : ''}`}>{formatMoney(cards.totalMargin)}</div>
           </div>
         </CardContent>
       </Card>
@@ -417,15 +422,15 @@ export default function ProjectBillingPage() {
             </div>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Scheduled</div><div className="mt-1 text-xl font-semibold">{selectedSummary.scheduledBillingAmount.toLocaleString()}</div></div>
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Requested</div><div className="mt-1 text-xl font-semibold">{selectedSummary.invoiceRequestedAmount.toLocaleString()}</div></div>
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Collected</div><div className="mt-1 text-xl font-semibold">{selectedSummary.collectedCashAmount.toLocaleString()}</div></div>
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Unbilled</div><div className="mt-1 text-xl font-semibold">{selectedSummary.unbilledAmount.toLocaleString()}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Scheduled</div><div className="mt-1 text-xl font-semibold">{formatMoney(selectedSummary.scheduledBillingAmount)}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Requested</div><div className="mt-1 text-xl font-semibold">{formatMoney(selectedSummary.invoiceRequestedAmount)}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Collected</div><div className="mt-1 text-xl font-semibold">{formatMoney(selectedSummary.collectedCashAmount)}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Unbilled</div><div className="mt-1 text-xl font-semibold">{formatMoney(selectedSummary.unbilledAmount)}</div></div>
             <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Coverage</div><div className="mt-1 text-xl font-semibold">{selectedSummary.billingCoveragePercent.toFixed(2)}%</div></div>
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Recognized Revenue</div><div className="mt-1 text-xl font-semibold">{selectedSummary.recognizedRevenue.toLocaleString()}</div></div>
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Revenue Gap</div><div className="mt-1 text-xl font-semibold">{selectedSummary.revenueGapAmount.toLocaleString()}</div></div>
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Actual Cost</div><div className="mt-1 text-xl font-semibold">{selectedSummary.actualCost.toLocaleString()}</div></div>
-            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Margin</div><div className={`mt-1 text-xl font-semibold ${selectedSummary.marginAmount < 0 ? 'text-red-600' : ''}`}>{selectedSummary.marginAmount.toLocaleString()}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Recognized Revenue</div><div className="mt-1 text-xl font-semibold">{formatMoney(selectedSummary.recognizedRevenue)}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Revenue Gap</div><div className="mt-1 text-xl font-semibold">{formatMoney(selectedSummary.revenueGapAmount)}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Actual Cost</div><div className="mt-1 text-xl font-semibold">{formatMoney(selectedSummary.actualCost)}</div></div>
+            <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Margin</div><div className={`mt-1 text-xl font-semibold ${selectedSummary.marginAmount < 0 ? 'text-red-600' : ''}`}>{formatMoney(selectedSummary.marginAmount)}</div></div>
           </CardContent>
         </Card>
       ) : null}
@@ -485,7 +490,7 @@ export default function ProjectBillingPage() {
                         {item.queueStage}
                       </Badge>
                     </TableCell>
-                    <TableCell>{item.currency} {item.requestedAmount.toLocaleString()}</TableCell>
+                    <TableCell>{formatMoney(item.requestedAmount, item.currency)}</TableCell>
                     <TableCell>
                       {item.billingScheduleName ? (
                         <div>
@@ -598,12 +603,12 @@ export default function ProjectBillingPage() {
                       </TableCell>
                       <TableCell>{item.readyBillingScheduleCount}</TableCell>
                       <TableCell>{item.overdueBillingScheduleCount}</TableCell>
-                      <TableCell>{item.scheduledBillingAmount.toLocaleString()}</TableCell>
-                      <TableCell>{item.invoiceRequestedAmount.toLocaleString()}</TableCell>
-                      <TableCell>{item.collectedCashAmount.toLocaleString()}</TableCell>
-                      <TableCell>{item.recognizedRevenue.toLocaleString()}</TableCell>
+                      <TableCell>{formatMoney(item.scheduledBillingAmount)}</TableCell>
+                      <TableCell>{formatMoney(item.invoiceRequestedAmount)}</TableCell>
+                      <TableCell>{formatMoney(item.collectedCashAmount)}</TableCell>
+                      <TableCell>{formatMoney(item.recognizedRevenue)}</TableCell>
                       <TableCell>{item.billingCoveragePercent.toFixed(2)}%</TableCell>
-                      <TableCell>{item.unbilledAmount.toLocaleString()}</TableCell>
+                      <TableCell>{formatMoney(item.unbilledAmount)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -623,7 +628,7 @@ export default function ProjectBillingPage() {
                 {contractMilestones.slice(0, 4).map((item) => (
                   <div key={item.id} className="rounded-lg border bg-slate-50 p-3 dark:bg-slate-900/40">
                     <div className="font-medium">{item.milestoneName}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">{item.paymentAmount.toLocaleString()} | {item.paymentPercentage}%</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{formatMoney(item.paymentAmount)} | {item.paymentPercentage}%</div>
                     <div className="mt-1 text-xs text-muted-foreground">{item.plannedDate ? format(new Date(item.plannedDate), 'MMM dd, yyyy') : 'No planned date'} | {item.status}</div>
                   </div>
                 ))}
@@ -751,7 +756,7 @@ export default function ProjectBillingPage() {
                         <div className="text-sm text-muted-foreground">{item.billingType}{item.contractMilestoneId ? ' | Contract milestone linked' : ''}</div>
                       </TableCell>
                       <TableCell>{format(new Date(item.billingDate), 'MMM dd, yyyy')}</TableCell>
-                      <TableCell>{item.amount.toLocaleString()}</TableCell>
+                      <TableCell>{formatMoney(item.amount)}</TableCell>
                       <TableCell><Badge variant="outline">{item.status}</Badge></TableCell>
                       <TableCell>
                         <div className="flex gap-2">
@@ -797,14 +802,14 @@ export default function ProjectBillingPage() {
               </div>
               <div className="grid gap-2">
                 <Label>Currency</Label>
-                <Select value={invoice.currency || currencyOptions[0]} onValueChange={(value) => setInvoice((prev) => ({ ...prev, currency: value }))}>
+                <Select value={invoice.currency || currencyOptions[0] || baseCurrency.code} onValueChange={(value) => setInvoice((prev) => ({ ...prev, currency: value }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {currencyOptions.map((code) => {
-                      const currency = currencies.find((item) => item.code.toUpperCase() === code.toUpperCase());
+                      const currency = findProjectCurrency(currencies, code, baseCurrency);
                       return (
                         <SelectItem key={code} value={code}>
-                          {currency ? formatCurrencyLabel(currency) : code}
+                          {formatProjectCurrencyLabel(currency, code)}
                         </SelectItem>
                       );
                     })}
@@ -837,7 +842,7 @@ export default function ProjectBillingPage() {
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <div className="font-medium">{item.requestNumber}</div>
-                          <div className="text-sm text-muted-foreground">{item.currency} {item.requestedAmount.toLocaleString()}</div>
+                          <div className="text-sm text-muted-foreground">{formatMoney(item.requestedAmount, item.currency)}</div>
                       </div>
                       <Badge variant="outline">{item.status}</Badge>
                       </div>

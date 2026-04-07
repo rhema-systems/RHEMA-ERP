@@ -108,6 +108,268 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
     }
 }
 
+public sealed class ProjectDevelopmentProfileConfiguration : IEntityTypeConfiguration<ProjectDevelopmentProfile>
+{
+    public void Configure(EntityTypeBuilder<ProjectDevelopmentProfile> builder)
+    {
+        builder.HasIndex(x => x.ProjectId).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.DeliveryStructure });
+
+        builder.HasOne(x => x.Project)
+            .WithOne(x => x.DevelopmentProfile)
+            .HasForeignKey<ProjectDevelopmentProfile>(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class ProjectPhaseConfiguration : IEntityTypeConfiguration<ProjectPhase>
+{
+    public void Configure(EntityTypeBuilder<ProjectPhase> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.ParentPhaseId, x.SortOrder });
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.Phases)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ParentPhase)
+            .WithMany(x => x.Children)
+            .HasForeignKey(x => x.ParentPhaseId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ProjectPackageConfiguration : IEntityTypeConfiguration<ProjectPackage>
+{
+    public void Configure(EntityTypeBuilder<ProjectPackage> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.SortOrder });
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectPhaseId });
+        builder.HasIndex(x => new { x.ProjectId, x.Code });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.Packages)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectPhase)
+            .WithMany(x => x.Packages)
+            .HasForeignKey(x => x.ProjectPhaseId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ProjectBoqItemConfiguration : IEntityTypeConfiguration<ProjectBoqItem>
+{
+    public void Configure(EntityTypeBuilder<ProjectBoqItem> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectPackageId, x.SortOrder });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectPackageId, x.LineNumber });
+        builder.HasIndex(x => new { x.ProjectId, x.ItemType });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.BoqItems)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ProjectPackage)
+            .WithMany(x => x.BoqItems)
+            .HasForeignKey(x => x.ProjectPackageId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class ProjectApprovalRegisterItemConfiguration : IEntityTypeConfiguration<ProjectApprovalRegisterItem>
+{
+    public void Configure(EntityTypeBuilder<ProjectApprovalRegisterItem> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectPhaseId, x.ApprovalType });
+        builder.HasIndex(x => new { x.ProjectId, x.TargetDecisionDate });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.ApprovalRegisterItems)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectPhase)
+            .WithMany(x => x.ApprovalRegisterItems)
+            .HasForeignKey(x => x.ProjectPhaseId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ProjectUnitConfiguration : IEntityTypeConfiguration<ProjectUnit>
+{
+    public void Configure(EntityTypeBuilder<ProjectUnit> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.SortOrder });
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.Code });
+        builder.HasIndex(x => new { x.ProjectId, x.CustomerBusinessPartnerId });
+        builder.HasIndex(x => new { x.ProjectId, x.SalesAgreementId });
+        builder.HasIndex(x => new { x.ProjectId, x.SalesOrderId });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.Units)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.SalesAgreement)
+            .WithMany()
+            .HasForeignKey(x => x.SalesAgreementId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.SalesOrder)
+            .WithMany()
+            .HasForeignKey(x => x.SalesOrderId)
+            .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+public sealed class ProjectCustomerVariationConfiguration : IEntityTypeConfiguration<ProjectCustomerVariation>
+{
+    public void Configure(EntityTypeBuilder<ProjectCustomerVariation> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectUnitId });
+        builder.HasIndex(x => new { x.ProjectId, x.CustomerBusinessPartnerId });
+        builder.HasIndex(x => new { x.ProjectId, x.RequestDate });
+        builder.HasIndex(x => new { x.ProjectId, x.SalesAgreementId });
+        builder.HasIndex(x => new { x.ProjectId, x.SalesOrderId });
+        builder.HasIndex(x => new { x.ProjectId, x.JobCardId });
+        builder.HasIndex(x => new { x.ProjectId, x.WorkOrderId });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.CustomerVariations)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectUnit)
+            .WithMany(x => x.CustomerVariations)
+            .HasForeignKey(x => x.ProjectUnitId)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasOne(x => x.SalesAgreement)
+            .WithMany()
+            .HasForeignKey(x => x.SalesAgreementId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.SalesOrder)
+            .WithMany()
+            .HasForeignKey(x => x.SalesOrderId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.JobCard)
+            .WithMany()
+            .HasForeignKey(x => x.JobCardId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.WorkOrder)
+            .WithMany()
+            .HasForeignKey(x => x.WorkOrderId)
+            .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+public sealed class ProjectCommissioningItemConfiguration : IEntityTypeConfiguration<ProjectCommissioningItem>
+{
+    public void Configure(EntityTypeBuilder<ProjectCommissioningItem> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.SortOrder });
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectUnitId });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.CommissioningItems)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectUnit)
+            .WithMany(x => x.CommissioningItems)
+            .HasForeignKey(x => x.ProjectUnitId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public sealed class ProjectHandoverItemConfiguration : IEntityTypeConfiguration<ProjectHandoverItem>
+{
+    public void Configure(EntityTypeBuilder<ProjectHandoverItem> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.SortOrder });
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.HandoverType });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectUnitId });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.HandoverItems)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectUnit)
+            .WithMany(x => x.HandoverItems)
+            .HasForeignKey(x => x.ProjectUnitId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public sealed class ProjectSnagItemConfiguration : IEntityTypeConfiguration<ProjectSnagItem>
+{
+    public void Configure(EntityTypeBuilder<ProjectSnagItem> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.Severity });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectUnitId });
+        builder.HasIndex(x => new { x.ProjectId, x.TargetClosureDate });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.SnagItems)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectUnit)
+            .WithMany(x => x.SnagItems)
+            .HasForeignKey(x => x.ProjectUnitId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public sealed class ProjectDefectLiabilityCaseConfiguration : IEntityTypeConfiguration<ProjectDefectLiabilityCase>
+{
+    public void Configure(EntityTypeBuilder<ProjectDefectLiabilityCase> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectUnitId });
+        builder.HasIndex(x => new { x.ProjectId, x.CustomerBusinessPartnerId });
+        builder.HasIndex(x => new { x.ProjectId, x.TargetResolutionDate });
+        builder.HasIndex(x => new { x.ProjectId, x.JobCardId });
+        builder.HasIndex(x => new { x.ProjectId, x.WorkOrderId });
+
+        builder.HasOne(x => x.Project)
+            .WithMany(x => x.DefectLiabilityCases)
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectUnit)
+            .WithMany(x => x.DefectLiabilityCases)
+            .HasForeignKey(x => x.ProjectUnitId)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasOne(x => x.JobCard)
+            .WithMany()
+            .HasForeignKey(x => x.JobCardId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.WorkOrder)
+            .WithMany()
+            .HasForeignKey(x => x.WorkOrderId)
+            .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
 public sealed class ProjectInitiationVersionConfiguration : IEntityTypeConfiguration<ProjectInitiationVersion>
 {
     public void Configure(EntityTypeBuilder<ProjectInitiationVersion> builder)

@@ -10,6 +10,21 @@ export interface PagedResult<T> {
   totalPages: number;
 }
 
+export interface SalesLinkedProjectUnitContextDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectUnitId: string;
+  projectUnitCode?: string;
+  projectUnitName: string;
+  projectUnitType: string;
+  projectUnitStatus: string;
+  projectUnitCommercialStatus: string;
+  projectUnitHandoverStatus: string;
+  isReleasedForMarket: boolean;
+  handoverDate?: string;
+}
+
 export interface SalesOrderSummaryDto {
   id: string;
   orderNumber: string;
@@ -26,6 +41,7 @@ export interface SalesOrderSummaryDto {
   expectedDeliveryDate?: string;
   deliveryProgress: number;
   createdAt: string;
+  projectUnitContext?: SalesLinkedProjectUnitContextDto;
 }
 
 export interface SalesOrderDetailDto {
@@ -65,6 +81,7 @@ export interface SalesOrderDetailDto {
   deliveryProgress: number;
   lines: SalesOrderLineDto[];
   statusHistory: SalesOrderStatusHistoryDto[];
+  projectUnitContext?: SalesLinkedProjectUnitContextDto;
   createdAt: string;
   createdByName?: string;
   modifiedAt?: string;
@@ -220,6 +237,119 @@ export interface ConfirmDeliveryLineDto {
   deliveredQuantity: number;
 }
 
+function normalizeProjectUnitContext(raw: any): SalesLinkedProjectUnitContextDto | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  return {
+    projectId: raw.projectId,
+    projectCode: raw.projectCode ?? '',
+    projectTitle: raw.projectTitle ?? '',
+    projectUnitId: raw.projectUnitId,
+    projectUnitCode: raw.projectUnitCode,
+    projectUnitName: raw.projectUnitName ?? '',
+    projectUnitType: raw.projectUnitType ?? '',
+    projectUnitStatus: raw.projectUnitStatus ?? '',
+    projectUnitCommercialStatus: raw.projectUnitCommercialStatus ?? '',
+    projectUnitHandoverStatus: raw.projectUnitHandoverStatus ?? '',
+    isReleasedForMarket: Boolean(raw.isReleasedForMarket),
+    handoverDate: raw.handoverDate,
+  };
+}
+
+function normalizeSalesOrderSummary(raw: any): SalesOrderSummaryDto {
+  return {
+    id: raw.id,
+    orderNumber: raw.orderNumber ?? raw.documentNumber ?? '',
+    orderDate: raw.orderDate ?? raw.documentDate ?? '',
+    businessPartnerId: raw.businessPartnerId,
+    customerName: raw.customerName ?? '',
+    orderType: raw.orderType != null ? String(raw.orderType) : '',
+    status: raw.status ?? (raw.orderStatus != null ? String(raw.orderStatus) : ''),
+    priority: raw.priority ?? raw.orderPriority ?? 'Normal',
+    totalAmount: raw.totalAmount ?? 0,
+    currency: raw.currency ?? 'GHS',
+    salesRepName: raw.salesRepName,
+    propertyReference: raw.propertyReference,
+    expectedDeliveryDate: raw.expectedDeliveryDate ?? raw.requestedDeliveryDate ?? raw.promisedDeliveryDate,
+    deliveryProgress: raw.deliveryProgress ?? 0,
+    createdAt: raw.createdAt ?? raw.documentDate ?? '',
+    projectUnitContext: normalizeProjectUnitContext(raw.projectUnitContext),
+  };
+}
+
+function normalizeSalesOrderDetail(raw: any): SalesOrderDetailDto {
+  return {
+    id: raw.id,
+    orderNumber: raw.orderNumber ?? raw.documentNumber ?? '',
+    orderDate: raw.orderDate ?? raw.documentDate ?? '',
+    businessPartnerId: raw.businessPartnerId,
+    customerName: raw.customerName ?? '',
+    orderType: raw.orderType != null ? String(raw.orderType) : '',
+    status: raw.status ?? (raw.orderStatus != null ? String(raw.orderStatus) : ''),
+    priority: raw.priority ?? raw.orderPriority ?? 'Normal',
+    subtotalAmount: raw.subtotalAmount ?? raw.subTotal ?? 0,
+    discountAmount: raw.discountAmount ?? 0,
+    taxAmount: raw.taxAmount ?? 0,
+    totalAmount: raw.totalAmount ?? 0,
+    currency: raw.currency ?? 'GHS',
+    paymentTerms: raw.paymentTerms ?? (raw.paymentTermsDays ? `Net ${raw.paymentTermsDays} days` : undefined),
+    salesRepId: raw.salesRepId,
+    salesRepName: raw.salesRepName,
+    propertyReference: raw.propertyReference,
+    propertyType: raw.propertyType != null ? String(raw.propertyType) : undefined,
+    shippingAddress: raw.shippingAddress,
+    billingAddress: raw.billingAddress,
+    customerPoNumber: raw.customerPoNumber ?? raw.referenceNumber,
+    expectedDeliveryDate: raw.expectedDeliveryDate ?? raw.requestedDeliveryDate ?? raw.promisedDeliveryDate,
+    notes: raw.notes ?? raw.externalNotes,
+    internalNotes: raw.internalNotes,
+    rejectionReason: raw.rejectionReason,
+    cancellationReason: raw.cancellationReason,
+    holdReason: raw.holdReason,
+    sourceQuoteId: raw.sourceQuoteId ?? raw.quoteId,
+    sourceQuoteNumber: raw.sourceQuoteNumber ?? raw.quoteNumber,
+    approvedById: raw.approvedById,
+    approvedByName: raw.approvedByName,
+    approvedDate: raw.approvedDate,
+    confirmedDate: raw.confirmedDate,
+    deliveryProgress: raw.deliveryProgress ?? 0,
+    lines: Array.isArray(raw.lines)
+      ? raw.lines.map((line: any) => ({
+          id: line.id,
+          lineNumber: line.lineNumber ?? 0,
+          itemId: line.itemId ?? line.inventoryItemId ?? line.productId,
+          itemCode: line.itemCode ?? line.productCode,
+          itemName: line.itemName ?? line.description ?? '',
+          description: line.description,
+          quantity: line.quantity ?? 0,
+          unitOfMeasure: line.unitOfMeasure ?? line.unit ?? '',
+          unitPrice: line.unitPrice ?? 0,
+          discountPercent: line.discountPercent ?? line.discountPercentage ?? 0,
+          taxPercent: line.taxPercent ?? line.taxRate ?? 0,
+          lineTotal: line.lineTotal ?? 0,
+          deliveredQuantity: line.deliveredQuantity ?? 0,
+          remainingQuantity: line.remainingQuantity ?? 0,
+        }))
+      : [],
+    statusHistory: Array.isArray(raw.statusHistory)
+      ? raw.statusHistory.map((entry: any) => ({
+          id: entry.id,
+          fromStatus: entry.fromStatus != null ? String(entry.fromStatus) : '',
+          toStatus: entry.toStatus != null ? String(entry.toStatus) : '',
+          changedByName: entry.changedByName ?? '',
+          changedDate: entry.changedDate ?? entry.changedAt ?? '',
+          reason: entry.reason ?? entry.notes,
+        }))
+      : [],
+    createdAt: raw.createdAt ?? raw.documentDate ?? '',
+    createdByName: raw.createdByName,
+    modifiedAt: raw.modifiedAt ?? raw.updatedAt,
+    projectUnitContext: normalizeProjectUnitContext(raw.projectUnitContext),
+  };
+}
+
 // ==================== API FUNCTIONS ====================
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -247,6 +377,8 @@ export const salesOrderService = {
     startDate?: string,
     endDate?: string,
     priority?: string,
+    projectLinkedOnly?: boolean,
+    releasedUnitsOnly?: boolean,
   ): Promise<PagedResult<SalesOrderSummaryDto>> {
     const params = new URLSearchParams();
     params.append('page', page.toString());
@@ -258,12 +390,21 @@ export const salesOrderService = {
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
     if (priority) params.append('priority', priority);
+    if (projectLinkedOnly) params.append('projectLinkedOnly', 'true');
+    if (releasedUnitsOnly) params.append('releasedUnitsOnly', 'true');
 
     const response = await fetch(`${API_BASE_URL}/sales/orders?${params.toString()}`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error('Failed to fetch sales orders');
-    return response.json();
+    const result = await response.json();
+    return {
+      items: Array.isArray(result.items) ? result.items.map(normalizeSalesOrderSummary) : [],
+      totalCount: result.totalCount ?? 0,
+      page: result.page ?? page,
+      pageSize: result.pageSize ?? pageSize,
+      totalPages: result.totalPages ?? Math.max(1, Math.ceil((result.totalCount ?? 0) / ((result.pageSize ?? pageSize) || 1))),
+    };
   },
 
   async getSalesOrderById(id: string): Promise<SalesOrderDetailDto> {
@@ -271,7 +412,7 @@ export const salesOrderService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error('Failed to fetch sales order');
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async createSalesOrder(data: CreateSalesOrderDto): Promise<SalesOrderDetailDto> {
@@ -284,7 +425,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to create sales order');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async updateSalesOrder(id: string, data: UpdateSalesOrderDto): Promise<SalesOrderDetailDto> {
@@ -297,7 +438,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to update sales order');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async submitForApproval(id: string): Promise<SalesOrderDetailDto> {
@@ -309,7 +450,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to submit sales order');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async processApproval(id: string, data: SalesOrderApprovalDto): Promise<SalesOrderDetailDto> {
@@ -322,7 +463,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to process approval');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async confirmSalesOrder(id: string): Promise<SalesOrderDetailDto> {
@@ -334,7 +475,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to confirm sales order');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async cancelSalesOrder(id: string, data: CancelSalesOrderDto): Promise<SalesOrderDetailDto> {
@@ -347,7 +488,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to cancel sales order');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async putOnHold(id: string, reason?: string): Promise<SalesOrderDetailDto> {
@@ -360,7 +501,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to put order on hold');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async releaseFromHold(id: string): Promise<SalesOrderDetailDto> {
@@ -372,7 +513,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to release order');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async closeSalesOrder(id: string): Promise<SalesOrderDetailDto> {
@@ -384,7 +525,7 @@ export const salesOrderService = {
       const error = await response.text();
       throw new Error(error || 'Failed to close sales order');
     }
-    return response.json();
+    return normalizeSalesOrderDetail(await response.json());
   },
 
   async validateCredit(businessPartnerId: string, amount: number): Promise<{ isValid: boolean; outstandingBalance: number; requestedAmount: number }> {

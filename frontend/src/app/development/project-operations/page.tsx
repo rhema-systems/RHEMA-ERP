@@ -5,12 +5,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  DEFAULT_PROJECT_CURRENCY,
+  formatProjectMoney,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
 import { projectService, type ProjectBillingSummaryReportItemDto, type ProjectDependencyWatchReportItemDto, type ProjectExpenseApprovalQueueItemDto, type ProjectInvoiceRequestQueueItemDto, type ProjectMaterialReconciliationReportItemDto, type ProjectPortfolioPrioritizationReportItemDto, type ProjectStrategicInitiativeReportItemDto, type ProjectTimesheetApprovalQueueItemDto, type ProjectWorkflowApprovalQueueItemDto } from '@/services/projectService';
 import { RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-
-const formatMoney = (value: number, currency: string = 'USD') =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
 
 export default function ProjectOperationsPage() {
   const [loading, setLoading] = useState(true);
@@ -24,18 +27,23 @@ export default function ProjectOperationsPage() {
   const [billingSummary, setBillingSummary] = useState<ProjectBillingSummaryReportItemDto[]>([]);
   const [dependencyWatch, setDependencyWatch] = useState<ProjectDependencyWatchReportItemDto[]>([]);
   const [strategicInitiatives, setStrategicInitiatives] = useState<ProjectStrategicInitiativeReportItemDto[]>([]);
+  const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
 
   const load = async () => {
     try {
       setLoading(true);
       setSecondaryLoading(true);
-      const primaryResults = await Promise.allSettled([
-        projectService.getWorkflowApprovalQueueReport(20),
-        projectService.getInvoiceRequestQueueReport(20),
-        projectService.getTimesheetApprovalQueue(undefined, 'Submitted', undefined, 20),
-        projectService.getExpenseApprovalQueue(undefined, 'Submitted', undefined, 20),
-        projectService.getMaterialReconciliationReport(20),
+      const [primaryResults, currencyContext] = await Promise.all([
+        Promise.allSettled([
+          projectService.getWorkflowApprovalQueueReport(20),
+          projectService.getInvoiceRequestQueueReport(20),
+          projectService.getTimesheetApprovalQueue(undefined, 'Submitted', undefined, 20),
+          projectService.getExpenseApprovalQueue(undefined, 'Submitted', undefined, 20),
+          projectService.getMaterialReconciliationReport(20),
+        ]),
+        loadProjectCurrencyContext(),
       ]);
+      setBaseCurrency(currencyContext.baseCurrency);
 
       setWorkflowQueue(primaryResults[0].status === 'fulfilled' ? primaryResults[0].value : []);
       setInvoiceQueue(primaryResults[1].status === 'fulfilled' ? primaryResults[1].value : []);
@@ -91,6 +99,9 @@ export default function ProjectOperationsPage() {
     () => billingSummary.filter((item) => item.overdueBillingScheduleCount > 0 || item.unbilledAmount > 0).slice(0, 6),
     [billingSummary],
   );
+
+  const formatMoney = (value: number, currency?: string | null) =>
+    formatProjectMoney(value, currency, baseCurrency.code);
 
   return (
     <div className="space-y-6">

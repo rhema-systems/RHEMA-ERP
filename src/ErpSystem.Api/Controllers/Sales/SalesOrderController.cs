@@ -39,10 +39,12 @@ public class SalesOrderController : ControllerBase
         [FromQuery] SalesOrderType? orderType = null,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null,
-        [FromQuery] string? priority = null)
+        [FromQuery] string? priority = null,
+        [FromQuery] bool projectLinkedOnly = false,
+        [FromQuery] bool releasedUnitsOnly = false)
     {
         var result = await _salesOrderService.GetSalesOrdersAsync(
-            page, pageSize, search, status, customerId, salesRepId, orderType, startDate, endDate, priority);
+            page, pageSize, search, status, customerId, salesRepId, orderType, startDate, endDate, priority, projectLinkedOnly, releasedUnitsOnly);
         return Ok(result);
     }
 
