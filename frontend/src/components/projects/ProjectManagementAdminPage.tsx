@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ProjectPhaseLibraryAdmin } from '@/components/projects/ProjectPhaseLibraryAdmin';
 import {
   CreateProjectCatalogEntryDto,
   CreateProjectPriorityDto,
@@ -27,11 +28,366 @@ import {
 import { Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-type AdminTab = 'overview' | 'catalogs' | 'types' | 'priorities' | 'templates' | 'settings';
+type AdminTab = 'overview' | 'catalogs' | 'types' | 'priorities' | 'templates' | 'phases' | 'settings';
 
 interface Props {
   initialTab?: AdminTab;
 }
+
+interface TemplateDevelopmentProfileBuilder {
+  deliveryStructure: string;
+  developmentType: string;
+  siteName: string;
+  siteAddress: string;
+  landReference: string;
+  procurementRoute: string;
+  contractStrategy: string;
+  consultantTeam: string;
+  fundingArrangement: string;
+  handoverStrategy: string;
+  notes: string;
+}
+
+interface TemplatePhaseBuilder {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  status: string;
+  isOptional: boolean;
+  isStageGateRequired: boolean;
+}
+
+interface TemplateWorkItemBuilder {
+  id: string;
+  title: string;
+  description: string;
+  nodeType: string;
+  status: string;
+  priority: string;
+}
+
+interface TemplateMilestoneBuilder {
+  id: string;
+  title: string;
+  description: string;
+  targetDate: string;
+  status: string;
+  requiresApproval: boolean;
+}
+
+interface TemplateBuilderState {
+  developmentProfile: TemplateDevelopmentProfileBuilder;
+  phases: TemplatePhaseBuilder[];
+  workItems: TemplateWorkItemBuilder[];
+  milestones: TemplateMilestoneBuilder[];
+  extraDefinition: Record<string, unknown>;
+}
+
+const DELIVERY_STRUCTURES = ['WholeDevelopment', 'SingleUnit', 'MultiUnit'];
+const DEVELOPMENT_TYPES = ['Residential', 'Commercial', 'Industrial', 'MixedUse', 'Hospitality', 'Institutional', 'Infrastructure', 'Renovation'];
+const PROCUREMENT_ROUTES = ['Traditional', 'DesignBuild', 'ConstructionManagement', 'DirectLabour', 'Negotiated', 'FrameworkCallOff'];
+const CONTRACT_STRATEGIES = ['LumpSum', 'MeasuredWorks', 'CostPlus', 'TargetCost', 'ManagementContract', 'SubcontractPackages'];
+const HANDOVER_STRATEGIES = ['SingleHandover', 'PhasedHandover', 'UnitByUnitHandover', 'ShellAndCore', 'Turnkey'];
+
+const DEFAULT_TEMPLATE_PHASE_BLUEPRINTS = [
+  { code: 'FEASIBILITY', name: 'Feasibility', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
+  { code: 'CONCEPT_DESIGN', name: 'Concept Design', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
+  { code: 'DETAILED_DESIGN', name: 'Detailed Design', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
+  { code: 'APPROVALS', name: 'Approvals & Permits', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
+  { code: 'PROCUREMENT', name: 'Procurement', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
+  { code: 'CONSTRUCTION', name: 'Construction', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: false },
+  { code: 'COMMISSIONING', name: 'Testing & Commissioning', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
+  { code: 'HANDOVER', name: 'Handover', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
+  { code: 'DEFECTS_LIABILITY', name: 'Defects Liability', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: false },
+];
+
+const createTemplateRowId = () =>
+  typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : Math.random().toString(36).slice(2, 10);
+
+const formatCatalogLabel = (value: string) =>
+  value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .replace(/[-_]/g, ' ');
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const readStringValue = (value: Record<string, unknown>, key: string) =>
+  typeof value[key] === 'string' ? (value[key] as string) : '';
+
+const readBooleanValue = (value: Record<string, unknown>, key: string) =>
+  typeof value[key] === 'boolean' ? (value[key] as boolean) : false;
+
+const normalizeDateInput = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed;
+};
+
+const createBlankTemplateBuilder = (): TemplateBuilderState => ({
+  developmentProfile: {
+    deliveryStructure: 'WholeDevelopment',
+    developmentType: '',
+    siteName: '',
+    siteAddress: '',
+    landReference: '',
+    procurementRoute: '',
+    contractStrategy: '',
+    consultantTeam: '',
+    fundingArrangement: '',
+    handoverStrategy: '',
+    notes: '',
+  },
+  phases: [],
+  workItems: [],
+  milestones: [],
+  extraDefinition: {},
+});
+
+const createDefaultTemplateBuilder = (): TemplateBuilderState => ({
+  ...createBlankTemplateBuilder(),
+  phases: DEFAULT_TEMPLATE_PHASE_BLUEPRINTS.map((phase) => ({
+    id: createTemplateRowId(),
+    ...phase,
+  })),
+});
+
+const cloneTemplateBuilder = (builder: TemplateBuilderState): TemplateBuilderState => ({
+  developmentProfile: { ...builder.developmentProfile },
+  phases: builder.phases.map((phase) => ({ ...phase })),
+  workItems: builder.workItems.map((item) => ({ ...item })),
+  milestones: builder.milestones.map((item) => ({ ...item })),
+  extraDefinition: { ...builder.extraDefinition },
+});
+
+const parseTemplatePhases = (value: unknown): TemplatePhaseBuilder[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string') {
+        return {
+          id: createTemplateRowId(),
+          code: '',
+          name: item,
+          description: '',
+          status: 'NotStarted',
+          isOptional: false,
+          isStageGateRequired: false,
+        };
+      }
+
+      const record = asRecord(item);
+      if (!record) return null;
+
+      return {
+        id: createTemplateRowId(),
+        code: readStringValue(record, 'code'),
+        name: readStringValue(record, 'name') || readStringValue(record, 'title') || 'Unnamed phase',
+        description: readStringValue(record, 'description'),
+        status: readStringValue(record, 'status') || 'NotStarted',
+        isOptional: readBooleanValue(record, 'isOptional'),
+        isStageGateRequired: readBooleanValue(record, 'isStageGateRequired') || readBooleanValue(record, 'stageGateRequired'),
+      };
+    })
+    .filter((item): item is TemplatePhaseBuilder => item !== null);
+};
+
+const parseTemplateWorkItems = (value: unknown): TemplateWorkItemBuilder[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string') {
+        return {
+          id: createTemplateRowId(),
+          title: item,
+          description: '',
+          nodeType: 'Task',
+          status: 'New',
+          priority: 'Normal',
+        };
+      }
+
+      const record = asRecord(item);
+      if (!record) return null;
+
+      return {
+        id: createTemplateRowId(),
+        title: readStringValue(record, 'title') || 'Untitled work item',
+        description: readStringValue(record, 'description'),
+        nodeType: readStringValue(record, 'nodeType') || 'Task',
+        status: readStringValue(record, 'status') || 'New',
+        priority: readStringValue(record, 'priority') || 'Normal',
+      };
+    })
+    .filter((item): item is TemplateWorkItemBuilder => item !== null);
+};
+
+const parseTemplateMilestones = (value: unknown): TemplateMilestoneBuilder[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string') {
+        return {
+          id: createTemplateRowId(),
+          title: item,
+          description: '',
+          targetDate: '',
+          status: 'Draft',
+          requiresApproval: false,
+        };
+      }
+
+      const record = asRecord(item);
+      if (!record) return null;
+
+      return {
+        id: createTemplateRowId(),
+        title: readStringValue(record, 'title') || 'Untitled milestone',
+        description: readStringValue(record, 'description'),
+        targetDate: normalizeDateInput(readStringValue(record, 'targetDate')),
+        status: readStringValue(record, 'status') || 'Draft',
+        requiresApproval: readBooleanValue(record, 'requiresApproval'),
+      };
+    })
+    .filter((item): item is TemplateMilestoneBuilder => item !== null);
+};
+
+const parseTemplateDefinition = (templateDefinitionJson?: string, useDefaultWhenEmpty: boolean = false) => {
+  const fallbackBuilder = useDefaultWhenEmpty ? createDefaultTemplateBuilder() : createBlankTemplateBuilder();
+  if (!templateDefinitionJson?.trim()) {
+    return { builder: fallbackBuilder, error: null as string | null };
+  }
+
+  try {
+    const parsed = JSON.parse(templateDefinitionJson);
+    const root = asRecord(parsed);
+    if (!root) {
+      return { builder: fallbackBuilder, error: 'Template definition must be a JSON object.' };
+    }
+
+    const { developmentProfile, constructionProfile, projectPhases, phases, workItems, milestones, ...extraDefinition } = root;
+    const profile = asRecord(developmentProfile) ?? asRecord(constructionProfile) ?? {};
+    const builder: TemplateBuilderState = {
+      developmentProfile: {
+        deliveryStructure: readStringValue(profile, 'deliveryStructure') || 'WholeDevelopment',
+        developmentType: readStringValue(profile, 'developmentType'),
+        siteName: readStringValue(profile, 'siteName'),
+        siteAddress: readStringValue(profile, 'siteAddress'),
+        landReference: readStringValue(profile, 'landReference'),
+        procurementRoute: readStringValue(profile, 'procurementRoute'),
+        contractStrategy: readStringValue(profile, 'contractStrategy'),
+        consultantTeam: readStringValue(profile, 'consultantTeam'),
+        fundingArrangement: readStringValue(profile, 'fundingArrangement'),
+        handoverStrategy: readStringValue(profile, 'handoverStrategy'),
+        notes: readStringValue(profile, 'notes'),
+      },
+      phases: parseTemplatePhases(projectPhases ?? phases),
+      workItems: parseTemplateWorkItems(workItems),
+      milestones: parseTemplateMilestones(milestones),
+      extraDefinition,
+    };
+
+    if (useDefaultWhenEmpty && builder.phases.length === 0) {
+      builder.phases = createDefaultTemplateBuilder().phases;
+    }
+
+    return { builder, error: null as string | null };
+  } catch {
+    return { builder: fallbackBuilder, error: 'Template JSON is invalid. Use Advanced mode to repair it before saving.' };
+  }
+};
+
+const buildTemplateDefinitionJson = (builder: TemplateBuilderState) => {
+  const payload: Record<string, unknown> = { ...builder.extraDefinition };
+  const {
+    deliveryStructure,
+    developmentType,
+    siteName,
+    siteAddress,
+    landReference,
+    procurementRoute,
+    contractStrategy,
+    consultantTeam,
+    fundingArrangement,
+    handoverStrategy,
+    notes,
+  } = builder.developmentProfile;
+
+  const developmentProfile = Object.fromEntries(
+    Object.entries({
+      deliveryStructure: deliveryStructure || undefined,
+      developmentType: developmentType.trim() || undefined,
+      siteName: siteName.trim() || undefined,
+      siteAddress: siteAddress.trim() || undefined,
+      landReference: landReference.trim() || undefined,
+      procurementRoute: procurementRoute.trim() || undefined,
+      contractStrategy: contractStrategy.trim() || undefined,
+      consultantTeam: consultantTeam.trim() || undefined,
+      fundingArrangement: fundingArrangement.trim() || undefined,
+      handoverStrategy: handoverStrategy.trim() || undefined,
+      notes: notes.trim() || undefined,
+    }).filter(([, value]) => value !== undefined),
+  );
+
+  if (Object.keys(developmentProfile).length > 0) {
+    payload.developmentProfile = developmentProfile;
+  }
+
+  const phases = builder.phases
+    .map((phase, index) => ({
+      code: phase.code.trim() || undefined,
+      name: phase.name.trim(),
+      description: phase.description.trim() || undefined,
+      status: phase.status.trim() || 'NotStarted',
+      sortOrder: index,
+      isOptional: phase.isOptional,
+      isStageGateRequired: phase.isStageGateRequired,
+    }))
+    .filter((phase) => phase.name);
+
+  if (phases.length > 0) {
+    payload.projectPhases = phases;
+  }
+
+  const workItems = builder.workItems
+    .map((item, index) => ({
+      title: item.title.trim(),
+      description: item.description.trim() || undefined,
+      nodeType: item.nodeType.trim() || 'Task',
+      status: item.status.trim() || 'New',
+      priority: item.priority.trim() || 'Normal',
+      sortOrder: index,
+    }))
+    .filter((item) => item.title);
+
+  if (workItems.length > 0) {
+    payload.workItems = workItems;
+  }
+
+  const milestones = builder.milestones
+    .map((milestone) => ({
+      title: milestone.title.trim(),
+      description: milestone.description.trim() || undefined,
+      targetDate: milestone.targetDate || undefined,
+      status: milestone.status.trim() || 'Draft',
+      requiresApproval: milestone.requiresApproval,
+    }))
+    .filter((milestone) => milestone.title);
+
+  if (milestones.length > 0) {
+    payload.milestones = milestones;
+  }
+
+  return JSON.stringify(payload, null, 2);
+};
 
 const emptyType: CreateProjectTypeDto = { code: '', name: '', description: '', isActive: true, requiresSponsor: false, requiresApproval: true, mandatoryFieldsJson: '' };
 const emptyPriority: CreateProjectPriorityDto = { code: '', name: '', colorHex: '#2563eb', sortOrder: 10, isActive: true };
@@ -40,7 +396,7 @@ const emptyTemplate: CreateProjectTemplateDto = {
   name: '',
   description: '',
   versionLabel: '1.0',
-  templateDefinitionJson: JSON.stringify({ workItems: [{ nodeType: 'Phase', title: 'Initiation' }] }, null, 2),
+  templateDefinitionJson: buildTemplateDefinitionJson(createDefaultTemplateBuilder()),
   isActive: true,
 };
 const emptySettings: UpdateProjectManagementSettingsDto = {
@@ -72,6 +428,11 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
   const [typeForm, setTypeForm] = useState<CreateProjectTypeDto>(emptyType);
   const [priorityForm, setPriorityForm] = useState<CreateProjectPriorityDto>(emptyPriority);
   const [templateForm, setTemplateForm] = useState<CreateProjectTemplateDto>(emptyTemplate);
+  const [templateBuilder, setTemplateBuilder] = useState<TemplateBuilderState>(() =>
+    cloneTemplateBuilder(parseTemplateDefinition(emptyTemplate.templateDefinitionJson, true).builder),
+  );
+  const [templateJsonError, setTemplateJsonError] = useState<string | null>(null);
+  const [showAdvancedTemplateJson, setShowAdvancedTemplateJson] = useState(false);
   const [catalogForm, setCatalogForm] = useState<CreateProjectCatalogEntryDto>(emptyCatalog);
   const [settingsForm, setSettingsForm] = useState<UpdateProjectManagementSettingsDto>(emptySettings);
   const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
@@ -80,6 +441,53 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
   const [editingCatalogId, setEditingCatalogId] = useState<string | null>(null);
   const [selectedCatalogType, setSelectedCatalogType] = useState<string>('methodologies');
   const [seedingCatalogs, setSeedingCatalogs] = useState(false);
+
+  const resetTemplateEditor = (nextForm: CreateProjectTemplateDto = emptyTemplate, useDefaultWhenEmpty: boolean = true) => {
+    const parsed = parseTemplateDefinition(nextForm.templateDefinitionJson, useDefaultWhenEmpty);
+    setTemplateForm(nextForm);
+    setTemplateBuilder(cloneTemplateBuilder(parsed.builder));
+    setTemplateJsonError(parsed.error);
+    setShowAdvancedTemplateJson(false);
+  };
+
+  const updateTemplateBuilder = (updater: (current: TemplateBuilderState) => TemplateBuilderState) => {
+    setTemplateBuilder((current) => {
+      const next = updater(current);
+      const templateDefinitionJson = buildTemplateDefinitionJson(next);
+      setTemplateForm((prev) => ({
+        ...prev,
+        templateDefinitionJson,
+      }));
+      setTemplateJsonError(null);
+      return next;
+    });
+  };
+
+  const updateTemplateDevelopmentProfile = (updates: Partial<TemplateDevelopmentProfileBuilder>) => {
+    updateTemplateBuilder((current) => ({
+      ...current,
+      developmentProfile: {
+        ...current.developmentProfile,
+        ...updates,
+      },
+    }));
+  };
+
+  const updateAdvancedTemplateJson = (value: string) => {
+    setTemplateForm((prev) => ({
+      ...prev,
+      templateDefinitionJson: value,
+    }));
+
+    const parsed = parseTemplateDefinition(value, false);
+    if (parsed.error) {
+      setTemplateJsonError(parsed.error);
+      return;
+    }
+
+    setTemplateBuilder(cloneTemplateBuilder(parsed.builder));
+    setTemplateJsonError(null);
+  };
 
   const loadData = async () => {
     try {
@@ -174,13 +582,25 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
 
   const saveTemplate = async () => {
     try {
-      setSaving(true);
-      if (editingTemplateId) {
-        await projectService.updateProjectTemplate(editingTemplateId, templateForm);
-      } else {
-        await projectService.createProjectTemplate(templateForm);
+      const parsed = parseTemplateDefinition(templateForm.templateDefinitionJson, false);
+      if (parsed.error) {
+        toast.error(parsed.error);
+        return;
       }
-      setTemplateForm(emptyTemplate);
+
+      setSaving(true);
+      const payload = {
+        ...templateForm,
+        templateDefinitionJson: templateForm.templateDefinitionJson?.trim()
+          ? templateForm.templateDefinitionJson
+          : buildTemplateDefinitionJson(templateBuilder),
+      };
+      if (editingTemplateId) {
+        await projectService.updateProjectTemplate(editingTemplateId, payload);
+      } else {
+        await projectService.createProjectTemplate(payload);
+      }
+      resetTemplateEditor();
       setEditingTemplateId(null);
       await loadData();
       toast.success('Project template saved');
@@ -259,7 +679,7 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
       await projectService.deleteProjectTemplate(id);
       if (editingTemplateId === id) {
         setEditingTemplateId(null);
-        setTemplateForm(emptyTemplate);
+        resetTemplateEditor();
       }
       await loadData();
       toast.success('Project template deleted');
@@ -313,20 +733,23 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
       </div>
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as AdminTab)} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="catalogs">Catalogs</TabsTrigger>
           <TabsTrigger value="types">Types</TabsTrigger>
           <TabsTrigger value="priorities">Priorities</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
+          <TabsTrigger value="phases">Phases</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
-          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-8">
             <Card><CardHeader><CardTitle className="text-base">Types</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectTypeCount ?? types.length}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Priorities</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectPriorityCount ?? priorities.length}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Templates</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectTemplateCount ?? templates.length}</CardContent></Card>
+            <Card><CardHeader><CardTitle className="text-base">Phase Templates</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectPhaseTemplateCount ?? 0}</CardContent></Card>
+            <Card><CardHeader><CardTitle className="text-base">Gate Rules</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectStageGateRuleCount ?? 0}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Portfolios</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.portfolioCount ?? 0}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Programs</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.programCount ?? 0}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Approval Default</CardTitle></CardHeader><CardContent><Badge>{settings?.defaultApprovalRequired ? 'Required' : 'Optional'}</Badge></CardContent></Card>
@@ -559,57 +982,390 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
           <Card>
             <CardHeader>
               <CardTitle>Project Templates</CardTitle>
-              <CardDescription>Reusable WBS and milestone definitions stored as JSON.</CardDescription>
+              <CardDescription>
+                Build reusable project blueprints with construction profile defaults, lifecycle phases, work items, and milestones.
+                Raw JSON is still available for advanced administrators, but normal setup no longer requires hand-editing JSON.
+              </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="space-y-3">
-                {templates.map((item) => (
-                  <div key={item.id} className="rounded-lg border p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold">{item.name}</span>
-                          <Badge variant="outline">{item.code}</Badge>
-                          <Badge variant="secondary">{item.versionLabel}</Badge>
+                {templates.map((item) => {
+                  const parsed = parseTemplateDefinition(item.templateDefinitionJson, false);
+                  const summary = parsed.builder;
+
+                  return (
+                    <div key={item.id} className="rounded-lg border p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-3">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold">{item.name}</span>
+                              <Badge variant="outline">{item.code}</Badge>
+                              <Badge variant="secondary">{item.versionLabel}</Badge>
+                              {item.projectTypeName ? <Badge variant="outline">{item.projectTypeName}</Badge> : null}
+                            </div>
+                            <div className="text-sm text-muted-foreground">{item.description || 'No description'}</div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="secondary">{summary.phases.length} phases</Badge>
+                            <Badge variant="secondary">{summary.workItems.length} work items</Badge>
+                            <Badge variant="secondary">{summary.milestones.length} milestones</Badge>
+                            {summary.developmentProfile.developmentType ? (
+                              <Badge variant="outline">{formatCatalogLabel(summary.developmentProfile.developmentType)}</Badge>
+                            ) : null}
+                            <Badge variant={item.isActive ? 'secondary' : 'outline'}>
+                              {item.isActive ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </div>
+                          {parsed.error ? <div className="text-sm text-amber-600">{parsed.error}</div> : null}
                         </div>
-                        <div className="text-sm text-muted-foreground">{item.description || 'No description'}</div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => {
-                          setEditingTemplateId(item.id);
-                          setTemplateForm({ code: item.code, name: item.name, description: item.description || '', projectTypeId: item.projectTypeId, versionLabel: item.versionLabel, templateDefinitionJson: item.templateDefinitionJson || '', isActive: item.isActive });
-                        }}>Edit</Button>
-                        <Button variant="ghost" size="icon" onClick={() => removeTemplate(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setEditingTemplateId(item.id);
+                              resetTemplateEditor(
+                                {
+                                  code: item.code,
+                                  name: item.name,
+                                  description: item.description || '',
+                                  projectTypeId: item.projectTypeId,
+                                  versionLabel: item.versionLabel,
+                                  templateDefinitionJson: item.templateDefinitionJson || '',
+                                  isActive: item.isActive,
+                                },
+                                !item.templateDefinitionJson?.trim(),
+                              );
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => removeTemplate(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <div className="rounded-lg border p-4 space-y-4">
-                <div className="font-semibold">{editingTemplateId ? 'Edit Template' : 'New Template'}</div>
-                <div className="grid gap-2"><Label>Code</Label><Input value={templateForm.code} onChange={(e) => setTemplateForm((prev) => ({ ...prev, code: e.target.value }))} /></div>
-                <div className="grid gap-2"><Label>Name</Label><Input value={templateForm.name} onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))} /></div>
-                <div className="grid gap-2">
-                  <Label>Project Type</Label>
-                  <Select value={templateForm.projectTypeId || 'none'} onValueChange={(value) => setTemplateForm((prev) => ({ ...prev, projectTypeId: value === 'none' ? undefined : value }))}>
-                    <SelectTrigger><SelectValue placeholder="General template" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">General template</SelectItem>
-                      {types.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+              <div className="rounded-lg border p-4 space-y-6">
+                <div>
+                  <div className="font-semibold">{editingTemplateId ? 'Edit Template' : 'New Template'}</div>
+                  <div className="text-sm text-muted-foreground">
+                    Set up a business-friendly template here. The system will still store the final template as JSON behind the scenes.
+                  </div>
                 </div>
-                <div className="grid gap-2"><Label>Version</Label><Input value={templateForm.versionLabel} onChange={(e) => setTemplateForm((prev) => ({ ...prev, versionLabel: e.target.value }))} /></div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-2"><Label>Code</Label><Input value={templateForm.code} onChange={(e) => setTemplateForm((prev) => ({ ...prev, code: e.target.value }))} /></div>
+                  <div className="grid gap-2"><Label>Name</Label><Input value={templateForm.name} onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))} /></div>
+                  <div className="grid gap-2">
+                    <Label>Project Type</Label>
+                    <Select value={templateForm.projectTypeId || 'none'} onValueChange={(value) => setTemplateForm((prev) => ({ ...prev, projectTypeId: value === 'none' ? undefined : value }))}>
+                      <SelectTrigger><SelectValue placeholder="General template" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">General template</SelectItem>
+                        {types.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2"><Label>Version</Label><Input value={templateForm.versionLabel} onChange={(e) => setTemplateForm((prev) => ({ ...prev, versionLabel: e.target.value }))} /></div>
+                </div>
+
                 <div className="grid gap-2"><Label>Description</Label><Textarea rows={3} value={templateForm.description} onChange={(e) => setTemplateForm((prev) => ({ ...prev, description: e.target.value }))} /></div>
-                <div className="grid gap-2"><Label>Template Definition JSON</Label><Textarea rows={10} value={templateForm.templateDefinitionJson} onChange={(e) => setTemplateForm((prev) => ({ ...prev, templateDefinitionJson: e.target.value }))} /></div>
+
+                <div className="rounded-lg border p-4">
+                  <div className="mb-4">
+                    <div className="font-medium">Construction Profile Defaults</div>
+                    <div className="text-sm text-muted-foreground">These defaults will be applied when a project is created from this template.</div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label>Delivery Structure</Label>
+                      <Select value={templateBuilder.developmentProfile.deliveryStructure || 'WholeDevelopment'} onValueChange={(value) => updateTemplateDevelopmentProfile({ deliveryStructure: value })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {DELIVERY_STRUCTURES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Development Type</Label>
+                      <Select value={templateBuilder.developmentProfile.developmentType || 'none'} onValueChange={(value) => updateTemplateDevelopmentProfile({ developmentType: value === 'none' ? '' : value })}>
+                        <SelectTrigger><SelectValue placeholder="No development type" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No development type</SelectItem>
+                          {DEVELOPMENT_TYPES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2"><Label>Site Name</Label><Input value={templateBuilder.developmentProfile.siteName} onChange={(e) => updateTemplateDevelopmentProfile({ siteName: e.target.value })} /></div>
+                    <div className="grid gap-2"><Label>Land Reference</Label><Input value={templateBuilder.developmentProfile.landReference} onChange={(e) => updateTemplateDevelopmentProfile({ landReference: e.target.value })} /></div>
+                    <div className="grid gap-2">
+                      <Label>Procurement Route</Label>
+                      <Select value={templateBuilder.developmentProfile.procurementRoute || 'none'} onValueChange={(value) => updateTemplateDevelopmentProfile({ procurementRoute: value === 'none' ? '' : value })}>
+                        <SelectTrigger><SelectValue placeholder="No procurement route" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No procurement route</SelectItem>
+                          {PROCUREMENT_ROUTES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Contract Strategy</Label>
+                      <Select value={templateBuilder.developmentProfile.contractStrategy || 'none'} onValueChange={(value) => updateTemplateDevelopmentProfile({ contractStrategy: value === 'none' ? '' : value })}>
+                        <SelectTrigger><SelectValue placeholder="No contract strategy" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No contract strategy</SelectItem>
+                          {CONTRACT_STRATEGIES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Handover Strategy</Label>
+                      <Select value={templateBuilder.developmentProfile.handoverStrategy || 'none'} onValueChange={(value) => updateTemplateDevelopmentProfile({ handoverStrategy: value === 'none' ? '' : value })}>
+                        <SelectTrigger><SelectValue placeholder="No handover strategy" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No handover strategy</SelectItem>
+                          {HANDOVER_STRATEGIES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2"><Label>Consultant Team</Label><Input value={templateBuilder.developmentProfile.consultantTeam} onChange={(e) => updateTemplateDevelopmentProfile({ consultantTeam: e.target.value })} /></div>
+                    <div className="grid gap-2"><Label>Funding Arrangement</Label><Input value={templateBuilder.developmentProfile.fundingArrangement} onChange={(e) => updateTemplateDevelopmentProfile({ fundingArrangement: e.target.value })} /></div>
+                    <div className="grid gap-2 md:col-span-2"><Label>Site Address</Label><Textarea rows={2} value={templateBuilder.developmentProfile.siteAddress} onChange={(e) => updateTemplateDevelopmentProfile({ siteAddress: e.target.value })} /></div>
+                    <div className="grid gap-2 md:col-span-2"><Label>Profile Notes</Label><Textarea rows={2} value={templateBuilder.developmentProfile.notes} onChange={(e) => updateTemplateDevelopmentProfile({ notes: e.target.value })} /></div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-medium">Default Lifecycle Phases</div>
+                      <div className="text-sm text-muted-foreground">Preload the construction lifecycle that new projects should start with.</div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        updateTemplateBuilder((current) => ({
+                          ...current,
+                          phases: [
+                            ...current.phases,
+                            {
+                              id: createTemplateRowId(),
+                              code: '',
+                              name: '',
+                              description: '',
+                              status: 'NotStarted',
+                              isOptional: false,
+                              isStageGateRequired: false,
+                            },
+                          ],
+                        }))
+                      }
+                    >
+                      Add Phase
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {templateBuilder.phases.length === 0 ? <div className="text-sm text-muted-foreground">No phases added yet.</div> : null}
+                    {templateBuilder.phases.map((phase, index) => (
+                      <div key={phase.id} className="rounded-md border p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-medium">Phase {index + 1}</div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              updateTemplateBuilder((current) => ({
+                                ...current,
+                                phases: current.phases.filter((item) => item.id !== phase.id),
+                              }))
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="grid gap-2"><Label>Code</Label><Input value={phase.code} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, code: e.target.value } : item) }))} /></div>
+                          <div className="grid gap-2"><Label>Name</Label><Input value={phase.name} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, name: e.target.value } : item) }))} /></div>
+                          <div className="grid gap-2"><Label>Status</Label><Input value={phase.status} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, status: e.target.value } : item) }))} /></div>
+                          <div className="grid gap-2"><Label>Description</Label><Input value={phase.description} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, description: e.target.value } : item) }))} /></div>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="flex items-center justify-between rounded-md border p-3">
+                            <span className="text-sm">Optional phase</span>
+                            <Switch checked={phase.isOptional} onCheckedChange={(checked) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, isOptional: checked } : item) }))} />
+                          </div>
+                          <div className="flex items-center justify-between rounded-md border p-3">
+                            <span className="text-sm">Stage gate required</span>
+                            <Switch checked={phase.isStageGateRequired} onCheckedChange={(checked) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, isStageGateRequired: checked } : item) }))} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-medium">Default Work Items</div>
+                      <div className="text-sm text-muted-foreground">Optional starter work items or WBS entries for new projects.</div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        updateTemplateBuilder((current) => ({
+                          ...current,
+                          workItems: [
+                            ...current.workItems,
+                            {
+                              id: createTemplateRowId(),
+                              title: '',
+                              description: '',
+                              nodeType: 'Task',
+                              status: 'New',
+                              priority: 'Normal',
+                            },
+                          ],
+                        }))
+                      }
+                    >
+                      Add Work Item
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {templateBuilder.workItems.length === 0 ? <div className="text-sm text-muted-foreground">No starter work items added yet.</div> : null}
+                    {templateBuilder.workItems.map((item, index) => (
+                      <div key={item.id} className="rounded-md border p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-medium">Work Item {index + 1}</div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              updateTemplateBuilder((current) => ({
+                                ...current,
+                                workItems: current.workItems.filter((entry) => entry.id !== item.id),
+                              }))
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="grid gap-2"><Label>Title</Label><Input value={item.title} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, workItems: current.workItems.map((entry) => entry.id === item.id ? { ...entry, title: e.target.value } : entry) }))} /></div>
+                          <div className="grid gap-2"><Label>Node Type</Label><Input value={item.nodeType} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, workItems: current.workItems.map((entry) => entry.id === item.id ? { ...entry, nodeType: e.target.value } : entry) }))} /></div>
+                          <div className="grid gap-2"><Label>Status</Label><Input value={item.status} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, workItems: current.workItems.map((entry) => entry.id === item.id ? { ...entry, status: e.target.value } : entry) }))} /></div>
+                          <div className="grid gap-2"><Label>Priority</Label><Input value={item.priority} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, workItems: current.workItems.map((entry) => entry.id === item.id ? { ...entry, priority: e.target.value } : entry) }))} /></div>
+                          <div className="grid gap-2 md:col-span-2"><Label>Description</Label><Textarea rows={2} value={item.description} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, workItems: current.workItems.map((entry) => entry.id === item.id ? { ...entry, description: e.target.value } : entry) }))} /></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-medium">Default Milestones</div>
+                      <div className="text-sm text-muted-foreground">Optional milestones to preload into project planning.</div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        updateTemplateBuilder((current) => ({
+                          ...current,
+                          milestones: [
+                            ...current.milestones,
+                            {
+                              id: createTemplateRowId(),
+                              title: '',
+                              description: '',
+                              targetDate: '',
+                              status: 'Draft',
+                              requiresApproval: false,
+                            },
+                          ],
+                        }))
+                      }
+                    >
+                      Add Milestone
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {templateBuilder.milestones.length === 0 ? <div className="text-sm text-muted-foreground">No starter milestones added yet.</div> : null}
+                    {templateBuilder.milestones.map((milestone, index) => (
+                      <div key={milestone.id} className="rounded-md border p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-medium">Milestone {index + 1}</div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              updateTemplateBuilder((current) => ({
+                                ...current,
+                                milestones: current.milestones.filter((entry) => entry.id !== milestone.id),
+                              }))
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="grid gap-2"><Label>Title</Label><Input value={milestone.title} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, milestones: current.milestones.map((entry) => entry.id === milestone.id ? { ...entry, title: e.target.value } : entry) }))} /></div>
+                          <div className="grid gap-2"><Label>Status</Label><Input value={milestone.status} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, milestones: current.milestones.map((entry) => entry.id === milestone.id ? { ...entry, status: e.target.value } : entry) }))} /></div>
+                          <div className="grid gap-2"><Label>Target Date</Label><Input type="date" value={milestone.targetDate} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, milestones: current.milestones.map((entry) => entry.id === milestone.id ? { ...entry, targetDate: e.target.value } : entry) }))} /></div>
+                          <div className="flex items-center justify-between rounded-md border p-3">
+                            <span className="text-sm">Requires approval</span>
+                            <Switch checked={milestone.requiresApproval} onCheckedChange={(checked) => updateTemplateBuilder((current) => ({ ...current, milestones: current.milestones.map((entry) => entry.id === milestone.id ? { ...entry, requiresApproval: checked } : entry) }))} />
+                          </div>
+                          <div className="grid gap-2 md:col-span-2"><Label>Description</Label><Textarea rows={2} value={milestone.description} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, milestones: current.milestones.map((entry) => entry.id === milestone.id ? { ...entry, description: e.target.value } : entry) }))} /></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-medium">Advanced JSON</div>
+                      <div className="text-sm text-muted-foreground">Only use this when you need to inspect or repair the raw stored template definition.</div>
+                    </div>
+                    <Button variant="outline" onClick={() => setShowAdvancedTemplateJson((current) => !current)}>
+                      {showAdvancedTemplateJson ? 'Hide Advanced JSON' : 'Show Advanced JSON'}
+                    </Button>
+                  </div>
+                  {showAdvancedTemplateJson ? (
+                    <div className="space-y-3">
+                      <div className="grid gap-2">
+                        <Label>Template Definition JSON</Label>
+                        <Textarea rows={14} value={templateForm.templateDefinitionJson} onChange={(e) => updateAdvancedTemplateJson(e.target.value)} />
+                      </div>
+                      {templateJsonError ? (
+                        <div className="text-sm text-amber-600">{templateJsonError}</div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">The structured builder above stays in sync whenever this JSON is valid.</div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="flex items-center justify-between border rounded-md p-3"><span className="text-sm">Active</span><Switch checked={templateForm.isActive !== false} onCheckedChange={(checked) => setTemplateForm((prev) => ({ ...prev, isActive: checked }))} /></div>
+
                 <div className="flex gap-2">
-                  <Button onClick={saveTemplate} disabled={saving || !templateForm.code || !templateForm.name}>Save Template</Button>
-                  {editingTemplateId && <Button variant="outline" onClick={() => { setEditingTemplateId(null); setTemplateForm(emptyTemplate); }}>Cancel</Button>}
+                  <Button onClick={saveTemplate} disabled={saving || !templateForm.code || !templateForm.name || !!templateJsonError}>Save Template</Button>
+                  {editingTemplateId && <Button variant="outline" onClick={() => { setEditingTemplateId(null); resetTemplateEditor(); }}>Cancel</Button>}
                 </div>
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="phases">
+          <ProjectPhaseLibraryAdmin onChanged={loadData} />
         </TabsContent>
 
         <TabsContent value="settings">

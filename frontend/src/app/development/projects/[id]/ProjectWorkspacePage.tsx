@@ -23,8 +23,10 @@ import type { ProjectWorkspaceTab } from './projectWorkspaceTabs';
 import { ProjectAccessTab } from './components/ProjectAccessTab';
 import { ProjectAnalysisTab } from './components/ProjectAnalysisTab';
 import { ProjectApprovalsTab } from './components/ProjectApprovalsTab';
+import { ProjectCommercialAdminTab } from './components/ProjectCommercialAdminTab';
 import { ProjectCommercialTab } from './components/ProjectCommercialTab';
 import { ProjectCustomerVariationsTab } from './components/ProjectCustomerVariationsTab';
+import { ProjectDesignTab } from './components/ProjectDesignTab';
 import { ProjectDefectsTab } from './components/ProjectDefectsTab';
 import { ProjectDocumentsTab } from './components/ProjectDocumentsTab';
 import { ProjectExecutionTab } from './components/ProjectExecutionTab';
@@ -35,7 +37,9 @@ import { ProjectHistoryTab } from './components/ProjectHistoryTab';
 import { ProjectMaterialsTab } from './components/ProjectMaterialsTab';
 import { ProjectOverviewTab } from './components/ProjectOverviewTab';
 import { ProjectPackagesTab } from './components/ProjectPackagesTab';
+import { ProjectPhasesTab } from './components/ProjectPhasesTab';
 import { ProjectPlanTab } from './components/ProjectPlanTab';
+import { ProjectSiteControlsTab } from './components/ProjectSiteControlsTab';
 import { ProjectUnitsTab } from './components/ProjectUnitsTab';
 import {
   DEFAULT_PROJECT_CURRENCY,
@@ -62,60 +66,88 @@ import {
   CreateProjectBaselineDto,
   CreateProjectBillingScheduleDto,
   CreateProjectBoqItemDto,
+  CreateProjectBuildingDto,
   CreateProjectBudgetRevisionDto,
   CreateProjectChangeRequestDto,
   CreateProjectCommentDto,
   CreateProjectCustomerVariationDto,
+  CreateProjectDrawingDto,
   CreateProjectDefectLiabilityCaseDto,
   CreateProjectDecisionDto,
   CreateProjectDeliverableDto,
   CreateProjectExpenseDto,
   CreateProjectExternalAccessPolicyDto,
   CreateProjectForecastVersionDto,
+  CreateProjectFloorDto,
   CreateProjectCommissioningItemDto,
+  CreateProjectExtensionOfTimeDto,
   CreateProjectHandoverItemDto,
+  CreateProjectUnitHandoverBatchDto,
+  CreateProjectInterimValuationDto,
   CreateProjectIssueDto,
   CreateProjectNonConformanceDto,
   CreateProjectPackageDto,
+  CreateProjectPaymentCertificateDto,
   CreateProjectQualityCheckpointDto,
+  CreateProjectRfiDto,
   CreateProjectMilestoneDto,
   CreateProjectLessonLearnedDto,
   CreateProjectInvoiceRequestDto,
   CreateProjectMeetingMinuteDto,
+  CreateProjectPhaseDto,
   CreateProjectResourceAllocationDto,
   CreateProjectRiskDto,
   CreateProjectSnagItemDto,
   CreateProjectTaskDependencyDto,
   CreateProjectTimesheetEntryDto,
   CreateProjectUnitDto,
+  CreateProjectUnitReleaseBatchDto,
+  CreateProjectVariationOrderDto,
   CreateProjectWorkItemDto,
+  CreateProjectSiteInstructionDto,
+  CreateProjectSubmittalDto,
   ProjectAiInsightDto,
   ProjectBaselineComparisonDto,
   ProjectBudgetRevisionDto,
   ProjectCatalogEntryDto,
+  ProjectBoqItemDto,
   ProjectCommercialSummaryDto,
   ProjectDetailDto,
+  ProjectDrawingDto,
   ProjectFinancialControlSummaryDto,
   ProjectForecastVersionDto,
+  ProjectExtensionOfTimeDto,
+  ProjectFinalAccountDto,
   ProjectGovernanceSummaryDto,
   ProjectIntegrationSummaryDto,
+  ProjectInterimValuationDto,
   ProjectInvoiceRequestDto,
   ProjectLinkOptionsDto,
   ProjectClosureDto,
+  ProjectPackageDto,
+  ProjectPostHandoverSummaryDto,
+  ProjectPaymentCertificateDto,
   ProjectPortfolioDto,
+  ProjectPhaseDto,
+  ProjectPhaseGateEvaluationDto,
   ProjectProcurementPlanItemLookupDto,
   ProjectPriorityDto,
   ProjectProgramDto,
   ProjectPurchaseOrderLookupDto,
   ProjectPurchaseRequisitionLookupDto,
   ProjectQualityCheckpointDto,
+  ProjectRfiDto,
   ProjectScheduleAnalysisDto,
+  ProjectSiteInstructionDto,
+  ProjectSubmittalDto,
   ProjectTenderLookupDto,
   ProjectTemplateDto,
   ProjectTypeDto,
+  ProjectVariationOrderDto,
   ProjectWorkspaceDto,
   ProjectWorkItemDto,
   ProjectNonConformanceDto,
+  UpsertProjectFinalAccountDto,
   UpsertProjectClosureDto,
   UpdateProjectDto,
   projectService,
@@ -159,6 +191,21 @@ const DEFAULT_PACKAGE_STATUSES = ['Planned', 'ProcurementPending', 'Awarded', 'A
 const DEFAULT_BOQ_ITEM_TYPES = ['Item', 'ProvisionalSum', 'PrimeCost', 'Variation', 'Allowance'];
 const DEFAULT_APPROVAL_TYPES = ['PlanningPermission', 'BuildingPermit', 'EnvironmentalApproval', 'FireClearance', 'UtilityClearance', 'OccupancyCertificate', 'Other'];
 const DEFAULT_APPROVAL_STATUSES = ['Planned', 'Submitted', 'Approved', 'Rejected', 'Expired', 'ConditionallyApproved'];
+const DEFAULT_PROJECT_DRAWING_STATUSES = ['Draft', 'ForReview', 'ApprovedForConstruction', 'ApprovedAsBuilt', 'Superseded', 'Archived'];
+const DEFAULT_PROJECT_DRAWING_DISCIPLINES = ['Architectural', 'Structural', 'Mechanical', 'Electrical', 'Plumbing', 'Civil', 'FireProtection', 'Interior', 'Other'];
+const DEFAULT_PROJECT_SUBMITTAL_STATUSES = ['Draft', 'Submitted', 'UnderReview', 'Approved', 'ApprovedWithComments', 'Rejected', 'ResubmissionRequired', 'Closed'];
+const DEFAULT_PROJECT_SUBMITTAL_TYPES = ['Material', 'ShopDrawing', 'MethodStatement', 'Sample', 'TechnicalData', 'Mockup', 'Other'];
+const DEFAULT_PROJECT_RFI_STATUSES = ['Draft', 'Submitted', 'Answered', 'Closed', 'Void'];
+const DEFAULT_PROJECT_RFI_PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
+const DEFAULT_PROJECT_SITE_INSTRUCTION_STATUSES = ['Draft', 'Issued', 'Acknowledged', 'InProgress', 'Completed', 'Closed', 'Cancelled'];
+const DEFAULT_PROJECT_SITE_INSTRUCTION_TYPES = ['SiteInstruction', 'ArchitectInstruction', 'EngineerInstruction', 'VariationInstruction', 'SafetyInstruction', 'QualityInstruction', 'Other'];
+const DEFAULT_PROJECT_PHASE_STATUSES = ['NotStarted', 'InProgress', 'Blocked', 'Completed', 'Waived', 'Cancelled'];
+const DEFAULT_PROJECT_VARIATION_ORDER_STATUSES = ['Draft', 'Submitted', 'UnderReview', 'Approved', 'Rejected', 'Implemented', 'Closed'];
+const DEFAULT_PROJECT_VARIATION_ORDER_TYPES = ['ScopeChange', 'QuantityAdjustment', 'ProvisionalSum', 'RateChange', 'Omission', 'Other'];
+const DEFAULT_PROJECT_INTERIM_VALUATION_STATUSES = ['Draft', 'Submitted', 'UnderReview', 'Certified', 'Paid', 'Rejected'];
+const DEFAULT_PROJECT_PAYMENT_CERTIFICATE_STATUSES = ['Draft', 'Issued', 'Approved', 'Paid', 'Cancelled'];
+const DEFAULT_PROJECT_EXTENSION_OF_TIME_STATUSES = ['Draft', 'Submitted', 'UnderReview', 'Approved', 'Rejected', 'Implemented', 'Closed'];
+const DEFAULT_PROJECT_FINAL_ACCOUNT_STATUSES = ['Draft', 'UnderReview', 'Agreed', 'Approved', 'Closed'];
 const DEFAULT_PROJECT_UNIT_TYPES = ['WholeBuilding', 'Apartment', 'OfficeSuite', 'RetailShop', 'Warehouse', 'Unit'];
 const DEFAULT_PROJECT_UNIT_STATUSES = ['Planned', 'Available', 'Reserved', 'Sold', 'Leased', 'HandedOver', 'Occupied', 'Archived'];
 const DEFAULT_PROJECT_CUSTOMER_VARIATION_STATUSES = ['Requested', 'UnderReview', 'Quoted', 'Approved', 'Rejected', 'InProgress', 'Completed', 'Billed', 'Cancelled'];
@@ -277,9 +324,19 @@ const decisionInit: CreateProjectDecisionDto = { title: '', decisionDate: today(
 const meetingInit: CreateProjectMeetingMinuteDto = { title: '', meetingDate: today(), meetingType: 'Status', minutes: '', attendeesJson: '' };
 const actionItemInit: CreateProjectActionItemDto = { title: '', description: '', status: 'Open', priority: 'Normal', dueDate: today() };
 const lessonLearnedInit: CreateProjectLessonLearnedDto = { title: '', category: 'General', description: '', recommendation: '', appliedPhase: '', visibility: 'Internal' };
+const projectPhaseInit: CreateProjectPhaseDto = { name: '', description: '', code: '', status: 'NotStarted', sortOrder: 0, isOptional: false, isStageGateRequired: false };
 const packageInit: CreateProjectPackageDto = { name: '', packageType: 'WorkPackage', status: 'Planned', currency: '' };
 const boqItemInit: CreateProjectBoqItemDto = { projectPackageId: '', description: '', itemType: 'Item', quantity: 1, currency: '' };
 const approvalRegisterItemInit: CreateProjectApprovalRegisterItemDto = { approvalType: 'BuildingPermit', title: '', status: 'Planned', isRequired: true };
+const drawingInit: CreateProjectDrawingDto = { drawingNumber: '', title: '', discipline: 'Architectural', status: 'Draft', isAsBuilt: false };
+const submittalInit: CreateProjectSubmittalDto = { title: '', submittalType: 'Material', status: 'Draft' };
+const rfiInit: CreateProjectRfiDto = { subject: '', question: '', priority: 'Medium', status: 'Draft' };
+const siteInstructionInit: CreateProjectSiteInstructionDto = { title: '', instructionType: 'SiteInstruction', status: 'Draft', currency: '' };
+const variationOrderInit: CreateProjectVariationOrderDto = { title: '', variationType: 'ScopeChange', status: 'Draft', requestedDate: today(), currency: '' };
+const interimValuationInit: CreateProjectInterimValuationDto = { title: '', status: 'Draft', valuationDate: today(), grossWorkValue: 0, netValuationAmount: 0, retentionAmount: 0, currency: '' };
+const paymentCertificateInit: CreateProjectPaymentCertificateDto = { title: '', status: 'Draft', issueDate: today(), grossCertifiedAmount: 0, netCertifiedAmount: 0, retentionHeldAmount: 0, currency: '' };
+const extensionOfTimeInit: CreateProjectExtensionOfTimeDto = { title: '', status: 'Draft', requestedDate: today(), daysRequested: 0, daysApproved: 0 };
+const finalAccountInit: UpsertProjectFinalAccountDto = { status: 'Draft', settlementDate: today(), originalContractValue: 0, approvedVariationAmount: 0, certifiedToDate: 0, retentionHeldAmount: 0, retentionReleasedAmount: 0, finalAccountValue: 0, currency: '' };
 const unitInit: CreateProjectUnitDto = { name: '', unitType: 'Unit', status: 'Planned', currency: '', isReleasedForMarket: false };
 const customerVariationInit: CreateProjectCustomerVariationDto = { title: '', timing: 'PreHandover', status: 'Requested', currency: '', requiresScheduleAdjustment: false };
 const commissioningInit: CreateProjectCommissioningItemDto = { title: '', status: 'Planned', requiresRegulatoryInspection: false };
@@ -567,9 +624,19 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [meeting, setMeeting] = useState<CreateProjectMeetingMinuteDto>(meetingInit);
   const [actionItem, setActionItem] = useState<CreateProjectActionItemDto>(actionItemInit);
   const [lessonLearned, setLessonLearned] = useState<CreateProjectLessonLearnedDto>(lessonLearnedInit);
+  const [projectPhaseDraft, setProjectPhaseDraft] = useState<CreateProjectPhaseDto>(projectPhaseInit);
   const [projectPackageDraft, setProjectPackageDraft] = useState<CreateProjectPackageDto>(packageInit);
   const [boqItemDraft, setBoqItemDraft] = useState<CreateProjectBoqItemDto>(boqItemInit);
   const [approvalDraft, setApprovalDraft] = useState<CreateProjectApprovalRegisterItemDto>(approvalRegisterItemInit);
+  const [drawingDraft, setDrawingDraft] = useState<CreateProjectDrawingDto>(drawingInit);
+  const [submittalDraft, setSubmittalDraft] = useState<CreateProjectSubmittalDto>(submittalInit);
+  const [rfiDraft, setRfiDraft] = useState<CreateProjectRfiDto>(rfiInit);
+  const [siteInstructionDraft, setSiteInstructionDraft] = useState<CreateProjectSiteInstructionDto>(siteInstructionInit);
+  const [variationOrderDraft, setVariationOrderDraft] = useState<CreateProjectVariationOrderDto>(variationOrderInit);
+  const [interimValuationDraft, setInterimValuationDraft] = useState<CreateProjectInterimValuationDto>(interimValuationInit);
+  const [paymentCertificateDraft, setPaymentCertificateDraft] = useState<CreateProjectPaymentCertificateDto>(paymentCertificateInit);
+  const [extensionOfTimeDraft, setExtensionOfTimeDraft] = useState<CreateProjectExtensionOfTimeDto>(extensionOfTimeInit);
+  const [finalAccountDraft, setFinalAccountDraft] = useState<UpsertProjectFinalAccountDto>(finalAccountInit);
   const [unitDraft, setUnitDraft] = useState<CreateProjectUnitDto>(unitInit);
   const [customerVariationDraft, setCustomerVariationDraft] = useState<CreateProjectCustomerVariationDto>(customerVariationInit);
   const [commissioningDraft, setCommissioningDraft] = useState<CreateProjectCommissioningItemDto>(commissioningInit);
@@ -582,11 +649,13 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [baselineComparison, setBaselineComparison] = useState<ProjectBaselineComparisonDto | null>(null);
   const [financialSummary, setFinancialSummary] = useState<ProjectFinancialControlSummaryDto | null>(null);
   const [commercialSummary, setCommercialSummary] = useState<ProjectCommercialSummaryDto | null>(null);
+  const [postHandoverSummary, setPostHandoverSummary] = useState<ProjectPostHandoverSummaryDto | null>(null);
   const [budgetRevisions, setBudgetRevisions] = useState<ProjectBudgetRevisionDto[]>([]);
   const [forecastVersions, setForecastVersions] = useState<ProjectForecastVersionDto[]>([]);
   const [integrationSummary, setIntegrationSummary] = useState<ProjectIntegrationSummaryDto | null>(null);
   const [governanceSummary, setGovernanceSummary] = useState<ProjectGovernanceSummaryDto | null>(null);
   const [projectLinkOptions, setProjectLinkOptions] = useState<ProjectLinkOptionsDto>(EMPTY_PROJECT_LINK_OPTIONS);
+  const [phaseGateEvaluations, setPhaseGateEvaluations] = useState<ProjectPhaseGateEvaluationDto[]>([]);
   const [materialRequisitions, setMaterialRequisitions] = useState<InventoryRequisitionDto[]>([]);
   const [materialWarehouses, setMaterialWarehouses] = useState<WarehouseDto[]>([]);
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
@@ -611,6 +680,13 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [collapsedGanttItems, setCollapsedGanttItems] = useState<string[]>([]);
   const [hoveredGanttItemId, setHoveredGanttItemId] = useState<string | null>(null);
   const [editingWorkItemId, setEditingWorkItemId] = useState<string | null>(null);
+  const [editingProjectPhaseId, setEditingProjectPhaseId] = useState<string | null>(null);
+  const [editingProjectPackageId, setEditingProjectPackageId] = useState<string | null>(null);
+  const [editingProjectBoqItemId, setEditingProjectBoqItemId] = useState<string | null>(null);
+  const [editingVariationOrderId, setEditingVariationOrderId] = useState<string | null>(null);
+  const [editingInterimValuationId, setEditingInterimValuationId] = useState<string | null>(null);
+  const [editingPaymentCertificateId, setEditingPaymentCertificateId] = useState<string | null>(null);
+  const [editingExtensionOfTimeId, setEditingExtensionOfTimeId] = useState<string | null>(null);
   const [ganttQuickFilters, setGanttQuickFilters] = useState({
     overdue: false,
     offBaseline: false,
@@ -773,9 +849,11 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       setProject(p);
       setFinancialSummary(workspace.financialSummary ?? null);
       setCommercialSummary(workspace.commercialSummary ?? null);
+      setPostHandoverSummary(workspace.postHandoverSummary ?? null);
       setIntegrationSummary(workspace.integrationSummary ?? null);
       setGovernanceSummary(workspace.governanceSummary ?? null);
       setProjectLinkOptions(workspace.linkOptions ?? EMPTY_PROJECT_LINK_OPTIONS);
+      setPhaseGateEvaluations(workspace.phaseGateEvaluations ?? []);
       setTypes(t);
       setPriorities(pr);
       setTemplates(tpl);
@@ -850,6 +928,17 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         setDecision((prev) => ({ ...prev, approverId: prev.approverId || currentUserId }));
         setMeeting((prev) => ({ ...prev, facilitatorId: prev.facilitatorId || currentUserId }));
       }
+      setProjectPhaseDraft({
+        ...projectPhaseInit,
+        sortOrder: p.phases.length,
+      });
+      setEditingProjectPhaseId(null);
+      setEditingProjectPackageId(null);
+      setEditingProjectBoqItemId(null);
+      setEditingVariationOrderId(null);
+      setEditingInterimValuationId(null);
+      setEditingPaymentCertificateId(null);
+      setEditingExtensionOfTimeId(null);
       setProjectPackageDraft({ ...packageInit, currency: baseCurrency.code });
       setBoqItemDraft({
         ...boqItemInit,
@@ -862,6 +951,68 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         status: approvalRegisterItemInit.status,
         isRequired: approvalRegisterItemInit.isRequired,
         projectPhaseId: p.phases[0]?.id,
+      });
+      setDrawingDraft({
+        ...drawingInit,
+        projectPhaseId: p.phases[0]?.id,
+      });
+      setSubmittalDraft({
+        ...submittalInit,
+        projectPhaseId: p.phases[0]?.id,
+        projectPackageId: p.packages[0]?.id,
+      });
+      setRfiDraft({
+        ...rfiInit,
+        projectPhaseId: p.phases[0]?.id,
+        projectPackageId: p.packages[0]?.id,
+      });
+      setSiteInstructionDraft({
+        ...siteInstructionInit,
+        currency: baseCurrency.code,
+        projectPhaseId: p.phases[0]?.id,
+        projectPackageId: p.packages[0]?.id,
+      });
+      setVariationOrderDraft({
+        ...variationOrderInit,
+        currency: baseCurrency.code,
+        projectPhaseId: p.phases[0]?.id,
+        projectPackageId: p.packages[0]?.id,
+        contractId: p.contractId || p.packages.find((item) => !!item.contractId)?.contractId,
+      });
+      setInterimValuationDraft({
+        ...interimValuationInit,
+        currency: baseCurrency.code,
+        projectPhaseId: p.phases[0]?.id,
+        projectPackageId: p.packages[0]?.id,
+        contractId: p.contractId || p.packages.find((item) => !!item.contractId)?.contractId,
+      });
+      setPaymentCertificateDraft({
+        ...paymentCertificateInit,
+        currency: baseCurrency.code,
+        projectPhaseId: p.phases[0]?.id,
+        projectPackageId: p.packages[0]?.id,
+        contractId: p.contractId || p.packages.find((item) => !!item.contractId)?.contractId,
+        projectInterimValuationId: p.interimValuations[0]?.id,
+      });
+      setExtensionOfTimeDraft({
+        ...extensionOfTimeInit,
+        projectPhaseId: p.phases[0]?.id,
+        projectPackageId: p.packages[0]?.id,
+        contractId: p.contractId || p.packages.find((item) => !!item.contractId)?.contractId,
+      });
+      setFinalAccountDraft({
+        ...finalAccountInit,
+        contractId: p.finalAccount?.contractId || p.contractId || p.packages.find((item) => !!item.contractId)?.contractId,
+        status: p.finalAccount?.status || finalAccountInit.status,
+        settlementDate: normalizeDateInputValue(p.finalAccount?.settlementDate) || finalAccountInit.settlementDate,
+        originalContractValue: p.finalAccount?.originalContractValue ?? 0,
+        approvedVariationAmount: p.finalAccount?.approvedVariationAmount ?? p.variationOrders.reduce((sum, item) => sum + (item.approvedAmount ?? 0), 0),
+        certifiedToDate: p.finalAccount?.certifiedToDate ?? 0,
+        retentionHeldAmount: p.finalAccount?.retentionHeldAmount ?? 0,
+        retentionReleasedAmount: p.finalAccount?.retentionReleasedAmount ?? 0,
+        finalAccountValue: p.finalAccount?.finalAccountValue ?? 0,
+        currency: p.finalAccount?.currency || baseCurrency.code,
+        notes: p.finalAccount?.notes || undefined,
       });
       setUnitDraft({ ...unitInit, currency: baseCurrency.code });
       setCustomerVariationDraft({
@@ -897,6 +1048,65 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     setWork(workInit);
     setEditingWorkItemId(null);
   };
+  const resetProjectPhaseEditor = () => {
+    setProjectPhaseDraft({
+      ...projectPhaseInit,
+      sortOrder: project?.phases.length ?? 0,
+    });
+    setEditingProjectPhaseId(null);
+  };
+  const resetProjectPackageEditor = () => {
+    setProjectPackageDraft({ ...packageInit, currency: baseCurrency.code });
+    setEditingProjectPackageId(null);
+  };
+  const resetProjectBoqItemEditor = () => {
+    setBoqItemDraft({
+      ...boqItemInit,
+      currency: baseCurrency.code,
+      projectPackageId: project?.packages[0]?.id || '',
+    });
+    setEditingProjectBoqItemId(null);
+  };
+  const resetVariationOrderEditor = () => {
+    setVariationOrderDraft({
+      ...variationOrderInit,
+      currency: baseCurrency.code,
+      projectPhaseId: project?.phases[0]?.id,
+      projectPackageId: project?.packages[0]?.id,
+      contractId: project?.finalAccount?.contractId || project?.contractId || project?.packages.find((item) => !!item.contractId)?.contractId,
+    });
+    setEditingVariationOrderId(null);
+  };
+  const resetInterimValuationEditor = () => {
+    setInterimValuationDraft({
+      ...interimValuationInit,
+      currency: baseCurrency.code,
+      projectPhaseId: project?.phases[0]?.id,
+      projectPackageId: project?.packages[0]?.id,
+      contractId: project?.finalAccount?.contractId || project?.contractId || project?.packages.find((item) => !!item.contractId)?.contractId,
+    });
+    setEditingInterimValuationId(null);
+  };
+  const resetPaymentCertificateEditor = () => {
+    setPaymentCertificateDraft({
+      ...paymentCertificateInit,
+      currency: baseCurrency.code,
+      projectPhaseId: project?.phases[0]?.id,
+      projectPackageId: project?.packages[0]?.id,
+      contractId: project?.finalAccount?.contractId || project?.contractId || project?.packages.find((item) => !!item.contractId)?.contractId,
+      projectInterimValuationId: project?.interimValuations[0]?.id,
+    });
+    setEditingPaymentCertificateId(null);
+  };
+  const resetExtensionOfTimeEditor = () => {
+    setExtensionOfTimeDraft({
+      ...extensionOfTimeInit,
+      projectPhaseId: project?.phases[0]?.id,
+      projectPackageId: project?.packages[0]?.id,
+      contractId: project?.finalAccount?.contractId || project?.contractId || project?.packages.find((item) => !!item.contractId)?.contractId,
+    });
+    setEditingExtensionOfTimeId(null);
+  };
 
   const beginEditWorkItem = (item: ProjectWorkItemDto, options?: { keepCurrentView?: boolean }) => {
     if (!options?.keepCurrentView) {
@@ -921,6 +1131,159 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       actualEffortHours: item.actualEffortHours ?? undefined,
     });
   };
+  const beginEditProjectPhase = (phase: ProjectPhaseDto) => {
+    setEditingProjectPhaseId(phase.id);
+    setProjectPhaseDraft({
+      parentPhaseId: phase.parentPhaseId || undefined,
+      code: phase.code || '',
+      name: phase.name,
+      description: phase.description || '',
+      status: phase.status || DEFAULT_PROJECT_PHASE_STATUSES[0],
+      sortOrder: phase.sortOrder,
+      isOptional: phase.isOptional,
+      isStageGateRequired: phase.isStageGateRequired,
+      plannedStartDate: normalizeDateInputValue(phase.plannedStartDate) || undefined,
+      plannedEndDate: normalizeDateInputValue(phase.plannedEndDate) || undefined,
+      actualStartDate: normalizeDateInputValue(phase.actualStartDate) || undefined,
+      actualEndDate: normalizeDateInputValue(phase.actualEndDate) || undefined,
+    });
+  };
+  const beginEditProjectPackage = (projectPackage: ProjectPackageDto) => {
+    setEditingProjectPackageId(projectPackage.id);
+    setProjectPackageDraft({
+      projectPhaseId: projectPackage.projectPhaseId || undefined,
+      code: projectPackage.code || undefined,
+      name: projectPackage.name,
+      description: projectPackage.description || undefined,
+      packageType: projectPackage.packageType,
+      status: projectPackage.status,
+      sortOrder: projectPackage.sortOrder,
+      procurementRoute: projectPackage.procurementRoute || undefined,
+      contractStrategy: projectPackage.contractStrategy || undefined,
+      businessPartnerId: projectPackage.businessPartnerId || undefined,
+      tenderId: projectPackage.tenderId || undefined,
+      contractId: projectPackage.contractId || undefined,
+      procurementPlanItemId: projectPackage.procurementPlanItemId || undefined,
+      purchaseRequisitionId: projectPackage.purchaseRequisitionId || undefined,
+      purchaseOrderId: projectPackage.purchaseOrderId || undefined,
+      budgetAmount: projectPackage.budgetAmount ?? undefined,
+      committedAmount: projectPackage.committedAmount ?? undefined,
+      actualAmount: projectPackage.actualAmount ?? undefined,
+      forecastAmount: projectPackage.forecastAmount ?? undefined,
+      currency: projectPackage.currency || baseCurrency.code,
+      notes: projectPackage.notes || undefined,
+    });
+  };
+  const beginEditProjectBoqItem = (boqItem: ProjectBoqItemDto) => {
+    setEditingProjectBoqItemId(boqItem.id);
+    setBoqItemDraft({
+      projectPackageId: boqItem.projectPackageId,
+      lineNumber: boqItem.lineNumber || undefined,
+      itemCode: boqItem.itemCode || undefined,
+      itemType: boqItem.itemType,
+      description: boqItem.description,
+      quantity: boqItem.quantity ?? undefined,
+      unitOfMeasure: boqItem.unitOfMeasure || undefined,
+      unitRate: boqItem.unitRate ?? undefined,
+      budgetAmount: boqItem.budgetAmount ?? undefined,
+      committedAmount: boqItem.committedAmount ?? undefined,
+      actualAmount: boqItem.actualAmount ?? undefined,
+      forecastAmount: boqItem.forecastAmount ?? undefined,
+      currency: boqItem.currency || baseCurrency.code,
+      inventoryItemId: boqItem.inventoryItemId || undefined,
+      tenderItemId: boqItem.tenderItemId || undefined,
+      procurementPlanItemId: boqItem.procurementPlanItemId || undefined,
+      purchaseRequisitionItemId: boqItem.purchaseRequisitionItemId || undefined,
+      purchaseOrderItemId: boqItem.purchaseOrderItemId || undefined,
+      notes: boqItem.notes || undefined,
+      sortOrder: boqItem.sortOrder,
+    });
+  };
+  const beginEditVariationOrder = (variationOrder: ProjectVariationOrderDto) => {
+    setEditingVariationOrderId(variationOrder.id);
+    setVariationOrderDraft({
+      projectPhaseId: variationOrder.projectPhaseId || undefined,
+      projectPackageId: variationOrder.projectPackageId || undefined,
+      contractId: variationOrder.contractId || undefined,
+      referenceNumber: variationOrder.referenceNumber || undefined,
+      title: variationOrder.title,
+      description: variationOrder.description || undefined,
+      variationType: variationOrder.variationType,
+      status: variationOrder.status,
+      requestedDate: normalizeDateInputValue(variationOrder.requestedDate) || undefined,
+      approvedDate: normalizeDateInputValue(variationOrder.approvedDate) || undefined,
+      implementedDate: normalizeDateInputValue(variationOrder.implementedDate) || undefined,
+      requestedByName: variationOrder.requestedByName || undefined,
+      approvedByName: variationOrder.approvedByName || undefined,
+      estimatedAmount: variationOrder.estimatedAmount ?? undefined,
+      approvedAmount: variationOrder.approvedAmount ?? undefined,
+      currency: variationOrder.currency || baseCurrency.code,
+      scheduleImpactDays: variationOrder.scheduleImpactDays ?? undefined,
+      notes: variationOrder.notes || undefined,
+    });
+  };
+  const beginEditInterimValuation = (valuation: ProjectInterimValuationDto) => {
+    setEditingInterimValuationId(valuation.id);
+    setInterimValuationDraft({
+      projectPhaseId: valuation.projectPhaseId || undefined,
+      projectPackageId: valuation.projectPackageId || undefined,
+      contractId: valuation.contractId || undefined,
+      valuationNumber: valuation.valuationNumber || undefined,
+      title: valuation.title,
+      status: valuation.status,
+      valuationDate: normalizeDateInputValue(valuation.valuationDate) || undefined,
+      grossWorkValue: valuation.grossWorkValue ?? undefined,
+      materialsOnSiteValue: valuation.materialsOnSiteValue ?? undefined,
+      variationValue: valuation.variationValue ?? undefined,
+      retentionPercentage: valuation.retentionPercentage ?? undefined,
+      retentionAmount: valuation.retentionAmount ?? undefined,
+      previousCertifiedAmount: valuation.previousCertifiedAmount ?? undefined,
+      netValuationAmount: valuation.netValuationAmount ?? undefined,
+      currency: valuation.currency || baseCurrency.code,
+      notes: valuation.notes || undefined,
+    });
+  };
+  const beginEditPaymentCertificate = (certificate: ProjectPaymentCertificateDto) => {
+    setEditingPaymentCertificateId(certificate.id);
+    setPaymentCertificateDraft({
+      projectPhaseId: certificate.projectPhaseId || undefined,
+      projectPackageId: certificate.projectPackageId || undefined,
+      contractId: certificate.contractId || undefined,
+      projectInterimValuationId: certificate.projectInterimValuationId || undefined,
+      certificateNumber: certificate.certificateNumber || undefined,
+      title: certificate.title,
+      status: certificate.status,
+      issueDate: normalizeDateInputValue(certificate.issueDate) || undefined,
+      paymentDueDate: normalizeDateInputValue(certificate.paymentDueDate) || undefined,
+      grossCertifiedAmount: certificate.grossCertifiedAmount ?? undefined,
+      retentionHeldAmount: certificate.retentionHeldAmount ?? undefined,
+      retentionReleasedAmount: certificate.retentionReleasedAmount ?? undefined,
+      otherDeductionsAmount: certificate.otherDeductionsAmount ?? undefined,
+      netCertifiedAmount: certificate.netCertifiedAmount ?? undefined,
+      currency: certificate.currency || baseCurrency.code,
+      notes: certificate.notes || undefined,
+    });
+  };
+  const beginEditExtensionOfTime = (extension: ProjectExtensionOfTimeDto) => {
+    setEditingExtensionOfTimeId(extension.id);
+    setExtensionOfTimeDraft({
+      projectPhaseId: extension.projectPhaseId || undefined,
+      projectPackageId: extension.projectPackageId || undefined,
+      contractId: extension.contractId || undefined,
+      referenceNumber: extension.referenceNumber || undefined,
+      title: extension.title,
+      reason: extension.reason || undefined,
+      status: extension.status,
+      requestedDate: normalizeDateInputValue(extension.requestedDate) || undefined,
+      decisionDate: normalizeDateInputValue(extension.decisionDate) || undefined,
+      daysRequested: extension.daysRequested ?? undefined,
+      daysApproved: extension.daysApproved ?? undefined,
+      revisedCompletionDate: normalizeDateInputValue(extension.revisedCompletionDate) || undefined,
+      requestedByName: extension.requestedByName || undefined,
+      decidedByName: extension.decidedByName || undefined,
+      notes: extension.notes || undefined,
+    });
+  };
   const saveWorkEditor = async () => {
     if (!project?.id) {
       return;
@@ -938,6 +1301,35 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
           : projectService.addWorkItem(project.id, work).then(() => Promise.resolve()),
       editingWorkItemId ? 'Work item updated' : 'Work item added',
       resetWorkEditor,
+    );
+  };
+  const saveProjectPhase = async () => {
+    if (!project?.id) {
+      return;
+    }
+
+    const name = projectPhaseDraft.name?.trim();
+    if (!name) {
+      toast.error('Phase name is required');
+      return;
+    }
+
+    const payload = {
+      ...projectPhaseDraft,
+      name,
+      code: projectPhaseDraft.code?.trim() || undefined,
+      description: projectPhaseDraft.description?.trim() || undefined,
+      status: projectPhaseDraft.status || DEFAULT_PROJECT_PHASE_STATUSES[0],
+      sortOrder: Number.isFinite(projectPhaseDraft.sortOrder) ? Number(projectPhaseDraft.sortOrder) : project.phases.length,
+    };
+
+    await act(
+      () =>
+        editingProjectPhaseId
+          ? projectService.updateProjectPhase(editingProjectPhaseId, payload).then(() => Promise.resolve())
+          : projectService.addProjectPhase(project.id, payload).then(() => Promise.resolve()),
+      editingProjectPhaseId ? 'Project phase updated' : 'Project phase added',
+      resetProjectPhaseEditor,
     );
   };
 
@@ -1004,6 +1396,10 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     if (baseCurrency.code) {
       setProjectPackageDraft((current) => current.currency ? current : { ...current, currency: baseCurrency.code });
       setBoqItemDraft((current) => current.currency ? current : { ...current, currency: baseCurrency.code });
+      setVariationOrderDraft((current) => current.currency ? current : { ...current, currency: baseCurrency.code });
+      setInterimValuationDraft((current) => current.currency ? current : { ...current, currency: baseCurrency.code });
+      setPaymentCertificateDraft((current) => current.currency ? current : { ...current, currency: baseCurrency.code });
+      setFinalAccountDraft((current) => current.currency ? current : { ...current, currency: baseCurrency.code });
       setDefectLiabilityDraft((current) => current.currency ? current : { ...current, currency: baseCurrency.code });
     }
   }, [baseCurrency.code]);
@@ -2022,24 +2418,85 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       'Invoice request created',
       () => setInvoice(invoiceInit),
     );
+  const addProjectPhase = () => saveProjectPhase();
+  const advanceProjectPhase = async (phase: ProjectPhaseDto, evaluation?: ProjectPhaseGateEvaluationDto) => {
+    try {
+      let overrideStageGate = false;
+      if (phase.status === 'InProgress' && (evaluation?.blockingFailureCount ?? 0) > 0) {
+        overrideStageGate = window.confirm(
+          `This phase still has ${evaluation?.blockingFailureCount ?? 0} blocking gate requirement(s). Override the gate and complete the phase anyway?`,
+        );
+        if (!overrideStageGate) {
+          return;
+        }
+      }
+
+      const result = await projectService.advanceProjectPhase(phase.id, {
+        overrideStageGate,
+        startNextPhase: true,
+      });
+
+      if (editingProjectPhaseId === phase.id) {
+        resetProjectPhaseEditor();
+      }
+
+      await load();
+      toast.success(result.message || 'Project phase advanced');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to advance project phase');
+    }
+  };
+  const deleteProjectPhase = (phaseId: string) =>
+    act(() => projectService.deleteProjectPhase(phaseId), 'Project phase deleted', () => {
+      if (editingProjectPhaseId === phaseId) {
+        resetProjectPhaseEditor();
+      }
+    });
   const addProjectPackage = () =>
     act(
-      () => projectService.addProjectPackage(getProjectId(), { ...projectPackageDraft, currency: projectPackageDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
-      'Project package added',
-      () => setProjectPackageDraft({ ...packageInit, currency: baseCurrency.code }),
+      () =>
+        (
+          editingProjectPackageId
+            ? projectService.updateProjectPackage(editingProjectPackageId, { ...projectPackageDraft, currency: projectPackageDraft.currency || baseCurrency.code })
+            : projectService.addProjectPackage(getProjectId(), { ...projectPackageDraft, currency: projectPackageDraft.currency || baseCurrency.code })
+        ).then(() => Promise.resolve()),
+      editingProjectPackageId ? 'Project package updated' : 'Project package added',
+      resetProjectPackageEditor,
     );
   const deleteProjectPackage = (packageId: string) =>
     act(() => projectService.deleteProjectPackage(packageId), 'Project package deleted', () => {
+      if (editingProjectPackageId === packageId) {
+        resetProjectPackageEditor();
+      }
+      if (editingProjectBoqItemId && project?.boqItems.some((item) => item.id === editingProjectBoqItemId && item.projectPackageId === packageId)) {
+        resetProjectBoqItemEditor();
+      }
       setBoqItemDraft((current) => current.projectPackageId === packageId ? { ...boqItemInit, currency: baseCurrency.code } : current);
     });
   const addProjectBoqItem = () =>
     act(
-      () => projectService.addProjectBoqItem(getProjectId(), { ...boqItemDraft, currency: boqItemDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
-      'BOQ item added',
-      () => setBoqItemDraft((current) => ({ ...boqItemInit, currency: baseCurrency.code, projectPackageId: current.projectPackageId })),
+      () =>
+        (
+          editingProjectBoqItemId
+            ? projectService.updateProjectBoqItem(editingProjectBoqItemId, { ...boqItemDraft, currency: boqItemDraft.currency || baseCurrency.code })
+            : projectService.addProjectBoqItem(getProjectId(), { ...boqItemDraft, currency: boqItemDraft.currency || baseCurrency.code })
+        ).then(() => Promise.resolve()),
+      editingProjectBoqItemId ? 'BOQ item updated' : 'BOQ item added',
+      () => {
+        setEditingProjectBoqItemId(null);
+        setBoqItemDraft((current) => ({
+          ...boqItemInit,
+          currency: baseCurrency.code,
+          projectPackageId: current.projectPackageId || project?.packages[0]?.id || '',
+        }));
+      },
     );
   const deleteProjectBoqItem = (boqItemId: string) =>
-    act(() => projectService.deleteProjectBoqItem(boqItemId), 'BOQ item deleted');
+    act(() => projectService.deleteProjectBoqItem(boqItemId), 'BOQ item deleted', () => {
+      if (editingProjectBoqItemId === boqItemId) {
+        resetProjectBoqItemEditor();
+      }
+    });
   const addApprovalRegisterItem = () =>
     act(
       () => projectService.addApprovalRegisterItem(getProjectId(), approvalDraft).then(() => Promise.resolve()),
@@ -2054,6 +2511,168 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     );
   const deleteApprovalRegisterItem = (approvalRegisterItemId: string) =>
     act(() => projectService.deleteApprovalRegisterItem(approvalRegisterItemId), 'Approval register item deleted');
+  const addProjectDrawing = () =>
+    act(
+      () => projectService.addProjectDrawing(getProjectId(), drawingDraft).then(() => Promise.resolve()),
+      'Project drawing saved',
+      () => setDrawingDraft((current) => ({
+        ...drawingInit,
+        discipline: current.discipline || drawingInit.discipline,
+        status: current.status || drawingInit.status,
+        projectPhaseId: current.projectPhaseId,
+      })),
+    );
+  const deleteProjectDrawing = (drawingId: string) =>
+    act(() => projectService.deleteProjectDrawing(drawingId), 'Project drawing deleted');
+  const addProjectSubmittal = () =>
+    act(
+      () => projectService.addProjectSubmittal(getProjectId(), submittalDraft).then(() => Promise.resolve()),
+      'Project submittal saved',
+      () => setSubmittalDraft((current) => ({
+        ...submittalInit,
+        submittalType: current.submittalType || submittalInit.submittalType,
+        status: current.status || submittalInit.status,
+        projectPhaseId: current.projectPhaseId,
+        projectPackageId: current.projectPackageId,
+      })),
+    );
+  const deleteProjectSubmittal = (submittalId: string) =>
+    act(() => projectService.deleteProjectSubmittal(submittalId), 'Project submittal deleted');
+  const addProjectRfi = () =>
+    act(
+      () => projectService.addProjectRfi(getProjectId(), rfiDraft).then(() => Promise.resolve()),
+      'Project RFI saved',
+      () => setRfiDraft((current) => ({
+        ...rfiInit,
+        priority: current.priority || rfiInit.priority,
+        status: current.status || rfiInit.status,
+        projectPhaseId: current.projectPhaseId,
+        projectPackageId: current.projectPackageId,
+      })),
+    );
+  const deleteProjectRfi = (rfiId: string) =>
+    act(() => projectService.deleteProjectRfi(rfiId), 'Project RFI deleted');
+  const addProjectSiteInstruction = () =>
+    act(
+      () => projectService.addProjectSiteInstruction(getProjectId(), { ...siteInstructionDraft, currency: siteInstructionDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
+      'Project site instruction saved',
+      () => setSiteInstructionDraft((current) => ({
+        ...siteInstructionInit,
+        currency: current.currency || baseCurrency.code,
+        instructionType: current.instructionType || siteInstructionInit.instructionType,
+        status: current.status || siteInstructionInit.status,
+        projectPhaseId: current.projectPhaseId,
+        projectPackageId: current.projectPackageId,
+      })),
+    );
+  const deleteProjectSiteInstruction = (siteInstructionId: string) =>
+    act(() => projectService.deleteProjectSiteInstruction(siteInstructionId), 'Project site instruction deleted');
+  const saveVariationOrder = () =>
+    act(
+      () =>
+        (
+          editingVariationOrderId
+            ? projectService.updateProjectVariationOrder(editingVariationOrderId, { ...variationOrderDraft, currency: variationOrderDraft.currency || baseCurrency.code })
+            : projectService.addProjectVariationOrder(getProjectId(), { ...variationOrderDraft, currency: variationOrderDraft.currency || baseCurrency.code })
+        ).then(() => Promise.resolve()),
+      editingVariationOrderId ? 'Variation order updated' : 'Variation order added',
+      resetVariationOrderEditor,
+    );
+  const deleteVariationOrder = (variationOrderId: string) =>
+    act(() => projectService.deleteProjectVariationOrder(variationOrderId), 'Variation order deleted', () => {
+      if (editingVariationOrderId === variationOrderId) {
+        resetVariationOrderEditor();
+      }
+    });
+  const saveInterimValuation = () =>
+    act(
+      () =>
+        (
+          editingInterimValuationId
+            ? projectService.updateProjectInterimValuation(editingInterimValuationId, { ...interimValuationDraft, currency: interimValuationDraft.currency || baseCurrency.code })
+            : projectService.addProjectInterimValuation(getProjectId(), { ...interimValuationDraft, currency: interimValuationDraft.currency || baseCurrency.code })
+        ).then(() => Promise.resolve()),
+      editingInterimValuationId ? 'Interim valuation updated' : 'Interim valuation added',
+      resetInterimValuationEditor,
+    );
+  const deleteInterimValuation = (valuationId: string) =>
+    act(() => projectService.deleteProjectInterimValuation(valuationId), 'Interim valuation deleted', () => {
+      if (editingInterimValuationId === valuationId) {
+        resetInterimValuationEditor();
+      }
+    });
+  const savePaymentCertificate = () =>
+    act(
+      () =>
+        (
+          editingPaymentCertificateId
+            ? projectService.updateProjectPaymentCertificate(editingPaymentCertificateId, { ...paymentCertificateDraft, currency: paymentCertificateDraft.currency || baseCurrency.code })
+            : projectService.addProjectPaymentCertificate(getProjectId(), { ...paymentCertificateDraft, currency: paymentCertificateDraft.currency || baseCurrency.code })
+        ).then(() => Promise.resolve()),
+      editingPaymentCertificateId ? 'Payment certificate updated' : 'Payment certificate added',
+      resetPaymentCertificateEditor,
+    );
+  const deletePaymentCertificate = (certificateId: string) =>
+    act(() => projectService.deleteProjectPaymentCertificate(certificateId), 'Payment certificate deleted', () => {
+      if (editingPaymentCertificateId === certificateId) {
+        resetPaymentCertificateEditor();
+      }
+    });
+  const saveExtensionOfTime = () =>
+    act(
+      () =>
+        (
+          editingExtensionOfTimeId
+            ? projectService.updateProjectExtensionOfTimeRequest(editingExtensionOfTimeId, extensionOfTimeDraft)
+            : projectService.addProjectExtensionOfTimeRequest(getProjectId(), extensionOfTimeDraft)
+        ).then(() => Promise.resolve()),
+      editingExtensionOfTimeId ? 'EOT request updated' : 'EOT request added',
+      resetExtensionOfTimeEditor,
+    );
+  const deleteExtensionOfTime = (extensionOfTimeId: string) =>
+    act(() => projectService.deleteProjectExtensionOfTimeRequest(extensionOfTimeId), 'EOT request deleted', () => {
+      if (editingExtensionOfTimeId === extensionOfTimeId) {
+        resetExtensionOfTimeEditor();
+      }
+    });
+  const saveFinalAccount = () =>
+    act(
+      () => projectService.upsertProjectFinalAccount(getProjectId(), { ...finalAccountDraft, currency: finalAccountDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
+      'Final account saved',
+    );
+  const addProjectBuilding = (dto: CreateProjectBuildingDto) =>
+    act(
+      () => projectService.addProjectBuilding(getProjectId(), dto).then(() => Promise.resolve()),
+      'Project building added',
+    );
+  const deleteProjectBuilding = (buildingId: string) =>
+    act(() => projectService.deleteProjectBuilding(buildingId), 'Project building deleted', () => {
+      setUnitDraft((current) => current.projectBuildingId === buildingId
+        ? { ...current, projectBuildingId: undefined, projectFloorId: undefined, projectUnitReleaseBatchId: undefined }
+        : current);
+    });
+  const addProjectFloor = (dto: CreateProjectFloorDto) =>
+    act(
+      () => projectService.addProjectFloor(getProjectId(), dto).then(() => Promise.resolve()),
+      'Project floor added',
+    );
+  const deleteProjectFloor = (floorId: string) =>
+    act(() => projectService.deleteProjectFloor(floorId), 'Project floor deleted', () => {
+      setUnitDraft((current) => current.projectFloorId === floorId
+        ? { ...current, projectFloorId: undefined, projectUnitReleaseBatchId: undefined }
+        : current);
+    });
+  const addProjectUnitReleaseBatch = (dto: CreateProjectUnitReleaseBatchDto) =>
+    act(
+      () => projectService.addProjectUnitReleaseBatch(getProjectId(), dto).then(() => Promise.resolve()),
+      'Unit release batch added',
+    );
+  const deleteProjectUnitReleaseBatch = (unitReleaseBatchId: string) =>
+    act(() => projectService.deleteProjectUnitReleaseBatch(unitReleaseBatchId), 'Unit release batch deleted', () => {
+      setUnitDraft((current) => current.projectUnitReleaseBatchId === unitReleaseBatchId
+        ? { ...current, projectUnitReleaseBatchId: undefined }
+        : current);
+    });
   const addProjectUnit = () =>
     act(
       () => projectService.addProjectUnit(getProjectId(), { ...unitDraft, currency: unitDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
@@ -2110,8 +2729,20 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       () => setHandoverDraft((current) => ({
         ...handoverItemInit,
         projectUnitId: current.projectUnitId,
+        projectUnitHandoverBatchId: current.projectUnitHandoverBatchId,
       })),
     );
+  const addProjectUnitHandoverBatch = (dto: CreateProjectUnitHandoverBatchDto) =>
+    act(
+      () => projectService.addProjectUnitHandoverBatch(getProjectId(), dto).then(() => Promise.resolve()),
+      'Unit handover batch added',
+    );
+  const deleteProjectUnitHandoverBatch = (unitHandoverBatchId: string) =>
+    act(() => projectService.deleteProjectUnitHandoverBatch(unitHandoverBatchId), 'Unit handover batch deleted', () => {
+      setHandoverDraft((current) => current.projectUnitHandoverBatchId === unitHandoverBatchId
+        ? { ...current, projectUnitHandoverBatchId: undefined }
+        : current);
+    });
   const deleteHandoverItem = (handoverItemId: string) =>
     act(() => projectService.deleteProjectHandoverItem(handoverItemId), 'Handover item deleted');
   const addSnagItem = () =>
@@ -2223,10 +2854,14 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       <Tabs value={activeTab} onValueChange={navigateToTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-3 md:grid-cols-6 xl:grid-cols-12">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="phases">Phases</TabsTrigger>
+          <TabsTrigger value="design">Design</TabsTrigger>
           <TabsTrigger value="plan">Plan</TabsTrigger>
           <TabsTrigger value="packages">Packages</TabsTrigger>
           <TabsTrigger value="commercial">Commercial</TabsTrigger>
+          <TabsTrigger value="commercial-admin">Commercial Admin</TabsTrigger>
           <TabsTrigger value="approvals">Approvals</TabsTrigger>
+          <TabsTrigger value="site-controls">Site</TabsTrigger>
           <TabsTrigger value="units">Units</TabsTrigger>
           <TabsTrigger value="variations">Variations</TabsTrigger>
           <TabsTrigger value="handover">Handover</TabsTrigger>
@@ -2308,6 +2943,42 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             onActivateForecastVersion={activateForecastVersion}
           />
         </TabsContent>
+        <TabsContent value="phases" className="space-y-6">
+          <ProjectPhasesTab
+            phases={project.phases}
+            phaseGateEvaluations={phaseGateEvaluations}
+            phaseDraft={projectPhaseDraft}
+            editingPhaseId={editingProjectPhaseId}
+            onPhaseDraftChange={setProjectPhaseDraft}
+            onSavePhase={addProjectPhase}
+            onDeletePhase={deleteProjectPhase}
+            onEditPhase={beginEditProjectPhase}
+            onAdvancePhase={advanceProjectPhase}
+            onCancelEdit={resetProjectPhaseEditor}
+          />
+        </TabsContent>
+        <TabsContent value="design" className="space-y-6">
+          <ProjectDesignTab
+            drawings={project.drawings}
+            submittals={project.submittals}
+            phases={project.phases}
+            packages={project.packages}
+            drawingDraft={drawingDraft}
+            setDrawingDraft={setDrawingDraft}
+            submittalDraft={submittalDraft}
+            setSubmittalDraft={setSubmittalDraft}
+            drawingStatusOptions={DEFAULT_PROJECT_DRAWING_STATUSES}
+            drawingDisciplineOptions={DEFAULT_PROJECT_DRAWING_DISCIPLINES}
+            submittalStatusOptions={DEFAULT_PROJECT_SUBMITTAL_STATUSES}
+            submittalTypeOptions={DEFAULT_PROJECT_SUBMITTAL_TYPES}
+            formatCatalogLabel={formatCatalogLabel}
+            formatDateLabel={formatDateLabel}
+            onAddDrawing={addProjectDrawing}
+            onDeleteDrawing={deleteProjectDrawing}
+            onAddSubmittal={addProjectSubmittal}
+            onDeleteSubmittal={deleteProjectSubmittal}
+          />
+        </TabsContent>
         <TabsContent value="plan" className="space-y-6">
           <ProjectPlanTab
             project={project}
@@ -2358,8 +3029,10 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             project={project}
             phases={project.phases}
             packageDraft={projectPackageDraft}
+            editingPackageId={editingProjectPackageId}
             setPackageDraft={setProjectPackageDraft}
             boqDraft={boqItemDraft}
+            editingBoqItemId={editingProjectBoqItemId}
             setBoqDraft={setBoqItemDraft}
             activeBusinessPartners={businessPartners}
             activeContracts={contracts}
@@ -2372,9 +3045,13 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             boqItemTypeOptions={DEFAULT_BOQ_ITEM_TYPES}
             formatMoney={formatMoney}
             formatCatalogLabel={formatCatalogLabel}
-            onAddPackage={addProjectPackage}
+            onSavePackage={addProjectPackage}
+            onEditPackage={beginEditProjectPackage}
+            onCancelPackageEdit={resetProjectPackageEditor}
             onDeletePackage={deleteProjectPackage}
-            onAddBoqItem={addProjectBoqItem}
+            onSaveBoqItem={addProjectBoqItem}
+            onEditBoqItem={beginEditProjectBoqItem}
+            onCancelBoqItemEdit={resetProjectBoqItemEditor}
             onDeleteBoqItem={deleteProjectBoqItem}
           />
         </TabsContent>
@@ -2382,6 +3059,54 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
           <ProjectCommercialTab
             commercialSummary={commercialSummary}
             formatMoney={formatMoney}
+          />
+        </TabsContent>
+        <TabsContent value="commercial-admin" className="space-y-6">
+          <ProjectCommercialAdminTab
+            project={project}
+            phases={project.phases}
+            packages={project.packages}
+            activeContracts={activeContracts}
+            variationOrderDraft={variationOrderDraft}
+            setVariationOrderDraft={setVariationOrderDraft}
+            editingVariationOrderId={editingVariationOrderId}
+            interimValuationDraft={interimValuationDraft}
+            setInterimValuationDraft={setInterimValuationDraft}
+            editingInterimValuationId={editingInterimValuationId}
+            paymentCertificateDraft={paymentCertificateDraft}
+            setPaymentCertificateDraft={setPaymentCertificateDraft}
+            editingPaymentCertificateId={editingPaymentCertificateId}
+            extensionOfTimeDraft={extensionOfTimeDraft}
+            setExtensionOfTimeDraft={setExtensionOfTimeDraft}
+            editingExtensionOfTimeId={editingExtensionOfTimeId}
+            finalAccountDraft={finalAccountDraft}
+            setFinalAccountDraft={setFinalAccountDraft}
+            variationOrderStatusOptions={DEFAULT_PROJECT_VARIATION_ORDER_STATUSES}
+            variationOrderTypeOptions={DEFAULT_PROJECT_VARIATION_ORDER_TYPES}
+            interimValuationStatusOptions={DEFAULT_PROJECT_INTERIM_VALUATION_STATUSES}
+            paymentCertificateStatusOptions={DEFAULT_PROJECT_PAYMENT_CERTIFICATE_STATUSES}
+            extensionOfTimeStatusOptions={DEFAULT_PROJECT_EXTENSION_OF_TIME_STATUSES}
+            finalAccountStatusOptions={DEFAULT_PROJECT_FINAL_ACCOUNT_STATUSES}
+            formatCatalogLabel={formatCatalogLabel}
+            formatDateLabel={formatDateLabel}
+            formatMoney={formatMoney}
+            onSaveVariationOrder={saveVariationOrder}
+            onEditVariationOrder={beginEditVariationOrder}
+            onCancelVariationOrderEdit={resetVariationOrderEditor}
+            onDeleteVariationOrder={deleteVariationOrder}
+            onSaveInterimValuation={saveInterimValuation}
+            onEditInterimValuation={beginEditInterimValuation}
+            onCancelInterimValuationEdit={resetInterimValuationEditor}
+            onDeleteInterimValuation={deleteInterimValuation}
+            onSavePaymentCertificate={savePaymentCertificate}
+            onEditPaymentCertificate={beginEditPaymentCertificate}
+            onCancelPaymentCertificateEdit={resetPaymentCertificateEditor}
+            onDeletePaymentCertificate={deletePaymentCertificate}
+            onSaveExtensionOfTime={saveExtensionOfTime}
+            onEditExtensionOfTime={beginEditExtensionOfTime}
+            onCancelExtensionOfTimeEdit={resetExtensionOfTimeEditor}
+            onDeleteExtensionOfTime={deleteExtensionOfTime}
+            onSaveFinalAccount={saveFinalAccount}
           />
         </TabsContent>
         <TabsContent value="approvals" className="space-y-6">
@@ -2398,6 +3123,30 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             onDeleteApproval={deleteApprovalRegisterItem}
           />
         </TabsContent>
+        <TabsContent value="site-controls" className="space-y-6">
+          <ProjectSiteControlsTab
+            rfis={project.rfis}
+            siteInstructions={project.siteInstructions}
+            phases={project.phases}
+            packages={project.packages}
+            rfiDraft={rfiDraft}
+            setRfiDraft={setRfiDraft}
+            siteInstructionDraft={siteInstructionDraft}
+            setSiteInstructionDraft={setSiteInstructionDraft}
+            rfiStatusOptions={DEFAULT_PROJECT_RFI_STATUSES}
+            rfiPriorityOptions={DEFAULT_PROJECT_RFI_PRIORITIES}
+            siteInstructionStatusOptions={DEFAULT_PROJECT_SITE_INSTRUCTION_STATUSES}
+            siteInstructionTypeOptions={DEFAULT_PROJECT_SITE_INSTRUCTION_TYPES}
+            currencyOptions={currencyOptions.map((item) => item.code).filter(Boolean)}
+            formatCatalogLabel={formatCatalogLabel}
+            formatDateLabel={formatDateLabel}
+            formatMoney={formatMoney}
+            onAddRfi={addProjectRfi}
+            onDeleteRfi={deleteProjectRfi}
+            onAddSiteInstruction={addProjectSiteInstruction}
+            onDeleteSiteInstruction={deleteProjectSiteInstruction}
+          />
+        </TabsContent>
         <TabsContent value="units" className="space-y-6">
           <ProjectUnitsTab
             project={project}
@@ -2411,6 +3160,12 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             formatDateLabel={formatDateLabel}
             formatMoney={formatMoney}
             unitActionBusyKey={followThroughBusyKey}
+            onAddBuilding={addProjectBuilding}
+            onDeleteBuilding={deleteProjectBuilding}
+            onAddFloor={addProjectFloor}
+            onDeleteFloor={deleteProjectFloor}
+            onAddUnitReleaseBatch={addProjectUnitReleaseBatch}
+            onDeleteUnitReleaseBatch={deleteProjectUnitReleaseBatch}
             onAddUnit={addProjectUnit}
             onReleaseUnit={releaseProjectUnit}
             onWithdrawUnitRelease={withdrawProjectUnitRelease}
@@ -2453,6 +3208,8 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             handoverTypeOptions={DEFAULT_PROJECT_HANDOVER_ITEM_TYPES}
             formatCatalogLabel={formatCatalogLabel}
             formatDateLabel={formatDateLabel}
+            onAddHandoverBatch={addProjectUnitHandoverBatch}
+            onDeleteHandoverBatch={deleteProjectUnitHandoverBatch}
             onAddCommissioningItem={addCommissioningItem}
             onDeleteCommissioningItem={deleteCommissioningItem}
             onAddHandoverItem={addHandoverItem}
@@ -2465,6 +3222,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             units={project.units}
             activeBusinessPartners={activeBusinessPartners}
             linkOptions={projectLinkOptions}
+            postHandoverSummary={postHandoverSummary}
             snagDraft={snagDraft}
             setSnagDraft={setSnagDraft}
             defectLiabilityDraft={defectLiabilityDraft}

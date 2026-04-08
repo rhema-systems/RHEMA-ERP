@@ -163,6 +163,8 @@ public partial class ProjectService
         var salesAgreement = await EnsureTenantSalesAgreementExistsAsync(dto.SalesAgreementId);
         var salesOrder = await EnsureTenantSalesOrderExistsAsync(dto.SalesOrderId);
         ValidateCustomerLinkedSalesRecords(dto.CustomerBusinessPartnerId, salesAgreement, salesOrder);
+        var (building, floor) = await ResolveProjectHierarchyAsync(projectId, dto.ProjectBuildingId, dto.ProjectFloorId);
+        var releaseBatch = await ValidateProjectUnitReleaseBatchAsync(projectId, dto.ProjectUnitReleaseBatchId, building?.Id, floor?.Id);
         var isReleasedForMarket = dto.IsReleasedForMarket || salesAgreement != null || salesOrder != null;
         var normalizedStatus = NormalizeProjectUnitStatus(dto.Status);
         ValidateProjectUnitCommercialControls(isReleasedForMarket, normalizedStatus, dto.HandoverDate, salesAgreement, salesOrder);
@@ -173,6 +175,9 @@ public partial class ProjectService
         {
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
+            ProjectBuildingId = building?.Id,
+            ProjectFloorId = floor?.Id,
+            ProjectUnitReleaseBatchId = releaseBatch?.Id,
             IsReleasedForMarket = isReleasedForMarket,
             ReleasedAt = isReleasedForMarket ? DateTime.UtcNow : null,
             ReleasedById = isReleasedForMarket ? _currentUserProvider.UserId : null,
@@ -183,8 +188,8 @@ public partial class ProjectService
             Name = dto.Name.Trim(),
             UnitType = NormalizeProjectUnitType(dto.UnitType),
             Status = effectiveStatus,
-            BlockName = TrimOrNull(dto.BlockName),
-            FloorLabel = TrimOrNull(dto.FloorLabel),
+            BlockName = building?.Name ?? TrimOrNull(dto.BlockName),
+            FloorLabel = floor?.Name ?? TrimOrNull(dto.FloorLabel),
             AreaSquareMeters = dto.AreaSquareMeters,
             ValuationRate = dto.ValuationRate,
             BasePrice = dto.BasePrice,
@@ -209,6 +214,8 @@ public partial class ProjectService
         var salesAgreement = await EnsureTenantSalesAgreementExistsAsync(dto.SalesAgreementId);
         var salesOrder = await EnsureTenantSalesOrderExistsAsync(dto.SalesOrderId);
         ValidateCustomerLinkedSalesRecords(dto.CustomerBusinessPartnerId, salesAgreement, salesOrder);
+        var (building, floor) = await ResolveProjectHierarchyAsync(entity.ProjectId, dto.ProjectBuildingId, dto.ProjectFloorId);
+        var releaseBatch = await ValidateProjectUnitReleaseBatchAsync(entity.ProjectId, dto.ProjectUnitReleaseBatchId, building?.Id, floor?.Id);
         var isReleasedForMarket = dto.IsReleasedForMarket || salesAgreement != null || salesOrder != null;
         var normalizedStatus = NormalizeProjectUnitStatus(dto.Status);
         ValidateProjectUnitCommercialControls(isReleasedForMarket, normalizedStatus, dto.HandoverDate, salesAgreement, salesOrder);
@@ -226,6 +233,9 @@ public partial class ProjectService
         entity.ReleasedById = isReleasedForMarket
             ? entity.ReleasedById ?? _currentUserProvider.UserId
             : null;
+        entity.ProjectBuildingId = building?.Id;
+        entity.ProjectFloorId = floor?.Id;
+        entity.ProjectUnitReleaseBatchId = releaseBatch?.Id;
         entity.CustomerBusinessPartnerId = dto.CustomerBusinessPartnerId;
         entity.SalesAgreementId = salesAgreement?.Id;
         entity.SalesOrderId = salesOrder?.Id;
@@ -233,8 +243,8 @@ public partial class ProjectService
         entity.Name = dto.Name.Trim();
         entity.UnitType = NormalizeProjectUnitType(dto.UnitType);
         entity.Status = effectiveStatus;
-        entity.BlockName = TrimOrNull(dto.BlockName);
-        entity.FloorLabel = TrimOrNull(dto.FloorLabel);
+        entity.BlockName = building?.Name ?? TrimOrNull(dto.BlockName);
+        entity.FloorLabel = floor?.Name ?? TrimOrNull(dto.FloorLabel);
         entity.AreaSquareMeters = dto.AreaSquareMeters;
         entity.ValuationRate = dto.ValuationRate;
         entity.BasePrice = dto.BasePrice;
@@ -469,6 +479,21 @@ public partial class ProjectService
             .Where(x => x.SalesOrderId.HasValue)
             .Select(x => x.SalesOrderId!.Value)
             .Distinct());
+        var buildingLookup = (await GetBusinessHierarchyBuildingLookupAsync(units
+                .Where(x => x.ProjectBuildingId.HasValue)
+                .Select(x => x.ProjectBuildingId!.Value)
+                .Distinct()))
+            .ToDictionary(x => x.Id);
+        var floorLookup = (await GetBusinessHierarchyFloorLookupAsync(units
+                .Where(x => x.ProjectFloorId.HasValue)
+                .Select(x => x.ProjectFloorId!.Value)
+                .Distinct()))
+            .ToDictionary(x => x.Id);
+        var releaseBatchLookup = (await GetProjectUnitReleaseBatchLookupAsync(units
+                .Where(x => x.ProjectUnitReleaseBatchId.HasValue)
+                .Select(x => x.ProjectUnitReleaseBatchId!.Value)
+                .Distinct()))
+            .ToDictionary(x => x.Id);
         var releaseUsers = (await _userService.GetUsersByIdsAsync(units
                 .Where(x => x.ReleasedById.HasValue)
                 .Select(x => x.ReleasedById!.Value)
@@ -478,7 +503,7 @@ public partial class ProjectService
         return units
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.Name)
-            .Select(x => MapToDto(x, customerLookup, salesAgreementLookup, salesOrderLookup, releaseUsers))
+            .Select(x => MapToDto(x, customerLookup, salesAgreementLookup, salesOrderLookup, buildingLookup, floorLookup, releaseBatchLookup, releaseUsers))
             .ToList();
     }
 
@@ -694,11 +719,17 @@ public partial class ProjectService
         IReadOnlyDictionary<Guid, BusinessPartner> customerLookup,
         IReadOnlyDictionary<Guid, SalesAgreement> salesAgreementLookup,
         IReadOnlyDictionary<Guid, SalesOrder> salesOrderLookup,
+        IReadOnlyDictionary<Guid, ProjectBuilding> buildingLookup,
+        IReadOnlyDictionary<Guid, ProjectFloor> floorLookup,
+        IReadOnlyDictionary<Guid, ProjectUnitReleaseBatch> releaseBatchLookup,
         IReadOnlyDictionary<Guid, ApplicationUser> releaseUserLookup)
     {
         customerLookup.TryGetValue(entity.CustomerBusinessPartnerId ?? Guid.Empty, out var customer);
         salesAgreementLookup.TryGetValue(entity.SalesAgreementId ?? Guid.Empty, out var salesAgreement);
         salesOrderLookup.TryGetValue(entity.SalesOrderId ?? Guid.Empty, out var salesOrder);
+        buildingLookup.TryGetValue(entity.ProjectBuildingId ?? Guid.Empty, out var building);
+        floorLookup.TryGetValue(entity.ProjectFloorId ?? Guid.Empty, out var floor);
+        releaseBatchLookup.TryGetValue(entity.ProjectUnitReleaseBatchId ?? Guid.Empty, out var releaseBatch);
 
         var commercialStatus = DeriveProjectUnitCommercialStatus(entity, salesAgreement, salesOrder);
         var commercialIntent = DeriveProjectUnitCommercialIntent(salesAgreement, salesOrder);
@@ -708,6 +739,16 @@ public partial class ProjectService
         {
             Id = entity.Id,
             ProjectId = entity.ProjectId,
+            ProjectBuildingId = entity.ProjectBuildingId,
+            ProjectBuildingCode = building?.Code,
+            ProjectBuildingName = building?.Name,
+            ProjectFloorId = entity.ProjectFloorId,
+            ProjectFloorCode = floor?.Code,
+            ProjectFloorName = floor?.Name,
+            ProjectUnitReleaseBatchId = entity.ProjectUnitReleaseBatchId,
+            ProjectUnitReleaseBatchCode = releaseBatch?.Code,
+            ProjectUnitReleaseBatchName = releaseBatch?.Name,
+            ProjectUnitReleaseBatchStatus = releaseBatch?.Status,
             IsReleasedForMarket = entity.IsReleasedForMarket,
             ReleasedAt = entity.ReleasedAt,
             ReleasedByDisplayName = entity.ReleasedById.HasValue && releaseUserLookup.TryGetValue(entity.ReleasedById.Value, out var releasedBy)

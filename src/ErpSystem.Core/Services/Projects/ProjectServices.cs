@@ -222,6 +222,19 @@ public partial class ProjectService : IProjectService
         dto.Packages = (await GetProjectPackagesAsync(id)).ToList();
         dto.BoqItems = (await GetProjectBoqItemsAsync(id)).ToList();
         dto.ApprovalRegister = (await GetApprovalRegisterAsync(id)).ToList();
+        dto.Drawings = (await GetProjectDrawingsAsync(id)).ToList();
+        dto.Submittals = (await GetProjectSubmittalsAsync(id)).ToList();
+        dto.Rfis = (await GetProjectRfisAsync(id)).ToList();
+        dto.SiteInstructions = (await GetProjectSiteInstructionsAsync(id)).ToList();
+        dto.VariationOrders = (await GetProjectVariationOrdersAsync(id)).ToList();
+        dto.InterimValuations = (await GetProjectInterimValuationsAsync(id)).ToList();
+        dto.PaymentCertificates = (await GetProjectPaymentCertificatesAsync(id)).ToList();
+        dto.ExtensionOfTimeRequests = (await GetProjectExtensionOfTimeRequestsAsync(id)).ToList();
+        dto.FinalAccount = await GetProjectFinalAccountAsync(id);
+        dto.Buildings = (await GetProjectBuildingsAsync(id)).ToList();
+        dto.Floors = (await GetProjectFloorsAsync(id)).ToList();
+        dto.UnitReleaseBatches = (await GetProjectUnitReleaseBatchesAsync(id)).ToList();
+        dto.UnitHandoverBatches = (await GetProjectUnitHandoverBatchesAsync(id)).ToList();
         dto.Units = (await GetProjectUnitsAsync(id)).ToList();
         dto.CustomerVariations = (await GetCustomerVariationsAsync(id)).ToList();
         dto.CommissioningItems = (await GetProjectCommissioningItemsAsync(id)).ToList();
@@ -7563,7 +7576,7 @@ public partial class ProjectService : IProjectService
     }
 }
 
-public class ProjectSetupService : IProjectSetupService
+public partial class ProjectSetupService : IProjectSetupService
 {
     private readonly IProjectTypeRepository _projectTypeRepository;
     private readonly IProjectPriorityRepository _projectPriorityRepository;
@@ -7597,11 +7610,14 @@ public class ProjectSetupService : IProjectSetupService
     public async Task<ProjectMasterDataOverviewDto> GetMasterDataOverviewAsync()
     {
         EnsureAdministrationAccess();
+        await EnsureDefaultPhaseLibraryAsync();
         var typeCount = (await _projectTypeRepository.GetAllAsync()).Count();
         var priorityCount = (await _projectPriorityRepository.GetAllAsync()).Count();
         var templateCount = (await _projectTemplateRepository.GetActiveAsync()).Count();
         var portfolioCount = (await _projectPortfolioRepository.GetAllAsync()).Count();
         var programCount = (await _projectProgramRepository.GetAllAsync()).Count();
+        var phaseTemplateCount = (await _unitOfWork.Repository<ProjectPhaseTemplate>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId)).Count();
+        var stageGateRuleCount = (await _unitOfWork.Repository<ProjectStageGateRule>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId)).Count();
         var configuredCatalogs = (await _projectCatalogRepository.GetAllAsync()).ToList();
         var recommendedCatalogs = ProjectCatalogDefaults.GetRecommendedCatalogs();
 
@@ -7612,6 +7628,8 @@ public class ProjectSetupService : IProjectSetupService
             ProjectTemplateCount = templateCount,
             PortfolioCount = portfolioCount,
             ProgramCount = programCount,
+            ProjectPhaseTemplateCount = phaseTemplateCount,
+            ProjectStageGateRuleCount = stageGateRuleCount,
             RecommendedCatalogs = recommendedCatalogs,
             CatalogCoverage = recommendedCatalogs.Select(group => new ProjectCatalogTypeSummaryDto
             {

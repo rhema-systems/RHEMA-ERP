@@ -8,7 +8,7 @@ public static class ProjectCatalogDefaults
     [
         Create("methodologies", "Methodologies", "Waterfall", "Agile", "Hybrid", "Program", "Internal"),
         Create("lifecycle-statuses", "Lifecycle Statuses", "Draft", "PendingApproval", "Approved", "Planned", "InProgress", "OnHold", "AtRisk", "Delayed", "Completed", "Closed", "Cancelled", "Archived"),
-        Create("stages", "Lifecycle Stages", "Initiation", "Planning", "Execution", "Monitoring", "Closure"),
+        Create("stages", "Lifecycle Stages", "Initiation", "Planning", "Execution", "Monitoring", "Closure", "Feasibility", "ConceptDesign", "DetailedDesign", "Approvals", "Procurement", "Construction", "Commissioning", "Handover", "DefectsLiability"),
         Create("risk-ratings", "Risk Ratings", "Low", "Medium", "High", "Critical"),
         Create("risk-statuses", "Risk Statuses", "Open", "Monitoring", "Mitigated", "Closed", "Escalated"),
         Create("risk-categories", "Risk Categories", "Scope", "Schedule", "Resource", "Quality", "Vendor", "Compliance", "Financial", "Operational"),

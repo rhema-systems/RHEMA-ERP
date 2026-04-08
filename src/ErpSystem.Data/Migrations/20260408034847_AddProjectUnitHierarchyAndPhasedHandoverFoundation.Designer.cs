@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260408034847_AddProjectUnitHierarchyAndPhasedHandoverFoundation")]
+    partial class AddProjectUnitHierarchyAndPhasedHandoverFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -41723,9 +41726,6 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
-                    b.Property<DateTime?>("FirstResponseDate")
-                        .HasColumnType("datetime2");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -41754,14 +41754,8 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("ReportedDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<int?>("ResolutionSlaDays")
-                        .HasColumnType("int");
-
                     b.Property<DateTime?>("ResolvedDate")
                         .HasColumnType("datetime2");
-
-                    b.Property<int?>("ResponseSlaDays")
-                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -41785,10 +41779,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("WarrantyCategory")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
                     b.Property<DateTime?>("WarrantyExpiryDate")
                         .HasColumnType("datetime2");
 
@@ -41807,8 +41797,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ProjectId", "CustomerBusinessPartnerId");
 
-                    b.HasIndex("ProjectId", "FirstResponseDate");
-
                     b.HasIndex("ProjectId", "JobCardId");
 
                     b.HasIndex("ProjectId", "ProjectUnitId");
@@ -41816,8 +41804,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ProjectId", "Status");
 
                     b.HasIndex("ProjectId", "TargetResolutionDate");
-
-                    b.HasIndex("ProjectId", "WarrantyExpiryDate");
 
                     b.HasIndex("ProjectId", "WorkOrderId");
 

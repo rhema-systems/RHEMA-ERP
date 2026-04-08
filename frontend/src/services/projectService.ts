@@ -885,9 +885,504 @@ export interface CreateProjectApprovalRegisterItemDto {
 
 export interface UpdateProjectApprovalRegisterItemDto extends CreateProjectApprovalRegisterItemDto {}
 
+export interface ProjectDrawingDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  drawingNumber: string;
+  title: string;
+  discipline: string;
+  revision?: string;
+  status: string;
+  issuedDate?: string;
+  reviewDueDate?: string;
+  approvedDate?: string;
+  isAsBuilt: boolean;
+  responsibleParty?: string;
+  notes?: string;
+}
+
+export interface CreateProjectDrawingDto {
+  projectPhaseId?: string;
+  drawingNumber: string;
+  title: string;
+  discipline?: string;
+  revision?: string;
+  status?: string;
+  issuedDate?: string;
+  reviewDueDate?: string;
+  approvedDate?: string;
+  isAsBuilt?: boolean;
+  responsibleParty?: string;
+  notes?: string;
+}
+
+export interface UpdateProjectDrawingDto extends CreateProjectDrawingDto {}
+
+export interface ProjectSubmittalDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  submittalType: string;
+  referenceNumber?: string;
+  title: string;
+  status: string;
+  submittedDate?: string;
+  responseDueDate?: string;
+  respondedDate?: string;
+  submittedByName?: string;
+  reviewedByName?: string;
+  responsibleParty?: string;
+  notes?: string;
+}
+
+export interface CreateProjectSubmittalDto {
+  projectPhaseId?: string;
+  projectPackageId?: string;
+  submittalType?: string;
+  referenceNumber?: string;
+  title: string;
+  status?: string;
+  submittedDate?: string;
+  responseDueDate?: string;
+  respondedDate?: string;
+  submittedByName?: string;
+  reviewedByName?: string;
+  responsibleParty?: string;
+  notes?: string;
+}
+
+export interface UpdateProjectSubmittalDto extends CreateProjectSubmittalDto {}
+
+export interface ProjectRfiDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  referenceNumber?: string;
+  subject: string;
+  question: string;
+  priority: string;
+  status: string;
+  raisedDate: string;
+  responseDueDate?: string;
+  respondedDate?: string;
+  raisedByName?: string;
+  respondedByName?: string;
+  impactSummary?: string;
+  response?: string;
+  notes?: string;
+}
+
+export interface CreateProjectRfiDto {
+  projectPhaseId?: string;
+  projectPackageId?: string;
+  referenceNumber?: string;
+  subject: string;
+  question: string;
+  priority?: string;
+  status?: string;
+  raisedDate?: string;
+  responseDueDate?: string;
+  respondedDate?: string;
+  raisedByName?: string;
+  respondedByName?: string;
+  impactSummary?: string;
+  response?: string;
+  notes?: string;
+}
+
+export interface UpdateProjectRfiDto extends CreateProjectRfiDto {}
+
+export interface ProjectSiteInstructionDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  instructionType: string;
+  referenceNumber?: string;
+  title: string;
+  description?: string;
+  status: string;
+  issuedDate: string;
+  effectiveDate?: string;
+  closedDate?: string;
+  issuedByName?: string;
+  responsibleParty?: string;
+  estimatedCostImpact?: number;
+  currency: string;
+  scheduleImpactDays?: number;
+  notes?: string;
+}
+
+export interface CreateProjectSiteInstructionDto {
+  projectPhaseId?: string;
+  projectPackageId?: string;
+  instructionType?: string;
+  referenceNumber?: string;
+  title: string;
+  description?: string;
+  status?: string;
+  issuedDate?: string;
+  effectiveDate?: string;
+  closedDate?: string;
+  issuedByName?: string;
+  responsibleParty?: string;
+  estimatedCostImpact?: number;
+  currency?: string;
+  scheduleImpactDays?: number;
+  notes?: string;
+}
+
+export interface UpdateProjectSiteInstructionDto extends CreateProjectSiteInstructionDto {}
+
+export interface ProjectVariationOrderDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  contractId?: string;
+  contractNumber?: string;
+  contractTitle?: string;
+  referenceNumber?: string;
+  title: string;
+  description?: string;
+  variationType: string;
+  status: string;
+  requestedDate: string;
+  approvedDate?: string;
+  implementedDate?: string;
+  requestedByName?: string;
+  approvedByName?: string;
+  estimatedAmount?: number;
+  approvedAmount?: number;
+  currency: string;
+  scheduleImpactDays?: number;
+  notes?: string;
+}
+
+export interface CreateProjectVariationOrderDto {
+  projectPhaseId?: string;
+  projectPackageId?: string;
+  contractId?: string;
+  referenceNumber?: string;
+  title: string;
+  description?: string;
+  variationType?: string;
+  status?: string;
+  requestedDate?: string;
+  approvedDate?: string;
+  implementedDate?: string;
+  requestedByName?: string;
+  approvedByName?: string;
+  estimatedAmount?: number;
+  approvedAmount?: number;
+  currency?: string;
+  scheduleImpactDays?: number;
+  notes?: string;
+}
+
+export interface UpdateProjectVariationOrderDto extends CreateProjectVariationOrderDto {}
+
+export interface ProjectInterimValuationDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  contractId?: string;
+  contractNumber?: string;
+  contractTitle?: string;
+  valuationNumber?: string;
+  title: string;
+  status: string;
+  valuationDate: string;
+  grossWorkValue: number;
+  materialsOnSiteValue: number;
+  variationValue: number;
+  retentionPercentage: number;
+  retentionAmount: number;
+  previousCertifiedAmount: number;
+  netValuationAmount: number;
+  currency: string;
+  notes?: string;
+}
+
+export interface CreateProjectInterimValuationDto {
+  projectPhaseId?: string;
+  projectPackageId?: string;
+  contractId?: string;
+  valuationNumber?: string;
+  title: string;
+  status?: string;
+  valuationDate?: string;
+  grossWorkValue?: number;
+  materialsOnSiteValue?: number;
+  variationValue?: number;
+  retentionPercentage?: number;
+  retentionAmount?: number;
+  previousCertifiedAmount?: number;
+  netValuationAmount?: number;
+  currency?: string;
+  notes?: string;
+}
+
+export interface UpdateProjectInterimValuationDto extends CreateProjectInterimValuationDto {}
+
+export interface ProjectPaymentCertificateDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  contractId?: string;
+  contractNumber?: string;
+  contractTitle?: string;
+  projectInterimValuationId?: string;
+  interimValuationNumber?: string;
+  interimValuationTitle?: string;
+  certificateNumber?: string;
+  title: string;
+  status: string;
+  issueDate: string;
+  paymentDueDate?: string;
+  grossCertifiedAmount: number;
+  retentionHeldAmount: number;
+  retentionReleasedAmount: number;
+  otherDeductionsAmount: number;
+  netCertifiedAmount: number;
+  currency: string;
+  notes?: string;
+}
+
+export interface CreateProjectPaymentCertificateDto {
+  projectPhaseId?: string;
+  projectPackageId?: string;
+  contractId?: string;
+  projectInterimValuationId?: string;
+  certificateNumber?: string;
+  title: string;
+  status?: string;
+  issueDate?: string;
+  paymentDueDate?: string;
+  grossCertifiedAmount?: number;
+  retentionHeldAmount?: number;
+  retentionReleasedAmount?: number;
+  otherDeductionsAmount?: number;
+  netCertifiedAmount?: number;
+  currency?: string;
+  notes?: string;
+}
+
+export interface UpdateProjectPaymentCertificateDto extends CreateProjectPaymentCertificateDto {}
+
+export interface ProjectExtensionOfTimeDto {
+  id: string;
+  projectId: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  contractId?: string;
+  contractNumber?: string;
+  contractTitle?: string;
+  referenceNumber?: string;
+  title: string;
+  reason?: string;
+  status: string;
+  requestedDate: string;
+  decisionDate?: string;
+  daysRequested?: number;
+  daysApproved?: number;
+  revisedCompletionDate?: string;
+  requestedByName?: string;
+  decidedByName?: string;
+  notes?: string;
+}
+
+export interface CreateProjectExtensionOfTimeDto {
+  projectPhaseId?: string;
+  projectPackageId?: string;
+  contractId?: string;
+  referenceNumber?: string;
+  title: string;
+  reason?: string;
+  status?: string;
+  requestedDate?: string;
+  decisionDate?: string;
+  daysRequested?: number;
+  daysApproved?: number;
+  revisedCompletionDate?: string;
+  requestedByName?: string;
+  decidedByName?: string;
+  notes?: string;
+}
+
+export interface UpdateProjectExtensionOfTimeDto extends CreateProjectExtensionOfTimeDto {}
+
+export interface ProjectFinalAccountDto {
+  id: string;
+  projectId: string;
+  contractId?: string;
+  contractNumber?: string;
+  contractTitle?: string;
+  status: string;
+  settlementDate?: string;
+  originalContractValue: number;
+  approvedVariationAmount: number;
+  certifiedToDate: number;
+  retentionHeldAmount: number;
+  retentionReleasedAmount: number;
+  finalAccountValue: number;
+  currency: string;
+  notes?: string;
+}
+
+export interface UpsertProjectFinalAccountDto {
+  contractId?: string;
+  status?: string;
+  settlementDate?: string;
+  originalContractValue?: number;
+  approvedVariationAmount?: number;
+  certifiedToDate?: number;
+  retentionHeldAmount?: number;
+  retentionReleasedAmount?: number;
+  finalAccountValue?: number;
+  currency?: string;
+  notes?: string;
+}
+
+export interface ProjectBuildingDto {
+  id: string;
+  projectId: string;
+  code?: string;
+  name: string;
+  sortOrder: number;
+  notes?: string;
+}
+
+export interface CreateProjectBuildingDto {
+  code?: string;
+  name: string;
+  sortOrder?: number;
+  notes?: string;
+}
+
+export interface UpdateProjectBuildingDto extends CreateProjectBuildingDto {}
+
+export interface ProjectFloorDto {
+  id: string;
+  projectId: string;
+  projectBuildingId?: string;
+  projectBuildingCode?: string;
+  projectBuildingName?: string;
+  code?: string;
+  name: string;
+  levelNumber?: number;
+  sortOrder: number;
+  notes?: string;
+}
+
+export interface CreateProjectFloorDto {
+  projectBuildingId?: string;
+  code?: string;
+  name: string;
+  levelNumber?: number;
+  sortOrder?: number;
+  notes?: string;
+}
+
+export interface UpdateProjectFloorDto extends CreateProjectFloorDto {}
+
+export interface ProjectUnitReleaseBatchDto {
+  id: string;
+  projectId: string;
+  projectBuildingId?: string;
+  projectBuildingCode?: string;
+  projectBuildingName?: string;
+  projectFloorId?: string;
+  projectFloorCode?: string;
+  projectFloorName?: string;
+  code?: string;
+  name: string;
+  status: string;
+  plannedReleaseDate?: string;
+  actualReleaseDate?: string;
+  sortOrder: number;
+  notes?: string;
+}
+
+export interface CreateProjectUnitReleaseBatchDto {
+  projectBuildingId?: string;
+  projectFloorId?: string;
+  code?: string;
+  name: string;
+  status?: string;
+  plannedReleaseDate?: string;
+  actualReleaseDate?: string;
+  sortOrder?: number;
+  notes?: string;
+}
+
+export interface UpdateProjectUnitReleaseBatchDto extends CreateProjectUnitReleaseBatchDto {}
+
+export interface ProjectUnitHandoverBatchDto {
+  id: string;
+  projectId: string;
+  projectBuildingId?: string;
+  projectBuildingCode?: string;
+  projectBuildingName?: string;
+  projectFloorId?: string;
+  projectFloorCode?: string;
+  projectFloorName?: string;
+  code?: string;
+  name: string;
+  status: string;
+  plannedHandoverDate?: string;
+  actualHandoverDate?: string;
+  sortOrder: number;
+  notes?: string;
+}
+
+export interface CreateProjectUnitHandoverBatchDto {
+  projectBuildingId?: string;
+  projectFloorId?: string;
+  code?: string;
+  name: string;
+  status?: string;
+  plannedHandoverDate?: string;
+  actualHandoverDate?: string;
+  sortOrder?: number;
+  notes?: string;
+}
+
+export interface UpdateProjectUnitHandoverBatchDto extends CreateProjectUnitHandoverBatchDto {}
+
 export interface ProjectUnitDto {
   id: string;
   projectId: string;
+  projectBuildingId?: string;
+  projectBuildingCode?: string;
+  projectBuildingName?: string;
+  projectFloorId?: string;
+  projectFloorCode?: string;
+  projectFloorName?: string;
+  projectUnitReleaseBatchId?: string;
+  projectUnitReleaseBatchCode?: string;
+  projectUnitReleaseBatchName?: string;
+  projectUnitReleaseBatchStatus?: string;
   isReleasedForMarket: boolean;
   releasedAt?: string;
   releasedByDisplayName?: string;
@@ -954,6 +1449,9 @@ export interface ProjectReleasedUnitSalesLookupDto {
 }
 
 export interface CreateProjectUnitDto {
+  projectBuildingId?: string;
+  projectFloorId?: string;
+  projectUnitReleaseBatchId?: string;
   isReleasedForMarket?: boolean;
   customerBusinessPartnerId?: string;
   salesAgreementId?: string;
@@ -1090,6 +1588,10 @@ export interface ProjectHandoverItemDto {
   projectUnitId?: string;
   projectUnitCode?: string;
   projectUnitName?: string;
+  projectUnitHandoverBatchId?: string;
+  projectUnitHandoverBatchCode?: string;
+  projectUnitHandoverBatchName?: string;
+  projectUnitHandoverBatchStatus?: string;
   handoverType: string;
   title: string;
   status: string;
@@ -1103,6 +1605,7 @@ export interface ProjectHandoverItemDto {
 
 export interface CreateProjectHandoverItemDto {
   projectUnitId?: string;
+  projectUnitHandoverBatchId?: string;
   handoverType?: string;
   title: string;
   status?: string;
@@ -1171,7 +1674,11 @@ export interface ProjectDefectLiabilityCaseDto {
   targetResolutionDate?: string;
   resolvedDate?: string;
   isWarrantyRelated: boolean;
+  warrantyCategory?: string;
   warrantyExpiryDate?: string;
+  firstResponseDate?: string;
+  responseSlaDays?: number;
+  resolutionSlaDays?: number;
   rectificationCost?: number;
   chargeableAmount?: number;
   currency: string;
@@ -1190,7 +1697,11 @@ export interface CreateProjectDefectLiabilityCaseDto {
   targetResolutionDate?: string;
   resolvedDate?: string;
   isWarrantyRelated?: boolean;
+  warrantyCategory?: string;
   warrantyExpiryDate?: string;
+  firstResponseDate?: string;
+  responseSlaDays?: number;
+  resolutionSlaDays?: number;
   rectificationCost?: number;
   chargeableAmount?: number;
   currency?: string;
@@ -1234,6 +1745,19 @@ export interface ProjectCommercialSummaryDto {
   contractLinkedPackageCount: number;
   purchaseRequisitionLinkedPackageCount: number;
   purchaseOrderLinkedPackageCount: number;
+  phaseAlignedPackageCount: number;
+  phaseLaggingPackageCount: number;
+  variationOrderCount: number;
+  approvedVariationAmount: number;
+  interimValuationCount: number;
+  netValuationAmount: number;
+  paymentCertificateCount: number;
+  netCertifiedAmount: number;
+  retentionHeldAmount: number;
+  extensionOfTimeCount: number;
+  approvedExtensionDays: number;
+  finalAccountStatus?: string;
+  finalAccountValue?: number;
   phaseRollups: ProjectPhaseCommercialRollupDto[];
   alerts: ProjectCommercialAlertDto[];
 }
@@ -1272,11 +1796,60 @@ export interface CreateProjectPhaseDto {
   actualEndDate?: string;
 }
 
-export interface UpdateProjectPhaseDto extends CreateProjectPhaseDto {}
+export interface UpdateProjectPhaseDto extends CreateProjectPhaseDto {
+  overrideStageGate?: boolean;
+  overrideReason?: string;
+}
+
+export interface AdvanceProjectPhaseDto {
+  overrideStageGate?: boolean;
+  overrideReason?: string;
+  startNextPhase?: boolean;
+}
 
 export interface ReorderProjectPhasesDto {
   parentPhaseId?: string;
   orderedIds: string[];
+}
+
+export interface ProjectPhaseGateRequirementResultDto {
+  stageGateRuleId: string;
+  ruleCode?: string;
+  ruleName: string;
+  requirementType: string;
+  scope: string;
+  minimumCount?: number;
+  maximumCount?: number;
+  actualCount: number;
+  isBlocking: boolean;
+  isSatisfied: boolean;
+  message?: string;
+}
+
+export interface ProjectPhaseGateEvaluationDto {
+  projectPhaseId: string;
+  projectPhaseCode?: string;
+  projectPhaseName: string;
+  projectPhaseTemplateId?: string;
+  projectPhaseTemplateName?: string;
+  isStageGateRequired: boolean;
+  hasConfiguredRules: boolean;
+  isReady: boolean;
+  blockingFailureCount: number;
+  requirementResults: ProjectPhaseGateRequirementResultDto[];
+}
+
+export interface ProjectPhaseProgressionResultDto {
+  action: string;
+  message: string;
+  overrideUsed: boolean;
+  stageGateEvaluated: boolean;
+  stageGatePassed: boolean;
+  nextPhaseStarted: boolean;
+  packageStatusUpdateCount: number;
+  phase: ProjectPhaseDto;
+  nextPhase?: ProjectPhaseDto;
+  gateEvaluation?: ProjectPhaseGateEvaluationDto;
 }
 
 export interface ProjectPackageDto {
@@ -1289,6 +1862,11 @@ export interface ProjectPackageDto {
   description?: string;
   packageType: string;
   status: string;
+  isPhaseCommerciallyAligned: boolean;
+  phaseCommercialSyncStatus: string;
+  phaseCommercialSyncMessage?: string;
+  recommendedNextStatus?: string;
+  recommendedNextAction?: string;
   sortOrder: number;
   procurementRoute?: string;
   contractStrategy?: string;
@@ -1433,6 +2011,19 @@ export interface ProjectDetailDto extends ProjectDto {
   packages: ProjectPackageDto[];
   boqItems: ProjectBoqItemDto[];
   approvalRegister: ProjectApprovalRegisterItemDto[];
+  drawings: ProjectDrawingDto[];
+  submittals: ProjectSubmittalDto[];
+  rfis: ProjectRfiDto[];
+  siteInstructions: ProjectSiteInstructionDto[];
+  variationOrders: ProjectVariationOrderDto[];
+  interimValuations: ProjectInterimValuationDto[];
+  paymentCertificates: ProjectPaymentCertificateDto[];
+  extensionOfTimeRequests: ProjectExtensionOfTimeDto[];
+  finalAccount?: ProjectFinalAccountDto | null;
+  buildings: ProjectBuildingDto[];
+  floors: ProjectFloorDto[];
+  unitReleaseBatches: ProjectUnitReleaseBatchDto[];
+  unitHandoverBatches: ProjectUnitHandoverBatchDto[];
   units: ProjectUnitDto[];
   customerVariations: ProjectCustomerVariationDto[];
   commissioningItems: ProjectCommissioningItemDto[];
@@ -1474,7 +2065,36 @@ export interface ProjectWorkspaceDto {
   integrationSummary?: ProjectIntegrationSummaryDto | null;
   governanceSummary?: ProjectGovernanceSummaryDto | null;
   commercialSummary?: ProjectCommercialSummaryDto | null;
+  postHandoverSummary?: ProjectPostHandoverSummaryDto | null;
   linkOptions?: ProjectLinkOptionsDto | null;
+  phaseGateEvaluations?: ProjectPhaseGateEvaluationDto[] | null;
+}
+
+export interface ProjectPostHandoverSummaryDto {
+  projectId: string;
+  openHandoverItemCount: number;
+  activeDefectLiabilityCount: number;
+  warrantyCaseCount: number;
+  chargeableCaseCount: number;
+  responseBreachCount: number;
+  resolutionBreachCount: number;
+  warrantyExpiringSoonCount: number;
+  totalRectificationExposure: number;
+  chargeableExposure: number;
+  warrantyExposure: number;
+  alerts: ProjectPostHandoverAlertDto[];
+}
+
+export interface ProjectPostHandoverAlertDto {
+  alertType: string;
+  severity: string;
+  projectUnitId?: string;
+  projectUnitCode?: string;
+  projectUnitName?: string;
+  projectDefectLiabilityCaseId?: string;
+  title: string;
+  message: string;
+  dueDate?: string;
 }
 
 export interface ProjectSalesAgreementLinkOptionDto {
@@ -1816,6 +2436,75 @@ export interface CreateProjectTemplateDto {
   isActive?: boolean;
 }
 
+export interface ProjectPhaseTemplateDto {
+  id: string;
+  parentPhaseTemplateId?: string;
+  parentPhaseTemplateName?: string;
+  projectTypeId?: string;
+  projectTypeName?: string;
+  code?: string;
+  name: string;
+  description?: string;
+  defaultStatus: string;
+  sortOrder: number;
+  isOptional: boolean;
+  isStageGateRequired: boolean;
+  isActive: boolean;
+  appliesToDeliveryStructure?: string;
+  appliesToDevelopmentType?: string;
+  stageGateRules: ProjectStageGateRuleDto[];
+  children: ProjectPhaseTemplateDto[];
+}
+
+export interface CreateProjectPhaseTemplateDto {
+  parentPhaseTemplateId?: string;
+  projectTypeId?: string;
+  code?: string;
+  name: string;
+  description?: string;
+  defaultStatus?: string;
+  sortOrder?: number;
+  isOptional?: boolean;
+  isStageGateRequired?: boolean;
+  isActive?: boolean;
+  appliesToDeliveryStructure?: string;
+  appliesToDevelopmentType?: string;
+}
+
+export interface UpdateProjectPhaseTemplateDto extends CreateProjectPhaseTemplateDto {}
+
+export interface ProjectStageGateRuleDto {
+  id: string;
+  projectPhaseTemplateId: string;
+  projectPhaseTemplateName?: string;
+  code: string;
+  name: string;
+  description?: string;
+  requirementType: string;
+  scope: string;
+  minimumCount?: number;
+  maximumCount?: number;
+  isBlocking: boolean;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface CreateProjectStageGateRuleDto {
+  projectPhaseTemplateId: string;
+  code: string;
+  name: string;
+  description?: string;
+  requirementType: string;
+  scope?: string;
+  minimumCount?: number;
+  maximumCount?: number;
+  isBlocking?: boolean;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface UpdateProjectStageGateRuleDto extends CreateProjectStageGateRuleDto {}
+
 export interface ProjectManagementSettingsDto {
   id: string;
   tenantId: string;
@@ -1853,6 +2542,8 @@ export interface ProjectMasterDataOverviewDto {
   projectTemplateCount: number;
   portfolioCount: number;
   programCount: number;
+  projectPhaseTemplateCount: number;
+  projectStageGateRuleCount: number;
   recommendedCatalogs: ProjectCatalogGroupDto[];
   catalogCoverage: ProjectCatalogTypeSummaryDto[];
 }
@@ -2323,6 +3014,172 @@ export interface ProjectProcurementReconciliationReportItemDto {
   missingSourceLinkCount: number;
   reversalGapCount: number;
   reconciliationStatus: string;
+}
+
+export interface ProjectPhaseGateReadinessReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  projectPhaseId: string;
+  projectPhaseCode: string;
+  projectPhaseName: string;
+  projectPhaseSortOrder: number;
+  isStageGateRequired: boolean;
+  hasConfiguredRules: boolean;
+  isReady: boolean;
+  configuredRuleCount: number;
+  blockingRuleCount: number;
+  blockingFailureCount: number;
+  satisfiedRuleCount: number;
+  gateStatus: string;
+  topBlockingMessage?: string | null;
+}
+
+export interface ProjectApprovalWatchReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  approvalRegisterItemId: string;
+  projectPhaseId?: string | null;
+  projectPhaseName?: string | null;
+  approvalType: string;
+  title: string;
+  status: string;
+  watchState: string;
+  severity: string;
+  isRequired: boolean;
+  authorityName?: string | null;
+  referenceNumber?: string | null;
+  submittedDate?: string | null;
+  targetDecisionDate?: string | null;
+  approvedDate?: string | null;
+  expiryDate?: string | null;
+  daysToTargetDecision?: number | null;
+  daysToExpiry?: number | null;
+}
+
+export interface ProjectCommercialAdministrationReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  currency: string;
+  approvedBudget: number;
+  packageForecastAmount: number;
+  forecastVarianceAmount: number;
+  packageCount: number;
+  unassignedPackageCount: number;
+  variationOrderCount: number;
+  approvedVariationAmount: number;
+  interimValuationCount: number;
+  netValuationAmount: number;
+  paymentCertificateCount: number;
+  netCertifiedAmount: number;
+  retentionHeldAmount: number;
+  extensionOfTimeCount: number;
+  approvedExtensionDays: number;
+  finalAccountStatus?: string | null;
+  alertCount: number;
+  watchState: string;
+  topAlertMessage?: string | null;
+}
+
+export interface ProjectPostHandoverWatchReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  openHandoverItemCount: number;
+  activeDefectLiabilityCount: number;
+  warrantyCaseCount: number;
+  chargeableCaseCount: number;
+  responseBreachCount: number;
+  resolutionBreachCount: number;
+  warrantyExpiringSoonCount: number;
+  alertCount: number;
+  highestSeverity: string;
+  watchState: string;
+  totalRectificationExposure: number;
+  chargeableExposure: number;
+  warrantyExposure: number;
+}
+
+export interface ProjectDesignControlReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  itemType: string;
+  recordId: string;
+  projectPhaseId?: string | null;
+  projectPhaseName?: string | null;
+  projectPackageId?: string | null;
+  projectPackageName?: string | null;
+  referenceCode: string;
+  title: string;
+  category: string;
+  status: string;
+  watchState: string;
+  severity: string;
+  actionDueDate?: string | null;
+  daysToActionDue?: number | null;
+  responsibleParty?: string | null;
+  isAsBuilt: boolean;
+}
+
+export interface ProjectSiteControlReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  itemType: string;
+  recordId: string;
+  projectPhaseId?: string | null;
+  projectPhaseName?: string | null;
+  projectPackageId?: string | null;
+  projectPackageName?: string | null;
+  referenceCode: string;
+  title: string;
+  category: string;
+  status: string;
+  watchState: string;
+  severity: string;
+  actionDueDate?: string | null;
+  daysToActionDue?: number | null;
+  responsibleParty?: string | null;
+  estimatedCostImpact?: number | null;
+  scheduleImpactDays?: number | null;
+}
+
+export interface ProjectUnitCommercializationReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  projectUnitId: string;
+  projectBuildingName?: string | null;
+  projectFloorName?: string | null;
+  projectUnitReleaseBatchName?: string | null;
+  unitCode?: string | null;
+  unitName: string;
+  unitType: string;
+  status: string;
+  commercialStatus: string;
+  commercialIntent?: string | null;
+  handoverStatus: string;
+  isReleasedForMarket: boolean;
+  releaseState: string;
+  customerBusinessPartnerName?: string | null;
+  salesAgreementNumber?: string | null;
+  salesOrderNumber?: string | null;
+  areaSquareMeters?: number | null;
+  basePrice?: number | null;
+  currency: string;
+  watchState: string;
+  severity: string;
+  watchMessage?: string | null;
 }
 
 export interface ProjectMaterialCostEntryDto {
@@ -2810,6 +3667,97 @@ class ProjectService {
     return response.json();
   }
 
+  async getPhaseGateReadinessReport(projectId?: string, take: number = 250): Promise<ProjectPhaseGateReadinessReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/phase-gate-readiness?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch phase gate readiness report');
+    return response.json();
+  }
+
+  async getApprovalWatchReport(projectId?: string, take: number = 250): Promise<ProjectApprovalWatchReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/approval-watch?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch approval watch report');
+    return response.json();
+  }
+
+  async getCommercialAdministrationReport(projectId?: string, take: number = 200): Promise<ProjectCommercialAdministrationReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/construction-commercial?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch construction commercial report');
+    return response.json();
+  }
+
+  async getPostHandoverWatchReport(projectId?: string, take: number = 200): Promise<ProjectPostHandoverWatchReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/post-handover-watch?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch post-handover watch report');
+    return response.json();
+  }
+
+  async getDesignControlWatchReport(projectId?: string, take: number = 250): Promise<ProjectDesignControlReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/design-control-watch?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch design control watch report');
+    return response.json();
+  }
+
+  async getSiteControlsWatchReport(projectId?: string, take: number = 250): Promise<ProjectSiteControlReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/site-controls-watch?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch site controls watch report');
+    return response.json();
+  }
+
+  async getUnitCommercializationWatchReport(projectId?: string, take: number = 250): Promise<ProjectUnitCommercializationReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (projectId) params.set('projectId', projectId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/unit-commercialization-watch?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch unit commercialization watch report');
+    return response.json();
+  }
+
   async getResourceCapacityReport(startDate?: string, endDate?: string, userId?: string): Promise<ProjectResourceCapacityReportItemDto[]> {
     const queryParams = new URLSearchParams();
     if (startDate) queryParams.append('startDate', startDate);
@@ -3055,6 +4003,15 @@ class ProjectService {
     return response.json();
   }
 
+  async getProjectPhaseGateEvaluations(id: string): Promise<ProjectPhaseGateEvaluationDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${id}/phase-gates`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project phase gate evaluations');
+    return response.json();
+  }
+
   async addProjectPhase(projectId: string, dto: CreateProjectPhaseDto): Promise<ProjectPhaseDto> {
     const response = await fetch(`${API_BASE_URL}/projects/${projectId}/phases`, {
       method: 'POST',
@@ -3080,6 +4037,21 @@ class ProjectService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to update project phase');
+    }
+
+    return response.json();
+  }
+
+  async advanceProjectPhase(phaseId: string, dto: AdvanceProjectPhaseDto = {}): Promise<ProjectPhaseProgressionResultDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/phases/${phaseId}/advance`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to advance project phase');
     }
 
     return response.json();
@@ -3260,6 +4232,642 @@ class ProjectService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to delete project approval register item');
+    }
+  }
+
+  async getProjectDrawings(projectId: string): Promise<ProjectDrawingDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/drawings`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project drawings');
+    return response.json();
+  }
+
+  async addProjectDrawing(projectId: string, dto: CreateProjectDrawingDto): Promise<ProjectDrawingDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/drawings`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project drawing');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectDrawing(drawingId: string, dto: UpdateProjectDrawingDto): Promise<ProjectDrawingDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/drawings/${drawingId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project drawing');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectDrawing(drawingId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/drawings/${drawingId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project drawing');
+    }
+  }
+
+  async getProjectSubmittals(projectId: string): Promise<ProjectSubmittalDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/submittals`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project submittals');
+    return response.json();
+  }
+
+  async addProjectSubmittal(projectId: string, dto: CreateProjectSubmittalDto): Promise<ProjectSubmittalDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/submittals`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project submittal');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectSubmittal(submittalId: string, dto: UpdateProjectSubmittalDto): Promise<ProjectSubmittalDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/submittals/${submittalId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project submittal');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectSubmittal(submittalId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/submittals/${submittalId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project submittal');
+    }
+  }
+
+  async getProjectRfis(projectId: string): Promise<ProjectRfiDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/rfis`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project RFIs');
+    return response.json();
+  }
+
+  async addProjectRfi(projectId: string, dto: CreateProjectRfiDto): Promise<ProjectRfiDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/rfis`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project RFI');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectRfi(rfiId: string, dto: UpdateProjectRfiDto): Promise<ProjectRfiDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/rfis/${rfiId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project RFI');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectRfi(rfiId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/rfis/${rfiId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project RFI');
+    }
+  }
+
+  async getProjectSiteInstructions(projectId: string): Promise<ProjectSiteInstructionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/site-instructions`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project site instructions');
+    return response.json();
+  }
+
+  async addProjectSiteInstruction(projectId: string, dto: CreateProjectSiteInstructionDto): Promise<ProjectSiteInstructionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/site-instructions`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project site instruction');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectSiteInstruction(siteInstructionId: string, dto: UpdateProjectSiteInstructionDto): Promise<ProjectSiteInstructionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/site-instructions/${siteInstructionId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project site instruction');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectSiteInstruction(siteInstructionId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/site-instructions/${siteInstructionId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project site instruction');
+    }
+  }
+
+  async getProjectVariationOrders(projectId: string): Promise<ProjectVariationOrderDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/variation-orders`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project variation orders');
+    return response.json();
+  }
+
+  async addProjectVariationOrder(projectId: string, dto: CreateProjectVariationOrderDto): Promise<ProjectVariationOrderDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/variation-orders`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project variation order');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectVariationOrder(variationOrderId: string, dto: UpdateProjectVariationOrderDto): Promise<ProjectVariationOrderDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/variation-orders/${variationOrderId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project variation order');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectVariationOrder(variationOrderId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/variation-orders/${variationOrderId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project variation order');
+    }
+  }
+
+  async getProjectInterimValuations(projectId: string): Promise<ProjectInterimValuationDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/interim-valuations`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project interim valuations');
+    return response.json();
+  }
+
+  async addProjectInterimValuation(projectId: string, dto: CreateProjectInterimValuationDto): Promise<ProjectInterimValuationDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/interim-valuations`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project interim valuation');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectInterimValuation(interimValuationId: string, dto: UpdateProjectInterimValuationDto): Promise<ProjectInterimValuationDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/interim-valuations/${interimValuationId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project interim valuation');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectInterimValuation(interimValuationId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/interim-valuations/${interimValuationId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project interim valuation');
+    }
+  }
+
+  async getProjectPaymentCertificates(projectId: string): Promise<ProjectPaymentCertificateDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/payment-certificates`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project payment certificates');
+    return response.json();
+  }
+
+  async addProjectPaymentCertificate(projectId: string, dto: CreateProjectPaymentCertificateDto): Promise<ProjectPaymentCertificateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/payment-certificates`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project payment certificate');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectPaymentCertificate(paymentCertificateId: string, dto: UpdateProjectPaymentCertificateDto): Promise<ProjectPaymentCertificateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/payment-certificates/${paymentCertificateId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project payment certificate');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectPaymentCertificate(paymentCertificateId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/payment-certificates/${paymentCertificateId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project payment certificate');
+    }
+  }
+
+  async getProjectExtensionOfTimeRequests(projectId: string): Promise<ProjectExtensionOfTimeDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/extension-of-time-requests`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project extension of time requests');
+    return response.json();
+  }
+
+  async addProjectExtensionOfTimeRequest(projectId: string, dto: CreateProjectExtensionOfTimeDto): Promise<ProjectExtensionOfTimeDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/extension-of-time-requests`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project extension of time request');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectExtensionOfTimeRequest(extensionOfTimeId: string, dto: UpdateProjectExtensionOfTimeDto): Promise<ProjectExtensionOfTimeDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/extension-of-time-requests/${extensionOfTimeId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project extension of time request');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectExtensionOfTimeRequest(extensionOfTimeId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/extension-of-time-requests/${extensionOfTimeId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project extension of time request');
+    }
+  }
+
+  async getProjectFinalAccount(projectId: string): Promise<ProjectFinalAccountDto | null> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/final-account`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project final account');
+    return response.json();
+  }
+
+  async upsertProjectFinalAccount(projectId: string, dto: UpsertProjectFinalAccountDto): Promise<ProjectFinalAccountDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/final-account`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to save project final account');
+    }
+
+    return response.json();
+  }
+
+  async getProjectBuildings(projectId: string): Promise<ProjectBuildingDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/buildings`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project buildings');
+    return response.json();
+  }
+
+  async addProjectBuilding(projectId: string, dto: CreateProjectBuildingDto): Promise<ProjectBuildingDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/buildings`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project building');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectBuilding(buildingId: string, dto: UpdateProjectBuildingDto): Promise<ProjectBuildingDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/buildings/${buildingId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project building');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectBuilding(buildingId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/buildings/${buildingId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project building');
+    }
+  }
+
+  async getProjectFloors(projectId: string): Promise<ProjectFloorDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/floors`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project floors');
+    return response.json();
+  }
+
+  async addProjectFloor(projectId: string, dto: CreateProjectFloorDto): Promise<ProjectFloorDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/floors`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project floor');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectFloor(floorId: string, dto: UpdateProjectFloorDto): Promise<ProjectFloorDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/floors/${floorId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project floor');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectFloor(floorId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/floors/${floorId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project floor');
+    }
+  }
+
+  async getProjectUnitReleaseBatches(projectId: string): Promise<ProjectUnitReleaseBatchDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-release-batches`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project unit release batches');
+    return response.json();
+  }
+
+  async addProjectUnitReleaseBatch(projectId: string, dto: CreateProjectUnitReleaseBatchDto): Promise<ProjectUnitReleaseBatchDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-release-batches`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project unit release batch');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectUnitReleaseBatch(unitReleaseBatchId: string, dto: UpdateProjectUnitReleaseBatchDto): Promise<ProjectUnitReleaseBatchDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/unit-release-batches/${unitReleaseBatchId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project unit release batch');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectUnitReleaseBatch(unitReleaseBatchId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/unit-release-batches/${unitReleaseBatchId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project unit release batch');
+    }
+  }
+
+  async getProjectUnitHandoverBatches(projectId: string): Promise<ProjectUnitHandoverBatchDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-handover-batches`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project unit handover batches');
+    return response.json();
+  }
+
+  async addProjectUnitHandoverBatch(projectId: string, dto: CreateProjectUnitHandoverBatchDto): Promise<ProjectUnitHandoverBatchDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-handover-batches`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project unit handover batch');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectUnitHandoverBatch(unitHandoverBatchId: string, dto: UpdateProjectUnitHandoverBatchDto): Promise<ProjectUnitHandoverBatchDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/unit-handover-batches/${unitHandoverBatchId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project unit handover batch');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectUnitHandoverBatch(unitHandoverBatchId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/unit-handover-batches/${unitHandoverBatchId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project unit handover batch');
     }
   }
 
@@ -5814,6 +7422,110 @@ class ProjectService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to delete project template');
+    }
+  }
+
+  async getProjectPhaseTemplates(projectTypeId?: string): Promise<ProjectPhaseTemplateDto[]> {
+    const query = projectTypeId ? `?projectTypeId=${encodeURIComponent(projectTypeId)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project phase templates');
+    return response.json();
+  }
+
+  async createProjectPhaseTemplate(dto: CreateProjectPhaseTemplateDto): Promise<ProjectPhaseTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project phase template');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectPhaseTemplate(id: string, dto: UpdateProjectPhaseTemplateDto): Promise<ProjectPhaseTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project phase template');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectPhaseTemplate(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project phase template');
+    }
+  }
+
+  async getProjectStageGateRules(projectPhaseTemplateId?: string): Promise<ProjectStageGateRuleDto[]> {
+    const query = projectPhaseTemplateId ? `?projectPhaseTemplateId=${encodeURIComponent(projectPhaseTemplateId)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project stage gate rules');
+    return response.json();
+  }
+
+  async createProjectStageGateRule(dto: CreateProjectStageGateRuleDto): Promise<ProjectStageGateRuleDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project stage gate rule');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectStageGateRule(id: string, dto: UpdateProjectStageGateRuleDto): Promise<ProjectStageGateRuleDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project stage gate rule');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectStageGateRule(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project stage gate rule');
     }
   }
 

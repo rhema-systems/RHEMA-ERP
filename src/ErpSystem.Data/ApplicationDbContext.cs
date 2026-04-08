@@ -664,6 +664,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectType> ProjectTypes { get; set; }
     public DbSet<ProjectPriority> ProjectPriorities { get; set; }
     public DbSet<ProjectTemplate> ProjectTemplates { get; set; }
+    public DbSet<ProjectPhaseTemplate> ProjectPhaseTemplates { get; set; }
+    public DbSet<ProjectStageGateRule> ProjectStageGateRules { get; set; }
     public DbSet<ProjectPortfolio> ProjectPortfolios { get; set; }
     public DbSet<ProjectProgram> ProjectPrograms { get; set; }
     public DbSet<ProjectManagementSettings> ProjectManagementSettings { get; set; }
@@ -673,6 +675,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectPackage> ProjectPackages { get; set; }
     public DbSet<ProjectBoqItem> ProjectBoqItems { get; set; }
     public DbSet<ProjectApprovalRegisterItem> ProjectApprovalRegisterItems { get; set; }
+    public DbSet<ProjectDrawing> ProjectDrawings { get; set; }
+    public DbSet<ProjectSubmittal> ProjectSubmittals { get; set; }
+    public DbSet<ProjectRfi> ProjectRfis { get; set; }
+    public DbSet<ProjectSiteInstruction> ProjectSiteInstructions { get; set; }
+    public DbSet<ProjectVariationOrder> ProjectVariationOrders { get; set; }
+    public DbSet<ProjectInterimValuation> ProjectInterimValuations { get; set; }
+    public DbSet<ProjectPaymentCertificate> ProjectPaymentCertificates { get; set; }
+    public DbSet<ProjectExtensionOfTime> ProjectExtensionOfTimeRequests { get; set; }
+    public DbSet<ProjectFinalAccount> ProjectFinalAccounts { get; set; }
+    public DbSet<ProjectBuilding> ProjectBuildings { get; set; }
+    public DbSet<ProjectFloor> ProjectFloors { get; set; }
+    public DbSet<ProjectUnitReleaseBatch> ProjectUnitReleaseBatches { get; set; }
+    public DbSet<ProjectUnitHandoverBatch> ProjectUnitHandoverBatches { get; set; }
     public DbSet<ProjectUnit> ProjectUnits { get; set; }
     public DbSet<ProjectCustomerVariation> ProjectCustomerVariations { get; set; }
     public DbSet<ProjectCommissioningItem> ProjectCommissioningItems { get; set; }
@@ -1549,6 +1564,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectTypeConfiguration());
         builder.ApplyConfiguration(new ProjectPriorityConfiguration());
         builder.ApplyConfiguration(new ProjectTemplateConfiguration());
+        builder.ApplyConfiguration(new ProjectPhaseTemplateConfiguration());
+        builder.ApplyConfiguration(new ProjectStageGateRuleConfiguration());
         builder.ApplyConfiguration(new ProjectPortfolioConfiguration());
         builder.ApplyConfiguration(new ProjectProgramConfiguration());
         builder.ApplyConfiguration(new ProjectManagementSettingsConfiguration());
@@ -1559,6 +1576,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectPackageConfiguration());
         builder.ApplyConfiguration(new ProjectBoqItemConfiguration());
         builder.ApplyConfiguration(new ProjectApprovalRegisterItemConfiguration());
+        builder.ApplyConfiguration(new ProjectDrawingConfiguration());
+        builder.ApplyConfiguration(new ProjectSubmittalConfiguration());
+        builder.ApplyConfiguration(new ProjectRfiConfiguration());
+        builder.ApplyConfiguration(new ProjectSiteInstructionConfiguration());
+        builder.ApplyConfiguration(new ProjectVariationOrderConfiguration());
+        builder.ApplyConfiguration(new ProjectInterimValuationConfiguration());
+        builder.ApplyConfiguration(new ProjectPaymentCertificateConfiguration());
+        builder.ApplyConfiguration(new ProjectExtensionOfTimeConfiguration());
+        builder.ApplyConfiguration(new ProjectFinalAccountConfiguration());
+        builder.ApplyConfiguration(new ProjectBuildingConfiguration());
+        builder.ApplyConfiguration(new ProjectFloorConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitReleaseBatchConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitHandoverBatchConfiguration());
         builder.ApplyConfiguration(new ProjectUnitConfiguration());
         builder.ApplyConfiguration(new ProjectCustomerVariationConfiguration());
         builder.ApplyConfiguration(new ProjectCommissioningItemConfiguration());

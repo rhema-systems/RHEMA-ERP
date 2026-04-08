@@ -413,6 +413,20 @@ namespace ErpSystem.Web.Services
                 "Asset or facilities improvement work with formal budget controls.",
                 requiresSponsor: true,
                 requiresApproval: true);
+            var constructionType = await EnsureProjectTypeAsync(
+                tenantId,
+                "CONSTRUCTION",
+                "Construction Development",
+                "Building and civil works projects covering design, approvals, procurement, construction, handover, and defects-liability follow-through.",
+                requiresSponsor: true,
+                requiresApproval: true);
+            var renovationType = await EnsureProjectTypeAsync(
+                tenantId,
+                "RENOVATION_FITOUT",
+                "Renovation / Fit-Out",
+                "Renovation, refurbishment, and fit-out projects with phased handover and change-heavy execution.",
+                requiresSponsor: true,
+                requiresApproval: true);
 
             var highPriority = await EnsureProjectPriorityAsync(tenantId, "HIGH", "High", "#DC2626", 10);
             var mediumPriority = await EnsureProjectPriorityAsync(tenantId, "MEDIUM", "Medium", "#D97706", 20);
@@ -468,6 +482,56 @@ namespace ErpSystem.Web.Services
                 _context.ProjectPrograms.Add(program);
             }
 
+            var realEstatePortfolio = await _context.ProjectPortfolios
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "PORTFOLIO-REAL-ESTATE");
+            if (realEstatePortfolio == null)
+            {
+                realEstatePortfolio = new ProjectPortfolio
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = "PORTFOLIO-REAL-ESTATE",
+                    Name = "Real Estate Development Portfolio",
+                    Description = "Residential, commercial, and refurbishment developments managed with construction-specific controls.",
+                    Status = "Active",
+                    StrategicObjective = "Deliver Ghana construction projects with stronger package, unit, handover, and commercial governance.",
+                    OwnerId = sponsor.Id,
+                    SponsorId = sponsor.Id,
+                    StartDate = now.Date.AddMonths(-1),
+                    TargetEndDate = now.Date.AddMonths(18),
+                    BudgetCap = 9500000m,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectPortfolios.Add(realEstatePortfolio);
+            }
+
+            var housingProgram = await _context.ProjectPrograms
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "PROGRAM-ACCRA-HOUSING");
+            if (housingProgram == null)
+            {
+                housingProgram = new ProjectProgram
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PortfolioId = realEstatePortfolio.Id,
+                    Code = "PROGRAM-ACCRA-HOUSING",
+                    Name = "Accra Housing Delivery Program",
+                    Description = "Urban apartment and mixed-use developments with staged procurement, unit sales, and handover controls.",
+                    Status = "Active",
+                    ProgramManagerId = projectManager.Id,
+                    SponsorId = sponsor.Id,
+                    StartDate = now.Date.AddMonths(-1),
+                    TargetEndDate = now.Date.AddMonths(15),
+                    BudgetCap = 6200000m,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectPrograms.Add(housingProgram);
+            }
+
             var template = await _context.ProjectTemplates
                 .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "TPL-ERP-IMPLEMENTATION");
             if (template == null)
@@ -494,6 +558,33 @@ namespace ErpSystem.Web.Services
 
                 _context.ProjectTemplates.Add(template);
             }
+
+            var apartmentTemplate = await EnsureProjectTemplateAsync(
+                tenantId,
+                "TPL-GH-APARTMENT-MULTIUNIT",
+                "Ghana Apartment Development - Multi Unit",
+                "Recommended defaults for apartment developments delivered as multiple saleable units with phased commercialization and unit-by-unit handover.",
+                constructionType.Id,
+                "1.0",
+                BuildGhanaApartmentMultiUnitTemplateDefinitionJson());
+
+            var wholeBuildingTemplate = await EnsureProjectTemplateAsync(
+                tenantId,
+                "TPL-GH-WHOLE-BUILDING",
+                "Ghana Whole-Building Development",
+                "Recommended defaults for single whole-building developments such as offices, schools, warehouses, and owner-occupied facilities.",
+                constructionType.Id,
+                "1.0",
+                BuildGhanaWholeBuildingTemplateDefinitionJson());
+
+            var renovationTemplate = await EnsureProjectTemplateAsync(
+                tenantId,
+                "TPL-GH-RENOVATION-FITOUT",
+                "Ghana Renovation / Fit-Out",
+                "Recommended defaults for refurbishment, shell-and-core completion, and tenant fit-out projects.",
+                renovationType.Id,
+                "1.0",
+                BuildGhanaRenovationFitOutTemplateDefinitionJson());
 
             var settings = await _context.ProjectManagementSettings
                 .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted);
@@ -523,9 +614,51 @@ namespace ErpSystem.Web.Services
                 _context.ProjectManagementSettings.Add(settings);
             }
 
+            settings.MandatoryFieldsByTypeJson = MergeProjectMandatoryFieldsByTypeJson(settings.MandatoryFieldsByTypeJson);
+
             await _context.SaveChangesAsync();
             await NormalizeProjectDemoFundingSourcesAsync(tenantId);
             var baseCurrencyCode = await ResolveBaseCurrencyCodeAsync(tenantId);
+
+            var apartmentDeveloper = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CUST-GH-GOLDCOAST",
+                "Golden Coast Homes Ltd",
+                "Customer",
+                sponsor.Id,
+                "+233-302-100-200",
+                "developments@goldencoasthomes.example",
+                "Accra");
+
+            var apartmentBuyerOne = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CUST-GH-AMA-MENSAH",
+                "Ama Mensah",
+                "Customer",
+                sponsor.Id,
+                "+233-244-001-101",
+                "ama.mensah@example.com",
+                "Accra");
+
+            var apartmentBuyerTwo = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CUST-GH-KWESI-OWUSU",
+                "Kwesi Owusu",
+                "Customer",
+                sponsor.Id,
+                "+233-244-001-202",
+                "kwesi.owusu@example.com",
+                "Accra");
+
+            var apartmentContractor = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CONT-GH-ADOM-BUILD",
+                "Adom Construction Ltd",
+                "Contractor",
+                sponsor.Id,
+                "+233-302-880-440",
+                "tenders@adomconstruction.example",
+                "Accra");
 
             await EnsureProjectDemoSeededAsync(
                 tenantId,
@@ -580,6 +713,29 @@ namespace ErpSystem.Web.Services
                     department,
                     location,
                     customer,
+                    baseCurrencyCode,
+                    now));
+
+            await EnsureProjectDemoSeededAsync(
+                tenantId,
+                "PRJ-DEMO-2001",
+                () => CreateAccraApartmentDevelopmentProject(
+                    tenantId,
+                    constructionType,
+                    highPriority,
+                    apartmentTemplate,
+                    realEstatePortfolio,
+                    housingProgram,
+                    sponsor,
+                    projectManager,
+                    financeOwner,
+                    teamMember,
+                    department,
+                    location,
+                    apartmentDeveloper,
+                    apartmentBuyerOne,
+                    apartmentBuyerTwo,
+                    apartmentContractor,
                     baseCurrencyCode,
                     now));
 
@@ -661,6 +817,246 @@ namespace ErpSystem.Web.Services
             _context.ProjectPriorities.Add(entity);
             return entity;
         }
+
+        private async Task<ProjectTemplate> EnsureProjectTemplateAsync(
+            Guid tenantId,
+            string code,
+            string name,
+            string description,
+            Guid? projectTypeId,
+            string versionLabel,
+            string templateDefinitionJson)
+        {
+            var entity = await _context.ProjectTemplates
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == code);
+
+            if (entity == null)
+            {
+                entity = new ProjectTemplate
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = code,
+                    Name = name,
+                    Description = description,
+                    ProjectTypeId = projectTypeId,
+                    VersionLabel = versionLabel,
+                    TemplateDefinitionJson = templateDefinitionJson,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectTemplates.Add(entity);
+                return entity;
+            }
+
+            entity.Name = name;
+            entity.Description = description;
+            entity.ProjectTypeId = projectTypeId;
+            entity.VersionLabel = versionLabel;
+            entity.TemplateDefinitionJson = templateDefinitionJson;
+            entity.IsActive = true;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = "System";
+            return entity;
+        }
+
+        private async Task<BusinessPartner> EnsureApprovedBusinessPartnerAsync(
+            Guid tenantId,
+            string code,
+            string name,
+            string partnerType,
+            Guid approvedById,
+            string phone,
+            string email,
+            string city)
+        {
+            var entity = await _context.BusinessPartners
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.PartnerCode == code);
+
+            if (entity == null)
+            {
+                entity = new BusinessPartner
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PartnerCode = code,
+                    PartnerName = name,
+                    LegalName = name,
+                    PartnerType = partnerType,
+                    PrimaryPhone = phone,
+                    PrimaryEmail = email,
+                    PhysicalCity = city,
+                    PhysicalCountry = "Ghana",
+                    RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved",
+                    ApprovedById = approvedById,
+                    ApprovedDate = DateTime.UtcNow.AddDays(-45),
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.BusinessPartners.Add(entity);
+                return entity;
+            }
+
+            entity.PartnerName = name;
+            entity.LegalName = name;
+            entity.PartnerType = partnerType;
+            entity.PrimaryPhone = phone;
+            entity.PrimaryEmail = email;
+            entity.PhysicalCity = city;
+            entity.PhysicalCountry = "Ghana";
+            entity.RegistrationStatus = "Approved";
+            entity.ApprovalStatus = "Approved";
+            entity.ApprovedById = approvedById;
+            entity.ApprovedDate ??= DateTime.UtcNow.AddDays(-45);
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = "System";
+            return entity;
+        }
+
+        private static string MergeProjectMandatoryFieldsByTypeJson(string? currentJson)
+        {
+            Dictionary<string, List<string>> settings;
+            try
+            {
+                settings = string.IsNullOrWhiteSpace(currentJson)
+                    ? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+                    : JsonSerializer.Deserialize<Dictionary<string, List<string>>>(currentJson) ?? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                settings = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            settings["IMPLEMENTATION"] = new[] { "SponsorId", "ProjectManagerId", "EstimatedBudget", "StartDate", "TargetEndDate" }.ToList();
+            settings["INTERNAL"] = new[] { "SponsorId", "ProjectManagerId", "StartDate" }.ToList();
+            settings["CAPEX"] = new[] { "SponsorId", "EstimatedBudget", "FundingSource" }.ToList();
+            settings["CONSTRUCTION"] = new[] { "SponsorId", "ProjectManagerId", "EstimatedBudget", "StartDate", "TargetEndDate", "FundingSource" }.ToList();
+            settings["RENOVATION_FITOUT"] = new[] { "SponsorId", "ProjectManagerId", "StartDate", "TargetEndDate", "BusinessPartnerId" }.ToList();
+
+            return JsonSerializer.Serialize(settings);
+        }
+
+        private static string BuildGhanaApartmentMultiUnitTemplateDefinitionJson()
+            => JsonSerializer.Serialize(new
+            {
+                developmentProfile = new
+                {
+                    deliveryStructure = ProjectDeliveryStructures.MultiUnit,
+                    developmentType = "Residential",
+                    procurementRoute = "Traditional",
+                    contractStrategy = "SubcontractPackages",
+                    handoverStrategy = "UnitByUnitHandover",
+                    fundingArrangement = "Developer Equity + Off-plan Sales",
+                    notes = "Recommended Ghana apartment-development defaults with package procurement, phased unit release, and unit-by-unit handover."
+                },
+                projectPhases = new object[]
+                {
+                    new { code = "FEASIBILITY", name = "Feasibility", isStageGateRequired = true },
+                    new { code = "CONCEPT_DESIGN", name = "Concept Design", isStageGateRequired = true },
+                    new { code = "DETAILED_DESIGN", name = "Detailed Design", isStageGateRequired = true },
+                    new { code = "APPROVALS", name = "Approvals & Permits", isStageGateRequired = true },
+                    new { code = "PROCUREMENT", name = "Procurement", isStageGateRequired = true },
+                    new { code = "CONSTRUCTION", name = "Construction", isStageGateRequired = false },
+                    new { code = "COMMISSIONING", name = "Testing & Commissioning", isStageGateRequired = true },
+                    new { code = "HANDOVER", name = "Handover", isStageGateRequired = true },
+                    new { code = "DEFECTS_LIABILITY", name = "Defects Liability", isStageGateRequired = false }
+                },
+                workItems = new object[]
+                {
+                    new { nodeType = ProjectWorkItemNodeTypes.Phase, title = "Mobilize design consultants", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare apartment unit mix and floor schedule", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare package procurement strategy", status = "New", priority = "Normal" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Plan phased unit release and handover readiness", status = "New", priority = "Normal" }
+                },
+                milestones = new object[]
+                {
+                    new { title = "Planning approval secured", status = "Draft", requiresApproval = true },
+                    new { title = "Main contract award completed", status = "Draft", requiresApproval = true },
+                    new { title = "Practical completion for first units", status = "Draft", requiresApproval = true },
+                    new { title = "First unit handover completed", status = "Draft", requiresApproval = true }
+                }
+            });
+
+        private static string BuildGhanaWholeBuildingTemplateDefinitionJson()
+            => JsonSerializer.Serialize(new
+            {
+                developmentProfile = new
+                {
+                    deliveryStructure = ProjectDeliveryStructures.WholeDevelopment,
+                    developmentType = "Commercial",
+                    procurementRoute = "Traditional",
+                    contractStrategy = "LumpSum",
+                    handoverStrategy = "SingleHandover",
+                    fundingArrangement = "Customer Contract / Capex Funding",
+                    notes = "Recommended defaults for whole-building delivery such as schools, offices, warehouses, and owner-occupied facilities."
+                },
+                projectPhases = new object[]
+                {
+                    new { code = "FEASIBILITY", name = "Feasibility", isStageGateRequired = true },
+                    new { code = "CONCEPT_DESIGN", name = "Concept Design", isStageGateRequired = true },
+                    new { code = "DETAILED_DESIGN", name = "Detailed Design", isStageGateRequired = true },
+                    new { code = "APPROVALS", name = "Approvals & Permits", isStageGateRequired = true },
+                    new { code = "PROCUREMENT", name = "Procurement", isStageGateRequired = true },
+                    new { code = "CONSTRUCTION", name = "Construction", isStageGateRequired = false },
+                    new { code = "COMMISSIONING", name = "Testing & Commissioning", isStageGateRequired = true },
+                    new { code = "HANDOVER", name = "Handover", isStageGateRequired = true },
+                    new { code = "DEFECTS_LIABILITY", name = "Defects Liability", isStageGateRequired = false }
+                },
+                workItems = new object[]
+                {
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Confirm client brief and building performance targets", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare whole-building procurement and contract plan", status = "New", priority = "Normal" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Plan integrated commissioning and final handover", status = "New", priority = "Normal" }
+                },
+                milestones = new object[]
+                {
+                    new { title = "Building permit approved", status = "Draft", requiresApproval = true },
+                    new { title = "Contract execution complete", status = "Draft", requiresApproval = true },
+                    new { title = "Practical completion achieved", status = "Draft", requiresApproval = true }
+                }
+            });
+
+        private static string BuildGhanaRenovationFitOutTemplateDefinitionJson()
+            => JsonSerializer.Serialize(new
+            {
+                developmentProfile = new
+                {
+                    deliveryStructure = ProjectDeliveryStructures.WholeDevelopment,
+                    developmentType = "Renovation",
+                    procurementRoute = "Negotiated",
+                    contractStrategy = "MeasuredWorks",
+                    handoverStrategy = "PhasedHandover",
+                    fundingArrangement = "Client Budget / Fit-Out Allowance",
+                    notes = "Recommended defaults for renovation and fit-out work with phased handover, high change frequency, and measurement-driven commercial control."
+                },
+                projectPhases = new object[]
+                {
+                    new { code = "FEASIBILITY", name = "Feasibility", isStageGateRequired = true, isOptional = true },
+                    new { code = "CONCEPT_DESIGN", name = "Concept Design", isStageGateRequired = true },
+                    new { code = "DETAILED_DESIGN", name = "Detailed Design", isStageGateRequired = true },
+                    new { code = "APPROVALS", name = "Approvals & Permits", isStageGateRequired = false },
+                    new { code = "PROCUREMENT", name = "Procurement", isStageGateRequired = true },
+                    new { code = "CONSTRUCTION", name = "Construction", isStageGateRequired = false },
+                    new { code = "COMMISSIONING", name = "Testing & Commissioning", isStageGateRequired = true },
+                    new { code = "HANDOVER", name = "Handover", isStageGateRequired = true }
+                },
+                workItems = new object[]
+                {
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Survey existing condition and confirm demolition scope", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Freeze finish selections and client alterations process", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare phased handover plan by work zone", status = "New", priority = "Normal" }
+                },
+                milestones = new object[]
+                {
+                    new { title = "Existing-condition sign-off complete", status = "Draft", requiresApproval = true },
+                    new { title = "Fit-out package award complete", status = "Draft", requiresApproval = true },
+                    new { title = "Zone handover achieved", status = "Draft", requiresApproval = true }
+                }
+            });
 
         private async Task NormalizeProjectDemoFundingSourcesAsync(Guid tenantId)
         {
@@ -941,8 +1337,24 @@ namespace ErpSystem.Web.Services
                     .FirstOrDefaultAsync();
             if (effectiveDepartment == null)
             {
-                _logger.LogWarning("Skipping project demo procurement/material seed for tenant {TenantId} because no active department was found.", tenantId);
-                return;
+                effectiveDepartment = new Department
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Name = "Project Delivery",
+                    Code = "PRJ-DEL",
+                    Description = "Fallback seeded department for project procurement and material demo flows.",
+                    DepartmentType = DepartmentType.Operations,
+                    IsActive = true,
+                    Color = "#2563EB",
+                    Icon = "briefcase",
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.Departments.Add(effectiveDepartment);
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("Seeded fallback active department {DepartmentCode} for tenant {TenantId} so project procurement/material demo data can be created.", effectiveDepartment.Code, tenantId);
             }
 
             var category = await _context.InventoryCategories
@@ -1254,6 +1666,550 @@ namespace ErpSystem.Web.Services
             }
 
             await _context.SaveChangesAsync();
+        }
+
+        private void CreateAccraApartmentDevelopmentProject(
+            Guid tenantId,
+            ProjectType constructionType,
+            ProjectPriority highPriority,
+            ProjectTemplate apartmentTemplate,
+            ProjectPortfolio realEstatePortfolio,
+            ProjectProgram housingProgram,
+            ApplicationUser sponsor,
+            ApplicationUser projectManager,
+            ApplicationUser financeOwner,
+            ApplicationUser teamMember,
+            Department? department,
+            Location? location,
+            BusinessPartner apartmentDeveloper,
+            BusinessPartner apartmentBuyerOne,
+            BusinessPartner apartmentBuyerTwo,
+            BusinessPartner apartmentContractor,
+            string baseCurrencyCode,
+            DateTime now)
+        {
+            var projectId = Guid.NewGuid();
+            var project = new Project
+            {
+                Id = projectId,
+                TenantId = tenantId,
+                ProjectCode = "PRJ-DEMO-2001",
+                Title = "Airport Hills Residences Block A",
+                Summary = "Six-floor apartment development in Accra with 24 apartments, phased release, buyer variations, and unit-by-unit handover.",
+                BusinessCase = "Deliver a commercially viable residential block with controlled package procurement, phased unit sales, and post-handover support.",
+                Objectives = "Complete Block A, commission services, release apartments to market, and manage buyer changes through closeout.",
+                StrategicAlignment = "Residential development growth and phased property sales",
+                ProjectTypeId = constructionType.Id,
+                ProjectPriorityId = highPriority.Id,
+                TemplateId = apartmentTemplate.Id,
+                PortfolioId = realEstatePortfolio.Id,
+                ProgramId = housingProgram.Id,
+                Status = ProjectStatuses.InProgress,
+                Methodology = "Waterfall",
+                SponsorId = sponsor.Id,
+                ProjectManagerId = projectManager.Id,
+                DepartmentId = department?.Id,
+                LocationId = location?.Id,
+                CustomerId = apartmentDeveloper.Id,
+                BusinessPartnerId = apartmentDeveloper.Id,
+                StartDate = now.Date.AddMonths(-8),
+                TargetEndDate = now.Date.AddMonths(6),
+                ActualStartDate = now.Date.AddMonths(-8).AddDays(5),
+                EstimatedBudget = 6200000m,
+                ApprovedBudget = 6450000m,
+                ActualCost = 4685000m,
+                BudgetStatus = "Approved",
+                ProgressPercent = 74m,
+                ApprovalRequired = true,
+                SubmittedAt = now.AddMonths(-9),
+                ApprovedAt = now.AddMonths(-9).AddDays(4),
+                ScopeStatement = "Construct Block A, commission common services, market apartments, support buyer alterations, and hand over units progressively.",
+                Assumptions = "Statutory approvals remain valid and buyer finish selections are frozen by release batch.",
+                Constraints = "Lift certification, utility energisation, and buyer finish changes sit on the critical path.",
+                ExpectedBenefits = "Earlier unit sales, cleaner package cost tracking, and stronger post-handover support records.",
+                FundingSource = "Developer Equity + Off-plan Sales",
+                StatusRemarks = "Structure is substantially complete, finishes are active, and phased handover has started for early units.",
+                ExternalPortalAccessEnabled = true,
+                ExternalCollaborationEnabled = true,
+                CreatedAt = now.AddMonths(-9),
+                CreatedBy = "System"
+            };
+
+            _context.Projects.Add(project);
+            _context.ProjectDevelopmentProfiles.Add(new ProjectDevelopmentProfile
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                DeliveryStructure = ProjectDeliveryStructures.MultiUnit,
+                DevelopmentType = "Residential",
+                SiteName = "Airport Hills, Block A",
+                SiteAddress = "Airport Hills Enclave, Accra, Ghana",
+                LandReference = "AH/RES/BLK-A/2026",
+                ProcurementRoute = "Traditional",
+                ContractStrategy = "SubcontractPackages",
+                ConsultantTeam = "ArchPlan Studio, Volta Structures, Prime MEP Consult",
+                FundingArrangement = "Developer Equity + Off-plan Sales",
+                HandoverStrategy = "UnitByUnitHandover",
+                Notes = "Seeded Ghana apartment scenario with phased commercialization, buyer variations, commissioning, and defects control.",
+                CreatedAt = now.AddMonths(-9),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectInitiationVersions.Add(new ProjectInitiationVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                SnapshotJson = JsonSerializer.Serialize(new
+                {
+                    project.ProjectCode,
+                    project.Title,
+                    project.Status,
+                    project.EstimatedBudget,
+                    project.StartDate,
+                    project.TargetEndDate
+                }),
+                ChangeType = "Approved",
+                Notes = "Initial approved residential development brief and baseline.",
+                CreatedAt = now.AddMonths(-9).AddDays(4),
+                CreatedBy = "System"
+            });
+
+            ProjectPhase MakePhase(string code, string name, string status, int sortOrder, bool stageGate, bool optional, DateTime? plannedStart, DateTime? plannedEnd, DateTime? actualStart, DateTime? actualEnd)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    Code = code,
+                    Name = name,
+                    Status = status,
+                    SortOrder = sortOrder,
+                    IsOptional = optional,
+                    IsStageGateRequired = stageGate,
+                    IsTemplateSeeded = true,
+                    PlannedStartDate = plannedStart,
+                    PlannedEndDate = plannedEnd,
+                    ActualStartDate = actualStart,
+                    ActualEndDate = actualEnd,
+                    CreatedAt = now.AddMonths(-9).AddDays(6 + sortOrder),
+                    CreatedBy = "System"
+                };
+
+            var phases = new[]
+            {
+                MakePhase("FEASIBILITY", "Feasibility", ProjectPhaseStatuses.Completed, 0, true, false, now.Date.AddMonths(-10), now.Date.AddMonths(-9).AddDays(5), now.Date.AddMonths(-10), now.Date.AddMonths(-9).AddDays(2)),
+                MakePhase("CONCEPT_DESIGN", "Concept Design", ProjectPhaseStatuses.Completed, 1, true, false, now.Date.AddMonths(-9).AddDays(3), now.Date.AddMonths(-8).AddDays(8), now.Date.AddMonths(-9).AddDays(4), now.Date.AddMonths(-8).AddDays(10)),
+                MakePhase("DETAILED_DESIGN", "Detailed Design", ProjectPhaseStatuses.Completed, 2, true, false, now.Date.AddMonths(-8).AddDays(9), now.Date.AddMonths(-6).AddDays(12), now.Date.AddMonths(-8).AddDays(10), now.Date.AddMonths(-6).AddDays(15)),
+                MakePhase("APPROVALS", "Approvals & Permits", ProjectPhaseStatuses.Completed, 3, true, false, now.Date.AddMonths(-7), now.Date.AddMonths(-5).AddDays(20), now.Date.AddMonths(-7).AddDays(3), now.Date.AddMonths(-5).AddDays(25)),
+                MakePhase("PROCUREMENT", "Procurement", ProjectPhaseStatuses.Completed, 4, true, false, now.Date.AddMonths(-6).AddDays(5), now.Date.AddMonths(-3).AddDays(10), now.Date.AddMonths(-6).AddDays(7), now.Date.AddMonths(-3).AddDays(2)),
+                MakePhase("CONSTRUCTION", "Construction", ProjectPhaseStatuses.InProgress, 5, false, false, now.Date.AddMonths(-5), now.Date.AddMonths(4), now.Date.AddMonths(-5).AddDays(3), null),
+                MakePhase("COMMISSIONING", "Testing & Commissioning", ProjectPhaseStatuses.InProgress, 6, true, false, now.Date.AddDays(-14), now.Date.AddMonths(3), now.Date.AddDays(-10), null),
+                MakePhase("HANDOVER", "Handover", ProjectPhaseStatuses.InProgress, 7, true, false, now.Date.AddDays(-7), now.Date.AddMonths(4), now.Date.AddDays(-4), null),
+                MakePhase("DEFECTS_LIABILITY", "Defects Liability", ProjectPhaseStatuses.InProgress, 8, false, false, now.Date.AddDays(-3), now.Date.AddMonths(16), now.Date.AddDays(-2), null)
+            };
+
+            _context.ProjectPhases.AddRange(phases);
+            var phaseByCode = phases.ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            ProjectPackage MakePackage(string code, string name, string status, int sortOrder, decimal budget, decimal? committed, decimal? actual, decimal? forecast, string description, string notes)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectPhaseId = phaseByCode["CONSTRUCTION"].Id,
+                    Code = code,
+                    Name = name,
+                    Description = description,
+                    PackageType = ProjectPackageTypes.TradePackage,
+                    Status = status,
+                    SortOrder = sortOrder,
+                    ProcurementRoute = "Traditional",
+                    ContractStrategy = "SubcontractPackages",
+                    BusinessPartnerId = apartmentContractor.Id,
+                    BudgetAmount = budget,
+                    CommittedAmount = committed,
+                    ActualAmount = actual,
+                    ForecastAmount = forecast,
+                    Currency = baseCurrencyCode,
+                    Notes = notes,
+                    CreatedAt = now.AddMonths(-5).AddDays(sortOrder),
+                    CreatedBy = "System"
+                };
+
+            var packages = new[]
+            {
+                MakePackage("PKG-SUB", "Substructure", ProjectPackageStatuses.Completed, 0, 820000m, 820000m, 810500m, 810500m, "Foundations, retaining walls, and ground beams.", "Completed and certified in the prior valuation cycle."),
+                MakePackage("PKG-SUP", "Superstructure", ProjectPackageStatuses.Active, 1, 1650000m, 1625000m, 1510000m, 1668000m, "RC frame, blockwork, roofing, and shell completion.", "Final roof waterproofing and stair-core finishes remain open."),
+                MakePackage("PKG-ELEC", "Electrical & ELV", ProjectPackageStatuses.Active, 2, 540000m, 470000m, 281000m, 552000m, "Power, lighting, fire alarm, and access control.", "Common-area testing has started ahead of final lift energisation."),
+                MakePackage("PKG-PLUMB", "Plumbing & Drainage", ProjectPackageStatuses.Active, 3, 425000m, 362000m, 238500m, 432000m, "Water supply, drainage, sanitary fixtures, and pumps.", "Upper-floor fixture installation and pump calibration are in progress."),
+                MakePackage("PKG-FIN", "Finishes & Joinery", ProjectPackageStatuses.Active, 4, 910000m, 708000m, 468500m, 936000m, "Internal finishes, tiling, kitchens, wardrobes, and painting.", "Buyer finish changes are controlled through the customer variation log."),
+                MakePackage("PKG-EXT", "External Works & Landscaping", ProjectPackageStatuses.ProcurementPending, 5, 265000m, null, null, 278000m, "Boundary wall, paving, drainage tie-ins, and landscaping.", "Final release is pending utility trench reinstatement.")
+            };
+
+            _context.ProjectPackages.AddRange(packages);
+            var packageByCode = packages.ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            ProjectBoqItem MakeBoq(string packageCode, string lineNumber, string itemCode, string description, decimal quantity, string uom, decimal? unitRate, decimal budget, decimal? committed, decimal? actual, decimal? forecast)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectPackageId = packageByCode[packageCode].Id,
+                    LineNumber = lineNumber,
+                    ItemCode = itemCode,
+                    ItemType = ProjectBoqItemTypes.Item,
+                    Description = description,
+                    Quantity = quantity,
+                    UnitOfMeasure = uom,
+                    UnitRate = unitRate,
+                    BudgetAmount = budget,
+                    CommittedAmount = committed,
+                    ActualAmount = actual,
+                    ForecastAmount = forecast,
+                    Currency = baseCurrencyCode,
+                    SortOrder = int.Parse(lineNumber) - 1,
+                    CreatedAt = now.AddMonths(-4),
+                    CreatedBy = "System"
+                };
+
+            _context.ProjectBoqItems.AddRange(
+                MakeBoq("PKG-SUB", "1", "SUB-FOUND", "Reinforced concrete foundations and ground beams", 1m, "LS", 810500m, 820000m, 820000m, 810500m, 810500m),
+                MakeBoq("PKG-SUP", "1", "SUP-FRAME", "RC frame, slabs, and blockwork shell", 1m, "LS", 1600000m, 1650000m, 1625000m, 1510000m, 1668000m),
+                MakeBoq("PKG-ELEC", "1", "ELEC-COMMON", "Common-area distribution boards, lighting, and ELV rough-in", 1m, "LS", 540000m, 540000m, 470000m, 281000m, 552000m),
+                MakeBoq("PKG-PLUMB", "1", "PLUMB-RISERS", "Water risers, sanitary stacks, and pump-room fit-out", 1m, "LS", 425000m, 425000m, 362000m, 238500m, 432000m),
+                MakeBoq("PKG-FIN", "1", "FIN-APT", "Apartment finishes, joinery, tiling, and painting", 24m, "UNIT", 37916.67m, 910000m, 708000m, 468500m, 936000m),
+                MakeBoq("PKG-EXT", "1", "EXT-LAND", "External paving, drainage tie-ins, and landscaping", 1m, "LS", 265000m, 265000m, null, null, 278000m));
+
+            ProjectApprovalRegisterItem MakeApproval(string phaseCode, string type, string title, string authority, string status, string? reference, DateTime? submitted, DateTime? targetDecision, DateTime? approved, string notes)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectPhaseId = phaseByCode[phaseCode].Id,
+                    ApprovalType = type,
+                    Title = title,
+                    AuthorityName = authority,
+                    ReferenceNumber = reference,
+                    Status = status,
+                    IsRequired = true,
+                    SubmittedDate = submitted,
+                    TargetDecisionDate = targetDecision,
+                    ApprovedDate = approved,
+                    Notes = notes,
+                    CreatedAt = now.AddMonths(-6),
+                    CreatedBy = "System"
+                };
+
+            _context.ProjectApprovalRegisterItems.AddRange(
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.PlanningPermission, "Planning permission for Block A", "Accra Metropolitan Assembly", ProjectApprovalRegisterStatuses.Approved, "AMA/PLAN/BLOCKA/26/014", now.Date.AddMonths(-7).AddDays(10), now.Date.AddMonths(-6).AddDays(18), now.Date.AddMonths(-6).AddDays(15), "Approved with standard drainage and parking conditions."),
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.BuildingPermit, "Building permit for residential block", "Accra Metropolitan Assembly", ProjectApprovalRegisterStatuses.Approved, "AMA/BLD/BLOCKA/26/052", now.Date.AddMonths(-6).AddDays(3), now.Date.AddMonths(-5).AddDays(5), now.Date.AddMonths(-5).AddDays(2), "Permit covers six floors plus rooftop plant room."),
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.FireClearance, "Fire service installation clearance", "Ghana National Fire Service", ProjectApprovalRegisterStatuses.Submitted, "GNFS/BLOCKA/26/033", now.Date.AddDays(-18), now.Date.AddDays(9), null, "Awaiting final witness test of alarm and hydrant systems."),
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.UtilityClearance, "Utility energisation clearance", "ECG / Ghana Water", ProjectApprovalRegisterStatuses.Approved, "UTIL/BLOCKA/26/017", now.Date.AddMonths(-1), now.Date.AddDays(-10), now.Date.AddDays(-8), "Permanent services are live for common areas and test apartments."),
+                MakeApproval("HANDOVER", ProjectApprovalRegisterTypes.OccupancyCertificate, "Occupancy certificate for phased unit handover", "Accra Metropolitan Assembly", ProjectApprovalRegisterStatuses.InPreparation, "AMA/OCC/BLOCKA/26/PH1", null, now.Date.AddMonths(1), null, "Batch 1 submission will cover the first handed-over units and shared services."));
+
+            var units = new List<ProjectUnit>();
+            for (var floor = 1; floor <= 6; floor++)
+            {
+                for (var position = 1; position <= 4; position++)
+                {
+                    var index = ((floor - 1) * 4) + (position - 1);
+                    var code = $"A{floor}{position:00}";
+                    var areaSquareMeters = position is 2 or 3 ? 124m : 96m;
+                    var valuationRate = 15500m + (floor * 175m) + (position is 2 or 3 ? 350m : 0m);
+                    var status = index switch
+                    {
+                        < 2 => ProjectUnitStatuses.HandedOver,
+                        < 8 => ProjectUnitStatuses.Sold,
+                        < 14 => ProjectUnitStatuses.Reserved,
+                        < 22 => ProjectUnitStatuses.Available,
+                        _ => ProjectUnitStatuses.Planned
+                    };
+
+                    var customerId = status switch
+                    {
+                        ProjectUnitStatuses.HandedOver or ProjectUnitStatuses.Sold or ProjectUnitStatuses.Reserved
+                            => index % 2 == 0 ? apartmentBuyerOne.Id : apartmentBuyerTwo.Id,
+                        _ => (Guid?)null
+                    };
+
+                    var released = status != ProjectUnitStatuses.Planned;
+                    units.Add(new ProjectUnit
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        ProjectId = projectId,
+                        CustomerBusinessPartnerId = customerId,
+                        IsReleasedForMarket = released,
+                        ReleasedAt = released ? now.Date.AddDays(-45 + index) : null,
+                        ReleasedById = released ? projectManager.Id : null,
+                        Code = code,
+                        Name = $"Apartment {code}",
+                        UnitType = ProjectUnitTypes.Apartment,
+                        Status = status,
+                        BlockName = "Block A",
+                        FloorLabel = $"Floor {floor}",
+                        AreaSquareMeters = areaSquareMeters,
+                        ValuationRate = valuationRate,
+                        BasePrice = Math.Round(areaSquareMeters * valuationRate, 2, MidpointRounding.AwayFromZero),
+                        Currency = baseCurrencyCode,
+                        HandoverDate = status == ProjectUnitStatuses.HandedOver ? now.Date.AddDays(-(12 - index)) : null,
+                        SortOrder = index,
+                        Notes = status switch
+                        {
+                            ProjectUnitStatuses.HandedOver => "Buyer handover complete; unit has entered early defects monitoring.",
+                            ProjectUnitStatuses.Sold => "Sold unit awaiting final finishes or commissioning closeout before handover.",
+                            ProjectUnitStatuses.Reserved => "Reserved for buyer pending full sales completion and finish confirmation.",
+                            ProjectUnitStatuses.Available => "Released to market for active sales and leasing conversations.",
+                            _ => "Held back from release until top-floor finishes are ready."
+                        },
+                        CreatedAt = now.AddMonths(-2).AddDays(index),
+                        CreatedBy = "System"
+                    });
+                }
+            }
+
+            _context.ProjectUnits.AddRange(units);
+            var unitByCode = units.ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            _context.ProjectCustomerVariations.AddRange(
+                new ProjectCustomerVariation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A203"].Id,
+                    CustomerBusinessPartnerId = apartmentBuyerOne.Id,
+                    Title = "Upgrade kitchen finishes and extend breakfast counter",
+                    Description = "Buyer requested upgraded quartz worktops, revised splashback selection, and a longer breakfast counter in Apartment A203.",
+                    VariationType = "BuyerFinishUpgrade",
+                    Timing = ProjectCustomerVariationTimings.PreHandover,
+                    Status = ProjectCustomerVariationStatuses.Approved,
+                    RequestDate = now.Date.AddDays(-16),
+                    TargetCompletionDate = now.Date.AddDays(12),
+                    EstimatedAmount = 42000m,
+                    QuotedAmount = 45500m,
+                    ApprovedAmount = 45500m,
+                    Currency = baseCurrencyCode,
+                    RequiresScheduleAdjustment = true,
+                    ScheduleImpactDays = 5,
+                    Notes = "Approved after commercial review; finish package sequence has been adjusted.",
+                    CreatedAt = now.Date.AddDays(-16),
+                    CreatedBy = "System"
+                },
+                new ProjectCustomerVariation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A101"].Id,
+                    CustomerBusinessPartnerId = apartmentBuyerTwo.Id,
+                    Title = "Post-handover wardrobe and utility-cabinet modification",
+                    Description = "Buyer requested an additional utility cabinet and modified wardrobe shelving after taking possession of Apartment A101.",
+                    VariationType = "PostHandoverAlteration",
+                    Timing = ProjectCustomerVariationTimings.PostHandover,
+                    Status = ProjectCustomerVariationStatuses.Billed,
+                    RequestDate = now.Date.AddDays(-9),
+                    TargetCompletionDate = now.Date.AddDays(-2),
+                    CompletedDate = now.Date.AddDays(-3),
+                    EstimatedAmount = 16500m,
+                    QuotedAmount = 18500m,
+                    ApprovedAmount = 18500m,
+                    BilledAmount = 18500m,
+                    Currency = baseCurrencyCode,
+                    Notes = "Delivered as a billable post-handover alteration and invoiced to the buyer.",
+                    CreatedAt = now.Date.AddDays(-9),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectCommissioningItems.AddRange(
+                new ProjectCommissioningItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    Title = "Fire alarm, smoke detection, and emergency lighting tests",
+                    SystemArea = "Life Safety",
+                    Status = ProjectCommissioningItemStatuses.Completed,
+                    RequiresRegulatoryInspection = true,
+                    PlannedDate = now.Date.AddDays(-12),
+                    CompletedDate = now.Date.AddDays(-8),
+                    CertificateReference = "COMM-LS-001",
+                    ResponsibleParty = "Prime MEP Consult",
+                    SortOrder = 0,
+                    Notes = "Witness test complete for the first occupancy batch.",
+                    CreatedAt = now.Date.AddDays(-12),
+                    CreatedBy = "System"
+                },
+                new ProjectCommissioningItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    Title = "Passenger lift load test and certification",
+                    SystemArea = "Vertical Transportation",
+                    Status = ProjectCommissioningItemStatuses.ReadyForInspection,
+                    RequiresRegulatoryInspection = true,
+                    PlannedDate = now.Date.AddDays(6),
+                    ResponsibleParty = "Adom Construction Ltd",
+                    SortOrder = 1,
+                    Notes = "Awaiting final inspector slot confirmation.",
+                    CreatedAt = now.Date.AddDays(-5),
+                    CreatedBy = "System"
+                },
+                new ProjectCommissioningItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A101"].Id,
+                    Title = "Final electrical and plumbing validation for Apartment A101",
+                    SystemArea = "Unit Services",
+                    Status = ProjectCommissioningItemStatuses.Completed,
+                    PlannedDate = now.Date.AddDays(-18),
+                    CompletedDate = now.Date.AddDays(-13),
+                    CertificateReference = "COMM-A101-006",
+                    ResponsibleParty = "Prime MEP Consult",
+                    SortOrder = 2,
+                    Notes = "Released for phased buyer handover.",
+                    CreatedAt = now.Date.AddDays(-18),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectHandoverItems.AddRange(
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    HandoverType = ProjectHandoverItemTypes.PracticalCompletion,
+                    Title = "Practical completion for Batch 1 apartments",
+                    Status = ProjectHandoverItemStatuses.InPreparation,
+                    ResponsibleParty = "Project Manager",
+                    ReferenceNumber = "PC-B1-2026-01",
+                    TargetDate = now.Date.AddDays(18),
+                    SortOrder = 0,
+                    Notes = "Batch 1 includes the first four apartments and related common services.",
+                    CreatedAt = now.Date.AddDays(-6),
+                    CreatedBy = "System"
+                },
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    HandoverType = ProjectHandoverItemTypes.AsBuiltDrawing,
+                    Title = "As-built drawings and O&M pack for Block A",
+                    Status = ProjectHandoverItemStatuses.Ready,
+                    ResponsibleParty = "Prime MEP Consult",
+                    ReferenceNumber = "AB-BLOCKA-01",
+                    TargetDate = now.Date.AddDays(7),
+                    SortOrder = 1,
+                    Notes = "Ready for sponsor review before occupancy submission.",
+                    CreatedAt = now.Date.AddDays(-8),
+                    CreatedBy = "System"
+                },
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A101"].Id,
+                    HandoverType = ProjectHandoverItemTypes.KeyHandover,
+                    Title = "Key handover for Apartment A101",
+                    Status = ProjectHandoverItemStatuses.Completed,
+                    ResponsibleParty = "Sales & Handover Desk",
+                    ReferenceNumber = "KEY-A101",
+                    TargetDate = now.Date.AddDays(-14),
+                    CompletedDate = now.Date.AddDays(-12),
+                    SortOrder = 2,
+                    Notes = "Buyer took possession after snag clearance and services demonstration.",
+                    CreatedAt = now.Date.AddDays(-14),
+                    CreatedBy = "System"
+                },
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A102"].Id,
+                    HandoverType = ProjectHandoverItemTypes.KeyHandover,
+                    Title = "Key handover for Apartment A102",
+                    Status = ProjectHandoverItemStatuses.Completed,
+                    ResponsibleParty = "Sales & Handover Desk",
+                    ReferenceNumber = "KEY-A102",
+                    TargetDate = now.Date.AddDays(-10),
+                    CompletedDate = now.Date.AddDays(-8),
+                    SortOrder = 3,
+                    Notes = "Second early unit handover completed with signed acceptance pack.",
+                    CreatedAt = now.Date.AddDays(-10),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectSnagItems.AddRange(
+                new ProjectSnagItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A204"].Id,
+                    Title = "Balcony door alignment adjustment",
+                    Description = "Door leaf on the living-room balcony opening needs alignment before buyer demonstration.",
+                    Severity = ProjectSnagSeverities.Medium,
+                    Status = ProjectSnagStatuses.InProgress,
+                    ReportedDate = now.Date.AddDays(-6),
+                    TargetClosureDate = now.Date.AddDays(3),
+                    RaisedByName = "Site QA Team",
+                    ResponsibleParty = "Finishes Subcontractor",
+                    Notes = "Included in the current snag-closing round.",
+                    CreatedAt = now.Date.AddDays(-6),
+                    CreatedBy = "System"
+                },
+                new ProjectSnagItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A503"].Id,
+                    Title = "Kitchen backsplash tile replacement",
+                    Description = "Two backsplash tiles cracked during appliance installation and require replacement.",
+                    Severity = ProjectSnagSeverities.Low,
+                    Status = ProjectSnagStatuses.Open,
+                    ReportedDate = now.Date.AddDays(-2),
+                    TargetClosureDate = now.Date.AddDays(5),
+                    RaisedByName = "Clerk of Works",
+                    ResponsibleParty = "Finishes Subcontractor",
+                    Notes = "Hold release of unit until replacement tiles are fitted and checked.",
+                    CreatedAt = now.Date.AddDays(-2),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectDefectLiabilityCases.Add(new ProjectDefectLiabilityCase
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                ProjectUnitId = unitByCode["A101"].Id,
+                CustomerBusinessPartnerId = apartmentBuyerTwo.Id,
+                Title = "Water heater pressure fluctuation after occupancy",
+                Description = "Buyer reported intermittent water-heater pressure drop during the first week of occupancy.",
+                Status = ProjectDefectLiabilityStatuses.UnderReview,
+                ReportedDate = now.Date.AddDays(-4),
+                TargetResolutionDate = now.Date.AddDays(2),
+                IsWarrantyRelated = true,
+                WarrantyExpiryDate = now.Date.AddMonths(12),
+                RectificationCost = 1200m,
+                ChargeableAmount = 0m,
+                Currency = baseCurrencyCode,
+                Notes = "Treated as warranty rectification under the defects liability process.",
+                CreatedAt = now.Date.AddDays(-4),
+                CreatedBy = "System"
+            });
         }
 
         private void CreateImplementationProject(

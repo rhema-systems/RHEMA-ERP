@@ -134,6 +134,34 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<IEnumerable<ProjectProcurementReconciliationReportItemDto>>> GetProcurementReconciliationReport([FromQuery] int take = 200, [FromQuery] string? reconciliationStatus = null)
         => await ExecuteProjectReadAsync(() => _projectService.GetProcurementReconciliationReportAsync(take, reconciliationStatus), "Error loading procurement reconciliation report");
 
+    [HttpGet("reports/phase-gate-readiness")]
+    public async Task<ActionResult<IEnumerable<ProjectPhaseGateReadinessReportItemDto>>> GetPhaseGateReadinessReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 250)
+        => await ExecuteProjectReadAsync(() => _projectService.GetPhaseGateReadinessReportAsync(projectId, take), "Error loading phase gate readiness report");
+
+    [HttpGet("reports/approval-watch")]
+    public async Task<ActionResult<IEnumerable<ProjectApprovalWatchReportItemDto>>> GetApprovalWatchReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 250)
+        => await ExecuteProjectReadAsync(() => _projectService.GetApprovalWatchReportAsync(projectId, take), "Error loading approval watch report");
+
+    [HttpGet("reports/construction-commercial")]
+    public async Task<ActionResult<IEnumerable<ProjectCommercialAdministrationReportItemDto>>> GetConstructionCommercialReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 200)
+        => await ExecuteProjectReadAsync(() => _projectService.GetCommercialAdministrationReportAsync(projectId, take), "Error loading construction commercial report");
+
+    [HttpGet("reports/post-handover-watch")]
+    public async Task<ActionResult<IEnumerable<ProjectPostHandoverWatchReportItemDto>>> GetPostHandoverWatchReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 200)
+        => await ExecuteProjectReadAsync(() => _projectService.GetPostHandoverWatchReportAsync(projectId, take), "Error loading post-handover watch report");
+
+    [HttpGet("reports/design-control-watch")]
+    public async Task<ActionResult<IEnumerable<ProjectDesignControlReportItemDto>>> GetDesignControlWatchReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 250)
+        => await ExecuteProjectReadAsync(() => _projectService.GetDesignControlWatchReportAsync(projectId, take), "Error loading design control watch report");
+
+    [HttpGet("reports/site-controls-watch")]
+    public async Task<ActionResult<IEnumerable<ProjectSiteControlReportItemDto>>> GetSiteControlsWatchReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 250)
+        => await ExecuteProjectReadAsync(() => _projectService.GetSiteControlsWatchReportAsync(projectId, take), "Error loading site controls watch report");
+
+    [HttpGet("reports/unit-commercialization-watch")]
+    public async Task<ActionResult<IEnumerable<ProjectUnitCommercializationReportItemDto>>> GetUnitCommercializationWatchReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 250)
+        => await ExecuteProjectReadAsync(() => _projectService.GetUnitCommercializationWatchReportAsync(projectId, take), "Error loading unit commercialization watch report");
+
     [HttpGet("reports/resource-capacity")]
     public async Task<ActionResult<IEnumerable<ProjectResourceCapacityReportItemDto>>> GetResourceCapacityReport([FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null, [FromQuery] Guid? userId = null)
         => await ExecuteProjectReadAsync(() => _projectService.GetResourceCapacityReportAsync(startDate, endDate, userId), "Error loading resource capacity report");
@@ -230,6 +258,10 @@ public class ProjectsController : ControllerBase
     [HttpGet("{id:guid}/phases")]
     public async Task<ActionResult<IEnumerable<ProjectPhaseDto>>> GetProjectPhases(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectPhasesAsync(id), "Error loading project phases");
+
+    [HttpGet("{id:guid}/phase-gates")]
+    public async Task<ActionResult<IEnumerable<ProjectPhaseGateEvaluationDto>>> GetProjectPhaseGates(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectPhaseGateEvaluationsAsync(id), "Error loading project phase gates");
 
     [HttpPost("{id:guid}/phases")]
     public async Task<ActionResult<ProjectPhaseDto>> AddProjectPhase(Guid id, [FromBody] CreateProjectPhaseDto dto)
@@ -416,9 +448,702 @@ public class ProjectsController : ControllerBase
         }
     }
 
+    [HttpGet("{id:guid}/drawings")]
+    public async Task<ActionResult<IEnumerable<ProjectDrawingDto>>> GetProjectDrawings(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectDrawingsAsync(id), "Error loading project drawings");
+
+    [HttpPost("{id:guid}/drawings")]
+    public async Task<ActionResult<ProjectDrawingDto>> AddProjectDrawing(Guid id, [FromBody] CreateProjectDrawingDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectDrawingAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("drawings/{drawingId:guid}")]
+    public async Task<ActionResult<ProjectDrawingDto>> UpdateProjectDrawing(Guid drawingId, [FromBody] UpdateProjectDrawingDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectDrawingAsync(drawingId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("drawings/{drawingId:guid}")]
+    public async Task<IActionResult> DeleteProjectDrawing(Guid drawingId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectDrawingAsync(drawingId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/submittals")]
+    public async Task<ActionResult<IEnumerable<ProjectSubmittalDto>>> GetProjectSubmittals(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectSubmittalsAsync(id), "Error loading project submittals");
+
+    [HttpPost("{id:guid}/submittals")]
+    public async Task<ActionResult<ProjectSubmittalDto>> AddProjectSubmittal(Guid id, [FromBody] CreateProjectSubmittalDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectSubmittalAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("submittals/{submittalId:guid}")]
+    public async Task<ActionResult<ProjectSubmittalDto>> UpdateProjectSubmittal(Guid submittalId, [FromBody] UpdateProjectSubmittalDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectSubmittalAsync(submittalId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("submittals/{submittalId:guid}")]
+    public async Task<IActionResult> DeleteProjectSubmittal(Guid submittalId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectSubmittalAsync(submittalId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/rfis")]
+    public async Task<ActionResult<IEnumerable<ProjectRfiDto>>> GetProjectRfis(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectRfisAsync(id), "Error loading project RFIs");
+
+    [HttpPost("{id:guid}/rfis")]
+    public async Task<ActionResult<ProjectRfiDto>> AddProjectRfi(Guid id, [FromBody] CreateProjectRfiDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectRfiAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("rfis/{rfiId:guid}")]
+    public async Task<ActionResult<ProjectRfiDto>> UpdateProjectRfi(Guid rfiId, [FromBody] UpdateProjectRfiDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectRfiAsync(rfiId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("rfis/{rfiId:guid}")]
+    public async Task<IActionResult> DeleteProjectRfi(Guid rfiId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectRfiAsync(rfiId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/site-instructions")]
+    public async Task<ActionResult<IEnumerable<ProjectSiteInstructionDto>>> GetProjectSiteInstructions(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectSiteInstructionsAsync(id), "Error loading project site instructions");
+
+    [HttpPost("{id:guid}/site-instructions")]
+    public async Task<ActionResult<ProjectSiteInstructionDto>> AddProjectSiteInstruction(Guid id, [FromBody] CreateProjectSiteInstructionDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectSiteInstructionAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("site-instructions/{siteInstructionId:guid}")]
+    public async Task<ActionResult<ProjectSiteInstructionDto>> UpdateProjectSiteInstruction(Guid siteInstructionId, [FromBody] UpdateProjectSiteInstructionDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectSiteInstructionAsync(siteInstructionId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("site-instructions/{siteInstructionId:guid}")]
+    public async Task<IActionResult> DeleteProjectSiteInstruction(Guid siteInstructionId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectSiteInstructionAsync(siteInstructionId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/variation-orders")]
+    public async Task<ActionResult<IEnumerable<ProjectVariationOrderDto>>> GetProjectVariationOrders(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectVariationOrdersAsync(id), "Error loading project variation orders");
+
+    [HttpPost("{id:guid}/variation-orders")]
+    public async Task<ActionResult<ProjectVariationOrderDto>> AddProjectVariationOrder(Guid id, [FromBody] CreateProjectVariationOrderDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectVariationOrderAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("variation-orders/{variationOrderId:guid}")]
+    public async Task<ActionResult<ProjectVariationOrderDto>> UpdateProjectVariationOrder(Guid variationOrderId, [FromBody] UpdateProjectVariationOrderDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectVariationOrderAsync(variationOrderId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("variation-orders/{variationOrderId:guid}")]
+    public async Task<IActionResult> DeleteProjectVariationOrder(Guid variationOrderId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectVariationOrderAsync(variationOrderId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/interim-valuations")]
+    public async Task<ActionResult<IEnumerable<ProjectInterimValuationDto>>> GetProjectInterimValuations(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectInterimValuationsAsync(id), "Error loading project interim valuations");
+
+    [HttpPost("{id:guid}/interim-valuations")]
+    public async Task<ActionResult<ProjectInterimValuationDto>> AddProjectInterimValuation(Guid id, [FromBody] CreateProjectInterimValuationDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectInterimValuationAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("interim-valuations/{interimValuationId:guid}")]
+    public async Task<ActionResult<ProjectInterimValuationDto>> UpdateProjectInterimValuation(Guid interimValuationId, [FromBody] UpdateProjectInterimValuationDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectInterimValuationAsync(interimValuationId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("interim-valuations/{interimValuationId:guid}")]
+    public async Task<IActionResult> DeleteProjectInterimValuation(Guid interimValuationId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectInterimValuationAsync(interimValuationId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/payment-certificates")]
+    public async Task<ActionResult<IEnumerable<ProjectPaymentCertificateDto>>> GetProjectPaymentCertificates(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectPaymentCertificatesAsync(id), "Error loading project payment certificates");
+
+    [HttpPost("{id:guid}/payment-certificates")]
+    public async Task<ActionResult<ProjectPaymentCertificateDto>> AddProjectPaymentCertificate(Guid id, [FromBody] CreateProjectPaymentCertificateDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectPaymentCertificateAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("payment-certificates/{paymentCertificateId:guid}")]
+    public async Task<ActionResult<ProjectPaymentCertificateDto>> UpdateProjectPaymentCertificate(Guid paymentCertificateId, [FromBody] UpdateProjectPaymentCertificateDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectPaymentCertificateAsync(paymentCertificateId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("payment-certificates/{paymentCertificateId:guid}")]
+    public async Task<IActionResult> DeleteProjectPaymentCertificate(Guid paymentCertificateId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectPaymentCertificateAsync(paymentCertificateId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/extension-of-time-requests")]
+    public async Task<ActionResult<IEnumerable<ProjectExtensionOfTimeDto>>> GetProjectExtensionOfTimeRequests(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectExtensionOfTimeRequestsAsync(id), "Error loading project extension of time requests");
+
+    [HttpPost("{id:guid}/extension-of-time-requests")]
+    public async Task<ActionResult<ProjectExtensionOfTimeDto>> AddProjectExtensionOfTimeRequest(Guid id, [FromBody] CreateProjectExtensionOfTimeDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectExtensionOfTimeRequestAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("extension-of-time-requests/{extensionOfTimeId:guid}")]
+    public async Task<ActionResult<ProjectExtensionOfTimeDto>> UpdateProjectExtensionOfTimeRequest(Guid extensionOfTimeId, [FromBody] UpdateProjectExtensionOfTimeDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectExtensionOfTimeRequestAsync(extensionOfTimeId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("extension-of-time-requests/{extensionOfTimeId:guid}")]
+    public async Task<IActionResult> DeleteProjectExtensionOfTimeRequest(Guid extensionOfTimeId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectExtensionOfTimeRequestAsync(extensionOfTimeId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/final-account")]
+    public async Task<ActionResult<ProjectFinalAccountDto?>> GetProjectFinalAccount(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectFinalAccountAsync(id), "Error loading project final account");
+
+    [HttpPut("{id:guid}/final-account")]
+    public async Task<ActionResult<ProjectFinalAccountDto>> UpsertProjectFinalAccount(Guid id, [FromBody] UpsertProjectFinalAccountDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpsertProjectFinalAccountAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
     [HttpGet("{id:guid}/units")]
     public async Task<ActionResult<IEnumerable<ProjectUnitDto>>> GetProjectUnits(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectUnitsAsync(id), "Error loading project units");
+
+    [HttpGet("{id:guid}/buildings")]
+    public async Task<ActionResult<IEnumerable<ProjectBuildingDto>>> GetProjectBuildings(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectBuildingsAsync(id), "Error loading project buildings");
+
+    [HttpPost("{id:guid}/buildings")]
+    public async Task<ActionResult<ProjectBuildingDto>> AddProjectBuilding(Guid id, [FromBody] CreateProjectBuildingDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectBuildingAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("buildings/{buildingId:guid}")]
+    public async Task<ActionResult<ProjectBuildingDto>> UpdateProjectBuilding(Guid buildingId, [FromBody] UpdateProjectBuildingDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectBuildingAsync(buildingId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("buildings/{buildingId:guid}")]
+    public async Task<IActionResult> DeleteProjectBuilding(Guid buildingId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectBuildingAsync(buildingId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/floors")]
+    public async Task<ActionResult<IEnumerable<ProjectFloorDto>>> GetProjectFloors(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectFloorsAsync(id), "Error loading project floors");
+
+    [HttpPost("{id:guid}/floors")]
+    public async Task<ActionResult<ProjectFloorDto>> AddProjectFloor(Guid id, [FromBody] CreateProjectFloorDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectFloorAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("floors/{floorId:guid}")]
+    public async Task<ActionResult<ProjectFloorDto>> UpdateProjectFloor(Guid floorId, [FromBody] UpdateProjectFloorDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectFloorAsync(floorId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("floors/{floorId:guid}")]
+    public async Task<IActionResult> DeleteProjectFloor(Guid floorId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectFloorAsync(floorId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/unit-release-batches")]
+    public async Task<ActionResult<IEnumerable<ProjectUnitReleaseBatchDto>>> GetProjectUnitReleaseBatches(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectUnitReleaseBatchesAsync(id), "Error loading project unit release batches");
+
+    [HttpPost("{id:guid}/unit-release-batches")]
+    public async Task<ActionResult<ProjectUnitReleaseBatchDto>> AddProjectUnitReleaseBatch(Guid id, [FromBody] CreateProjectUnitReleaseBatchDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectUnitReleaseBatchAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("unit-release-batches/{unitReleaseBatchId:guid}")]
+    public async Task<ActionResult<ProjectUnitReleaseBatchDto>> UpdateProjectUnitReleaseBatch(Guid unitReleaseBatchId, [FromBody] UpdateProjectUnitReleaseBatchDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectUnitReleaseBatchAsync(unitReleaseBatchId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("unit-release-batches/{unitReleaseBatchId:guid}")]
+    public async Task<IActionResult> DeleteProjectUnitReleaseBatch(Guid unitReleaseBatchId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectUnitReleaseBatchAsync(unitReleaseBatchId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/unit-handover-batches")]
+    public async Task<ActionResult<IEnumerable<ProjectUnitHandoverBatchDto>>> GetProjectUnitHandoverBatches(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetProjectUnitHandoverBatchesAsync(id), "Error loading project unit handover batches");
+
+    [HttpPost("{id:guid}/unit-handover-batches")]
+    public async Task<ActionResult<ProjectUnitHandoverBatchDto>> AddProjectUnitHandoverBatch(Guid id, [FromBody] CreateProjectUnitHandoverBatchDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddProjectUnitHandoverBatchAsync(id, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("unit-handover-batches/{unitHandoverBatchId:guid}")]
+    public async Task<ActionResult<ProjectUnitHandoverBatchDto>> UpdateProjectUnitHandoverBatch(Guid unitHandoverBatchId, [FromBody] UpdateProjectUnitHandoverBatchDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateProjectUnitHandoverBatchAsync(unitHandoverBatchId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("unit-handover-batches/{unitHandoverBatchId:guid}")]
+    public async Task<IActionResult> DeleteProjectUnitHandoverBatch(Guid unitHandoverBatchId)
+    {
+        try
+        {
+            await _projectService.DeleteProjectUnitHandoverBatchAsync(unitHandoverBatchId);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
 
     [HttpGet("units/released-market")]
     public async Task<ActionResult<IEnumerable<ProjectReleasedUnitSalesLookupDto>>> GetReleasedProjectUnitsForSales([FromQuery] string? search = null, [FromQuery] int take = 50)
@@ -949,6 +1674,23 @@ public class ProjectsController : ControllerBase
         try
         {
             return Ok(await _projectService.UpdateProjectPhaseAsync(phaseId, dto));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("phases/{phaseId:guid}/advance")]
+    public async Task<ActionResult<ProjectPhaseProgressionResultDto>> AdvanceProjectPhase(Guid phaseId, [FromBody] AdvanceProjectPhaseDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AdvanceProjectPhaseAsync(phaseId, dto));
         }
         catch (UnauthorizedAccessException)
         {

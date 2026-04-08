@@ -85,6 +85,11 @@ public partial class ProjectService
         var phases = (await GetProjectPhaseEntitiesAsync(projectId)).ToList();
         var packages = (await GetProjectPackageEntitiesAsync(projectId)).ToList();
         var boqItems = (await GetProjectBoqItemEntitiesAsync(projectId)).ToList();
+        var variationOrders = (await GetProjectVariationOrderEntitiesAsync(projectId)).ToList();
+        var interimValuations = (await GetProjectInterimValuationEntitiesAsync(projectId)).ToList();
+        var paymentCertificates = (await GetProjectPaymentCertificateEntitiesAsync(projectId)).ToList();
+        var extensionOfTimeRequests = (await GetProjectExtensionOfTimeEntitiesAsync(projectId)).ToList();
+        var finalAccount = await GetProjectFinalAccountEntityAsync(projectId);
         var currencyCode = await GetProjectBaseCurrencyCodeAsync();
 
         var alerts = new List<ProjectCommercialAlertDto>();
@@ -117,6 +122,40 @@ public partial class ProjectService
             });
         }
 
+        var phaseLinkedPackages = packages
+            .Where(x => x.ProjectPhaseId.HasValue)
+            .Join(phases, package => package.ProjectPhaseId!.Value, phase => phase.Id, (package, phase) => new { Package = package, Phase = phase })
+            .ToList();
+
+        var phaseAlignedPackageCount = phaseLinkedPackages.Count(item => IsPackageCommerciallyAlignedToPhase(item.Phase, item.Package));
+        var phaseLaggingPackageCount = phaseLinkedPackages.Count - phaseAlignedPackageCount;
+
+        var activeProcurementPhaseLaggingCount = phaseLinkedPackages.Count(item =>
+            string.Equals(item.Phase.Status, ProjectPhaseStatuses.InProgress, StringComparison.OrdinalIgnoreCase)
+            && IsProcurementPhase(item.Phase)
+            && !IsPackageCommerciallyAlignedToPhase(item.Phase, item.Package));
+        if (activeProcurementPhaseLaggingCount > 0)
+        {
+            alerts.Add(new ProjectCommercialAlertDto
+            {
+                Severity = "Medium",
+                Message = $"{activeProcurementPhaseLaggingCount} package(s) in active procurement phases are still lagging procurement setup or award status."
+            });
+        }
+
+        var activeConstructionPhaseLaggingCount = phaseLinkedPackages.Count(item =>
+            string.Equals(item.Phase.Status, ProjectPhaseStatuses.InProgress, StringComparison.OrdinalIgnoreCase)
+            && IsConstructionPhase(item.Phase)
+            && !IsPackageCommerciallyAlignedToPhase(item.Phase, item.Package));
+        if (activeConstructionPhaseLaggingCount > 0)
+        {
+            alerts.Add(new ProjectCommercialAlertDto
+            {
+                Severity = "High",
+                Message = $"{activeConstructionPhaseLaggingCount} package(s) in active construction phases are not yet commercially active."
+            });
+        }
+
         var packageBudgetAmount = packages.Sum(x => x.BudgetAmount ?? 0m);
         var packageCommittedAmount = packages.Sum(x => x.CommittedAmount ?? 0m);
         var packageActualAmount = packages.Sum(x => x.ActualAmount ?? 0m);
@@ -129,6 +168,43 @@ public partial class ProjectService
             {
                 Severity = "High",
                 Message = "Package forecast exceeds the approved project budget."
+            });
+        }
+
+        var approvedVariationAmount = variationOrders
+            .Where(x => x.Status == ProjectVariationOrderStatuses.Approved || x.Status == ProjectVariationOrderStatuses.Implemented || x.Status == ProjectVariationOrderStatuses.Closed)
+            .Sum(x => x.ApprovedAmount ?? x.EstimatedAmount ?? 0m);
+        var netValuationAmount = interimValuations.Sum(x => x.NetValuationAmount);
+        var netCertifiedAmount = paymentCertificates.Sum(x => x.NetCertifiedAmount);
+        var retentionHeldAmount = paymentCertificates.Sum(x => x.RetentionHeldAmount) + interimValuations.Sum(x => x.RetentionAmount);
+        var approvedExtensionDays = extensionOfTimeRequests
+            .Where(x => x.Status == ProjectExtensionOfTimeStatuses.Approved || x.Status == ProjectExtensionOfTimeStatuses.Implemented || x.Status == ProjectExtensionOfTimeStatuses.Closed)
+            .Sum(x => x.DaysApproved ?? 0);
+
+        if (variationOrders.Count == 0)
+        {
+            alerts.Add(new ProjectCommercialAlertDto
+            {
+                Severity = "Low",
+                Message = "No variation orders have been recorded yet."
+            });
+        }
+
+        if (paymentCertificates.Any() && netCertifiedAmount < netValuationAmount)
+        {
+            alerts.Add(new ProjectCommercialAlertDto
+            {
+                Severity = "Medium",
+                Message = "Certified payment amount is below recorded interim valuation value."
+            });
+        }
+
+        if (finalAccount != null && finalAccount.Status != ProjectFinalAccountStatuses.Closed)
+        {
+            alerts.Add(new ProjectCommercialAlertDto
+            {
+                Severity = "Low",
+                Message = $"Final account is currently {finalAccount.Status}."
             });
         }
 
@@ -195,6 +271,19 @@ public partial class ProjectService
             ContractLinkedPackageCount = packages.Count(x => x.ContractId.HasValue),
             PurchaseRequisitionLinkedPackageCount = packages.Count(x => x.PurchaseRequisitionId.HasValue),
             PurchaseOrderLinkedPackageCount = packages.Count(x => x.PurchaseOrderId.HasValue),
+            PhaseAlignedPackageCount = phaseAlignedPackageCount,
+            PhaseLaggingPackageCount = phaseLaggingPackageCount,
+            VariationOrderCount = variationOrders.Count,
+            ApprovedVariationAmount = approvedVariationAmount,
+            InterimValuationCount = interimValuations.Count,
+            NetValuationAmount = netValuationAmount,
+            PaymentCertificateCount = paymentCertificates.Count,
+            NetCertifiedAmount = netCertifiedAmount,
+            RetentionHeldAmount = retentionHeldAmount,
+            ExtensionOfTimeCount = extensionOfTimeRequests.Count,
+            ApprovedExtensionDays = approvedExtensionDays,
+            FinalAccountStatus = finalAccount?.Status,
+            FinalAccountValue = finalAccount?.FinalAccountValue,
             PhaseRollups = phaseRollups.OrderBy(x => x.PhaseSortOrder).ThenBy(x => x.PhaseName).ToList(),
             Alerts = alerts
         };

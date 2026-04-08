@@ -541,6 +541,61 @@ public class ProjectsControllerRouteTests
     }
 
     [Fact]
+    public async Task AdvanceProjectPhase_ShouldReturnProgressionResult()
+    {
+        var phaseId = Guid.NewGuid();
+        var nextPhaseId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.AdvanceProjectPhaseAsync(
+                phaseId,
+                It.Is<AdvanceProjectPhaseDto>(dto => dto.StartNextPhase)))
+            .ReturnsAsync(new ProjectPhaseProgressionResultDto
+            {
+                Action = "Completed",
+                Message = "Phase 'Detailed Design' completed and 'Approvals & Permits' started.",
+                StageGateEvaluated = true,
+                StageGatePassed = true,
+                NextPhaseStarted = true,
+                Phase = new ProjectPhaseDto
+                {
+                    Id = phaseId,
+                    ProjectId = projectId,
+                    Name = "Detailed Design",
+                    Status = "Completed",
+                    SortOrder = 2,
+                    Children = new List<ProjectPhaseDto>()
+                },
+                NextPhase = new ProjectPhaseDto
+                {
+                    Id = nextPhaseId,
+                    ProjectId = projectId,
+                    Name = "Approvals & Permits",
+                    Status = "InProgress",
+                    SortOrder = 3,
+                    Children = new List<ProjectPhaseDto>()
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync($"/api/projects/phases/{phaseId}/advance", new AdvanceProjectPhaseDto
+        {
+            StartNextPhase = true
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ProjectPhaseProgressionResultDto>();
+        result.Should().NotBeNull();
+        result!.Phase.Status.Should().Be("Completed");
+        result.NextPhaseStarted.Should().BeTrue();
+        result.NextPhase.Should().NotBeNull();
+        result.NextPhase!.Status.Should().Be("InProgress");
+    }
+
+    [Fact]
     public async Task GetProjectPackages_ShouldReturnPackageRegister()
     {
         var projectId = Guid.NewGuid();
@@ -1539,6 +1594,292 @@ public class ProjectsControllerRouteTests
         queue![0].AcceptedReceiptAmount.Should().Be(500m);
         queue[0].IssueToPostingVariance.Should().Be(150m);
         queue[0].ReconciliationStatus.Should().Be("PendingInspection");
+    }
+
+    [Fact]
+    public async Task PhaseGateReadinessReport_ShouldReturnConstructionGateRows()
+    {
+        var projectId = Guid.NewGuid();
+        var phaseId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetPhaseGateReadinessReportAsync(projectId, 50))
+            .ReturnsAsync(new[]
+            {
+                new ProjectPhaseGateReadinessReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-GATE-001",
+                    ProjectTitle = "Phase Gate Project",
+                    ProjectStatus = "InProgress",
+                    ProjectPhaseId = phaseId,
+                    ProjectPhaseCode = "PROCUREMENT",
+                    ProjectPhaseName = "Procurement",
+                    ProjectPhaseSortOrder = 5,
+                    IsStageGateRequired = true,
+                    HasConfiguredRules = true,
+                    IsReady = false,
+                    ConfiguredRuleCount = 3,
+                    BlockingRuleCount = 2,
+                    BlockingFailureCount = 1,
+                    SatisfiedRuleCount = 2,
+                    GateStatus = "Blocked",
+                    TopBlockingMessage = "Needs attention: actual 0, target min 1."
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/phase-gate-readiness?projectId={projectId}&take=50");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectPhaseGateReadinessReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].GateStatus.Should().Be("Blocked");
+        report[0].BlockingFailureCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ApprovalWatchReport_ShouldReturnPermitAlerts()
+    {
+        var projectId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetApprovalWatchReportAsync(projectId, 50))
+            .ReturnsAsync(new[]
+            {
+                new ProjectApprovalWatchReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-APP-001",
+                    ProjectTitle = "Approval Watch Project",
+                    ProjectStatus = "InProgress",
+                    ApprovalRegisterItemId = itemId,
+                    ApprovalType = "OccupancyCertificate",
+                    Title = "Occupancy certificate",
+                    Status = "Approved",
+                    WatchState = "ExpiringSoon",
+                    Severity = "High",
+                    DaysToExpiry = 10
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/approval-watch?projectId={projectId}&take=50");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectApprovalWatchReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].WatchState.Should().Be("ExpiringSoon");
+        report[0].Severity.Should().Be("High");
+    }
+
+    [Fact]
+    public async Task CommercialAdministrationReport_ShouldReturnCommercialWatchRows()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetCommercialAdministrationReportAsync(projectId, 50))
+            .ReturnsAsync(new[]
+            {
+                new ProjectCommercialAdministrationReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-COM-001",
+                    ProjectTitle = "Commercial Watch Project",
+                    ProjectStatus = "InProgress",
+                    Currency = "GHS",
+                    ApprovedBudget = 1000000m,
+                    PackageForecastAmount = 1120000m,
+                    ForecastVarianceAmount = -120000m,
+                    AlertCount = 2,
+                    WatchState = "Critical",
+                    TopAlertMessage = "Package forecast exceeds the approved project budget."
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/construction-commercial?projectId={projectId}&take=50");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectCommercialAdministrationReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].WatchState.Should().Be("Critical");
+        report[0].AlertCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task PostHandoverWatchReport_ShouldReturnGovernanceExposure()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetPostHandoverWatchReportAsync(projectId, 50))
+            .ReturnsAsync(new[]
+            {
+                new ProjectPostHandoverWatchReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-DLP-001",
+                    ProjectTitle = "Post-Handover Watch Project",
+                    ProjectStatus = "Completed",
+                    OpenHandoverItemCount = 2,
+                    ActiveDefectLiabilityCount = 3,
+                    ResponseBreachCount = 1,
+                    ResolutionBreachCount = 1,
+                    WarrantyExpiringSoonCount = 1,
+                    AlertCount = 3,
+                    HighestSeverity = "Critical",
+                    WatchState = "Critical",
+                    TotalRectificationExposure = 24500m
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/post-handover-watch?projectId={projectId}&take=50");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectPostHandoverWatchReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].HighestSeverity.Should().Be("Critical");
+        report[0].TotalRectificationExposure.Should().Be(24500m);
+    }
+
+    [Fact]
+    public async Task DesignControlWatchReport_ShouldReturnDesignItems()
+    {
+        var projectId = Guid.NewGuid();
+        var recordId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetDesignControlWatchReportAsync(projectId, 40))
+            .ReturnsAsync(new[]
+            {
+                new ProjectDesignControlReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-DSN-001",
+                    ProjectTitle = "Design Watch Project",
+                    ProjectStatus = "InProgress",
+                    ItemType = "Drawing",
+                    RecordId = recordId,
+                    ReferenceCode = "A-201",
+                    Title = "Typical floor plan",
+                    Category = "Architectural",
+                    Status = "ForReview",
+                    WatchState = "ReviewOverdue",
+                    Severity = "High"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/design-control-watch?projectId={projectId}&take=40");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectDesignControlReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].ItemType.Should().Be("Drawing");
+        report[0].WatchState.Should().Be("ReviewOverdue");
+    }
+
+    [Fact]
+    public async Task SiteControlsWatchReport_ShouldReturnOperationalItems()
+    {
+        var projectId = Guid.NewGuid();
+        var recordId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetSiteControlsWatchReportAsync(projectId, 40))
+            .ReturnsAsync(new[]
+            {
+                new ProjectSiteControlReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-SITE-001",
+                    ProjectTitle = "Site Watch Project",
+                    ProjectStatus = "InProgress",
+                    ItemType = "RFI",
+                    RecordId = recordId,
+                    ReferenceCode = "RFI-017",
+                    Title = "Beam depth clarification",
+                    Category = "Critical",
+                    Status = "Submitted",
+                    WatchState = "ResponseOverdue",
+                    Severity = "Critical"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/site-controls-watch?projectId={projectId}&take=40");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectSiteControlReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].ItemType.Should().Be("RFI");
+        report[0].Severity.Should().Be("Critical");
+    }
+
+    [Fact]
+    public async Task UnitCommercializationWatchReport_ShouldReturnCommercialUnitRows()
+    {
+        var projectId = Guid.NewGuid();
+        var unitId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetUnitCommercializationWatchReportAsync(projectId, 40))
+            .ReturnsAsync(new[]
+            {
+                new ProjectUnitCommercializationReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-UNIT-001",
+                    ProjectTitle = "Unit Watch Project",
+                    ProjectStatus = "InProgress",
+                    ProjectUnitId = unitId,
+                    UnitCode = "B-03",
+                    UnitName = "Apartment B-03",
+                    UnitType = "Apartment",
+                    Status = "Available",
+                    CommercialStatus = "Available",
+                    HandoverStatus = "NotScheduled",
+                    IsReleasedForMarket = false,
+                    ReleaseState = "Withheld",
+                    Currency = "GHS",
+                    WatchState = "NotReleased",
+                    Severity = "Warning"
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/unit-commercialization-watch?projectId={projectId}&take=40");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectUnitCommercializationReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].ReleaseState.Should().Be("Withheld");
+        report[0].WatchState.Should().Be("NotReleased");
     }
 
     [Fact]

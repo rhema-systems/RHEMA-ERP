@@ -155,7 +155,7 @@ if (builder.Environment.IsEnvironment("Testing")
 {
     builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
     {
-        ["ConnectionStrings:DefaultConnection"] = "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem_TestHost;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true",
+        ["ConnectionStrings:DefaultConnection"] = "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem_TestHost;Trusted_Connection=True;TrustServerCertificate=True",
         ["Database:Provider"] = "SqlServer",
         ["SkipStartupInitialization"] = "true",
         ["JwtSettings:SecretKey"] = "TestingOnlySecretKeyForApiHost1234567890",

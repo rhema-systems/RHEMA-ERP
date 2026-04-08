@@ -26,6 +26,8 @@ public class ProjectMasterDataOverviewDto
     public int ProjectTypeCount { get; set; }
     public int ProjectPriorityCount { get; set; }
     public int ProjectTemplateCount { get; set; }
+    public int ProjectPhaseTemplateCount { get; set; }
+    public int ProjectStageGateRuleCount { get; set; }
     public int PortfolioCount { get; set; }
     public int ProgramCount { get; set; }
     public List<ProjectCatalogGroupDto> RecommendedCatalogs { get; set; } = new();
@@ -76,6 +78,19 @@ public class ProjectCommercialSummaryDto
     public int ContractLinkedPackageCount { get; set; }
     public int PurchaseRequisitionLinkedPackageCount { get; set; }
     public int PurchaseOrderLinkedPackageCount { get; set; }
+    public int PhaseAlignedPackageCount { get; set; }
+    public int PhaseLaggingPackageCount { get; set; }
+    public int VariationOrderCount { get; set; }
+    public decimal ApprovedVariationAmount { get; set; }
+    public int InterimValuationCount { get; set; }
+    public decimal NetValuationAmount { get; set; }
+    public int PaymentCertificateCount { get; set; }
+    public decimal NetCertifiedAmount { get; set; }
+    public decimal RetentionHeldAmount { get; set; }
+    public int ExtensionOfTimeCount { get; set; }
+    public int ApprovedExtensionDays { get; set; }
+    public string? FinalAccountStatus { get; set; }
+    public decimal? FinalAccountValue { get; set; }
     public List<ProjectPhaseCommercialRollupDto> PhaseRollups { get; set; } = new();
     public List<ProjectCommercialAlertDto> Alerts { get; set; } = new();
 }

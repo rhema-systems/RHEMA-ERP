@@ -24,6 +24,13 @@ type ReportKey =
   | 'milestones'
   | 'performance'
   | 'budgetActual'
+  | 'phaseGates'
+  | 'approvalWatch'
+  | 'commercialAdmin'
+  | 'postHandover'
+  | 'designControl'
+  | 'siteControls'
+  | 'unitCommercialization'
   | 'portfolioSummary'
   | 'programSummary'
   | 'prioritization'
@@ -59,6 +66,13 @@ const REPORT_OPTIONS: { value: ReportKey; label: string }[] = [
   { value: 'milestones', label: 'Milestone Tracker' },
   { value: 'performance', label: 'Performance Analytics' },
   { value: 'budgetActual', label: 'Budget vs Actual' },
+  { value: 'phaseGates', label: 'Phase Gate Readiness' },
+  { value: 'approvalWatch', label: 'Permit & Approval Watch' },
+  { value: 'commercialAdmin', label: 'Commercial Admin Watch' },
+  { value: 'postHandover', label: 'Post-Handover Watchlist' },
+  { value: 'designControl', label: 'Design Control Watch' },
+  { value: 'siteControls', label: 'Site Controls Watch' },
+  { value: 'unitCommercialization', label: 'Unit Commercialization Watch' },
   { value: 'portfolioSummary', label: 'Portfolio Summary' },
   { value: 'programSummary', label: 'Program Summary' },
   { value: 'prioritization', label: 'Portfolio Prioritization' },
@@ -120,7 +134,7 @@ export default function ProjectReportsPage() {
     () => REPORT_OPTIONS.find((option) => option.value === selectedReport),
     [selectedReport],
   );
-  const supportsProjectFilter = selectedReport === 'taskAging' || selectedReport === 'milestones';
+  const supportsProjectFilter = ['taskAging', 'milestones', 'phaseGates', 'approvalWatch', 'commercialAdmin', 'postHandover', 'designControl', 'siteControls', 'unitCommercialization'].includes(selectedReport);
   const supportsDateRange = selectedReport === 'resourceCapacity' || selectedReport === 'resourceRecommendations';
 
   const loadReport = async (reportKey: ReportKey, projectId: string) => {
@@ -267,6 +281,210 @@ export default function ProjectReportsPage() {
             primaryValue: `${items.length}`,
             secondaryLabel: 'Negative Variance',
             secondaryValue: `${items.filter((item) => item.budgetVariance < 0).length}`,
+          };
+          break;
+        }
+        case 'phaseGates': {
+          const items = await projectService.getPhaseGateReadinessReport(projectFilter, 250);
+          next = {
+            title: 'Phase Gate Readiness',
+            description: 'Construction-stage gate posture across configured project phases.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              phaseName: item.projectPhaseName,
+              gateStatus: item.gateStatus,
+              stageGateRequired: item.isStageGateRequired ? 'Yes' : 'No',
+              configuredRules: item.configuredRuleCount,
+              satisfiedRules: item.satisfiedRuleCount,
+              blockingFailures: item.blockingFailureCount,
+              topBlockingMessage: item.topBlockingMessage || 'n/a',
+            })),
+            columns: ['projectCode', 'projectTitle', 'phaseName', 'gateStatus', 'stageGateRequired', 'configuredRules', 'satisfiedRules', 'blockingFailures', 'topBlockingMessage'],
+            primaryLabel: 'Phase Gates',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Blocked / Needs Setup',
+            secondaryValue: `${items.filter((item) => item.gateStatus === 'Blocked' || item.gateStatus === 'NeedsSetup').length}`,
+            supportsProjectFilter: true,
+          };
+          break;
+        }
+        case 'approvalWatch': {
+          const items = await projectService.getApprovalWatchReport(projectFilter, 250);
+          next = {
+            title: 'Permit & Approval Watch',
+            description: 'Permit, approval, expiry, and pending-decision watchlist for construction delivery.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              phaseName: item.projectPhaseName || 'n/a',
+              approvalType: item.approvalType,
+              title: item.title,
+              watchState: item.watchState,
+              severity: item.severity,
+              status: item.status,
+              targetDecisionDate: formatDate(item.targetDecisionDate || undefined),
+              daysToTargetDecision: item.daysToTargetDecision ?? 'n/a',
+              expiryDate: formatDate(item.expiryDate || undefined),
+              daysToExpiry: item.daysToExpiry ?? 'n/a',
+            })),
+            columns: ['projectCode', 'projectTitle', 'phaseName', 'approvalType', 'title', 'watchState', 'severity', 'status', 'targetDecisionDate', 'daysToTargetDecision', 'expiryDate', 'daysToExpiry'],
+            primaryLabel: 'Watch Items',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Critical / High',
+            secondaryValue: `${items.filter((item) => item.severity === 'Critical' || item.severity === 'High').length}`,
+            supportsProjectFilter: true,
+          };
+          break;
+        }
+        case 'commercialAdmin': {
+          const items = await projectService.getCommercialAdministrationReport(projectFilter, 250);
+          next = {
+            title: 'Commercial Admin Watch',
+            description: 'Construction-commercial posture covering packages, valuations, certification, retention, and final account.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              watchState: item.watchState,
+              alertCount: item.alertCount,
+              approvedBudget: formatCurrency(item.approvedBudget, item.currency),
+              packageForecastAmount: formatCurrency(item.packageForecastAmount, item.currency),
+              forecastVarianceAmount: formatCurrency(item.forecastVarianceAmount, item.currency),
+              variationOrderCount: item.variationOrderCount,
+              netValuationAmount: formatCurrency(item.netValuationAmount, item.currency),
+              netCertifiedAmount: formatCurrency(item.netCertifiedAmount, item.currency),
+              retentionHeldAmount: formatCurrency(item.retentionHeldAmount, item.currency),
+              finalAccountStatus: item.finalAccountStatus || 'n/a',
+              topAlertMessage: item.topAlertMessage || 'n/a',
+            })),
+            columns: ['projectCode', 'projectTitle', 'watchState', 'alertCount', 'approvedBudget', 'packageForecastAmount', 'forecastVarianceAmount', 'variationOrderCount', 'netValuationAmount', 'netCertifiedAmount', 'retentionHeldAmount', 'finalAccountStatus', 'topAlertMessage'],
+            primaryLabel: 'Projects',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Critical / Attention',
+            secondaryValue: `${items.filter((item) => item.watchState === 'Critical' || item.watchState === 'Attention').length}`,
+            supportsProjectFilter: true,
+          };
+          break;
+        }
+        case 'postHandover': {
+          const items = await projectService.getPostHandoverWatchReport(projectFilter, 250);
+          next = {
+            title: 'Post-Handover Watchlist',
+            description: 'Defects-liability, warranty, SLA, and unresolved handover exposure across completed delivery.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              watchState: item.watchState,
+              highestSeverity: item.highestSeverity,
+              openHandoverItems: item.openHandoverItemCount,
+              activeDefectLiabilityCases: item.activeDefectLiabilityCount,
+              responseBreaches: item.responseBreachCount,
+              resolutionBreaches: item.resolutionBreachCount,
+              warrantyExpiringSoon: item.warrantyExpiringSoonCount,
+              totalRectificationExposure: formatCurrency(item.totalRectificationExposure),
+              chargeableExposure: formatCurrency(item.chargeableExposure),
+              warrantyExposure: formatCurrency(item.warrantyExposure),
+            })),
+            columns: ['projectCode', 'projectTitle', 'watchState', 'highestSeverity', 'openHandoverItems', 'activeDefectLiabilityCases', 'responseBreaches', 'resolutionBreaches', 'warrantyExpiringSoon', 'totalRectificationExposure', 'chargeableExposure', 'warrantyExposure'],
+            primaryLabel: 'Projects',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Critical Exposure',
+            secondaryValue: `${items.filter((item) => item.watchState === 'Critical').length}`,
+            supportsProjectFilter: true,
+          };
+          break;
+        }
+        case 'designControl': {
+          const items = await projectService.getDesignControlWatchReport(projectFilter, 250);
+          next = {
+            title: 'Design Control Watch',
+            description: 'Drawing and submittal review pressure across active construction delivery.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              itemType: item.itemType,
+              referenceCode: item.referenceCode,
+              title: item.title,
+              category: item.category,
+              phaseName: item.projectPhaseName || 'n/a',
+              packageName: item.projectPackageName || 'n/a',
+              watchState: item.watchState,
+              severity: item.severity,
+              status: item.status,
+              actionDueDate: formatDate(item.actionDueDate || undefined),
+              daysToActionDue: item.daysToActionDue ?? 'n/a',
+              responsibleParty: item.responsibleParty || 'n/a',
+            })),
+            columns: ['projectCode', 'projectTitle', 'itemType', 'referenceCode', 'title', 'category', 'phaseName', 'packageName', 'watchState', 'severity', 'status', 'actionDueDate', 'daysToActionDue', 'responsibleParty'],
+            primaryLabel: 'Control Items',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Critical / High',
+            secondaryValue: `${items.filter((item) => item.severity === 'Critical' || item.severity === 'High').length}`,
+            supportsProjectFilter: true,
+          };
+          break;
+        }
+        case 'siteControls': {
+          const items = await projectService.getSiteControlsWatchReport(projectFilter, 250);
+          next = {
+            title: 'Site Controls Watch',
+            description: 'RFI response pressure and open site instruction exposure across project delivery.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              itemType: item.itemType,
+              referenceCode: item.referenceCode,
+              title: item.title,
+              category: item.category,
+              phaseName: item.projectPhaseName || 'n/a',
+              packageName: item.projectPackageName || 'n/a',
+              watchState: item.watchState,
+              severity: item.severity,
+              status: item.status,
+              actionDueDate: formatDate(item.actionDueDate || undefined),
+              daysToActionDue: item.daysToActionDue ?? 'n/a',
+              estimatedCostImpact: item.estimatedCostImpact != null ? formatCurrency(item.estimatedCostImpact) : 'n/a',
+              scheduleImpactDays: item.scheduleImpactDays ?? 'n/a',
+              responsibleParty: item.responsibleParty || 'n/a',
+            })),
+            columns: ['projectCode', 'projectTitle', 'itemType', 'referenceCode', 'title', 'category', 'phaseName', 'packageName', 'watchState', 'severity', 'status', 'actionDueDate', 'daysToActionDue', 'estimatedCostImpact', 'scheduleImpactDays', 'responsibleParty'],
+            primaryLabel: 'Site Items',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Critical / High',
+            secondaryValue: `${items.filter((item) => item.severity === 'Critical' || item.severity === 'High').length}`,
+            supportsProjectFilter: true,
+          };
+          break;
+        }
+        case 'unitCommercialization': {
+          const items = await projectService.getUnitCommercializationWatchReport(projectFilter, 250);
+          next = {
+            title: 'Unit Commercialization Watch',
+            description: 'Release, pricing, reservation, sales, lease, and handover consistency for project units.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              unitCode: item.unitCode || 'n/a',
+              unitName: item.unitName,
+              building: item.projectBuildingName || 'n/a',
+              floor: item.projectFloorName || 'n/a',
+              unitType: item.unitType,
+              releaseState: item.releaseState,
+              commercialStatus: item.commercialStatus,
+              commercialIntent: item.commercialIntent || 'n/a',
+              handoverStatus: item.handoverStatus,
+              basePrice: item.basePrice != null ? formatCurrency(item.basePrice, item.currency) : 'n/a',
+              currency: item.currency,
+              watchState: item.watchState,
+              severity: item.severity,
+              watchMessage: item.watchMessage || 'n/a',
+            })),
+            columns: ['projectCode', 'projectTitle', 'unitCode', 'unitName', 'building', 'floor', 'unitType', 'releaseState', 'commercialStatus', 'commercialIntent', 'handoverStatus', 'basePrice', 'currency', 'watchState', 'severity', 'watchMessage'],
+            primaryLabel: 'Units',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Attention / Critical',
+            secondaryValue: `${items.filter((item) => item.watchState === 'Attention' || item.watchState === 'Critical').length}`,
+            supportsProjectFilter: true,
           };
           break;
         }

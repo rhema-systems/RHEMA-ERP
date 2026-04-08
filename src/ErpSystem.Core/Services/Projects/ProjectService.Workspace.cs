@@ -16,7 +16,9 @@ public partial class ProjectService
         var commercialSummary = await GetCommercialSummaryAsync(id);
         var integrationSummary = await GetIntegrationSummaryAsync(id);
         var governanceSummary = await GetGovernanceSummaryAsync(id);
+        var postHandoverSummary = await GetPostHandoverSummaryAsync(id);
         var linkOptions = await GetProjectLinkOptionsAsync(id);
+        var phaseGateEvaluations = await GetProjectPhaseGateEvaluationsAsync(id);
 
         return new ProjectWorkspaceDto
         {
@@ -25,7 +27,9 @@ public partial class ProjectService
             CommercialSummary = commercialSummary,
             IntegrationSummary = integrationSummary,
             GovernanceSummary = governanceSummary,
+            PostHandoverSummary = postHandoverSummary,
             LinkOptions = linkOptions,
+            PhaseGateEvaluations = phaseGateEvaluations.ToList(),
         };
     }
 }

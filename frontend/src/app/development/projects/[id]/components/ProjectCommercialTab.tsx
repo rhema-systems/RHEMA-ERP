@@ -97,6 +97,51 @@ export function ProjectCommercialTab({ commercialSummary, formatMoney }: Project
               <div className="mt-2 text-2xl font-semibold">{commercialSummary.unassignedPackageCount}</div>
             </div>
           </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Phase-Aligned Packages</div>
+              <div className="mt-2 text-2xl font-semibold">{commercialSummary.phaseAlignedPackageCount}</div>
+              <div className="text-sm text-muted-foreground">Linked packages already matching their current phase posture</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Need Phase Sync</div>
+              <div className="mt-2 text-2xl font-semibold">{commercialSummary.phaseLaggingPackageCount}</div>
+              <div className="text-sm text-muted-foreground">Linked packages that still need procurement or construction follow-through</div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Variation Orders</div>
+              <div className="mt-2 text-2xl font-semibold">{commercialSummary.variationOrderCount}</div>
+              <div className="text-sm text-muted-foreground">{formatMoney(commercialSummary.approvedVariationAmount, currency)}</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Interim Valuations</div>
+              <div className="mt-2 text-2xl font-semibold">{commercialSummary.interimValuationCount}</div>
+              <div className="text-sm text-muted-foreground">{formatMoney(commercialSummary.netValuationAmount, currency)}</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Certificates</div>
+              <div className="mt-2 text-2xl font-semibold">{commercialSummary.paymentCertificateCount}</div>
+              <div className="text-sm text-muted-foreground">{formatMoney(commercialSummary.netCertifiedAmount, currency)}</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Retention Held</div>
+              <div className="mt-2 text-2xl font-semibold">{formatMoney(commercialSummary.retentionHeldAmount, currency)}</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Approved EOT</div>
+              <div className="mt-2 text-2xl font-semibold">{commercialSummary.extensionOfTimeCount}</div>
+              <div className="text-sm text-muted-foreground">{commercialSummary.approvedExtensionDays} day(s)</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Final Account</div>
+              <div className="mt-2 text-2xl font-semibold">{formatMoney(commercialSummary.finalAccountValue, currency)}</div>
+              <div className="text-sm text-muted-foreground">{commercialSummary.finalAccountStatus || 'Not started'}</div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

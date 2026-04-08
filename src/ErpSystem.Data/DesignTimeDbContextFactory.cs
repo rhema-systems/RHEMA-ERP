@@ -34,7 +34,7 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
         }
 
         // Fallback connection string if none found
-        connectionString ??= "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True";
+        connectionString ??= "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem;Trusted_Connection=True;TrustServerCertificate=True";
 
         optionsBuilder.UseSqlServer(connectionString, sql =>
         {

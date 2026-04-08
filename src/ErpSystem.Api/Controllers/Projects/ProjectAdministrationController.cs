@@ -97,6 +97,44 @@ public class ProjectAdministrationController : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("phase-templates")]
+    public async Task<ActionResult<IEnumerable<ProjectPhaseTemplateDto>>> GetProjectPhaseTemplates([FromQuery] Guid? projectTypeId = null)
+        => Ok(await _projectSetupService.GetProjectPhaseTemplatesAsync(projectTypeId));
+
+    [HttpPost("phase-templates")]
+    public async Task<ActionResult<ProjectPhaseTemplateDto>> CreateProjectPhaseTemplate([FromBody] CreateProjectPhaseTemplateDto dto)
+        => Ok(await _projectSetupService.CreateProjectPhaseTemplateAsync(dto));
+
+    [HttpPut("phase-templates/{id:guid}")]
+    public async Task<ActionResult<ProjectPhaseTemplateDto>> UpdateProjectPhaseTemplate(Guid id, [FromBody] UpdateProjectPhaseTemplateDto dto)
+        => Ok(await _projectSetupService.UpdateProjectPhaseTemplateAsync(id, dto));
+
+    [HttpDelete("phase-templates/{id:guid}")]
+    public async Task<IActionResult> DeleteProjectPhaseTemplate(Guid id)
+    {
+        await _projectSetupService.DeleteProjectPhaseTemplateAsync(id);
+        return NoContent();
+    }
+
+    [HttpGet("stage-gate-rules")]
+    public async Task<ActionResult<IEnumerable<ProjectStageGateRuleDto>>> GetProjectStageGateRules([FromQuery] Guid? projectPhaseTemplateId = null)
+        => Ok(await _projectSetupService.GetProjectStageGateRulesAsync(projectPhaseTemplateId));
+
+    [HttpPost("stage-gate-rules")]
+    public async Task<ActionResult<ProjectStageGateRuleDto>> CreateProjectStageGateRule([FromBody] CreateProjectStageGateRuleDto dto)
+        => Ok(await _projectSetupService.CreateProjectStageGateRuleAsync(dto));
+
+    [HttpPut("stage-gate-rules/{id:guid}")]
+    public async Task<ActionResult<ProjectStageGateRuleDto>> UpdateProjectStageGateRule(Guid id, [FromBody] UpdateProjectStageGateRuleDto dto)
+        => Ok(await _projectSetupService.UpdateProjectStageGateRuleAsync(id, dto));
+
+    [HttpDelete("stage-gate-rules/{id:guid}")]
+    public async Task<IActionResult> DeleteProjectStageGateRule(Guid id)
+    {
+        await _projectSetupService.DeleteProjectStageGateRuleAsync(id);
+        return NoContent();
+    }
+
     [HttpGet("portfolios")]
     public async Task<ActionResult<IEnumerable<ProjectPortfolioDto>>> GetPortfolios() => Ok(await _projectSetupService.GetPortfoliosAsync());
 

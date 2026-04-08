@@ -3,6 +3,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -31,7 +32,8 @@ public class JwtBlacklistServiceTests
                 new InvalidOperationException(
                     "Cannot insert duplicate key row in object 'dbo.BlacklistedTokens' with unique index 'IX_BlacklistedTokens_Jti'.")));
 
-        var service = new JwtBlacklistService(unitOfWork.Object, NullLogger<JwtBlacklistService>.Instance);
+        using var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var service = new JwtBlacklistService(unitOfWork.Object, memoryCache, NullLogger<JwtBlacklistService>.Instance);
 
         var act = async () => await service.BlacklistTokenAsync(
             Guid.NewGuid().ToString(),

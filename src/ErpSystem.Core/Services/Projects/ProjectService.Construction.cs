@@ -111,20 +111,49 @@ public partial class ProjectService
             }
         }
 
+        var originalStatus = entity.Status;
+        var normalizedStatus = NormalizeProjectPhaseStatus(dto.Status);
+        if (!string.Equals(originalStatus, normalizedStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(normalizedStatus, ProjectPhaseStatuses.InProgress, StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsurePhaseCanStartAsync(entity, dto.OverrideStageGate, dto.OverrideReason);
+                entity.ActualStartDate ??= DateTime.UtcNow;
+            }
+            else if (string.Equals(normalizedStatus, ProjectPhaseStatuses.Completed, StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsurePhaseCanCompleteAsync(entity, dto.OverrideStageGate, dto.OverrideReason);
+                entity.ActualStartDate ??= DateTime.UtcNow;
+                entity.ActualEndDate ??= DateTime.UtcNow;
+            }
+        }
+
         entity.ParentPhaseId = dto.ParentPhaseId;
         entity.Code = dto.Code?.Trim();
         entity.Name = dto.Name.Trim();
         entity.Description = TrimOrNull(dto.Description);
-        entity.Status = NormalizeProjectPhaseStatus(dto.Status);
+        entity.Status = normalizedStatus;
         entity.SortOrder = dto.SortOrder ?? entity.SortOrder;
         entity.IsOptional = dto.IsOptional;
         entity.IsStageGateRequired = dto.IsStageGateRequired;
         entity.PlannedStartDate = dto.PlannedStartDate;
         entity.PlannedEndDate = dto.PlannedEndDate;
-        entity.ActualStartDate = dto.ActualStartDate;
-        entity.ActualEndDate = dto.ActualEndDate;
+        entity.ActualStartDate = dto.ActualStartDate ?? entity.ActualStartDate;
+        entity.ActualEndDate = dto.ActualEndDate ?? entity.ActualEndDate;
         entity.UpdatedBy = _currentUserProvider.Username;
         entity.LastModifiedById = _currentUserProvider.UserId;
+
+        if (!string.Equals(originalStatus, normalizedStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(normalizedStatus, ProjectPhaseStatuses.InProgress, StringComparison.OrdinalIgnoreCase))
+            {
+                await ApplyPhasePackageStatusNudgesAsync(entity, phaseCompleted: false);
+            }
+            else if (string.Equals(normalizedStatus, ProjectPhaseStatuses.Completed, StringComparison.OrdinalIgnoreCase))
+            {
+                await ApplyPhasePackageStatusNudgesAsync(entity, phaseCompleted: true);
+            }
+        }
 
         await _unitOfWork.Repository<ProjectPhase>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -304,6 +333,12 @@ public partial class ProjectService
     private async Task SeedDefaultConstructionPhasesAsync(Guid projectId)
     {
         if (await HasProjectPhasesAsync(projectId))
+        {
+            return;
+        }
+
+        var project = await _projectRepository.GetByIdAsync(projectId);
+        if (project != null && await SeedConfiguredConstructionPhasesAsync(project))
         {
             return;
         }

@@ -13,6 +13,7 @@ import type {
   ProjectLinkOptionsDto,
   CreateProjectSnagItemDto,
   ProjectDetailDto,
+  ProjectPostHandoverSummaryDto,
   ProjectUnitDto,
 } from '@/services/projectService';
 
@@ -21,6 +22,7 @@ type ProjectDefectsTabProps = {
   units: ProjectUnitDto[];
   activeBusinessPartners: BusinessPartnerDto[];
   linkOptions: ProjectLinkOptionsDto;
+  postHandoverSummary?: ProjectPostHandoverSummaryDto | null;
   snagDraft: CreateProjectSnagItemDto;
   setSnagDraft: Dispatch<SetStateAction<CreateProjectSnagItemDto>>;
   defectLiabilityDraft: CreateProjectDefectLiabilityCaseDto;
@@ -45,6 +47,7 @@ export function ProjectDefectsTab({
   units,
   activeBusinessPartners,
   linkOptions,
+  postHandoverSummary,
   snagDraft,
   setSnagDraft,
   defectLiabilityDraft,
@@ -79,6 +82,9 @@ export function ProjectDefectsTab({
     () => project.defectLiabilityCases.reduce((sum, item) => sum + (item.rectificationCost || 0), 0),
     [project.defectLiabilityCases],
   );
+  const warrantyExpiringSoonCount = postHandoverSummary?.warrantyExpiringSoonCount ?? 0;
+  const resolutionBreachCount = postHandoverSummary?.resolutionBreachCount ?? 0;
+  const responseBreachCount = postHandoverSummary?.responseBreachCount ?? 0;
   const availableWorkOrders = useMemo(
     () => defectLiabilityDraft.jobCardId
       ? linkOptions.workOrders.filter((item) => !item.jobCardId || item.jobCardId === defectLiabilityDraft.jobCardId)
@@ -119,6 +125,72 @@ export function ProjectDefectsTab({
           </div>
         </CardContent>
       </Card>
+
+      {postHandoverSummary ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Post-Handover Watchlist</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Open Handover</div>
+                <div className="text-2xl font-semibold">{postHandoverSummary.openHandoverItemCount}</div>
+                <div className="text-sm text-muted-foreground">Still pending formal closeout</div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Active DLP Cases</div>
+                <div className="text-2xl font-semibold">{postHandoverSummary.activeDefectLiabilityCount}</div>
+                <div className="text-sm text-muted-foreground">Reported or under rectification</div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Warranty Cases</div>
+                <div className="text-2xl font-semibold">{postHandoverSummary.warrantyCaseCount}</div>
+                <div className="text-sm text-muted-foreground">{warrantyExpiringSoonCount} expiring soon</div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Response Breaches</div>
+                <div className="text-2xl font-semibold">{responseBreachCount}</div>
+                <div className="text-sm text-muted-foreground">No first response within SLA</div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Resolution Breaches</div>
+                <div className="text-2xl font-semibold">{resolutionBreachCount}</div>
+                <div className="text-sm text-muted-foreground">Past target or SLA due date</div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Chargeable Exposure</div>
+                <div className="text-2xl font-semibold">{formatMoney(postHandoverSummary.chargeableExposure, project.defectLiabilityCases[0]?.currency)}</div>
+                <div className="text-sm text-muted-foreground">Customer or contractor recovery</div>
+              </div>
+            </div>
+            {postHandoverSummary.alerts.length > 0 ? (
+              <div className="space-y-3">
+                {postHandoverSummary.alerts.slice(0, 8).map((alert, index) => (
+                  <div key={`${alert.alertType}:${alert.projectDefectLiabilityCaseId ?? index}`} className="rounded-lg border p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={alert.severity === 'Critical' ? 'destructive' : 'secondary'}>{formatCatalogLabel(alert.severity)}</Badge>
+                      <Badge variant="outline">{formatCatalogLabel(alert.alertType)}</Badge>
+                      {alert.projectUnitName ? (
+                        <Badge variant="secondary">
+                          {alert.projectUnitCode ? `${alert.projectUnitCode} · ${alert.projectUnitName}` : alert.projectUnitName}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-2 font-medium">{alert.title}</div>
+                    <div className="text-sm text-muted-foreground">{alert.message}</div>
+                    {alert.dueDate ? <div className="mt-2 text-xs text-muted-foreground">Due {formatDateLabel(alert.dueDate)}</div> : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                No active post-handover alerts right now.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -338,6 +410,22 @@ export function ProjectDefectsTab({
                 <Input type="date" value={defectLiabilityDraft.warrantyExpiryDate || ''} onChange={(event) => setDefectLiabilityDraft((current) => ({ ...current, warrantyExpiryDate: event.target.value || undefined }))} />
               </div>
               <div className="grid gap-2">
+                <Label>Warranty Category</Label>
+                <Input value={defectLiabilityDraft.warrantyCategory || ''} onChange={(event) => setDefectLiabilityDraft((current) => ({ ...current, warrantyCategory: event.target.value || undefined }))} placeholder="Structural / Finishes / MEP" />
+              </div>
+              <div className="grid gap-2">
+                <Label>First Response</Label>
+                <Input type="date" value={defectLiabilityDraft.firstResponseDate || ''} onChange={(event) => setDefectLiabilityDraft((current) => ({ ...current, firstResponseDate: event.target.value || undefined }))} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Response SLA (days)</Label>
+                <Input type="number" min="0" step="1" value={defectLiabilityDraft.responseSlaDays ?? ''} onChange={(event) => setDefectLiabilityDraft((current) => ({ ...current, responseSlaDays: event.target.value ? Number(event.target.value) : undefined }))} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Resolution SLA (days)</Label>
+                <Input type="number" min="0" step="1" value={defectLiabilityDraft.resolutionSlaDays ?? ''} onChange={(event) => setDefectLiabilityDraft((current) => ({ ...current, resolutionSlaDays: event.target.value ? Number(event.target.value) : undefined }))} />
+              </div>
+              <div className="grid gap-2">
                 <Label>Rectification Cost</Label>
                 <Input type="number" min="0" step="0.01" value={defectLiabilityDraft.rectificationCost ?? ''} onChange={(event) => setDefectLiabilityDraft((current) => ({ ...current, rectificationCost: event.target.value ? Number(event.target.value) : undefined }))} />
               </div>
@@ -376,12 +464,16 @@ export function ProjectDefectsTab({
                       <div className="font-medium">{item.title}</div>
                       <Badge>{formatCatalogLabel(item.status)}</Badge>
                       {item.isWarrantyRelated ? <Badge variant="outline">Warranty</Badge> : <Badge variant="outline">Chargeable</Badge>}
+                      {item.warrantyCategory ? <Badge variant="secondary">{item.warrantyCategory}</Badge> : null}
+                      {item.responseSlaDays ? <Badge variant="outline">Resp SLA {item.responseSlaDays}d</Badge> : null}
+                      {item.resolutionSlaDays ? <Badge variant="outline">Resolve SLA {item.resolutionSlaDays}d</Badge> : null}
                       {item.projectUnitName ? <Badge variant="secondary">{item.projectUnitCode ? `${item.projectUnitCode} · ${item.projectUnitName}` : item.projectUnitName}</Badge> : null}
                     </div>
                     <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
                       <span>Reported {formatDateLabel(item.reportedDate)}</span>
                       {item.targetResolutionDate ? <span>Target {formatDateLabel(item.targetResolutionDate)}</span> : null}
                       {item.resolvedDate ? <span>Resolved {formatDateLabel(item.resolvedDate)}</span> : null}
+                      {item.firstResponseDate ? <span>First response {formatDateLabel(item.firstResponseDate)}</span> : null}
                       {item.customerBusinessPartnerName ? <span>{item.customerBusinessPartnerName}</span> : null}
                       {item.jobCardNumber ? <span>Job card {item.jobCardNumber}</span> : null}
                       {item.workOrderNumber ? <span>Work order {item.workOrderNumber}</span> : null}

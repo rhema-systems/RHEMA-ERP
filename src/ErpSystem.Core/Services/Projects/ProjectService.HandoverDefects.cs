@@ -86,6 +86,7 @@ public partial class ProjectService
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManageGovernance);
         var unit = await ValidateProjectCloseoutUnitAsync(projectId, dto.ProjectUnitId);
+        var handoverBatch = await ValidateProjectUnitHandoverBatchAsync(projectId, dto.ProjectUnitHandoverBatchId, unit?.Id);
         var siblings = (await GetProjectHandoverItemEntitiesAsync(projectId)).ToList();
 
         var entity = new ProjectHandoverItem
@@ -93,6 +94,7 @@ public partial class ProjectService
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
             ProjectUnitId = unit?.Id,
+            ProjectUnitHandoverBatchId = handoverBatch?.Id,
             HandoverType = NormalizeProjectHandoverItemType(dto.HandoverType),
             Title = dto.Title.Trim(),
             Status = NormalizeProjectHandoverItemStatus(dto.Status),
@@ -116,8 +118,10 @@ public partial class ProjectService
         var entity = await GetProjectHandoverItemEntityAsync(handoverItemId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageGovernance);
         var unit = await ValidateProjectCloseoutUnitAsync(entity.ProjectId, dto.ProjectUnitId);
+        var handoverBatch = await ValidateProjectUnitHandoverBatchAsync(entity.ProjectId, dto.ProjectUnitHandoverBatchId, unit?.Id);
 
         entity.ProjectUnitId = unit?.Id;
+        entity.ProjectUnitHandoverBatchId = handoverBatch?.Id;
         entity.HandoverType = NormalizeProjectHandoverItemType(dto.HandoverType);
         entity.Title = dto.Title.Trim();
         entity.Status = NormalizeProjectHandoverItemStatus(dto.Status);
@@ -241,7 +245,11 @@ public partial class ProjectService
             TargetResolutionDate = dto.TargetResolutionDate,
             ResolvedDate = dto.ResolvedDate,
             IsWarrantyRelated = dto.IsWarrantyRelated,
+            WarrantyCategory = TrimOrNull(dto.WarrantyCategory),
             WarrantyExpiryDate = dto.WarrantyExpiryDate,
+            FirstResponseDate = dto.FirstResponseDate,
+            ResponseSlaDays = dto.ResponseSlaDays,
+            ResolutionSlaDays = dto.ResolutionSlaDays,
             RectificationCost = dto.RectificationCost,
             ChargeableAmount = dto.ChargeableAmount,
             Currency = await ResolveProjectCurrencyAsync(dto.Currency ?? unit?.Currency),
@@ -275,7 +283,11 @@ public partial class ProjectService
         entity.TargetResolutionDate = dto.TargetResolutionDate;
         entity.ResolvedDate = dto.ResolvedDate;
         entity.IsWarrantyRelated = dto.IsWarrantyRelated;
+        entity.WarrantyCategory = TrimOrNull(dto.WarrantyCategory);
         entity.WarrantyExpiryDate = dto.WarrantyExpiryDate;
+        entity.FirstResponseDate = dto.FirstResponseDate;
+        entity.ResponseSlaDays = dto.ResponseSlaDays;
+        entity.ResolutionSlaDays = dto.ResolutionSlaDays;
         entity.RectificationCost = dto.RectificationCost;
         entity.ChargeableAmount = dto.ChargeableAmount;
         entity.Currency = await ResolveProjectCurrencyAsync(dto.Currency ?? unit?.Currency ?? entity.Currency);
@@ -428,16 +440,23 @@ public partial class ProjectService
             .ToList());
     }
 
-    private Task<List<ProjectHandoverItemDto>> MapProjectHandoverItemsAsync(IReadOnlyCollection<ProjectHandoverItem> items, IReadOnlyCollection<ProjectUnit> units)
+    private async Task<List<ProjectHandoverItemDto>> MapProjectHandoverItemsAsync(IReadOnlyCollection<ProjectHandoverItem> items, IReadOnlyCollection<ProjectUnit> units)
     {
         var unitLookup = units.ToDictionary(x => x.Id);
-        return Task.FromResult(items
+        var batchLookup = (await GetProjectUnitHandoverBatchLookupAsync(items
+                .Where(x => x.ProjectUnitHandoverBatchId.HasValue)
+                .Select(x => x.ProjectUnitHandoverBatchId!.Value)
+                .Distinct()))
+            .ToDictionary(x => x.Id);
+
+        return items
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.Title)
             .Select(x => MapToDto(
                 x,
-                x.ProjectUnitId.HasValue && unitLookup.TryGetValue(x.ProjectUnitId.Value, out var unit) ? unit : null))
-            .ToList());
+                x.ProjectUnitId.HasValue && unitLookup.TryGetValue(x.ProjectUnitId.Value, out var unit) ? unit : null,
+                x.ProjectUnitHandoverBatchId.HasValue && batchLookup.TryGetValue(x.ProjectUnitHandoverBatchId.Value, out var batch) ? batch : null))
+            .ToList();
     }
 
     private Task<List<ProjectSnagItemDto>> MapProjectSnagItemsAsync(IReadOnlyCollection<ProjectSnagItem> items, IReadOnlyCollection<ProjectUnit> units)
@@ -499,13 +518,17 @@ public partial class ProjectService
         Notes = entity.Notes
     };
 
-    private static ProjectHandoverItemDto MapToDto(ProjectHandoverItem entity, ProjectUnit? unit) => new()
+    private static ProjectHandoverItemDto MapToDto(ProjectHandoverItem entity, ProjectUnit? unit, ProjectUnitHandoverBatch? batch) => new()
     {
         Id = entity.Id,
         ProjectId = entity.ProjectId,
         ProjectUnitId = entity.ProjectUnitId,
         ProjectUnitCode = unit?.Code,
         ProjectUnitName = unit?.Name,
+        ProjectUnitHandoverBatchId = entity.ProjectUnitHandoverBatchId,
+        ProjectUnitHandoverBatchCode = batch?.Code,
+        ProjectUnitHandoverBatchName = batch?.Name,
+        ProjectUnitHandoverBatchStatus = batch?.Status,
         HandoverType = entity.HandoverType,
         Title = entity.Title,
         Status = entity.Status,
@@ -573,7 +596,11 @@ public partial class ProjectService
         TargetResolutionDate = entity.TargetResolutionDate,
         ResolvedDate = entity.ResolvedDate,
         IsWarrantyRelated = entity.IsWarrantyRelated,
+        WarrantyCategory = entity.WarrantyCategory,
         WarrantyExpiryDate = entity.WarrantyExpiryDate,
+        FirstResponseDate = entity.FirstResponseDate,
+        ResponseSlaDays = entity.ResponseSlaDays,
+        ResolutionSlaDays = entity.ResolutionSlaDays,
         RectificationCost = entity.RectificationCost,
         ChargeableAmount = entity.ChargeableAmount,
         Currency = entity.Currency,

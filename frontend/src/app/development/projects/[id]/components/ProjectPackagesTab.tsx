@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useMemo } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowRightCircle, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,8 +25,10 @@ type ProjectPackagesTabProps = {
   project: ProjectDetailDto;
   phases: ProjectPhaseDto[];
   packageDraft: CreateProjectPackageDto;
+  editingPackageId: string | null;
   setPackageDraft: Dispatch<SetStateAction<CreateProjectPackageDto>>;
   boqDraft: CreateProjectBoqItemDto;
+  editingBoqItemId: string | null;
   setBoqDraft: Dispatch<SetStateAction<CreateProjectBoqItemDto>>;
   activeBusinessPartners: BusinessPartnerDto[];
   activeContracts: ContractDto[];
@@ -39,9 +41,13 @@ type ProjectPackagesTabProps = {
   boqItemTypeOptions: string[];
   formatMoney: (value: number | undefined, currency?: string | null, maximumFractionDigits?: number) => string;
   formatCatalogLabel: (value?: string | null) => string;
-  onAddPackage: () => void;
+  onSavePackage: () => void;
+  onEditPackage: (projectPackage: ProjectPackageDto) => void;
+  onCancelPackageEdit: () => void;
   onDeletePackage: (packageId: string) => void;
-  onAddBoqItem: () => void;
+  onSaveBoqItem: () => void;
+  onEditBoqItem: (boqItem: ProjectBoqItemDto) => void;
+  onCancelBoqItemEdit: () => void;
   onDeleteBoqItem: (boqItemId: string) => void;
 };
 
@@ -53,12 +59,28 @@ const flattenPhases = (phases: ProjectPhaseDto[], depth = 0): Array<{ id: string
 
 const formatReference = (...parts: Array<string | undefined>) => parts.filter(Boolean).join(' - ');
 
+const getPhaseSyncTone = (status?: string) => {
+  switch ((status || '').toLowerCase()) {
+    case 'aligned':
+    case 'stable':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'lagging':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
+    case 'unassigned':
+      return 'border-slate-300 bg-slate-50 text-slate-700';
+    default:
+      return 'border-blue-200 bg-blue-50 text-blue-700';
+  }
+};
+
 export function ProjectPackagesTab({
   project,
   phases,
   packageDraft,
+  editingPackageId,
   setPackageDraft,
   boqDraft,
+  editingBoqItemId,
   setBoqDraft,
   activeBusinessPartners,
   activeContracts,
@@ -71,9 +93,13 @@ export function ProjectPackagesTab({
   boqItemTypeOptions,
   formatMoney,
   formatCatalogLabel,
-  onAddPackage,
+  onSavePackage,
+  onEditPackage,
+  onCancelPackageEdit,
   onDeletePackage,
-  onAddBoqItem,
+  onSaveBoqItem,
+  onEditBoqItem,
+  onCancelBoqItemEdit,
   onDeleteBoqItem,
 }: ProjectPackagesTabProps) {
   const phaseOptions = useMemo(() => flattenPhases(phases), [phases]);
@@ -81,6 +107,15 @@ export function ProjectPackagesTab({
   const totalCommitted = useMemo(() => project.packages.reduce((sum, item) => sum + (item.committedAmount ?? 0), 0), [project.packages]);
   const totalActual = useMemo(() => project.packages.reduce((sum, item) => sum + (item.actualAmount ?? 0), 0), [project.packages]);
   const totalForecast = useMemo(() => project.packages.reduce((sum, item) => sum + (item.forecastAmount ?? 0), 0), [project.packages]);
+  const alignedPackageCount = useMemo(() => project.packages.filter((item) => item.isPhaseCommerciallyAligned).length, [project.packages]);
+  const laggingPackageCount = useMemo(
+    () => project.packages.filter((item) => item.phaseCommercialSyncStatus === 'Lagging').length,
+    [project.packages],
+  );
+  const unassignedPackageCount = useMemo(
+    () => project.packages.filter((item) => item.phaseCommercialSyncStatus === 'Unassigned').length,
+    [project.packages],
+  );
   const selectedPackageBoqItems = useMemo(
     () => (boqDraft.projectPackageId ? project.boqItems.filter((item) => item.projectPackageId === boqDraft.projectPackageId) : []),
     [boqDraft.projectPackageId, project.boqItems],
@@ -116,9 +151,36 @@ export function ProjectPackagesTab({
             </div>
           </div>
 
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">Phase-Aligned</div>
+              <div className="text-2xl font-semibold">{alignedPackageCount}</div>
+              <div className="text-sm text-muted-foreground">Packages already matching the current phase posture</div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4">
+              <div className="text-sm text-amber-700">Need Commercial Sync</div>
+              <div className="text-2xl font-semibold text-amber-900">{laggingPackageCount}</div>
+              <div className="text-sm text-amber-700">Packages lagging procurement or construction follow-through</div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">Unassigned to Phase</div>
+              <div className="text-2xl font-semibold">{unassignedPackageCount}</div>
+              <div className="text-sm text-muted-foreground">Packages that still need a phase before workflow nudges apply</div>
+            </div>
+          </div>
+
+          {laggingPackageCount > 0 ? (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                {laggingPackageCount} package(s) are behind their linked phase. Review the sync badges below and complete the recommended procurement or commercial step.
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 xl:grid-cols-2">
             <div className="rounded-lg border p-4 space-y-4">
-              <div className="font-medium">New Package</div>
+              <div className="font-medium">{editingPackageId ? 'Edit Package' : 'New Package'}</div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Name</Label>
@@ -229,16 +291,22 @@ export function ProjectPackagesTab({
                   <Input value={packageDraft.description || ''} onChange={(event) => setPackageDraft((current) => ({ ...current, description: event.target.value || undefined }))} />
                 </div>
               </div>
-              <div className="flex justify-end">
-                <Button disabled={!packageDraft.name?.trim()} onClick={onAddPackage}>
+              <div className="flex justify-end gap-2">
+                {editingPackageId ? (
+                  <Button variant="outline" onClick={onCancelPackageEdit}>
+                    <X className="mr-2 h-4 w-4" />
+                    Cancel
+                  </Button>
+                ) : null}
+                <Button disabled={!packageDraft.name?.trim()} onClick={onSavePackage}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Add Package
+                  {editingPackageId ? 'Save Package' : 'Add Package'}
                 </Button>
               </div>
             </div>
 
             <div className="rounded-lg border p-4 space-y-4">
-              <div className="font-medium">New BOQ Item</div>
+              <div className="font-medium">{editingBoqItemId ? 'Edit BOQ Item' : 'New BOQ Item'}</div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Package</Label>
@@ -304,12 +372,20 @@ export function ProjectPackagesTab({
                   <Input value={boqDraft.notes || ''} onChange={(event) => setBoqDraft((current) => ({ ...current, notes: event.target.value || undefined }))} />
                 </div>
               </div>
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
                 <span>{selectedPackageBoqItems.length} existing BOQ lines in the selected package</span>
-                <Button disabled={!boqDraft.projectPackageId || !boqDraft.description?.trim()} onClick={onAddBoqItem}>
+                <div className="flex items-center gap-2">
+                  {editingBoqItemId ? (
+                    <Button variant="outline" onClick={onCancelBoqItemEdit}>
+                      <X className="mr-2 h-4 w-4" />
+                      Cancel
+                    </Button>
+                  ) : null}
+                  <Button disabled={!boqDraft.projectPackageId || !boqDraft.description?.trim()} onClick={onSaveBoqItem}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Add BOQ Item
-                </Button>
+                    {editingBoqItemId ? 'Save BOQ Item' : 'Add BOQ Item'}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -329,8 +405,23 @@ export function ProjectPackagesTab({
                       <Badge variant="outline">{formatCatalogLabel(item.packageType)}</Badge>
                       <Badge>{formatCatalogLabel(item.status)}</Badge>
                       {item.projectPhaseName ? <Badge variant="secondary">{item.projectPhaseName}</Badge> : null}
+                      <Badge variant="outline" className={getPhaseSyncTone(item.phaseCommercialSyncStatus)}>
+                        {item.phaseCommercialSyncStatus}
+                      </Badge>
                     </div>
                     {item.description ? <div className="text-sm text-muted-foreground">{item.description}</div> : null}
+                    {item.phaseCommercialSyncMessage ? (
+                      <div className={`rounded-md border px-3 py-2 text-sm ${getPhaseSyncTone(item.phaseCommercialSyncStatus)}`}>
+                        <div>{item.phaseCommercialSyncMessage}</div>
+                        {item.recommendedNextAction ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
+                            <ArrowRightCircle className="h-3.5 w-3.5" />
+                            <span>{item.recommendedNextAction}</span>
+                            {item.recommendedNextStatus ? <Badge variant="outline">{formatCatalogLabel(item.recommendedNextStatus)}</Badge> : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                       <div>Budget {formatMoney(item.budgetAmount, item.currency)}</div>
                       <div>Committed {formatMoney(item.committedAmount, item.currency)}</div>
@@ -347,6 +438,10 @@ export function ProjectPackagesTab({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => onEditPackage(item)}>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => onDeletePackage(item.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -374,9 +469,15 @@ export function ProjectPackagesTab({
                           </div>
                           {boqItem.notes ? <div className="text-sm text-muted-foreground">{boqItem.notes}</div> : null}
                         </div>
-                        <Button variant="ghost" size="sm" onClick={() => onDeleteBoqItem(boqItem.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => onEditBoqItem(boqItem)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => onDeleteBoqItem(boqItem.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     ))
                   )}

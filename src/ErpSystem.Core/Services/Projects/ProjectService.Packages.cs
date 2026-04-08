@@ -592,17 +592,28 @@ public partial class ProjectService
         IReadOnlyDictionary<Guid, ProcurementPlanItem> procurementPlanLookup,
         IReadOnlyDictionary<Guid, PurchaseRequisition> purchaseRequisitionLookup,
         IReadOnlyDictionary<Guid, PurchaseOrder> purchaseOrderLookup,
-        IReadOnlyList<ProjectBoqItemDto> boqItems) => new()
+        IReadOnlyList<ProjectBoqItemDto> boqItems)
     {
+        var phase = entity.ProjectPhaseId.HasValue && phaseLookup.TryGetValue(entity.ProjectPhaseId.Value, out var resolvedPhase)
+            ? resolvedPhase
+            : null;
+
+        return new ProjectPackageDto
+        {
         Id = entity.Id,
         ProjectId = entity.ProjectId,
         ProjectPhaseId = entity.ProjectPhaseId,
-        ProjectPhaseName = entity.ProjectPhaseId.HasValue && phaseLookup.TryGetValue(entity.ProjectPhaseId.Value, out var phase) ? phase.Name : null,
+        ProjectPhaseName = phase?.Name,
         Code = entity.Code,
         Name = entity.Name,
         Description = entity.Description,
         PackageType = entity.PackageType,
         Status = entity.Status,
+        IsPhaseCommerciallyAligned = phase == null || IsPackageCommerciallyAlignedToPhase(phase, entity),
+        PhaseCommercialSyncStatus = ResolvePackagePhaseCommercialSyncStatus(phase, entity),
+        PhaseCommercialSyncMessage = BuildPackagePhaseCommercialSyncMessage(phase, entity),
+        RecommendedNextStatus = ResolveRecommendedNextStatus(phase, entity),
+        RecommendedNextAction = BuildRecommendedPackageNextAction(phase, entity),
         SortOrder = entity.SortOrder,
         ProcurementRoute = entity.ProcurementRoute,
         ContractStrategy = entity.ContractStrategy,
@@ -635,7 +646,8 @@ public partial class ProjectService
         Currency = entity.Currency,
         Notes = entity.Notes,
         BoqItems = boqItems.ToList()
-    };
+        };
+    }
 
     private static ProjectBoqItemDto MapToDto(ProjectBoqItem entity, ProjectPackage? package) => new()
     {

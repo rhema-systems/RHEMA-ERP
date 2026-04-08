@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useMemo } from 'react';
+import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type {
   CreateProjectCommissioningItemDto,
   CreateProjectHandoverItemDto,
+  CreateProjectUnitHandoverBatchDto,
   ProjectDetailDto,
   ProjectUnitDto,
 } from '@/services/projectService';
@@ -26,11 +27,15 @@ type ProjectHandoverTabProps = {
   handoverTypeOptions: string[];
   formatCatalogLabel: (value?: string | null) => string;
   formatDateLabel: (value?: string) => string;
+  onAddHandoverBatch: (dto: CreateProjectUnitHandoverBatchDto) => Promise<void>;
+  onDeleteHandoverBatch: (unitHandoverBatchId: string) => Promise<void>;
   onAddCommissioningItem: () => void;
   onDeleteCommissioningItem: (commissioningItemId: string) => void;
   onAddHandoverItem: () => void;
   onDeleteHandoverItem: (handoverItemId: string) => void;
 };
+
+const DEFAULT_HANDOVER_BATCH_STATUSES = ['Planned', 'InPreparation', 'Active', 'Completed', 'Closed'];
 
 export function ProjectHandoverTab({
   project,
@@ -44,11 +49,17 @@ export function ProjectHandoverTab({
   handoverTypeOptions,
   formatCatalogLabel,
   formatDateLabel,
+  onAddHandoverBatch,
+  onDeleteHandoverBatch,
   onAddCommissioningItem,
   onDeleteCommissioningItem,
   onAddHandoverItem,
   onDeleteHandoverItem,
 }: ProjectHandoverTabProps) {
+  const [handoverBatchDraft, setHandoverBatchDraft] = useState<CreateProjectUnitHandoverBatchDto>({
+    name: '',
+    status: DEFAULT_HANDOVER_BATCH_STATUSES[0],
+  });
   const outstandingCommissioningCount = useMemo(
     () => project.commissioningItems.filter((item) => !['Completed', 'Waived'].includes(item.status)).length,
     [project.commissioningItems],
@@ -65,6 +76,48 @@ export function ProjectHandoverTab({
     () => project.handoverItems.filter((item) => item.handoverType === 'PracticalCompletion').length,
     [project.handoverItems],
   );
+  const handoverBatchItemCounts = useMemo(
+    () => project.handoverItems.reduce<Record<string, number>>((accumulator, item) => {
+      if (item.projectUnitHandoverBatchId) {
+        accumulator[item.projectUnitHandoverBatchId] = (accumulator[item.projectUnitHandoverBatchId] || 0) + 1;
+      }
+      return accumulator;
+    }, {}),
+    [project.handoverItems],
+  );
+  const selectedHandoverUnit = useMemo(
+    () => units.find((item) => item.id === handoverDraft.projectUnitId),
+    [handoverDraft.projectUnitId, units],
+  );
+  const availableHandoverBatches = useMemo(
+    () => project.unitHandoverBatches.filter((item) => {
+      if (selectedHandoverUnit?.projectBuildingId && item.projectBuildingId && item.projectBuildingId !== selectedHandoverUnit.projectBuildingId) {
+        return false;
+      }
+      if (selectedHandoverUnit?.projectFloorId && item.projectFloorId && item.projectFloorId !== selectedHandoverUnit.projectFloorId) {
+        return false;
+      }
+      return true;
+    }),
+    [project.unitHandoverBatches, selectedHandoverUnit?.projectBuildingId, selectedHandoverUnit?.projectFloorId],
+  );
+
+  const handleAddHandoverBatch = async () => {
+    if (!handoverBatchDraft.name?.trim()) return;
+    await onAddHandoverBatch({
+      ...handoverBatchDraft,
+      name: handoverBatchDraft.name.trim(),
+      code: handoverBatchDraft.code?.trim() || undefined,
+      notes: handoverBatchDraft.notes?.trim() || undefined,
+      status: handoverBatchDraft.status || DEFAULT_HANDOVER_BATCH_STATUSES[0],
+    });
+    setHandoverBatchDraft({
+      name: '',
+      status: DEFAULT_HANDOVER_BATCH_STATUSES[0],
+      projectBuildingId: handoverBatchDraft.projectBuildingId,
+      projectFloorId: handoverBatchDraft.projectFloorId,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -92,6 +145,104 @@ export function ProjectHandoverTab({
             <div className="text-sm text-muted-foreground">Practical Completion</div>
             <div className="text-2xl font-semibold">{practicalCompletionCount}</div>
             <div className="text-sm text-muted-foreground">Formal closeout milestones tracked</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Phased Handover Batches</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-6 xl:grid-cols-[minmax(0,380px)_1fr]">
+          <div className="space-y-3 rounded-lg border p-4">
+            <div className="font-medium">Add Batch</div>
+            <div className="grid gap-3">
+              <div className="grid gap-2">
+                <Label>Building</Label>
+                <Select
+                  value={handoverBatchDraft.projectBuildingId || 'none'}
+                  onValueChange={(value) => setHandoverBatchDraft((current) => ({
+                    ...current,
+                    projectBuildingId: value === 'none' ? undefined : value,
+                    projectFloorId: undefined,
+                  }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Optional building" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No building</SelectItem>
+                    {project.buildings.map((building) => <SelectItem key={building.id} value={building.id}>{building.code ? `${building.code} · ${building.name}` : building.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Floor</Label>
+                <Select
+                  value={handoverBatchDraft.projectFloorId || 'none'}
+                  onValueChange={(value) => setHandoverBatchDraft((current) => ({ ...current, projectFloorId: value === 'none' ? undefined : value }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Optional floor" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No floor</SelectItem>
+                    {project.floors
+                      .filter((floor) => !handoverBatchDraft.projectBuildingId || floor.projectBuildingId === handoverBatchDraft.projectBuildingId)
+                      .map((floor) => <SelectItem key={floor.id} value={floor.id}>{floor.code ? `${floor.code} · ${floor.name}` : floor.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Code</Label>
+                <Input value={handoverBatchDraft.code || ''} onChange={(event) => setHandoverBatchDraft((current) => ({ ...current, code: event.target.value || undefined }))} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Name</Label>
+                <Input value={handoverBatchDraft.name || ''} onChange={(event) => setHandoverBatchDraft((current) => ({ ...current, name: event.target.value }))} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Status</Label>
+                <Select value={handoverBatchDraft.status || DEFAULT_HANDOVER_BATCH_STATUSES[0]} onValueChange={(value) => setHandoverBatchDraft((current) => ({ ...current, status: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{DEFAULT_HANDOVER_BATCH_STATUSES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Planned Handover</Label>
+                <Input type="date" value={handoverBatchDraft.plannedHandoverDate || ''} onChange={(event) => setHandoverBatchDraft((current) => ({ ...current, plannedHandoverDate: event.target.value || undefined }))} />
+              </div>
+              <Button disabled={!handoverBatchDraft.name?.trim()} onClick={() => { void handleAddHandoverBatch(); }}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Handover Batch
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {project.unitHandoverBatches.length === 0 ? (
+              <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+                No phased handover batches have been recorded yet.
+              </div>
+            ) : null}
+            {project.unitHandoverBatches.map((batch) => (
+              <div key={batch.id} className="rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{batch.name}</div>
+                      {batch.code ? <Badge variant="outline">{batch.code}</Badge> : null}
+                      <Badge variant="secondary">{formatCatalogLabel(batch.status)}</Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                      <span>{batch.projectBuildingName || 'Whole project'}{batch.projectFloorName ? ` · ${batch.projectFloorName}` : ''}</span>
+                      <span>{handoverBatchItemCounts[batch.id] || 0} handover items</span>
+                      {batch.plannedHandoverDate ? <span>Planned {formatDateLabel(batch.plannedHandoverDate)}</span> : null}
+                      {batch.actualHandoverDate ? <span>Actual {formatDateLabel(batch.actualHandoverDate)}</span> : null}
+                    </div>
+                    {batch.notes ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{batch.notes}</div> : null}
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => { void onDeleteHandoverBatch(batch.id); }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -231,11 +382,41 @@ export function ProjectHandoverTab({
               </div>
               <div className="grid gap-2">
                 <Label>Unit</Label>
-                <Select value={handoverDraft.projectUnitId || 'none'} onValueChange={(value) => setHandoverDraft((current) => ({ ...current, projectUnitId: value === 'none' ? undefined : value }))}>
+                <Select
+                  value={handoverDraft.projectUnitId || 'none'}
+                  onValueChange={(value) => setHandoverDraft((current) => {
+                    const projectUnitId = value === 'none' ? undefined : value;
+                    const selectedUnit = units.find((item) => item.id === projectUnitId);
+                    const nextBatchStillValid = current.projectUnitHandoverBatchId && project.unitHandoverBatches.some((batch) => {
+                      if (batch.id !== current.projectUnitHandoverBatchId) return false;
+                      if (selectedUnit?.projectBuildingId && batch.projectBuildingId && batch.projectBuildingId !== selectedUnit.projectBuildingId) return false;
+                      if (selectedUnit?.projectFloorId && batch.projectFloorId && batch.projectFloorId !== selectedUnit.projectFloorId) return false;
+                      return true;
+                    });
+                    return {
+                      ...current,
+                      projectUnitId,
+                      projectUnitHandoverBatchId: nextBatchStillValid ? current.projectUnitHandoverBatchId : undefined,
+                    };
+                  })}
+                >
                   <SelectTrigger><SelectValue placeholder="Whole project" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Whole project</SelectItem>
                     {units.map((unit) => <SelectItem key={unit.id} value={unit.id}>{unit.code ? `${unit.code} · ${unit.name}` : unit.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Handover Batch</Label>
+                <Select
+                  value={handoverDraft.projectUnitHandoverBatchId || 'none'}
+                  onValueChange={(value) => setHandoverDraft((current) => ({ ...current, projectUnitHandoverBatchId: value === 'none' ? undefined : value }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Optional batch" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No batch</SelectItem>
+                    {availableHandoverBatches.map((batch) => <SelectItem key={batch.id} value={batch.id}>{batch.code ? `${batch.code} · ${batch.name}` : batch.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -283,12 +464,18 @@ export function ProjectHandoverTab({
                       <Badge>{formatCatalogLabel(item.status)}</Badge>
                       <Badge variant="outline">{formatCatalogLabel(item.handoverType)}</Badge>
                       {item.projectUnitName ? <Badge variant="secondary">{item.projectUnitCode ? `${item.projectUnitCode} · ${item.projectUnitName}` : item.projectUnitName}</Badge> : null}
+                      {item.projectUnitHandoverBatchName ? (
+                        <Badge variant="secondary">
+                          {item.projectUnitHandoverBatchCode ? `${item.projectUnitHandoverBatchCode} · ` : ''}{item.projectUnitHandoverBatchName}
+                        </Badge>
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
                       {item.responsibleParty ? <span>{item.responsibleParty}</span> : null}
                       {item.referenceNumber ? <span>Ref {item.referenceNumber}</span> : null}
                       {item.targetDate ? <span>Target {formatDateLabel(item.targetDate)}</span> : null}
                       {item.completedDate ? <span>Completed {formatDateLabel(item.completedDate)}</span> : null}
+                      {item.projectUnitHandoverBatchStatus ? <span>Batch {formatCatalogLabel(item.projectUnitHandoverBatchStatus)}</span> : null}
                     </div>
                     {item.notes ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{item.notes}</div> : null}
                   </div>

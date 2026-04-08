@@ -1,9 +1,13 @@
 export const PROJECT_WORKSPACE_TABS = [
   'overview',
+  'phases',
+  'design',
   'plan',
   'packages',
   'commercial',
+  'commercial-admin',
   'approvals',
+  'site-controls',
   'units',
   'variations',
   'handover',
