@@ -1,10 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Entities;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Data;
@@ -18,11 +20,16 @@ public class SalesAgreementService : ISalesAgreementService
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<SalesAgreementService> _logger;
+    private readonly ICurrentUserService _currentUserService;
 
-    public SalesAgreementService(ApplicationDbContext context, ILogger<SalesAgreementService> logger)
+    public SalesAgreementService(
+        ApplicationDbContext context,
+        ILogger<SalesAgreementService> logger,
+        ICurrentUserService currentUserService)
     {
         _context = context;
         _logger = logger;
+        _currentUserService = currentUserService;
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────
@@ -145,6 +152,11 @@ public class SalesAgreementService : ISalesAgreementService
     {
         var bp = await _context.Set<BusinessPartner>().FindAsync(dto.BusinessPartnerId)
             ?? throw new ArgumentException("Business Partner not found");
+        var tenantId = await ResolveAgreementTenantIdAsync(bp);
+        if (tenantId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Cannot create sales agreement because no valid tenant could be resolved for the selected customer.");
+        }
 
         var agreement = new SalesAgreement
         {
@@ -175,6 +187,7 @@ public class SalesAgreementService : ISalesAgreementService
             Notes = dto.Notes,
             InternalNotes = dto.InternalNotes,
             TermsAndConditions = dto.TermsAndConditions,
+            TenantId = tenantId,
         };
 
         // Lines
@@ -198,6 +211,7 @@ public class SalesAgreementService : ISalesAgreementService
                     DiscountPercentage = l.DiscountPercentage,
                     DiscountTiersJson = l.DiscountTiersJson,
                     Notes = l.Notes,
+                    TenantId = tenantId,
                 });
             }
         }
@@ -220,6 +234,7 @@ public class SalesAgreementService : ISalesAgreementService
                     DueDate = m.DueDate,
                     Notes = m.Notes,
                     Status = "Pending",
+                    TenantId = tenantId,
                 });
             }
         }
@@ -229,6 +244,48 @@ public class SalesAgreementService : ISalesAgreementService
         _logger.LogInformation("Created Sales Agreement {Number}", agreement.DocumentNumber);
 
         return await GetByIdAsync(agreement.Id);
+    }
+
+    private async Task<Guid> ResolveAgreementTenantIdAsync(BusinessPartner businessPartner)
+    {
+        var candidateTenantIds = new List<Guid>();
+        if (businessPartner.TenantId != Guid.Empty)
+        {
+            candidateTenantIds.Add(businessPartner.TenantId);
+        }
+
+        if (_currentUserService.TenantId.HasValue && _currentUserService.TenantId.Value != Guid.Empty)
+        {
+            candidateTenantIds.Add(_currentUserService.TenantId.Value);
+        }
+
+        candidateTenantIds = candidateTenantIds.Distinct().ToList();
+        if (candidateTenantIds.Count == 0)
+        {
+            return Guid.Empty;
+        }
+
+        var validTenantIds = await _context.Set<Tenant>()
+            .Where(x => candidateTenantIds.Contains(x.Id))
+            .Select(x => x.Id)
+            .ToListAsync();
+
+        if (businessPartner.TenantId != Guid.Empty && validTenantIds.Contains(businessPartner.TenantId))
+        {
+            return businessPartner.TenantId;
+        }
+
+        if (_currentUserService.TenantId.HasValue && validTenantIds.Contains(_currentUserService.TenantId.Value))
+        {
+            _logger.LogWarning(
+                "Falling back to current user tenant {TenantId} while creating sales agreement for business partner {BusinessPartnerId} because partner tenant {BusinessPartnerTenantId} is not valid.",
+                _currentUserService.TenantId.Value,
+                businessPartner.Id,
+                businessPartner.TenantId);
+            return _currentUserService.TenantId.Value;
+        }
+
+        return Guid.Empty;
     }
 
     public async Task<SalesAgreementDetailDto> UpdateAsync(Guid id, UpdateSalesAgreementDto dto)

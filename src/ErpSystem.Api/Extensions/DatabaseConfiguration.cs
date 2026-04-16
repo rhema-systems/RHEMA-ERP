@@ -111,7 +111,10 @@ namespace ErpSystem.Api.Extensions
             // The ERP intentionally keeps some historical dependent rows while soft-deleting principals.
             // We fix real model issues separately and suppress this noisy validation warning during startup.
             options.ConfigureWarnings(warnings =>
-                warnings.Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
+                warnings
+                    .Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning)
+                    .Ignore(CoreEventId.MappedEntityTypeIgnoredWarning)
+                    .Ignore(CoreEventId.MappedNavigationIgnoredWarning));
         }
 
         #region SQL Server Configuration

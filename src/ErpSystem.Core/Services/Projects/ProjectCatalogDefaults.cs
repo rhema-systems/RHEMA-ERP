@@ -25,6 +25,7 @@ public static class ProjectCatalogDefaults
         Create("funding-sources", "Funding Sources", "Customer Contract", "Internal Budget", "Capex Allocation", "Grant Funding", "Department Allocation"),
         Create("cost-categories", "Cost Categories", "Labor", "Materials", "Procurement", "Travel", "Equipment", "Subcontractor", "Miscellaneous"),
         Create("expense-categories", "Expense Categories", "Travel", "Meals", "Lodging", "Supplies", "Equipment", "Other"),
+        Create("boq-item-types", "BOQ Item Types", "Item", "ProvisionalSum", "PrimeCost", "Variation", "Allowance"),
         Create("resource-roles", "Resource Roles", "ProjectManager", "TeamMember", "TaskOwner", "FinanceOfficer", "RiskOfficer", "ProcurementOfficer", "ExternalContributor"),
         Create("member-roles", "Member Roles", "Sponsor", "Project Manager", "Team Member", "Task Owner", "Finance Officer", "External Contributor"),
         Create("task-statuses", "Task Statuses", "New", "Assigned", "InProgress", "Blocked", "PendingReview", "Completed", "Closed", "Cancelled"),

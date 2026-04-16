@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useMemo } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +11,7 @@ import type { BusinessPartnerDto } from '@/services/businessPartnerService';
 import type {
   CreateProjectCustomerVariationDto,
   ProjectDetailDto,
+  ProjectCustomerVariationDto,
   ProjectLinkOptionsDto,
   ProjectSalesAgreementLinkOptionDto,
   ProjectSalesOrderLinkOptionDto,
@@ -24,13 +25,16 @@ type ProjectCustomerVariationsTabProps = {
   linkOptions: ProjectLinkOptionsDto;
   variationDraft: CreateProjectCustomerVariationDto;
   setVariationDraft: Dispatch<SetStateAction<CreateProjectCustomerVariationDto>>;
+  editingVariationId: string | null;
   variationStatusOptions: string[];
   variationTimingOptions: string[];
   formatCatalogLabel: (value?: string | null) => string;
   formatDateLabel: (value?: string) => string;
   formatMoney: (value: number | undefined, currency?: string | null, maximumFractionDigits?: number) => string;
   followThroughBusyKey: string | null;
-  onAddVariation: () => void;
+  onSaveVariation: () => void;
+  onEditVariation: (variation: ProjectCustomerVariationDto) => void;
+  onCancelVariationEdit: () => void;
   onDeleteVariation: (variationId: string) => void;
   onCreateVariationJobCard: (variationId: string) => void;
   onCreateVariationWorkOrder: (variationId: string) => void;
@@ -52,13 +56,16 @@ export function ProjectCustomerVariationsTab({
   linkOptions,
   variationDraft,
   setVariationDraft,
+  editingVariationId,
   variationStatusOptions,
   variationTimingOptions,
   formatCatalogLabel,
   formatDateLabel,
   formatMoney,
   followThroughBusyKey,
-  onAddVariation,
+  onSaveVariation,
+  onEditVariation,
+  onCancelVariationEdit,
   onDeleteVariation,
   onCreateVariationJobCard,
   onCreateVariationWorkOrder,
@@ -126,7 +133,7 @@ export function ProjectCustomerVariationsTab({
           </div>
 
           <div className="rounded-lg border p-4 space-y-4">
-            <div className="font-medium">Add Customer Variation</div>
+            <div className="font-medium">{editingVariationId ? 'Edit Customer Variation' : 'Add Customer Variation'}</div>
             {!hasMaintenanceAssetLink ? (
               <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
                 Link a maintenance asset in the Access tab to enable direct job card and work order follow-through for variations.
@@ -319,10 +326,16 @@ export function ProjectCustomerVariationsTab({
                 <Textarea rows={2} value={variationDraft.notes || ''} onChange={(event) => setVariationDraft((current) => ({ ...current, notes: event.target.value || undefined }))} />
               </div>
             </div>
-            <div className="flex justify-end">
-              <Button disabled={!variationDraft.title?.trim()} onClick={onAddVariation}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Variation
+            <div className="flex justify-end gap-2">
+              {editingVariationId ? (
+                <Button variant="outline" onClick={onCancelVariationEdit}>
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              ) : null}
+              <Button disabled={!variationDraft.title?.trim()} onClick={onSaveVariation}>
+                {editingVariationId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+                {editingVariationId ? 'Save Variation' : 'Add Variation'}
               </Button>
             </div>
           </div>
@@ -376,6 +389,10 @@ export function ProjectCustomerVariationsTab({
                     {variation.notes ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{variation.notes}</div> : null}
                   </div>
                   <div className="flex flex-col items-stretch gap-2 xl:items-end">
+                    <Button variant="outline" size="sm" onClick={() => onEditVariation(variation)}>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
                     {!variation.jobCardId ? (
                       <Button
                         variant="outline"

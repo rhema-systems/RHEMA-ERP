@@ -83,14 +83,25 @@ public partial class ProjectService
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.View);
         var phases = (await GetProjectPhaseEntitiesAsync(projectId)).ToList();
-        var packages = (await GetProjectPackageEntitiesAsync(projectId)).ToList();
+        var rawPackages = (await GetProjectPackageEntitiesAsync(projectId)).ToList();
         var boqItems = (await GetProjectBoqItemEntitiesAsync(projectId)).ToList();
         var variationOrders = (await GetProjectVariationOrderEntitiesAsync(projectId)).ToList();
         var interimValuations = (await GetProjectInterimValuationEntitiesAsync(projectId)).ToList();
         var paymentCertificates = (await GetProjectPaymentCertificateEntitiesAsync(projectId)).ToList();
         var extensionOfTimeRequests = (await GetProjectExtensionOfTimeEntitiesAsync(projectId)).ToList();
         var finalAccount = await GetProjectFinalAccountEntityAsync(projectId);
-        var currencyCode = await GetProjectBaseCurrencyCodeAsync();
+        var derivationContext = await BuildProjectCommercialDerivationContextAsync(projectId, rawPackages, boqItems, paymentCertificates, interimValuations);
+        var packages = await MapProjectPackagesAsync(projectId, rawPackages, boqItems, derivationContext);
+        var finalAccountComputation = finalAccount == null
+            ? null
+            : await BuildProjectFinalAccountDerivationAsync(project, finalAccount.ContractId, finalAccount.Currency, finalAccount.SettlementDate);
+        var currencyCode = await GetProjectBaseCurrencyCodeAsync(project);
+        var conversionCurrencies = packages.Select(x => x.Currency)
+            .Concat(variationOrders.Select(x => x.Currency))
+            .Concat(interimValuations.Select(x => x.Currency))
+            .Concat(paymentCertificates.Select(x => x.Currency))
+            .Concat(finalAccountComputation != null ? [finalAccountComputation.CurrencyCode] : []);
+        var (tenantBaseCurrencyCode, exchangeRates) = await BuildCurrencyConversionContextAsync(currencyCode, conversionCurrencies);
 
         var alerts = new List<ProjectCommercialAlertDto>();
         if (packages.Count == 0)
@@ -122,7 +133,7 @@ public partial class ProjectService
             });
         }
 
-        var phaseLinkedPackages = packages
+        var phaseLinkedPackages = rawPackages
             .Where(x => x.ProjectPhaseId.HasValue)
             .Join(phases, package => package.ProjectPhaseId!.Value, phase => phase.Id, (package, phase) => new { Package = package, Phase = phase })
             .ToList();
@@ -156,10 +167,38 @@ public partial class ProjectService
             });
         }
 
-        var packageBudgetAmount = packages.Sum(x => x.BudgetAmount ?? 0m);
-        var packageCommittedAmount = packages.Sum(x => x.CommittedAmount ?? 0m);
-        var packageActualAmount = packages.Sum(x => x.ActualAmount ?? 0m);
-        var packageForecastAmount = packages.Sum(x => x.ForecastAmount ?? 0m);
+        var packageBudgetAmount = SumConvertedAmounts(
+            packages,
+            x => x.BudgetAmount ?? 0m,
+            x => x.Currency,
+            currencyCode,
+            tenantBaseCurrencyCode,
+            exchangeRates,
+            out var packageBudgetConversionFailures);
+        var packageCommittedAmount = SumConvertedAmounts(
+            packages,
+            x => x.CommittedAmount ?? 0m,
+            x => x.Currency,
+            currencyCode,
+            tenantBaseCurrencyCode,
+            exchangeRates,
+            out var packageCommittedConversionFailures);
+        var packageActualAmount = SumConvertedAmounts(
+            packages,
+            x => x.ActualAmount ?? 0m,
+            x => x.Currency,
+            currencyCode,
+            tenantBaseCurrencyCode,
+            exchangeRates,
+            out var packageActualConversionFailures);
+        var packageForecastAmount = SumConvertedAmounts(
+            packages,
+            x => x.ForecastAmount ?? 0m,
+            x => x.Currency,
+            currencyCode,
+            tenantBaseCurrencyCode,
+            exchangeRates,
+            out var packageForecastConversionFailures);
         var approvedBudget = project.ApprovedBudget ?? 0m;
 
         if (approvedBudget > 0m && packageForecastAmount > approvedBudget)
@@ -171,15 +210,68 @@ public partial class ProjectService
             });
         }
 
-        var approvedVariationAmount = variationOrders
-            .Where(x => x.Status == ProjectVariationOrderStatuses.Approved || x.Status == ProjectVariationOrderStatuses.Implemented || x.Status == ProjectVariationOrderStatuses.Closed)
-            .Sum(x => x.ApprovedAmount ?? x.EstimatedAmount ?? 0m);
-        var netValuationAmount = interimValuations.Sum(x => x.NetValuationAmount);
-        var netCertifiedAmount = paymentCertificates.Sum(x => x.NetCertifiedAmount);
-        var retentionHeldAmount = paymentCertificates.Sum(x => x.RetentionHeldAmount) + interimValuations.Sum(x => x.RetentionAmount);
+        var (approvedVariationAmount, variationConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+            variationOrders.Where(x =>
+                x.Status == ProjectVariationOrderStatuses.Approved
+                || x.Status == ProjectVariationOrderStatuses.Implemented
+                || x.Status == ProjectVariationOrderStatuses.Closed),
+            x => x.ApprovedAmount ?? x.EstimatedAmount ?? 0m,
+            x => x.Currency,
+            x => x.ApprovedDate ?? x.ImplementedDate ?? x.RequestedDate,
+            currencyCode);
+        var (netValuationAmount, valuationConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+            interimValuations,
+            x => x.NetValuationAmount,
+            x => x.Currency,
+            x => x.ValuationDate,
+            currencyCode);
+        var (netCertifiedAmount, certificationConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+            paymentCertificates,
+            x => x.NetCertifiedAmount,
+            x => x.Currency,
+            x => x.IssueDate,
+            currencyCode);
+        var (certificateRetentionHeldAmount, certificateRetentionConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+            paymentCertificates,
+            x => x.RetentionHeldAmount,
+            x => x.Currency,
+            x => x.IssueDate,
+            currencyCode);
+        var (valuationRetentionHeldAmount, valuationRetentionConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+            interimValuations,
+            x => x.RetentionAmount,
+            x => x.Currency,
+            x => x.ValuationDate,
+            currencyCode);
+        var retentionHeldAmount = certificateRetentionHeldAmount + valuationRetentionHeldAmount;
         var approvedExtensionDays = extensionOfTimeRequests
             .Where(x => x.Status == ProjectExtensionOfTimeStatuses.Approved || x.Status == ProjectExtensionOfTimeStatuses.Implemented || x.Status == ProjectExtensionOfTimeStatuses.Closed)
             .Sum(x => x.DaysApproved ?? 0);
+        decimal? finalAccountValue = null;
+        var finalAccountConversionFailures = 0;
+        if (finalAccountComputation != null)
+        {
+            var (convertedFinalAccountValue, convertedFinalAccountFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+                [finalAccountComputation],
+                x => x.FinalAccountValue,
+                x => x.CurrencyCode,
+                x => x.SettlementDate,
+                currencyCode);
+            finalAccountValue = convertedFinalAccountValue;
+            finalAccountConversionFailures = convertedFinalAccountFailures;
+        }
+
+        var totalConversionFailures =
+            packageBudgetConversionFailures
+            + packageCommittedConversionFailures
+            + packageActualConversionFailures
+            + packageForecastConversionFailures
+            + variationConversionFailures
+            + valuationConversionFailures
+            + certificationConversionFailures
+            + certificateRetentionConversionFailures
+            + valuationRetentionConversionFailures
+            + finalAccountConversionFailures;
 
         if (variationOrders.Count == 0)
         {
@@ -208,6 +300,15 @@ public partial class ProjectService
             });
         }
 
+        if (totalConversionFailures > 0)
+        {
+            alerts.Add(new ProjectCommercialAlertDto
+            {
+                Severity = "Medium",
+                Message = $"{totalConversionFailures} commercial amount(s) could not be converted to {currencyCode}; those totals still include their source values."
+            });
+        }
+
         var phaseRollups = phases
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.Name)
@@ -216,6 +317,38 @@ public partial class ProjectService
                 var phasePackages = packages.Where(x => x.ProjectPhaseId == phase.Id).ToList();
                 var phasePackageIds = phasePackages.Select(x => x.Id).ToHashSet();
                 var phaseBoqItems = boqItems.Where(x => phasePackageIds.Contains(x.ProjectPackageId)).ToList();
+                var phaseBudgetAmount = SumConvertedAmounts(
+                    phasePackages,
+                    x => x.BudgetAmount ?? 0m,
+                    x => x.Currency,
+                    currencyCode,
+                    tenantBaseCurrencyCode,
+                    exchangeRates,
+                    out _);
+                var phaseCommittedAmount = SumConvertedAmounts(
+                    phasePackages,
+                    x => x.CommittedAmount ?? 0m,
+                    x => x.Currency,
+                    currencyCode,
+                    tenantBaseCurrencyCode,
+                    exchangeRates,
+                    out _);
+                var phaseActualAmount = SumConvertedAmounts(
+                    phasePackages,
+                    x => x.ActualAmount ?? 0m,
+                    x => x.Currency,
+                    currencyCode,
+                    tenantBaseCurrencyCode,
+                    exchangeRates,
+                    out _);
+                var phaseForecastAmount = SumConvertedAmounts(
+                    phasePackages,
+                    x => x.ForecastAmount ?? 0m,
+                    x => x.Currency,
+                    currencyCode,
+                    tenantBaseCurrencyCode,
+                    exchangeRates,
+                    out _);
 
                 return new ProjectPhaseCommercialRollupDto
                 {
@@ -224,11 +357,11 @@ public partial class ProjectService
                     PhaseSortOrder = phase.SortOrder,
                     PackageCount = phasePackages.Count,
                     BoqItemCount = phaseBoqItems.Count,
-                    BudgetAmount = phasePackages.Sum(x => x.BudgetAmount ?? 0m),
-                    CommittedAmount = phasePackages.Sum(x => x.CommittedAmount ?? 0m),
-                    ActualAmount = phasePackages.Sum(x => x.ActualAmount ?? 0m),
-                    ForecastAmount = phasePackages.Sum(x => x.ForecastAmount ?? 0m),
-                    VarianceAmount = phasePackages.Sum(x => x.BudgetAmount ?? 0m) - phasePackages.Sum(x => x.ForecastAmount ?? 0m)
+                    BudgetAmount = phaseBudgetAmount,
+                    CommittedAmount = phaseCommittedAmount,
+                    ActualAmount = phaseActualAmount,
+                    ForecastAmount = phaseForecastAmount,
+                    VarianceAmount = phaseBudgetAmount - phaseForecastAmount
                 };
             })
             .ToList();
@@ -238,6 +371,38 @@ public partial class ProjectService
             var unassignedPackages = packages.Where(x => !x.ProjectPhaseId.HasValue).ToList();
             var unassignedPackageIds = unassignedPackages.Select(x => x.Id).ToHashSet();
             var unassignedBoqItems = boqItems.Where(x => unassignedPackageIds.Contains(x.ProjectPackageId)).ToList();
+            var unassignedBudgetAmount = SumConvertedAmounts(
+                unassignedPackages,
+                x => x.BudgetAmount ?? 0m,
+                x => x.Currency,
+                currencyCode,
+                tenantBaseCurrencyCode,
+                exchangeRates,
+                out _);
+            var unassignedCommittedAmount = SumConvertedAmounts(
+                unassignedPackages,
+                x => x.CommittedAmount ?? 0m,
+                x => x.Currency,
+                currencyCode,
+                tenantBaseCurrencyCode,
+                exchangeRates,
+                out _);
+            var unassignedActualAmount = SumConvertedAmounts(
+                unassignedPackages,
+                x => x.ActualAmount ?? 0m,
+                x => x.Currency,
+                currencyCode,
+                tenantBaseCurrencyCode,
+                exchangeRates,
+                out _);
+            var unassignedForecastAmount = SumConvertedAmounts(
+                unassignedPackages,
+                x => x.ForecastAmount ?? 0m,
+                x => x.Currency,
+                currencyCode,
+                tenantBaseCurrencyCode,
+                exchangeRates,
+                out _);
             phaseRollups.Add(new ProjectPhaseCommercialRollupDto
             {
                 ProjectPhaseId = null,
@@ -245,11 +410,11 @@ public partial class ProjectService
                 PhaseSortOrder = int.MaxValue,
                 PackageCount = unassignedPackages.Count,
                 BoqItemCount = unassignedBoqItems.Count,
-                BudgetAmount = unassignedPackages.Sum(x => x.BudgetAmount ?? 0m),
-                CommittedAmount = unassignedPackages.Sum(x => x.CommittedAmount ?? 0m),
-                ActualAmount = unassignedPackages.Sum(x => x.ActualAmount ?? 0m),
-                ForecastAmount = unassignedPackages.Sum(x => x.ForecastAmount ?? 0m),
-                VarianceAmount = unassignedPackages.Sum(x => x.BudgetAmount ?? 0m) - unassignedPackages.Sum(x => x.ForecastAmount ?? 0m)
+                BudgetAmount = unassignedBudgetAmount,
+                CommittedAmount = unassignedCommittedAmount,
+                ActualAmount = unassignedActualAmount,
+                ForecastAmount = unassignedForecastAmount,
+                VarianceAmount = unassignedBudgetAmount - unassignedForecastAmount
             });
         }
 
@@ -257,6 +422,10 @@ public partial class ProjectService
         {
             ProjectId = project.Id,
             Currency = currencyCode,
+            PackageConversionBasis = "Current active exchange rates",
+            DocumentConversionBasis = "Document-date exchange rates",
+            MissingExchangeRateCount = totalConversionFailures,
+            HasConversionGaps = totalConversionFailures > 0,
             EstimatedBudget = project.EstimatedBudget ?? 0m,
             ApprovedBudget = approvedBudget,
             PackageBudgetAmount = packageBudgetAmount,
@@ -283,7 +452,7 @@ public partial class ProjectService
             ExtensionOfTimeCount = extensionOfTimeRequests.Count,
             ApprovedExtensionDays = approvedExtensionDays,
             FinalAccountStatus = finalAccount?.Status,
-            FinalAccountValue = finalAccount?.FinalAccountValue,
+            FinalAccountValue = finalAccountValue,
             PhaseRollups = phaseRollups.OrderBy(x => x.PhaseSortOrder).ThenBy(x => x.PhaseName).ToList(),
             Alerts = alerts
         };

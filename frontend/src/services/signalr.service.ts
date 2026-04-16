@@ -93,16 +93,18 @@ class SignalRService {
   private readonly hubUrl: string;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private isManualDisconnect = false;
+  private readonly enableSignalRDebugLogging = process.env.NEXT_PUBLIC_DEBUG_SIGNALR === 'true';
 
   constructor() {
-    // Construct hub URL with better debugging
     const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
     this.hubUrl = `${baseUrl}/api/hubs/dashboard`;
-    console.log('SignalR Service initialized:', {
-      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
-      baseUrl,
-      hubUrl: this.hubUrl
-    });
+    if (this.enableSignalRDebugLogging) {
+      console.log('SignalR Service initialized:', {
+        NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+        baseUrl,
+        hubUrl: this.hubUrl
+      });
+    }
   }
 
   // Event handlers
@@ -116,8 +118,7 @@ class SignalRService {
       return;
     }
 
-    const token = getStoredToken();
-    if (!token) {
+    if (!getStoredToken()) {
       console.warn('No authentication token available for SignalR connection');
       throw new Error('No authentication token available');
     }
@@ -136,21 +137,15 @@ class SignalRService {
 
     this.connection = new HubConnectionBuilder()
       .withUrl(this.hubUrl, {
-        accessTokenFactory: () => token,
-        withCredentials: false, // Changed from true to false
-        // Enable transport fallback: WebSockets -> ServerSentEvents -> LongPolling
-        transport: undefined, // Let SignalR choose the best transport
-        skipNegotiation: false, // Keep negotiation to determine best transport
-        // Add timeout configurations
+        accessTokenFactory: () => getStoredToken() || '',
+        withCredentials: false,
+        transport: undefined,
+        skipNegotiation: false,
         timeout: 30000, // 30 seconds
-        headers: {
-          'Authorization': `Bearer ${token}` // Add explicit authorization header
-        }
       })
-      .configureLogging(LogLevel.Information)
+      .configureLogging(this.enableSignalRDebugLogging ? LogLevel.Information : LogLevel.Warning)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
-          // More conservative retry strategy
           if (retryContext.previousRetryCount === 0) return 2000; // 2 seconds
           if (retryContext.previousRetryCount === 1) return 5000; // 5 seconds
           if (retryContext.previousRetryCount === 2) return 10000; // 10 seconds
@@ -164,11 +159,15 @@ class SignalRService {
 
     try {
       this.isManualDisconnect = false;
-      console.log(`Attempting to connect to SignalR hub: ${this.hubUrl}`);
+      if (this.enableSignalRDebugLogging) {
+        console.log(`Attempting to connect to SignalR hub: ${this.hubUrl}`);
+      }
       
       await this.connection.start();
       
-      console.log(`SignalR connection established successfully. ConnectionId: ${this.connection.connectionId}`);
+      if (this.enableSignalRDebugLogging) {
+        console.log(`SignalR connection established successfully. ConnectionId: ${this.connection.connectionId}`);
+      }
       
       this.notifyConnectionStateChange(this.connection.state);
       
@@ -216,7 +215,9 @@ class SignalRService {
     if (this.connection) {
       try {
         await this.connection.stop();
-        console.log('SignalR connection stopped');
+        if (this.enableSignalRDebugLogging) {
+          console.log('SignalR connection stopped');
+        }
       } catch (error) {
         console.error('Error stopping SignalR connection:', error);
       } finally {
@@ -230,7 +231,9 @@ class SignalRService {
 
     // Dashboard update events
     this.connection.on('DashboardUpdate', (data: DashboardData) => {
-      console.log('Received dashboard update:', data);
+      if (this.enableSignalRDebugLogging) {
+        console.log('Received dashboard update:', data);
+      }
       this.dashboardUpdateHandlers.forEach(handler => {
         try {
           handler(data);
@@ -242,7 +245,9 @@ class SignalRService {
 
     // Notification events
     this.connection.on('NewNotification', (notification: Notification) => {
-      console.log('Received new notification:', notification);
+      if (this.enableSignalRDebugLogging) {
+        console.log('Received new notification:', notification);
+      }
       this.notificationHandlers.forEach(handler => {
         try {
           handler(notification);
@@ -254,7 +259,9 @@ class SignalRService {
 
     // User session update events
     this.connection.on('UserSessionUpdate', (update: UserSessionUpdate) => {
-      console.log('Received user session update:', update);
+      if (this.enableSignalRDebugLogging) {
+        console.log('Received user session update:', update);
+      }
       this.userSessionUpdateHandlers.forEach(handler => {
         try {
           handler(update);
@@ -266,22 +273,29 @@ class SignalRService {
 
     // Connection state change events
     this.connection.onclose(async (error) => {
-      console.log('SignalR connection closed:', error);
+      if (this.enableSignalRDebugLogging) {
+        console.log('SignalR connection closed:', error);
+      }
       this.notifyConnectionStateChange(HubConnectionState.Disconnected);
       
       if (!this.isManualDisconnect) {
-        console.log('Attempting to reconnect...');
-        // Auto-reconnect is handled by SignalR, but we can add custom logic if needed
+        if (this.enableSignalRDebugLogging) {
+          console.log('Attempting to reconnect...');
+        }
       }
     });
 
     this.connection.onreconnecting((error) => {
-      console.log('SignalR reconnecting:', error);
+      if (this.enableSignalRDebugLogging) {
+        console.log('SignalR reconnecting:', error);
+      }
       this.notifyConnectionStateChange(HubConnectionState.Reconnecting);
     });
 
     this.connection.onreconnected((connectionId) => {
-      console.log('SignalR reconnected with connection ID:', connectionId);
+      if (this.enableSignalRDebugLogging) {
+        console.log('SignalR reconnected with connection ID:', connectionId);
+      }
       this.notifyConnectionStateChange(HubConnectionState.Connected);
     });
   }

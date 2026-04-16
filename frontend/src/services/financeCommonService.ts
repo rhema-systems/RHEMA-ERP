@@ -83,6 +83,56 @@ export interface UpdateCurrencyDto extends CreateCurrencyDto {
   id: string;
 }
 
+type CurrencyApiDto = Partial<{
+  id: string;
+  code: string;
+  currencyCode: string;
+  name: string;
+  currencyName: string;
+  symbol: string;
+  currencySymbol: string;
+  decimalPlaces: number;
+  exchangeRate: number;
+  exchangeRateDate: string;
+  isBaseCurrency: boolean;
+  isActive: boolean;
+  displayOrder: number;
+  formatString: string;
+  country: string;
+  countryName: string;
+  createdAt: string;
+  createdBy: string;
+  modifiedAt: string;
+  modifiedBy: string;
+  updatedAt: string;
+  updatedBy: string;
+}>;
+
+function normalizeCurrencyDto(currency: CurrencyApiDto): CurrencyDetailDto {
+  return {
+    id: currency.id ?? '',
+    code: currency.code ?? currency.currencyCode ?? '',
+    name: currency.name ?? currency.currencyName ?? '',
+    symbol: currency.symbol ?? currency.currencySymbol ?? '',
+    decimalPlaces: typeof currency.decimalPlaces === 'number' ? currency.decimalPlaces : 2,
+    exchangeRate: typeof currency.exchangeRate === 'number' ? currency.exchangeRate : 1,
+    exchangeRateDate: currency.exchangeRateDate,
+    isBaseCurrency: currency.isBaseCurrency ?? false,
+    isActive: currency.isActive ?? true,
+    displayOrder: typeof currency.displayOrder === 'number' ? currency.displayOrder : 0,
+    formatString: currency.formatString,
+    country: currency.country ?? currency.countryName,
+    createdAt: currency.createdAt ?? '',
+    createdBy: currency.createdBy,
+    modifiedAt: currency.modifiedAt ?? currency.updatedAt,
+    modifiedBy: currency.modifiedBy ?? currency.updatedBy,
+  };
+}
+
+function normalizeCurrencyList(currencies: CurrencyApiDto[]): CurrencyListDto[] {
+  return currencies.map(normalizeCurrencyDto);
+}
+
 // Payment Term Service
 export const paymentTermService = {
   // Get all payment terms
@@ -149,28 +199,33 @@ export const paymentTermService = {
 export const currencyService = {
   // Get all currencies
   getAll: async (): Promise<CurrencyListDto[]> => {
-    return api.get<CurrencyListDto[]>('/finance/Currencies');
+    const response = await api.get<CurrencyApiDto[]>('/finance/Currencies');
+    return normalizeCurrencyList(response ?? []);
   },
 
   // Get active currencies
   getActive: async (): Promise<CurrencyListDto[]> => {
-    return api.get<CurrencyListDto[]>('/finance/Currencies/active');
+    const response = await api.get<CurrencyApiDto[]>('/finance/Currencies/active');
+    return normalizeCurrencyList(response ?? []);
   },
 
   // Get currency by ID
   getById: async (id: string): Promise<CurrencyDetailDto> => {
-    return api.get<CurrencyDetailDto>(`/finance/Currencies/${id}`);
+    const response = await api.get<CurrencyApiDto>(`/finance/Currencies/${id}`);
+    return normalizeCurrencyDto(response ?? {});
   },
 
   // Get currency by code
   getByCode: async (code: string): Promise<CurrencyDetailDto> => {
-    return api.get<CurrencyDetailDto>(`/finance/Currencies/code/${code}`);
+    const response = await api.get<CurrencyApiDto>(`/finance/Currencies/code/${code}`);
+    return normalizeCurrencyDto(response ?? {});
   },
 
   // Get base currency
   getBaseCurrency: async (): Promise<CurrencyDetailDto | null> => {
     try {
-      return await api.get<CurrencyDetailDto>('/finance/Currencies/base');
+      const response = await api.get<CurrencyApiDto>('/finance/Currencies/base');
+      return normalizeCurrencyDto(response ?? {});
     } catch {
       return null;
     }
@@ -185,7 +240,8 @@ export const currencyService = {
         ? data.exchangeRateDate.toISOString()
         : data.exchangeRateDate
     };
-    return api.post<CurrencyDetailDto>('/finance/Currencies', apiData);
+    const response = await api.post<CurrencyApiDto>('/finance/Currencies', apiData);
+    return normalizeCurrencyDto(response ?? {});
   },
 
   // Update currency
@@ -197,7 +253,8 @@ export const currencyService = {
         ? data.exchangeRateDate.toISOString()
         : data.exchangeRateDate
     };
-    return api.put<CurrencyDetailDto>(`/finance/Currencies/${id}`, apiData);
+    const response = await api.put<CurrencyApiDto>(`/finance/Currencies/${id}`, apiData);
+    return normalizeCurrencyDto(response ?? {});
   },
 
   // Delete currency

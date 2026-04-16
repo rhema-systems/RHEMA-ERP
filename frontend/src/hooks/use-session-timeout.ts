@@ -31,10 +31,15 @@ export function useSessionTimeout() {
   const activityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch session timeout settings from security settings - only if authenticated
-  const { data: securitySettings, isLoading: isLoadingSettings } = useQuery({
-    queryKey: ['securitySettings'],
-    queryFn: () => settingsService.getSecuritySettings(),
-    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes to get updated settings
+  const { data: sessionRuntimeSettings, isLoading: isLoadingSettings } = useQuery({
+    queryKey: ['sessionRuntimeSettings'],
+    queryFn: () => settingsService.getSessionSettings(),
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+    refetchInterval: 30 * 60 * 1000,
     enabled: typeof window !== 'undefined' && authService.isAuthenticated(),
     retry: (failureCount, error: any) => {
       // Don't retry on 401 errors - user is not authenticated
@@ -46,8 +51,8 @@ export function useSessionTimeout() {
   });
 
   // Use the actual session timeout from settings, or default if still loading
-  const sessionTimeoutMinutes = securitySettings?.sessionTimeoutMinutes || DEFAULT_SESSION_TIMEOUT;
-  const shouldInitializeTimers = !isLoadingSettings || securitySettings?.sessionTimeoutMinutes;
+  const sessionTimeoutMinutes = sessionRuntimeSettings?.sessionTimeoutMinutes || DEFAULT_SESSION_TIMEOUT;
+  const shouldInitializeTimers = !isLoadingSettings || sessionRuntimeSettings?.sessionTimeoutMinutes;
   const sessionTimeoutMs = sessionTimeoutMinutes * 60 * 1000;
   const warningTimeMs = WARNING_TIME * 1000;
 
@@ -67,15 +72,11 @@ export function useSessionTimeout() {
 
     // Don't initialize timers until we have the actual settings loaded
     if (!shouldInitializeTimers) {
-      console.log('⏳ Waiting for security settings before initializing session timeout...');
       return;
     }
 
-    console.log(`🔄 Activity reset - session timeout in ${sessionTimeoutMinutes} minutes`);
-
     // Set warning timer (show warning 2 minutes before timeout)
     warningTimeoutRef.current = setTimeout(() => {
-      console.log('⚠️ Showing session timeout warning');
       setSessionState(prev => ({
         ...prev,
         showWarning: true,
@@ -84,7 +85,6 @@ export function useSessionTimeout() {
 
       // Set final timeout timer
       timeoutRef.current = setTimeout(() => {
-        console.log('⏰ Session timeout - logging out');
         handleSessionTimeout();
       }, warningTimeMs);
 
@@ -93,8 +93,6 @@ export function useSessionTimeout() {
   }, [sessionTimeoutMinutes, sessionTimeoutMs, warningTimeMs, shouldInitializeTimers]);
 
   const handleSessionTimeout = useCallback(async () => {
-    console.log('🚪 Session expired - calling backend logout and clearing tokens');
-    
     // Clear all timers
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
@@ -110,9 +108,8 @@ export function useSessionTimeout() {
     // Call proper logout which handles backend cleanup
     try {
       await authService.logout();
-      console.log('✅ Backend logout successful');
     } catch (error) {
-      console.warn('⚠️ Backend logout failed, but continuing with cleanup:', error);
+      console.warn('Backend logout failed during session timeout cleanup:', error);
       // Still clear tokens locally even if backend fails
       tokenRefreshService.clearTokens();
     }
@@ -122,25 +119,21 @@ export function useSessionTimeout() {
   }, []);
 
   const extendSession = useCallback(async () => {
-    console.log('🔄 Extending session...');
-    
     try {
       // Try to refresh the token to extend the session
       if (tokenRefreshService.hasRefreshToken()) {
         await tokenRefreshService.refreshToken();
-        console.log('✅ Session extended via token refresh');
       }
       
       // Reset activity timers
       resetActivity();
     } catch (error) {
-      console.error('❌ Failed to extend session:', error);
+      console.error('Failed to extend session:', error);
       handleSessionTimeout();
     }
   }, [resetActivity, handleSessionTimeout]);
 
   const logout = useCallback(async () => {
-    console.log('🚪 Manual logout requested');
     await handleSessionTimeout();
   }, [handleSessionTimeout]);
 
@@ -195,37 +188,34 @@ export function useSessionTimeout() {
   // Initialize session timeout when security settings are first loaded
   useEffect(() => {
     // Only initialize if we have settings and haven't initialized yet
-    if (securitySettings?.sessionTimeoutMinutes && shouldInitializeTimers) {
-      console.log(`\u2699\ufe0f Security settings loaded - session timeout: ${securitySettings.sessionTimeoutMinutes} minutes`);
+    if (sessionRuntimeSettings?.sessionTimeoutMinutes && shouldInitializeTimers) {
       setSessionState(prev => ({
         ...prev,
-        sessionTimeoutMinutes: securitySettings.sessionTimeoutMinutes,
+        sessionTimeoutMinutes: sessionRuntimeSettings.sessionTimeoutMinutes,
       }));
       
       // Initialize timers with the correct timeout
       resetActivity();
     }
-  }, [securitySettings?.sessionTimeoutMinutes, shouldInitializeTimers, resetActivity]);
+  }, [sessionRuntimeSettings?.sessionTimeoutMinutes, shouldInitializeTimers, resetActivity]);
 
   // Update session timeout when security settings change (after initial load)
   useEffect(() => {
-    if (securitySettings?.sessionTimeoutMinutes && !isLoadingSettings) {
-      console.log(`\ud83d\udd04 Security settings updated - new session timeout: ${securitySettings.sessionTimeoutMinutes} minutes`);
+    if (sessionRuntimeSettings?.sessionTimeoutMinutes && !isLoadingSettings) {
       setSessionState(prev => ({
         ...prev,
-        sessionTimeoutMinutes: securitySettings.sessionTimeoutMinutes,
+        sessionTimeoutMinutes: sessionRuntimeSettings.sessionTimeoutMinutes,
       }));
       
       // Reset activity to apply new timeout
       resetActivity();
     }
-  }, [securitySettings?.sessionTimeoutMinutes, isLoadingSettings, resetActivity]);
+  }, [sessionRuntimeSettings?.sessionTimeoutMinutes, isLoadingSettings, resetActivity]);
 
   // Update remaining seconds countdown when warning is shown
   useEffect(() => {
     if (!sessionState.showWarning) return;
 
-    let countdownInterval: ReturnType<typeof setInterval>;
     let remainingTime = WARNING_TIME;
 
     const updateCountdown = () => {
@@ -241,7 +231,7 @@ export function useSessionTimeout() {
       }
     };
 
-    countdownInterval = setInterval(updateCountdown, 1000);
+    const countdownInterval: ReturnType<typeof setInterval> = setInterval(updateCountdown, 1000);
 
     return () => {
       if (countdownInterval) {

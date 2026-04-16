@@ -26,6 +26,7 @@ public class ProjectMasterDataOverviewDto
     public int ProjectTypeCount { get; set; }
     public int ProjectPriorityCount { get; set; }
     public int ProjectTemplateCount { get; set; }
+    public int ProjectUnitTypeTemplateCount { get; set; }
     public int ProjectPhaseTemplateCount { get; set; }
     public int ProjectStageGateRuleCount { get; set; }
     public int PortfolioCount { get; set; }
@@ -64,6 +65,10 @@ public class ProjectCommercialSummaryDto
 {
     public Guid ProjectId { get; set; }
     public string Currency { get; set; } = string.Empty;
+    public string PackageConversionBasis { get; set; } = string.Empty;
+    public string DocumentConversionBasis { get; set; } = string.Empty;
+    public int MissingExchangeRateCount { get; set; }
+    public bool HasConversionGaps { get; set; }
     public decimal EstimatedBudget { get; set; }
     public decimal ApprovedBudget { get; set; }
     public decimal PackageBudgetAmount { get; set; }

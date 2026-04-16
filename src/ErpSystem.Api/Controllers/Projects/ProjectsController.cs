@@ -1904,10 +1904,30 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<IEnumerable<ProjectMilestoneDto>>> GetMilestones(Guid projectId) => Ok(await _projectService.GetMilestonesAsync(projectId));
 
     [HttpPost("{projectId:guid}/milestones")]
-    public async Task<ActionResult<ProjectMilestoneDto>> AddMilestone(Guid projectId, [FromBody] CreateProjectMilestoneDto dto) => Ok(await _projectService.AddMilestoneAsync(projectId, dto));
+    public async Task<ActionResult<ProjectMilestoneDto>> AddMilestone(Guid projectId, [FromBody] CreateProjectMilestoneDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.AddMilestoneAsync(projectId, dto));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
 
     [HttpPut("milestones/{milestoneId:guid}")]
-    public async Task<ActionResult<ProjectMilestoneDto>> UpdateMilestone(Guid milestoneId, [FromBody] CreateProjectMilestoneDto dto) => Ok(await _projectService.UpdateMilestoneAsync(milestoneId, dto));
+    public async Task<ActionResult<ProjectMilestoneDto>> UpdateMilestone(Guid milestoneId, [FromBody] CreateProjectMilestoneDto dto)
+    {
+        try
+        {
+            return Ok(await _projectService.UpdateMilestoneAsync(milestoneId, dto));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
 
     [HttpDelete("milestones/{milestoneId:guid}")]
     public async Task<IActionResult> DeleteMilestone(Guid milestoneId)

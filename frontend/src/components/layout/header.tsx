@@ -51,13 +51,6 @@ export function Header({ className }: HeaderProps) {
     }
   }, [user, currentTenantCode, setCurrentTenantCode]);
 
-  // Debug logging
-  useEffect(() => {
-    if (currentTenant) {
-      console.log('Header: Displaying tenant:', currentTenant.name);
-    }
-  }, [currentTenant]);
-
   useEffect(() => {
     setMounted(true);
   }, []);

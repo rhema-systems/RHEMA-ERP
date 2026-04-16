@@ -363,14 +363,14 @@ export default function CreateSalesAgreementPage() {
                 disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateSalesAgreement}
                 onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit, 'agreement')}
               >
-                Use For Agreement
+                Use For Sales Agreement
               </Button>
               <Button
                 variant="outline"
                 disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateLeaseAgreement}
                 onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit, 'lease')}
               >
-                Use For {selectedReleasedUnit?.suggestedLeaseAgreementType || 'Lease'}
+                Use For {selectedReleasedUnit?.suggestedLeaseAgreementType || 'Lease'} Agreement
               </Button>
             </div>
           </CardContent>

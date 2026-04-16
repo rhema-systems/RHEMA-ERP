@@ -117,6 +117,23 @@ namespace ErpSystem.Api.Extensions
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.Zero
                 };
+                x.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        var requestPath = context.HttpContext.Request.Path;
+
+                        if (string.IsNullOrWhiteSpace(context.Token)
+                            && !string.IsNullOrWhiteSpace(accessToken)
+                            && requestPath.StartsWithSegments("/api/hubs"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
             // Register JWT service
@@ -600,6 +617,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Finance - Common services (Payment Terms, Currency)
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IPaymentTermService, ErpSystem.Core.Services.Finance.PaymentTermService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyService, ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICapitalProjectService, ErpSystem.Api.Services.Finance.FixedAssets.CapitalProjectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ILeaseAccountingService, ErpSystem.Api.Services.Finance.FixedAssets.LeaseAccountingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.ITenantSettingsService, ErpSystem.Api.Services.TenantSettingsService>();
 
             // Phase 1: Core Maintenance Services - workflow-ready implementation - NOW ENABLED

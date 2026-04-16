@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   type CreateProjectWorkItemDto,
   type ProjectGovernanceSummaryDto,
+  type ProjectPackageDto,
   type ProjectWorkItemDto,
 } from '@/services/projectService';
 import type { User } from '@/types';
@@ -25,6 +26,7 @@ type ProjectGanttPlannerEditorProps = {
   saveWorkEditor: () => void;
   work: CreateProjectWorkItemDto;
   setWork: Dispatch<SetStateAction<CreateProjectWorkItemDto>>;
+  projectPackages: ProjectPackageDto[];
   taskStatusOptions: string[];
   formatCatalogLabel: (value: string) => string;
   activeUsers: User[];
@@ -40,6 +42,7 @@ export function ProjectGanttPlannerEditor({
   saveWorkEditor,
   work,
   setWork,
+  projectPackages,
   taskStatusOptions,
   formatCatalogLabel,
   activeUsers,
@@ -103,6 +106,24 @@ export function ProjectGanttPlannerEditor({
               {activeUsers.map((user) => (
                 <SelectItem key={user.id} value={user.id}>
                   {formatUserLabel(user)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2 md:col-span-2">
+          <Label>Work Component</Label>
+          <Select value={work.projectPackageId || 'none'} onValueChange={(value) => setWork((p) => ({ ...p, projectPackageId: value === 'none' ? undefined : value }))}>
+            <SelectTrigger>
+              <SelectValue placeholder="Optional work component" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No work component</SelectItem>
+              {projectPackages.map((projectPackage) => (
+                <SelectItem key={projectPackage.id} value={projectPackage.id}>
+                  {projectPackage.projectPhaseName
+                    ? `${projectPackage.projectPhaseName} / ${projectPackage.code ? `${projectPackage.code} - ` : ''}${projectPackage.name}`
+                    : projectPackage.code ? `${projectPackage.code} - ${projectPackage.name}` : projectPackage.name}
                 </SelectItem>
               ))}
             </SelectContent>

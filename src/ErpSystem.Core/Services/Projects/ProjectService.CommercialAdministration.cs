@@ -100,10 +100,19 @@ public partial class ProjectService
 
     public async Task<ProjectInterimValuationDto> AddProjectInterimValuationAsync(Guid projectId, CreateProjectInterimValuationDto dto)
     {
-        await RequireProjectAsync(projectId, ProjectAccessOperation.ManageFinancials);
+        var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageFinancials);
         var phase = await ValidateProjectDesignPhaseAsync(projectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(projectId, dto.ProjectPackageId);
+        var milestone = await ValidateProjectCommercialMilestoneAsync(projectId, dto.ProjectMilestoneId);
+        var completedPackages = await ValidateProjectInterimValuationCompletedPackagesAsync(projectId, milestone?.Id, dto.CompletedProjectPackageIds);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
+        var derivation = DeriveProjectInterimValuationAmounts(
+            completedPackages,
+            dto.MaterialsOnSiteValue,
+            dto.VariationValue,
+            dto.RetentionPercentage,
+            dto.RetentionAmount,
+            dto.PreviousCertifiedAmount);
 
         var entity = new ProjectInterimValuation
         {
@@ -111,18 +120,19 @@ public partial class ProjectService
             ProjectId = projectId,
             ProjectPhaseId = phase?.Id,
             ProjectPackageId = package?.Id,
+            ProjectMilestoneId = milestone?.Id,
             ContractId = contract?.Id,
             ValuationNumber = TrimOrNull(dto.ValuationNumber),
             Title = dto.Title.Trim(),
             Status = NormalizeProjectInterimValuationStatus(dto.Status),
             ValuationDate = dto.ValuationDate ?? DateTime.UtcNow,
-            GrossWorkValue = dto.GrossWorkValue,
-            MaterialsOnSiteValue = dto.MaterialsOnSiteValue,
-            VariationValue = dto.VariationValue,
-            RetentionPercentage = dto.RetentionPercentage,
-            RetentionAmount = dto.RetentionAmount,
-            PreviousCertifiedAmount = dto.PreviousCertifiedAmount,
-            NetValuationAmount = dto.NetValuationAmount,
+            GrossWorkValue = derivation.GrossWorkValue,
+            MaterialsOnSiteValue = derivation.MaterialsOnSiteValue,
+            VariationValue = derivation.VariationValue,
+            RetentionPercentage = derivation.RetentionPercentage,
+            RetentionAmount = derivation.RetentionAmount,
+            PreviousCertifiedAmount = derivation.PreviousCertifiedAmount,
+            NetValuationAmount = derivation.NetValuationAmount,
             Currency = await ResolveProjectCurrencyAsync(dto.Currency),
             Notes = TrimOrNull(dto.Notes),
             CreatedBy = _currentUserProvider.Username,
@@ -131,31 +141,43 @@ public partial class ProjectService
 
         await _unitOfWork.Repository<ProjectInterimValuation>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        await ReplaceProjectInterimValuationCompletedPackagesAsync(entity.Id, completedPackages);
+        await UpdateProjectProgressAsync(project);
         return await GetProjectInterimValuationDtoAsync(projectId, entity.Id);
     }
 
     public async Task<ProjectInterimValuationDto> UpdateProjectInterimValuationAsync(Guid interimValuationId, UpdateProjectInterimValuationDto dto)
     {
         var entity = await GetProjectInterimValuationEntityAsync(interimValuationId);
-        await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
         var phase = await ValidateProjectDesignPhaseAsync(entity.ProjectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(entity.ProjectId, dto.ProjectPackageId);
+        var milestone = await ValidateProjectCommercialMilestoneAsync(entity.ProjectId, dto.ProjectMilestoneId);
+        var completedPackages = await ValidateProjectInterimValuationCompletedPackagesAsync(entity.ProjectId, milestone?.Id, dto.CompletedProjectPackageIds);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
+        var derivation = DeriveProjectInterimValuationAmounts(
+            completedPackages,
+            dto.MaterialsOnSiteValue,
+            dto.VariationValue,
+            dto.RetentionPercentage,
+            dto.RetentionAmount,
+            dto.PreviousCertifiedAmount);
 
         entity.ProjectPhaseId = phase?.Id;
         entity.ProjectPackageId = package?.Id;
+        entity.ProjectMilestoneId = milestone?.Id;
         entity.ContractId = contract?.Id;
         entity.ValuationNumber = TrimOrNull(dto.ValuationNumber);
         entity.Title = dto.Title.Trim();
         entity.Status = NormalizeProjectInterimValuationStatus(dto.Status);
         entity.ValuationDate = dto.ValuationDate ?? entity.ValuationDate;
-        entity.GrossWorkValue = dto.GrossWorkValue;
-        entity.MaterialsOnSiteValue = dto.MaterialsOnSiteValue;
-        entity.VariationValue = dto.VariationValue;
-        entity.RetentionPercentage = dto.RetentionPercentage;
-        entity.RetentionAmount = dto.RetentionAmount;
-        entity.PreviousCertifiedAmount = dto.PreviousCertifiedAmount;
-        entity.NetValuationAmount = dto.NetValuationAmount;
+        entity.GrossWorkValue = derivation.GrossWorkValue;
+        entity.MaterialsOnSiteValue = derivation.MaterialsOnSiteValue;
+        entity.VariationValue = derivation.VariationValue;
+        entity.RetentionPercentage = derivation.RetentionPercentage;
+        entity.RetentionAmount = derivation.RetentionAmount;
+        entity.PreviousCertifiedAmount = derivation.PreviousCertifiedAmount;
+        entity.NetValuationAmount = derivation.NetValuationAmount;
         entity.Currency = await ResolveProjectCurrencyAsync(dto.Currency ?? entity.Currency);
         entity.Notes = TrimOrNull(dto.Notes);
         entity.UpdatedBy = _currentUserProvider.Username;
@@ -163,15 +185,19 @@ public partial class ProjectService
 
         await _unitOfWork.Repository<ProjectInterimValuation>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        await ReplaceProjectInterimValuationCompletedPackagesAsync(entity.Id, completedPackages);
+        await UpdateProjectProgressAsync(project);
         return await GetProjectInterimValuationDtoAsync(entity.ProjectId, entity.Id);
     }
 
     public async Task DeleteProjectInterimValuationAsync(Guid interimValuationId)
     {
         var entity = await GetProjectInterimValuationEntityAsync(interimValuationId);
-        await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        await DeleteProjectInterimValuationCompletedPackagesAsync(entity.Id);
         await _unitOfWork.Repository<ProjectInterimValuation>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        await UpdateProjectProgressAsync(project);
     }
 
     public async Task<IEnumerable<ProjectPaymentCertificateDto>> GetProjectPaymentCertificatesAsync(Guid projectId)
@@ -347,10 +373,11 @@ public partial class ProjectService
 
     public async Task<ProjectFinalAccountDto> UpsertProjectFinalAccountAsync(Guid projectId, UpsertProjectFinalAccountDto dto)
     {
-        await RequireProjectAsync(projectId, ProjectAccessOperation.ManageFinancials);
+        var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageFinancials);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
         var entity = await GetProjectFinalAccountEntityAsync(projectId);
         var isNew = entity == null;
+        var computation = await BuildProjectFinalAccountDerivationAsync(project, contract?.Id, dto.Currency, dto.SettlementDate);
 
         entity ??= new ProjectFinalAccount
         {
@@ -360,16 +387,16 @@ public partial class ProjectService
             CreatedById = _currentUserProvider.UserId
         };
 
-        entity.ContractId = contract?.Id;
+        entity.ContractId = computation.ContractId ?? contract?.Id;
         entity.Status = NormalizeProjectFinalAccountStatus(dto.Status);
-        entity.SettlementDate = dto.SettlementDate;
-        entity.OriginalContractValue = dto.OriginalContractValue;
-        entity.ApprovedVariationAmount = dto.ApprovedVariationAmount;
-        entity.CertifiedToDate = dto.CertifiedToDate;
-        entity.RetentionHeldAmount = dto.RetentionHeldAmount;
-        entity.RetentionReleasedAmount = dto.RetentionReleasedAmount;
-        entity.FinalAccountValue = dto.FinalAccountValue;
-        entity.Currency = await ResolveProjectCurrencyAsync(dto.Currency);
+        entity.SettlementDate = computation.SettlementDate;
+        entity.OriginalContractValue = computation.OriginalContractValue;
+        entity.ApprovedVariationAmount = computation.ApprovedVariationAmount;
+        entity.CertifiedToDate = computation.CertifiedToDate;
+        entity.RetentionHeldAmount = computation.RetentionHeldAmount;
+        entity.RetentionReleasedAmount = computation.RetentionReleasedAmount;
+        entity.FinalAccountValue = computation.FinalAccountValue;
+        entity.Currency = computation.CurrencyCode;
         entity.Notes = TrimOrNull(dto.Notes);
         entity.UpdatedBy = _currentUserProvider.Username;
         entity.LastModifiedById = _currentUserProvider.UserId;
@@ -383,6 +410,7 @@ public partial class ProjectService
             await _unitOfWork.Repository<ProjectFinalAccount>().UpdateAsync(entity);
         }
 
+        await SyncProjectFinalPaymentBillingStepAsync(project, computation);
         await _unitOfWork.SaveChangesAsync();
         return await MapProjectFinalAccountAsync(entity);
     }
@@ -501,8 +529,55 @@ public partial class ProjectService
 
         return await _unitOfWork.Repository<Contract>().FirstOrDefaultAsync(x =>
                    x.Id == contractId.Value
-                   && x.TenantId == _currentUserProvider.TenantId)
+               && x.TenantId == _currentUserProvider.TenantId)
                ?? throw new InvalidOperationException("Selected contract was not found.");
+    }
+
+    private static (
+        decimal GrossWorkValue,
+        decimal MaterialsOnSiteValue,
+        decimal VariationValue,
+        decimal RetentionPercentage,
+        decimal RetentionAmount,
+        decimal PreviousCertifiedAmount,
+        decimal NetValuationAmount) DeriveProjectInterimValuationAmounts(
+            IReadOnlyCollection<ProjectPackage> completedPackages,
+            decimal? materialsOnSiteValue,
+            decimal? variationValue,
+            decimal? retentionPercentage,
+            decimal? retentionAmount,
+            decimal? previousCertifiedAmount)
+    {
+        var grossWorkValue = decimal.Round(completedPackages.Sum(x => x.BudgetAmount ?? 0m), 2, MidpointRounding.AwayFromZero);
+        var materialsValue = decimal.Round(Math.Max(0m, materialsOnSiteValue ?? 0m), 2, MidpointRounding.AwayFromZero);
+        var variationsValue = decimal.Round(variationValue ?? 0m, 2, MidpointRounding.AwayFromZero);
+        var previousCertifiedValue = decimal.Round(Math.Max(0m, previousCertifiedAmount ?? 0m), 2, MidpointRounding.AwayFromZero);
+        var retentionPercentValue = decimal.Round(Math.Max(0m, retentionPercentage ?? 0m), 2, MidpointRounding.AwayFromZero);
+        var valuationBase = grossWorkValue + materialsValue + variationsValue;
+        var resolvedRetentionAmount = retentionAmount.HasValue
+            ? decimal.Round(Math.Max(0m, retentionAmount.Value), 2, MidpointRounding.AwayFromZero)
+            : retentionPercentValue > 0m
+                ? decimal.Round(valuationBase * (retentionPercentValue / 100m), 2, MidpointRounding.AwayFromZero)
+                : 0m;
+
+        if (resolvedRetentionAmount > valuationBase)
+        {
+            resolvedRetentionAmount = valuationBase;
+        }
+
+        var netValuationAmount = decimal.Round(
+            Math.Max(0m, valuationBase - resolvedRetentionAmount - previousCertifiedValue),
+            2,
+            MidpointRounding.AwayFromZero);
+
+        return (
+            grossWorkValue,
+            materialsValue,
+            variationsValue,
+            retentionPercentValue,
+            resolvedRetentionAmount,
+            previousCertifiedValue,
+            netValuationAmount);
     }
 
     private async Task<ProjectInterimValuation?> ValidateProjectCommercialInterimValuationAsync(Guid projectId, Guid? interimValuationId)
@@ -519,6 +594,107 @@ public partial class ProjectService
         }
 
         return interimValuation;
+    }
+
+    private async Task<ProjectMilestone?> ValidateProjectCommercialMilestoneAsync(Guid projectId, Guid? projectMilestoneId)
+    {
+        if (!projectMilestoneId.HasValue)
+        {
+            return null;
+        }
+
+        return await _unitOfWork.Repository<ProjectMilestone>().FirstOrDefaultAsync(x =>
+                   x.Id == projectMilestoneId.Value
+                   && x.ProjectId == projectId
+                   && x.TenantId == _currentUserProvider.TenantId)
+               ?? throw new InvalidOperationException("Selected milestone was not found.");
+    }
+
+    private async Task<List<ProjectPackage>> ValidateProjectInterimValuationCompletedPackagesAsync(
+        Guid projectId,
+        Guid? projectMilestoneId,
+        IEnumerable<Guid>? completedProjectPackageIds)
+    {
+        var packageIds = (completedProjectPackageIds ?? Enumerable.Empty<Guid>())
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToList();
+        if (packageIds.Count == 0)
+        {
+            return [];
+        }
+
+        if (!projectMilestoneId.HasValue)
+        {
+            throw new InvalidOperationException("Select a milestone before marking completed work components.");
+        }
+
+        var allowedPhaseIds = (await _unitOfWork.Repository<ProjectMilestonePhase>().FindAsync(x =>
+                x.ProjectMilestoneId == projectMilestoneId.Value
+                && x.TenantId == _currentUserProvider.TenantId))
+            .Select(x => x.ProjectPhaseId)
+            .Distinct()
+            .ToHashSet();
+        if (allowedPhaseIds.Count == 0)
+        {
+            throw new InvalidOperationException("The selected milestone does not have any phases assigned yet.");
+        }
+
+        var packages = (await GetProjectPackageEntitiesAsync(projectId))
+            .Where(x => packageIds.Contains(x.Id))
+            .ToList();
+        if (packages.Count != packageIds.Count)
+        {
+            throw new InvalidOperationException("One or more selected work components were not found.");
+        }
+
+        var invalidPackage = packages.FirstOrDefault(x => !x.ProjectPhaseId.HasValue || !allowedPhaseIds.Contains(x.ProjectPhaseId.Value));
+        if (invalidPackage != null)
+        {
+            throw new InvalidOperationException("Completed work components must belong to phases included in the selected milestone.");
+        }
+
+        return packages;
+    }
+
+    private async Task ReplaceProjectInterimValuationCompletedPackagesAsync(Guid interimValuationId, IReadOnlyCollection<ProjectPackage> completedPackages)
+    {
+        await DeleteProjectInterimValuationCompletedPackagesAsync(interimValuationId);
+        if (completedPackages.Count == 0)
+        {
+            return;
+        }
+
+        var repository = _unitOfWork.Repository<ProjectInterimValuationPackageCompletion>();
+        foreach (var projectPackage in completedPackages)
+        {
+            await repository.AddAsync(new ProjectInterimValuationPackageCompletion
+            {
+                TenantId = _currentUserProvider.TenantId,
+                ProjectInterimValuationId = interimValuationId,
+                ProjectPackageId = projectPackage.Id,
+                CreatedBy = _currentUserProvider.Username,
+                CreatedById = _currentUserProvider.UserId
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync();
+    }
+
+    private async Task DeleteProjectInterimValuationCompletedPackagesAsync(Guid interimValuationId)
+    {
+        var repository = _unitOfWork.Repository<ProjectInterimValuationPackageCompletion>();
+        var existing = (await repository.FindAsync(x =>
+                x.ProjectInterimValuationId == interimValuationId
+                && x.TenantId == _currentUserProvider.TenantId))
+            .ToList();
+        if (existing.Count == 0)
+        {
+            return;
+        }
+
+        await repository.HardDeleteRangeAsync(existing);
+        await _unitOfWork.SaveChangesAsync();
     }
 
     private async Task<Dictionary<Guid, Contract>> GetProjectCommercialContractLookupAsync(IEnumerable<Guid?> contractIds)
@@ -597,6 +773,21 @@ public partial class ProjectService
         var phaseLookup = (await GetProjectPhaseEntitiesAsync(projectId)).ToDictionary(x => x.Id);
         var packageLookup = (await GetProjectPackageEntitiesAsync(projectId)).ToDictionary(x => x.Id);
         var contractLookup = await GetProjectCommercialContractLookupAsync(entities.Select(x => x.ContractId));
+        var milestoneIds = entities.Where(x => x.ProjectMilestoneId.HasValue).Select(x => x.ProjectMilestoneId!.Value).Distinct().ToList();
+        var milestoneLookup = milestoneIds.Count == 0
+            ? new Dictionary<Guid, ProjectMilestone>()
+            : (await _unitOfWork.Repository<ProjectMilestone>().FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId
+                    && milestoneIds.Contains(x.Id)))
+                .ToDictionary(x => x.Id);
+        var entityIds = entities.Select(x => x.Id).ToList();
+        var completionLookup = entityIds.Count == 0
+            ? new Dictionary<Guid, List<Guid>>()
+            : (await _unitOfWork.Repository<ProjectInterimValuationPackageCompletion>().FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId
+                    && entityIds.Contains(x.ProjectInterimValuationId)))
+                .GroupBy(x => x.ProjectInterimValuationId)
+                .ToDictionary(group => group.Key, group => group.Select(x => x.ProjectPackageId).Distinct().ToList());
 
         return entities
             .OrderByDescending(x => x.ValuationDate)
@@ -604,6 +795,7 @@ public partial class ProjectService
             .Select(entity =>
             {
                 contractLookup.TryGetValue(entity.ContractId ?? Guid.Empty, out var contract);
+                milestoneLookup.TryGetValue(entity.ProjectMilestoneId ?? Guid.Empty, out var milestone);
                 return new ProjectInterimValuationDto
                 {
                     Id = entity.Id,
@@ -612,6 +804,8 @@ public partial class ProjectService
                     ProjectPhaseName = entity.ProjectPhaseId.HasValue && phaseLookup.TryGetValue(entity.ProjectPhaseId.Value, out var phase) ? phase.Name : null,
                     ProjectPackageId = entity.ProjectPackageId,
                     ProjectPackageName = entity.ProjectPackageId.HasValue && packageLookup.TryGetValue(entity.ProjectPackageId.Value, out var package) ? package.Name : null,
+                    ProjectMilestoneId = entity.ProjectMilestoneId,
+                    ProjectMilestoneTitle = milestone?.Title,
                     ContractId = entity.ContractId,
                     ContractNumber = contract?.ContractNumber,
                     ContractTitle = contract?.ContractTitle,
@@ -627,7 +821,13 @@ public partial class ProjectService
                     PreviousCertifiedAmount = entity.PreviousCertifiedAmount,
                     NetValuationAmount = entity.NetValuationAmount,
                     Currency = entity.Currency,
-                    Notes = entity.Notes
+                    Notes = entity.Notes,
+                    CompletedProjectPackageIds = completionLookup.TryGetValue(entity.Id, out var completedProjectPackageIds)
+                        && completedProjectPackageIds.Count > 0
+                        ? completedProjectPackageIds
+                        : entity.ProjectPackageId.HasValue
+                            ? [entity.ProjectPackageId.Value]
+                            : []
                 };
             })
             .ToList();
@@ -720,23 +920,30 @@ public partial class ProjectService
 
     private async Task<ProjectFinalAccountDto> MapProjectFinalAccountAsync(ProjectFinalAccount entity)
     {
-        var contract = await ValidateProjectCommercialContractAsync(entity.ContractId);
+        var project = await _projectRepository.GetByIdAsync(entity.ProjectId)
+            ?? throw new InvalidOperationException($"Project with ID {entity.ProjectId} was not found.");
+        var computation = await BuildProjectFinalAccountDerivationAsync(project, entity.ContractId, entity.Currency, entity.SettlementDate);
+        var contract = await ValidateProjectCommercialContractAsync(computation.ContractId ?? entity.ContractId);
         return new ProjectFinalAccountDto
         {
             Id = entity.Id,
             ProjectId = entity.ProjectId,
-            ContractId = entity.ContractId,
+            ContractId = computation.ContractId ?? entity.ContractId,
             ContractNumber = contract?.ContractNumber,
             ContractTitle = contract?.ContractTitle,
             Status = entity.Status,
-            SettlementDate = entity.SettlementDate,
-            OriginalContractValue = entity.OriginalContractValue,
-            ApprovedVariationAmount = entity.ApprovedVariationAmount,
-            CertifiedToDate = entity.CertifiedToDate,
-            RetentionHeldAmount = entity.RetentionHeldAmount,
-            RetentionReleasedAmount = entity.RetentionReleasedAmount,
-            FinalAccountValue = entity.FinalAccountValue,
-            Currency = entity.Currency,
+            SettlementDate = computation.SettlementDate,
+            OriginalContractValue = computation.OriginalContractValue,
+            ApprovedVariationAmount = computation.ApprovedVariationAmount,
+            ClaimAmount = computation.ClaimAmount,
+            DeductionAmount = computation.DeductionAmount,
+            AdjustmentAmount = computation.AdjustmentAmount,
+            CertifiedToDate = computation.CertifiedToDate,
+            RetentionHeldAmount = computation.RetentionHeldAmount,
+            RetentionReleasedAmount = computation.RetentionReleasedAmount,
+            FinalAccountValue = computation.FinalAccountValue,
+            FinalPaymentAmount = computation.FinalPaymentAmount,
+            Currency = computation.CurrencyCode,
             Notes = entity.Notes
         };
     }

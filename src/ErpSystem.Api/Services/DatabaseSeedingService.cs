@@ -738,6 +738,7 @@ namespace ErpSystem.Web.Services
                     apartmentContractor,
                     baseCurrencyCode,
                     now));
+            await EnsureAccraApartmentDevelopmentPhasePackagesSeededAsync(tenantId, baseCurrencyCode, now);
 
             await EnsureProjectDemoInterdependenciesSeededAsync(tenantId, projectManager, financeOwner, now);
             await EnsureProjectDemoQualityDataSeededAsync(tenantId, sponsor, financeOwner, teamMember, now);
@@ -755,6 +756,280 @@ namespace ErpSystem.Web.Services
 
             create();
             await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureAccraApartmentDevelopmentPhasePackagesSeededAsync(Guid tenantId, string baseCurrencyCode, DateTime now)
+        {
+            var project = await _context.Projects
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.ProjectCode == "PRJ-DEMO-2001")
+                .Select(item => new
+                {
+                    item.Id,
+                    item.BaseCurrencyCode
+                })
+                .FirstOrDefaultAsync();
+
+            if (project == null)
+            {
+                return;
+            }
+
+            var phases = await _context.ProjectPhases
+                .Where(item => item.TenantId == tenantId && item.ProjectId == project.Id && !item.IsDeleted)
+                .ToListAsync();
+
+            if (phases.Count == 0)
+            {
+                return;
+            }
+
+            var phaseByCode = phases
+                .Where(item => !string.IsNullOrWhiteSpace(item.Code))
+                .ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            var existingPackages = await _context.ProjectPackages
+                .Where(item => item.TenantId == tenantId && item.ProjectId == project.Id && !item.IsDeleted)
+                .ToListAsync();
+
+            var packageByCode = existingPackages
+                .Where(item => !string.IsNullOrWhiteSpace(item.Code))
+                .ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            var existingBoqItems = await _context.ProjectBoqItems
+                .Where(item => item.TenantId == tenantId && item.ProjectId == project.Id && !item.IsDeleted)
+                .ToListAsync();
+
+            var boqItemCodes = existingBoqItems
+                .Where(item => !string.IsNullOrWhiteSpace(item.ItemCode))
+                .Select(item => item.ItemCode!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var defaultPartnerId = existingPackages
+                .Where(item => item.BusinessPartnerId.HasValue)
+                .Select(item => item.BusinessPartnerId!.Value)
+                .FirstOrDefault();
+
+            var currencyCode = string.IsNullOrWhiteSpace(project.BaseCurrencyCode) ? baseCurrencyCode : project.BaseCurrencyCode!;
+            var createdPackageCount = 0;
+            var createdBoqCount = 0;
+            var nextSortOrder = existingPackages.Count == 0 ? 100 : existingPackages.Max(item => item.SortOrder) + 10;
+
+            ProjectPackage EnsurePackage(
+                string packageCode,
+                string phaseCode,
+                string name,
+                string status,
+                decimal budgetAmount,
+                decimal? committedAmount,
+                decimal? actualAmount,
+                decimal? forecastAmount,
+                string description,
+                string notes)
+            {
+                if (packageByCode.TryGetValue(packageCode, out var existingPackage))
+                {
+                    return existingPackage;
+                }
+
+                if (!phaseByCode.TryGetValue(phaseCode, out var phase))
+                {
+                    throw new InvalidOperationException($"Phase {phaseCode} was not found while seeding demo package coverage for PRJ-DEMO-2001.");
+                }
+
+                var package = new ProjectPackage
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = project.Id,
+                    ProjectPhaseId = phase.Id,
+                    Code = packageCode,
+                    Name = name,
+                    Description = description,
+                    PackageType = ProjectPackageTypes.WorkPackage,
+                    Status = status,
+                    SortOrder = nextSortOrder,
+                    ProcurementRoute = "Traditional",
+                    ContractStrategy = "SubcontractPackages",
+                    BusinessPartnerId = defaultPartnerId == Guid.Empty ? null : defaultPartnerId,
+                    BudgetAmount = budgetAmount,
+                    CommittedAmount = committedAmount,
+                    ActualAmount = actualAmount,
+                    ForecastAmount = forecastAmount,
+                    Currency = currencyCode,
+                    Notes = notes,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                nextSortOrder += 10;
+                createdPackageCount++;
+                packageByCode[packageCode] = package;
+                _context.ProjectPackages.Add(package);
+                return package;
+            }
+
+            void EnsureBoq(
+                string packageCode,
+                string lineNumber,
+                string itemCode,
+                string description,
+                decimal quantity,
+                string unitOfMeasure,
+                decimal? unitRate,
+                decimal budgetAmount,
+                decimal? committedAmount,
+                decimal? actualAmount,
+                decimal? forecastAmount,
+                string? notes = null)
+            {
+                if (boqItemCodes.Contains(itemCode))
+                {
+                    return;
+                }
+
+                if (!packageByCode.TryGetValue(packageCode, out var package))
+                {
+                    throw new InvalidOperationException($"Package {packageCode} was not found while seeding BOQ coverage for PRJ-DEMO-2001.");
+                }
+                var sortOrder = int.TryParse(lineNumber, out var parsedLineNumber) ? Math.Max(0, parsedLineNumber - 1) : 0;
+
+                _context.ProjectBoqItems.Add(new ProjectBoqItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = project.Id,
+                    ProjectPackageId = package.Id,
+                    LineNumber = lineNumber,
+                    ItemCode = itemCode,
+                    ItemType = ProjectBoqItemTypes.Item,
+                    Description = description,
+                    Quantity = quantity,
+                    UnitOfMeasure = unitOfMeasure,
+                    UnitRate = unitRate,
+                    BudgetAmount = budgetAmount,
+                    CommittedAmount = committedAmount,
+                    ActualAmount = actualAmount,
+                    ForecastAmount = forecastAmount,
+                    Currency = currencyCode,
+                    Notes = notes,
+                    SortOrder = sortOrder,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                });
+
+                boqItemCodes.Add(itemCode);
+                createdBoqCount++;
+            }
+
+            EnsurePackage(
+                "PKG-FEAS",
+                "FEASIBILITY",
+                "Feasibility & Site Due Diligence",
+                ProjectPackageStatuses.Completed,
+                118000m,
+                118000m,
+                116500m,
+                116500m,
+                "Topographic survey, geotechnical investigation, feasibility reviews, and preliminary commercial studies.",
+                "Closed out during the initial go/no-go and land due-diligence cycle.");
+            EnsurePackage(
+                "PKG-CONCEPT",
+                "CONCEPT_DESIGN",
+                "Concept Design Coordination",
+                ProjectPackageStatuses.Completed,
+                176000m,
+                176000m,
+                172400m,
+                172400m,
+                "Architectural concept options, massing coordination, and elemental cost alignment.",
+                "Approved concept set used to launch scheme design and buyer mix planning.");
+            EnsurePackage(
+                "PKG-DDETAIL",
+                "DETAILED_DESIGN",
+                "Detailed Design & IFC Documentation",
+                ProjectPackageStatuses.Completed,
+                264000m,
+                264000m,
+                259800m,
+                259800m,
+                "Detailed architectural, structural, and MEP documentation including coordinated IFC issue and BOQ support.",
+                "Issued-for-construction set closed and superseded by current as-built revision control.");
+            EnsurePackage(
+                "PKG-APPROVAL",
+                "APPROVALS",
+                "Statutory Approvals & Utility Clearances",
+                ProjectPackageStatuses.Completed,
+                92000m,
+                92000m,
+                88750m,
+                88750m,
+                "Permit submissions, utility applications, authority fees, and compliance follow-through.",
+                "Occupancy certificate remains on the approval register, but the main approvals package is substantially complete.");
+            EnsurePackage(
+                "PKG-PROC",
+                "PROCUREMENT",
+                "Tendering, Awards & Package Procurement",
+                ProjectPackageStatuses.Completed,
+                138000m,
+                132500m,
+                126400m,
+                133900m,
+                "Tender preparation, bid evaluation, package awards, and mobilisation procurement planning.",
+                "Main trade packages have already been awarded and transitioned into execution.");
+            EnsurePackage(
+                "PKG-COMM",
+                "COMMISSIONING",
+                "Commissioning & Systems Testing",
+                ProjectPackageStatuses.Active,
+                148000m,
+                133000m,
+                58100m,
+                152600m,
+                "Common services commissioning, lift witness testing, fire alarm integration, and authority witness support.",
+                "Closely tied to common-area energisation and batch handover readiness.");
+            EnsurePackage(
+                "PKG-HAND",
+                "HANDOVER",
+                "Phased Unit Handover & Closeout",
+                ProjectPackageStatuses.Active,
+                104000m,
+                64200m,
+                28150m,
+                109500m,
+                "Unit readiness walks, handover packs, client inspections, and closeout documentation by release batch.",
+                "Batch 1 is active and later release batches remain forecast-driven.");
+            EnsurePackage(
+                "PKG-DLP",
+                "DEFECTS_LIABILITY",
+                "Defects Response & Warranty Support",
+                ProjectPackageStatuses.Active,
+                68000m,
+                22000m,
+                8450m,
+                68000m,
+                "Early defects-response cover, warranty coordination, and retained closeout support for handed-over units.",
+                "Active for the units already handed over under the phased turnover model.");
+
+            EnsureBoq("PKG-FEAS", "1", "FEAS-SITE", "Geotechnical investigation, topographic survey, and feasibility reporting", 1m, "LS", 118000m, 118000m, 118000m, 116500m, 116500m);
+            EnsureBoq("PKG-CONCEPT", "1", "CONCEPT-ARCH", "Concept design studies, space planning, and elemental cost plan coordination", 1m, "LS", 176000m, 176000m, 176000m, 172400m, 172400m);
+            EnsureBoq("PKG-DDETAIL", "1", "DETAIL-IFC", "Coordinated IFC drawings, design calculations, and final BOQ support", 1m, "LS", 264000m, 264000m, 264000m, 259800m, 259800m);
+            EnsureBoq("PKG-APPROVAL", "1", "APPROVAL-STAT", "Statutory submissions, permit fees, and utility clearance follow-up", 1m, "LS", 92000m, 92000m, 92000m, 88750m, 88750m);
+            EnsureBoq("PKG-PROC", "1", "PROC-TENDER", "Tendering, evaluations, award documentation, and supplier onboarding", 1m, "LS", 138000m, 138000m, 132500m, 126400m, 133900m);
+            EnsureBoq("PKG-COMM", "1", "COMM-SYS", "System testing, lift witness activities, and integrated commissioning closeout", 1m, "LS", 148000m, 148000m, 133000m, 58100m, 152600m);
+            EnsureBoq("PKG-HAND", "1", "HAND-B1", "Batch handover inspections, O&M pack issue, and client closeout walkthroughs", 1m, "LS", 104000m, 104000m, 64200m, 28150m, 109500m);
+            EnsureBoq("PKG-DLP", "1", "DLP-RESP", "Defects response mobilisation, warranty coordination, and rectification cover", 1m, "LS", 68000m, 68000m, 22000m, 8450m, 68000m);
+
+            if (createdPackageCount == 0 && createdBoqCount == 0)
+            {
+                return;
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation(
+                "Seeded {PackageCount} additional phase package(s) and {BoqCount} BOQ line(s) for project PRJ-DEMO-2001 in tenant {TenantId}.",
+                createdPackageCount,
+                createdBoqCount,
+                tenantId);
         }
 
         private async Task<ProjectType> EnsureProjectTypeAsync(

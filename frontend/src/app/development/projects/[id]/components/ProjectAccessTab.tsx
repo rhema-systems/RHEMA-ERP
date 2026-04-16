@@ -7,12 +7,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { BusinessPartnerDto } from '@/services/businessPartnerService';
+import type { Asset as MaintenanceAssetLookupOption } from '@/services/maintenanceDataService';
 import type {
   CreateProjectAssetLinkDto,
   CreateProjectExternalAccessPolicyDto,
   ProjectDetailDto,
   ProjectIntegrationSummaryDto,
+  ProjectJobCardLinkOptionDto,
 } from '@/services/projectService';
+import type { FixedAsset } from '@/types/fixed-assets';
 
 type ExternalArtifactOption = {
   id: string;
@@ -29,6 +32,9 @@ type ProjectAccessTabProps = {
   setAssetLink: Dispatch<SetStateAction<CreateProjectAssetLinkDto>>;
   assetLinkTypeOptions: string[];
   assetLinkStatusOptions: string[];
+  maintenanceAssets: MaintenanceAssetLookupOption[];
+  companyAssets: FixedAsset[];
+  jobCards: ProjectJobCardLinkOptionDto[];
   onAddAssetLink: () => void;
   externalPolicy: CreateProjectExternalAccessPolicyDto;
   setExternalPolicy: Dispatch<SetStateAction<CreateProjectExternalAccessPolicyDto>>;
@@ -48,6 +54,9 @@ export function ProjectAccessTab({
   setAssetLink,
   assetLinkTypeOptions,
   assetLinkStatusOptions,
+  maintenanceAssets,
+  companyAssets,
+  jobCards,
   onAddAssetLink,
   externalPolicy,
   setExternalPolicy,
@@ -56,6 +65,10 @@ export function ProjectAccessTab({
   onSaveExternalPolicy,
   onDeleteExternalPolicy,
 }: ProjectAccessTabProps) {
+  const availableJobCards = assetLink.maintenanceAssetId
+    ? jobCards.filter((jobCard) => jobCard.assetId === assetLink.maintenanceAssetId || jobCard.id === assetLink.jobCardId)
+    : jobCards;
+
   return (
     <div className="space-y-6">
       <Card>
@@ -93,9 +106,69 @@ export function ProjectAccessTab({
         <CardHeader><CardTitle>Asset Links</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-4">
-            <div className="grid gap-2"><Label>Maintenance Asset Id</Label><Input value={assetLink.maintenanceAssetId || ''} onChange={(event) => setAssetLink((current) => ({ ...current, maintenanceAssetId: event.target.value || undefined }))} /></div>
-            <div className="grid gap-2"><Label>Company Asset Id</Label><Input value={assetLink.companyAssetId || ''} onChange={(event) => setAssetLink((current) => ({ ...current, companyAssetId: event.target.value || undefined }))} /></div>
-            <div className="grid gap-2"><Label>Job Card Id</Label><Input value={assetLink.jobCardId || ''} onChange={(event) => setAssetLink((current) => ({ ...current, jobCardId: event.target.value || undefined }))} /></div>
+            <div className="grid gap-2">
+              <Label>Maintenance Asset</Label>
+              <Select
+                value={assetLink.maintenanceAssetId || 'none'}
+                onValueChange={(value) => setAssetLink((current) => {
+                  if (value === 'none') {
+                    return {
+                      ...current,
+                      maintenanceAssetId: undefined,
+                      jobCardId: undefined,
+                    };
+                  }
+
+                  return {
+                    ...current,
+                    maintenanceAssetId: value,
+                    jobCardId:
+                      !current.jobCardId
+                      || jobCards.some((jobCard) => jobCard.id === current.jobCardId && jobCard.assetId === value)
+                        ? current.jobCardId
+                        : undefined,
+                  };
+                })}
+              >
+                <SelectTrigger><SelectValue placeholder="Select maintenance asset" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No maintenance asset</SelectItem>
+                  {maintenanceAssets.map((asset) => (
+                    <SelectItem key={asset.id} value={asset.id}>
+                      {asset.assetCode ? `${asset.assetCode} - ${asset.assetName}` : asset.assetName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Company Asset</Label>
+              <Select value={assetLink.companyAssetId || 'none'} onValueChange={(value) => setAssetLink((current) => ({ ...current, companyAssetId: value === 'none' ? undefined : value }))}>
+                <SelectTrigger><SelectValue placeholder="Select company asset" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No company asset</SelectItem>
+                  {companyAssets.map((asset) => (
+                    <SelectItem key={asset.id} value={asset.id}>
+                      {asset.assetCode ? `${asset.assetCode} - ${asset.name}` : asset.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Job Card</Label>
+              <Select value={assetLink.jobCardId || 'none'} onValueChange={(value) => setAssetLink((current) => ({ ...current, jobCardId: value === 'none' ? undefined : value }))}>
+                <SelectTrigger><SelectValue placeholder="Select job card" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No job card</SelectItem>
+                  {availableJobCards.map((jobCard) => (
+                    <SelectItem key={jobCard.id} value={jobCard.id}>
+                      {jobCard.jobCardNumber} - {jobCard.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid gap-2"><Label>Link Type</Label><Select value={assetLink.linkType || assetLinkTypeOptions[0]} onValueChange={(value) => setAssetLink((current) => ({ ...current, linkType: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{assetLinkTypeOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div>
             <div className="grid gap-2"><Label>Status</Label><Select value={assetLink.status || assetLinkStatusOptions[0]} onValueChange={(value) => setAssetLink((current) => ({ ...current, status: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{assetLinkStatusOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div>
             <div className="grid gap-2 md:col-span-2"><Label>Notes</Label><Input value={assetLink.notes || ''} onChange={(event) => setAssetLink((current) => ({ ...current, notes: event.target.value }))} /></div>

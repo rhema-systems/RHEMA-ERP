@@ -65,18 +65,14 @@ export function TenantProvider({ children }: TenantProviderProps) {
   // Get all tenants - only if authenticated
   const { data: apiTenants = [], isLoading: isLoadingTenants, error: tenantsError } = useQuery({
     queryKey: ['tenants'],
-    queryFn: async () => {
-      console.log('TenantContext: Calling getTenants API...');
-      const result = await apiService.getTenants();
-      console.log('TenantContext: API response:', result);
-      return result;
-    },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    queryFn: () => apiService.getTenants(),
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 1 hour
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: (failureCount, error: any) => {
-      console.log('TenantContext: Query failed, retry attempt:', failureCount, error);
       // Don't retry on 401 errors - user is not authenticated
       if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
-        console.log('TenantContext: 401 error detected, stopping retries');
         return false;
       }
       return failureCount < 2;
@@ -136,13 +132,11 @@ export function TenantProvider({ children }: TenantProviderProps) {
 
     const handleTenantChanged = (event: CustomEvent) => {
       const code = resolveCode(event.detail);
-      console.log('TenantContext: Received tenant-changed event:', event.detail, '=>', code);
       if (code !== null) setCurrentTenantCode(code);
     };
 
     const handleTenantSelected = (event: CustomEvent) => {
       const code = resolveCode(event.detail);
-      console.log('TenantContext: Received tenant-selected event:', event.detail, '=>', code);
       if (code !== null) setCurrentTenantCode(code);
     };
 
@@ -156,7 +150,6 @@ export function TenantProvider({ children }: TenantProviderProps) {
 
   // Update localStorage when tenant code changes
   const setCurrentTenantCode = (code: string | null) => {
-    console.log('TenantContext: Setting tenant code:', code);
     setCurrentTenantCodeState(code);
     if (typeof window !== 'undefined') {
       if (code) {
@@ -166,17 +159,6 @@ export function TenantProvider({ children }: TenantProviderProps) {
       }
     }
   };
-
-  // Debug logging for tenant state changes
-  useEffect(() => {
-    console.log('TenantContext state:', {
-      currentTenantCode,
-      currentTenant: currentTenant?.name,
-      tenantCount: tenants.length,
-      isLoadingTenants,
-      error: tenantsError?.message
-    });
-  }, [currentTenantCode, currentTenant, tenants, isLoadingTenants, tenantsError]);
 
   // Log tenant loading errors
   useEffect(() => {

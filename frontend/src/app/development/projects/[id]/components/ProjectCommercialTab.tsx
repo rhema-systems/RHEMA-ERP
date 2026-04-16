@@ -39,29 +39,61 @@ export function ProjectCommercialTab({ commercialSummary, formatMoney }: Project
     <div className="space-y-6">
       <Card>
         <CardHeader>
+          <CardTitle>Currency Basis</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Project Base Currency</div>
+              <div className="mt-2 text-2xl font-semibold">{currency}</div>
+              <div className="text-sm text-muted-foreground">Commercial totals are reported in this currency.</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Work Component Totals</div>
+              <div className="mt-2 font-medium">{commercialSummary.packageConversionBasis}</div>
+              <div className="text-sm text-muted-foreground">Planning and live work component controls use the latest active rates.</div>
+            </div>
+            <div className="rounded-lg border p-4 text-sm">
+              <div className="text-muted-foreground">Document Totals</div>
+              <div className="mt-2 font-medium">{commercialSummary.documentConversionBasis}</div>
+              <div className="text-sm text-muted-foreground">Variations, valuations, certificates, and final account use document dates.</div>
+            </div>
+          </div>
+
+          <div className={`rounded-lg border p-4 text-sm ${commercialSummary.hasConversionGaps ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">Missing Exchange Rates</Badge>
+              <span className="font-medium">{commercialSummary.missingExchangeRateCount}</span>
+            </div>
+            <div className="mt-2">
+              {commercialSummary.hasConversionGaps
+                ? 'Some commercial source amounts could not be converted into the project base currency and remain included at source value until rates are configured.'
+                : 'All commercial amounts were converted successfully into the project base currency.'}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Commercial Snapshot</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-lg border p-4">
-              <div className="text-sm text-muted-foreground">Estimated</div>
-              <div className="text-2xl font-semibold">{formatMoney(commercialSummary.estimatedBudget, currency)}</div>
-              <div className="text-sm text-muted-foreground">Early phase estimate</div>
+              <div className="text-sm text-muted-foreground">Forecast</div>
+              <div className="text-2xl font-semibold">{formatMoney(commercialSummary.packageForecastAmount, currency)}</div>
+              <div className="text-sm text-muted-foreground">{commercialSummary.packageCount} work component(s)</div>
             </div>
             <div className="rounded-lg border p-4">
-              <div className="text-sm text-muted-foreground">Approved</div>
-              <div className="text-2xl font-semibold">{formatMoney(commercialSummary.approvedBudget, currency)}</div>
-              <div className="text-sm text-muted-foreground">Approved project budget</div>
-            </div>
-            <div className="rounded-lg border p-4">
-              <div className="text-sm text-muted-foreground">Package Budget</div>
+              <div className="text-sm text-muted-foreground">Budget</div>
               <div className="text-2xl font-semibold">{formatMoney(commercialSummary.packageBudgetAmount, currency)}</div>
-              <div className="text-sm text-muted-foreground">{commercialSummary.packageCount} package(s)</div>
+              <div className="text-sm text-muted-foreground">Commercial budget baseline</div>
             </div>
             <div className="rounded-lg border p-4">
-              <div className="text-sm text-muted-foreground">Committed</div>
-              <div className="text-2xl font-semibold">{formatMoney(commercialSummary.packageCommittedAmount, currency)}</div>
-              <div className="text-sm text-muted-foreground">Procurement exposure</div>
+              <div className="text-sm text-muted-foreground">Variance</div>
+              <div className="text-2xl font-semibold">{formatMoney(commercialSummary.forecastVarianceAmount, currency)}</div>
+              <div className="text-sm text-muted-foreground">Forecast versus budget</div>
             </div>
             <div className="rounded-lg border p-4">
               <div className="text-sm text-muted-foreground">Actual</div>
@@ -69,13 +101,13 @@ export function ProjectCommercialTab({ commercialSummary, formatMoney }: Project
               <div className="text-sm text-muted-foreground">{commercialSummary.boqItemCount} BOQ line(s)</div>
             </div>
             <div className="rounded-lg border p-4">
-              <div className="text-sm text-muted-foreground">Forecast</div>
-              <div className="text-2xl font-semibold">{formatMoney(commercialSummary.packageForecastAmount, currency)}</div>
-              <div className="text-sm text-muted-foreground">Variance {formatMoney(commercialSummary.forecastVarianceAmount, currency)}</div>
+              <div className="text-sm text-muted-foreground">Committed</div>
+              <div className="text-2xl font-semibold">{formatMoney(commercialSummary.packageCommittedAmount, currency)}</div>
+              <div className="text-sm text-muted-foreground">Procurement exposure</div>
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border p-4 text-sm">
               <div className="text-muted-foreground">Tender-linked</div>
               <div className="mt-2 text-2xl font-semibold">{commercialSummary.tenderLinkedPackageCount}</div>
@@ -91,23 +123,6 @@ export function ProjectCommercialTab({ commercialSummary, formatMoney }: Project
             <div className="rounded-lg border p-4 text-sm">
               <div className="text-muted-foreground">PO-linked</div>
               <div className="mt-2 text-2xl font-semibold">{commercialSummary.purchaseOrderLinkedPackageCount}</div>
-            </div>
-            <div className="rounded-lg border p-4 text-sm">
-              <div className="text-muted-foreground">Unassigned Packages</div>
-              <div className="mt-2 text-2xl font-semibold">{commercialSummary.unassignedPackageCount}</div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-lg border p-4 text-sm">
-              <div className="text-muted-foreground">Phase-Aligned Packages</div>
-              <div className="mt-2 text-2xl font-semibold">{commercialSummary.phaseAlignedPackageCount}</div>
-              <div className="text-sm text-muted-foreground">Linked packages already matching their current phase posture</div>
-            </div>
-            <div className="rounded-lg border p-4 text-sm">
-              <div className="text-muted-foreground">Need Phase Sync</div>
-              <div className="mt-2 text-2xl font-semibold">{commercialSummary.phaseLaggingPackageCount}</div>
-              <div className="text-sm text-muted-foreground">Linked packages that still need procurement or construction follow-through</div>
             </div>
           </div>
 
@@ -176,7 +191,7 @@ export function ProjectCommercialTab({ commercialSummary, formatMoney }: Project
         <CardContent className="space-y-3">
           {commercialSummary.phaseRollups.length === 0 ? (
             <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-              No package phases have been costed yet.
+              No work component phases have been costed yet.
             </div>
           ) : (
             commercialSummary.phaseRollups.map((phase) => (
@@ -184,7 +199,7 @@ export function ProjectCommercialTab({ commercialSummary, formatMoney }: Project
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="font-medium">{phase.phaseName}</div>
-                    <Badge variant="outline">{phase.packageCount} package(s)</Badge>
+                    <Badge variant="outline">{phase.packageCount} work component(s)</Badge>
                     <Badge variant="secondary">{phase.boqItemCount} BOQ item(s)</Badge>
                   </div>
                   <div className="text-sm text-muted-foreground">Variance {formatMoney(phase.varianceAmount, currency)}</div>

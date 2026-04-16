@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,26 +12,39 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { ProjectPhaseLibraryAdmin } from '@/components/projects/ProjectPhaseLibraryAdmin';
 import {
+  DEFAULT_PROJECT_CURRENCY,
+  buildProjectCurrencyOptions,
+  findProjectCurrency,
+  formatProjectCurrencyLabel,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
+import { inventoryManagementService, type InventoryItemDto } from '@/services/inventoryManagementService';
+import { type CurrencyListDto } from '@/services/financeCommonService';
+import {
   CreateProjectCatalogEntryDto,
   CreateProjectPriorityDto,
   CreateProjectTemplateDto,
   CreateProjectTypeDto,
+  CreateProjectUnitTypeTemplateDto,
   ProjectCatalogEntryDto,
   ProjectMasterDataOverviewDto,
   ProjectManagementSettingsDto,
   ProjectPriorityDto,
   ProjectTemplateDto,
   ProjectTypeDto,
+  ProjectUnitTypeTemplateDto,
   projectService,
   UpdateProjectManagementSettingsDto,
 } from '@/services/projectService';
 import { Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-type AdminTab = 'overview' | 'catalogs' | 'types' | 'priorities' | 'templates' | 'phases' | 'settings';
+type AdminTab = 'overview' | 'catalogs' | 'types' | 'priorities' | 'templates' | 'unit-types' | 'phases' | 'settings';
 
 interface Props {
   initialTab?: AdminTab;
+  initialCatalogType?: string;
 }
 
 interface TemplateDevelopmentProfileBuilder {
@@ -54,6 +67,7 @@ interface TemplatePhaseBuilder {
   name: string;
   description: string;
   status: string;
+  completionWeightPercent: number;
   isOptional: boolean;
   isStageGateRequired: boolean;
 }
@@ -89,17 +103,18 @@ const DEVELOPMENT_TYPES = ['Residential', 'Commercial', 'Industrial', 'MixedUse'
 const PROCUREMENT_ROUTES = ['Traditional', 'DesignBuild', 'ConstructionManagement', 'DirectLabour', 'Negotiated', 'FrameworkCallOff'];
 const CONTRACT_STRATEGIES = ['LumpSum', 'MeasuredWorks', 'CostPlus', 'TargetCost', 'ManagementContract', 'SubcontractPackages'];
 const HANDOVER_STRATEGIES = ['SingleHandover', 'PhasedHandover', 'UnitByUnitHandover', 'ShellAndCore', 'Turnkey'];
+const UNIT_CLASSIFICATION_OPTIONS = ['Unit', 'Apartment', 'OfficeSuite', 'RetailShop', 'Warehouse', 'WholeBuilding'];
 
 const DEFAULT_TEMPLATE_PHASE_BLUEPRINTS = [
-  { code: 'FEASIBILITY', name: 'Feasibility', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
-  { code: 'CONCEPT_DESIGN', name: 'Concept Design', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
-  { code: 'DETAILED_DESIGN', name: 'Detailed Design', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
-  { code: 'APPROVALS', name: 'Approvals & Permits', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
-  { code: 'PROCUREMENT', name: 'Procurement', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
-  { code: 'CONSTRUCTION', name: 'Construction', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: false },
-  { code: 'COMMISSIONING', name: 'Testing & Commissioning', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
-  { code: 'HANDOVER', name: 'Handover', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: true },
-  { code: 'DEFECTS_LIABILITY', name: 'Defects Liability', description: '', status: 'NotStarted', isOptional: false, isStageGateRequired: false },
+  { code: 'FEASIBILITY', name: 'Feasibility', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: true },
+  { code: 'CONCEPT_DESIGN', name: 'Concept Design', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: true },
+  { code: 'DETAILED_DESIGN', name: 'Detailed Design', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: true },
+  { code: 'APPROVALS', name: 'Approvals & Permits', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: true },
+  { code: 'PROCUREMENT', name: 'Procurement', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: true },
+  { code: 'CONSTRUCTION', name: 'Construction', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: false },
+  { code: 'COMMISSIONING', name: 'Testing & Commissioning', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: true },
+  { code: 'HANDOVER', name: 'Handover', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: true },
+  { code: 'DEFECTS_LIABILITY', name: 'Defects Liability', description: '', status: 'NotStarted', completionWeightPercent: 0, isOptional: false, isStageGateRequired: false },
 ];
 
 const createTemplateRowId = () =>
@@ -124,10 +139,28 @@ const readStringValue = (value: Record<string, unknown>, key: string) =>
 const readBooleanValue = (value: Record<string, unknown>, key: string) =>
   typeof value[key] === 'boolean' ? (value[key] as boolean) : false;
 
+const readNumberValue = (value: Record<string, unknown>, key: string) => {
+  const raw = value[key];
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string') {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+};
+
 const normalizeDateInput = (value: string) => {
   const trimmed = value.trim();
   return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed;
 };
+
+const resolveInventoryItemUnitCost = (item?: InventoryItemDto | null) =>
+  item?.currentCost
+  ?? item?.standardCost
+  ?? item?.averageCost
+  ?? item?.lastPurchaseCost
+  ?? 0;
 
 const createBlankTemplateBuilder = (): TemplateBuilderState => ({
   developmentProfile: {
@@ -177,6 +210,7 @@ const parseTemplatePhases = (value: unknown): TemplatePhaseBuilder[] => {
           name: item,
           description: '',
           status: 'NotStarted',
+          completionWeightPercent: 0,
           isOptional: false,
           isStageGateRequired: false,
         };
@@ -191,6 +225,7 @@ const parseTemplatePhases = (value: unknown): TemplatePhaseBuilder[] => {
         name: readStringValue(record, 'name') || readStringValue(record, 'title') || 'Unnamed phase',
         description: readStringValue(record, 'description'),
         status: readStringValue(record, 'status') || 'NotStarted',
+        completionWeightPercent: readNumberValue(record, 'completionWeightPercent'),
         isOptional: readBooleanValue(record, 'isOptional'),
         isStageGateRequired: readBooleanValue(record, 'isStageGateRequired') || readBooleanValue(record, 'stageGateRequired'),
       };
@@ -348,6 +383,7 @@ const buildTemplateDefinitionJson = (builder: TemplateBuilderState) => {
       description: phase.description.trim() || undefined,
       status: phase.status.trim() || 'NotStarted',
       sortOrder: index,
+      completionWeightPercent: Number((phase.completionWeightPercent || 0).toFixed(2)),
       isOptional: phase.isOptional,
       isStageGateRequired: phase.isStageGateRequired,
     }))
@@ -399,6 +435,16 @@ const emptyTemplate: CreateProjectTemplateDto = {
   templateDefinitionJson: buildTemplateDefinitionJson(createDefaultTemplateBuilder()),
   isActive: true,
 };
+const emptyUnitTypeTemplate: CreateProjectUnitTypeTemplateDto = {
+  code: '',
+  name: '',
+  description: '',
+  defaultProjectUnitType: 'Unit',
+  sortOrder: 10,
+  isActive: true,
+  currency: '',
+  amenities: [],
+};
 const emptySettings: UpdateProjectManagementSettingsDto = {
   projectNumberFormat: 'PRJ-{YYYY}-{SEQ:0000}',
   requireSponsor: false,
@@ -415,19 +461,24 @@ const emptyCatalog: CreateProjectCatalogEntryDto = {
   isActive: true,
 };
 
-export default function ProjectManagementAdminPage({ initialTab = 'overview' }: Props) {
+export default function ProjectManagementAdminPage({ initialTab = 'overview', initialCatalogType }: Props) {
   const [tab, setTab] = useState<AdminTab>(initialTab);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [types, setTypes] = useState<ProjectTypeDto[]>([]);
   const [priorities, setPriorities] = useState<ProjectPriorityDto[]>([]);
   const [templates, setTemplates] = useState<ProjectTemplateDto[]>([]);
+  const [unitTypeTemplates, setUnitTypeTemplates] = useState<ProjectUnitTypeTemplateDto[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
+  const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
+  const [unitTypeBaseCurrency, setUnitTypeBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [masterDataOverview, setMasterDataOverview] = useState<ProjectMasterDataOverviewDto | null>(null);
   const [catalogEntries, setCatalogEntries] = useState<ProjectCatalogEntryDto[]>([]);
   const [settings, setSettings] = useState<ProjectManagementSettingsDto | null>(null);
   const [typeForm, setTypeForm] = useState<CreateProjectTypeDto>(emptyType);
   const [priorityForm, setPriorityForm] = useState<CreateProjectPriorityDto>(emptyPriority);
   const [templateForm, setTemplateForm] = useState<CreateProjectTemplateDto>(emptyTemplate);
+  const [unitTypeTemplateForm, setUnitTypeTemplateForm] = useState<CreateProjectUnitTypeTemplateDto>(emptyUnitTypeTemplate);
   const [templateBuilder, setTemplateBuilder] = useState<TemplateBuilderState>(() =>
     cloneTemplateBuilder(parseTemplateDefinition(emptyTemplate.templateDefinitionJson, true).builder),
   );
@@ -438,9 +489,23 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
   const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
   const [editingPriorityId, setEditingPriorityId] = useState<string | null>(null);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingUnitTypeTemplateId, setEditingUnitTypeTemplateId] = useState<string | null>(null);
   const [editingCatalogId, setEditingCatalogId] = useState<string | null>(null);
-  const [selectedCatalogType, setSelectedCatalogType] = useState<string>('methodologies');
+  const [selectedCatalogType, setSelectedCatalogType] = useState<string>(initialCatalogType || 'methodologies');
   const [seedingCatalogs, setSeedingCatalogs] = useState(false);
+  const unitTypeCurrencyOptions = useMemo(
+    () => buildProjectCurrencyOptions(currencies, unitTypeBaseCurrency, unitTypeTemplateForm.currency),
+    [currencies, unitTypeBaseCurrency, unitTypeTemplateForm.currency],
+  );
+
+  useEffect(() => {
+    if (!initialCatalogType?.trim()) {
+      return;
+    }
+
+    setSelectedCatalogType(initialCatalogType);
+    setCatalogForm((prev) => ({ ...prev, catalogType: initialCatalogType }));
+  }, [initialCatalogType]);
 
   const resetTemplateEditor = (nextForm: CreateProjectTemplateDto = emptyTemplate, useDefaultWhenEmpty: boolean = true) => {
     const parsed = parseTemplateDefinition(nextForm.templateDefinitionJson, useDefaultWhenEmpty);
@@ -492,21 +557,32 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [loadedOverview, loadedTypes, loadedPriorities, loadedTemplates, loadedSettings] = await Promise.all([
+      const [loadedOverview, loadedTypes, loadedPriorities, loadedTemplates, loadedUnitTypes, loadedSettings, loadedInventoryItems, currencyContext] = await Promise.all([
         projectService.getMasterDataOverview(),
         projectService.getProjectTypes(),
         projectService.getProjectPriorities(),
         projectService.getProjectTemplates(),
+        projectService.getProjectUnitTypeTemplates().catch(() => []),
         projectService.getSettings(),
+        inventoryManagementService.getInventoryItems({ isActive: true }).catch(() => []),
+        loadProjectCurrencyContext().catch(() => ({ activeCurrencies: [], baseCurrency: DEFAULT_PROJECT_CURRENCY, rawBaseCurrency: null })),
       ]);
       setMasterDataOverview(loadedOverview);
-      const nextCatalogType = loadedOverview.recommendedCatalogs[0]?.key || selectedCatalogType;
+      const requestedCatalogType = initialCatalogType?.trim();
+      const nextCatalogType =
+        (requestedCatalogType && loadedOverview.recommendedCatalogs.some((group) => group.key === requestedCatalogType)
+          ? requestedCatalogType
+          : selectedCatalogType) || loadedOverview.recommendedCatalogs[0]?.key || 'methodologies';
       setSelectedCatalogType(nextCatalogType);
       setCatalogForm((prev) => ({ ...prev, catalogType: nextCatalogType }));
       setTypes(loadedTypes);
       setPriorities(loadedPriorities);
       setTemplates(loadedTemplates);
+      setUnitTypeTemplates(loadedUnitTypes);
       setSettings(loadedSettings);
+      setInventoryItems(loadedInventoryItems);
+      setCurrencies(currencyContext.activeCurrencies);
+      setUnitTypeBaseCurrency(currencyContext.baseCurrency);
       setSettingsForm({
         projectNumberFormat: loadedSettings.projectNumberFormat,
         requireSponsor: loadedSettings.requireSponsor,
@@ -541,6 +617,50 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
     setCatalogForm((prev) => ({ ...prev, catalogType: selectedCatalogType }));
     loadCatalogEntries(selectedCatalogType);
   }, [selectedCatalogType]);
+
+  const sortedInventoryItems = useMemo(
+    () => [...inventoryItems].sort((left, right) => `${left.itemCode} ${left.name}`.localeCompare(`${right.itemCode} ${right.name}`)),
+    [inventoryItems],
+  );
+  const unitTypeTemplateTotal = useMemo(
+    () => (unitTypeTemplateForm.amenities || []).reduce((sum, item) => sum + ((item.quantity ?? 1) * (item.unitCost ?? 0)), 0),
+    [unitTypeTemplateForm.amenities],
+  );
+
+  const addUnitTypeAmenityRow = () => {
+    const firstInventoryItem = sortedInventoryItems[0];
+    setUnitTypeTemplateForm((prev) => ({
+      ...prev,
+      amenities: [
+        ...(prev.amenities || []),
+        {
+          inventoryItemId: firstInventoryItem?.id || '',
+          itemCode: firstInventoryItem?.itemCode,
+          amenityName: firstInventoryItem?.name,
+          quantity: 1,
+          unitCost: resolveInventoryItemUnitCost(firstInventoryItem),
+          sortOrder: (prev.amenities || []).length,
+        },
+      ],
+    }));
+  };
+
+  const updateUnitTypeAmenityRow = (index: number, updates: Partial<NonNullable<CreateProjectUnitTypeTemplateDto['amenities']>[number]>) => {
+    setUnitTypeTemplateForm((prev) => ({
+      ...prev,
+      amenities: (prev.amenities || []).map((item, itemIndex) => itemIndex === index ? { ...item, ...updates } : item),
+    }));
+  };
+
+  const removeUnitTypeAmenityRow = (index: number) => {
+    setUnitTypeTemplateForm((prev) => ({
+      ...prev,
+      amenities: (prev.amenities || []).filter((_, itemIndex) => itemIndex !== index).map((item, itemIndex) => ({
+        ...item,
+        sortOrder: itemIndex,
+      })),
+    }));
+  };
 
   const saveType = async () => {
     try {
@@ -606,6 +726,41 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
       toast.success('Project template saved');
     } catch (error: any) {
       toast.error(error.message || 'Failed to save project template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveUnitTypeTemplate = async () => {
+    try {
+      setSaving(true);
+      const payload: CreateProjectUnitTypeTemplateDto = {
+        ...unitTypeTemplateForm,
+        currency: unitTypeTemplateForm.currency || unitTypeBaseCurrency.code,
+        amenities: (unitTypeTemplateForm.amenities || [])
+          .filter((item) => item.inventoryItemId)
+          .map((item, index) => ({
+            inventoryItemId: item.inventoryItemId as string,
+            itemCode: item.itemCode,
+            amenityName: item.amenityName,
+            quantity: item.quantity ?? 1,
+            unitCost: item.unitCost ?? 0,
+            sortOrder: index,
+          })),
+      };
+
+      if (editingUnitTypeTemplateId) {
+        await projectService.updateProjectUnitTypeTemplate(editingUnitTypeTemplateId, payload);
+      } else {
+        await projectService.createProjectUnitTypeTemplate(payload);
+      }
+
+      setUnitTypeTemplateForm(emptyUnitTypeTemplate);
+      setEditingUnitTypeTemplateId(null);
+      await loadData();
+      toast.success('Project unit type saved');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save project unit type');
     } finally {
       setSaving(false);
     }
@@ -688,6 +843,21 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
     }
   };
 
+  const removeUnitTypeTemplate = async (id: string) => {
+    if (!window.confirm('Delete this project unit type?')) return;
+    try {
+      await projectService.deleteProjectUnitTypeTemplate(id);
+      if (editingUnitTypeTemplateId === id) {
+        setEditingUnitTypeTemplateId(null);
+        setUnitTypeTemplateForm(emptyUnitTypeTemplate);
+      }
+      await loadData();
+      toast.success('Project unit type deleted');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete project unit type');
+    }
+  };
+
   const removeCatalogEntry = async (id: string) => {
     if (!window.confirm('Delete this project catalog entry?')) return;
     try {
@@ -733,21 +903,23 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
       </div>
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as AdminTab)} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-8">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="catalogs">Catalogs</TabsTrigger>
           <TabsTrigger value="types">Types</TabsTrigger>
           <TabsTrigger value="priorities">Priorities</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
+          <TabsTrigger value="unit-types">Unit Types</TabsTrigger>
           <TabsTrigger value="phases">Phases</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
-          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-8">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-9">
             <Card><CardHeader><CardTitle className="text-base">Types</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectTypeCount ?? types.length}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Priorities</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectPriorityCount ?? priorities.length}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Templates</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectTemplateCount ?? templates.length}</CardContent></Card>
+            <Card><CardHeader><CardTitle className="text-base">Unit Types</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectUnitTypeTemplateCount ?? unitTypeTemplates.length}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Phase Templates</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectPhaseTemplateCount ?? 0}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Gate Rules</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.projectStageGateRuleCount ?? 0}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Portfolios</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{masterDataOverview?.portfolioCount ?? 0}</CardContent></Card>
@@ -1157,6 +1329,7 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
                               name: '',
                               description: '',
                               status: 'NotStarted',
+                              completionWeightPercent: 0,
                               isOptional: false,
                               isStageGateRequired: false,
                             },
@@ -1168,6 +1341,12 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
                     </Button>
                   </div>
                   <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50/70 px-3 py-2 text-sm">
+                      <span className="text-slate-600">Total phase weight</span>
+                      <span className={`font-semibold ${Math.abs(templateBuilder.phases.reduce((sum, phase) => sum + (phase.completionWeightPercent || 0), 0) - 100) < 0.01 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {templateBuilder.phases.reduce((sum, phase) => sum + (phase.completionWeightPercent || 0), 0).toFixed(2)}%
+                      </span>
+                    </div>
                     {templateBuilder.phases.length === 0 ? <div className="text-sm text-muted-foreground">No phases added yet.</div> : null}
                     {templateBuilder.phases.map((phase, index) => (
                       <div key={phase.id} className="rounded-md border p-3 space-y-3">
@@ -1186,9 +1365,10 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-                        <div className="grid gap-3 md:grid-cols-2">
+                        <div className="grid gap-3 md:grid-cols-3">
                           <div className="grid gap-2"><Label>Code</Label><Input value={phase.code} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, code: e.target.value } : item) }))} /></div>
                           <div className="grid gap-2"><Label>Name</Label><Input value={phase.name} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, name: e.target.value } : item) }))} /></div>
+                          <div className="grid gap-2"><Label>Completion Weight (%)</Label><Input type="number" min={0} max={100} step="0.01" value={phase.completionWeightPercent ?? 0} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, completionWeightPercent: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 0 } : item) }))} /></div>
                           <div className="grid gap-2"><Label>Status</Label><Input value={phase.status} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, status: e.target.value } : item) }))} /></div>
                           <div className="grid gap-2"><Label>Description</Label><Input value={phase.description} onChange={(e) => updateTemplateBuilder((current) => ({ ...current, phases: current.phases.map((item) => item.id === phase.id ? { ...item, description: e.target.value } : item) }))} /></div>
                         </div>
@@ -1358,6 +1538,150 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview' }: 
                 <div className="flex gap-2">
                   <Button onClick={saveTemplate} disabled={saving || !templateForm.code || !templateForm.name || !!templateJsonError}>Save Template</Button>
                   {editingTemplateId && <Button variant="outline" onClick={() => { setEditingTemplateId(null); resetTemplateEditor(); }}>Cancel</Button>}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="unit-types">
+          <Card>
+            <CardHeader>
+              <CardTitle>Project Unit Types</CardTitle>
+              <CardDescription>Define residential or commercial unit presets, map their amenity costs from inventory, and reuse them when registering project units.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-3">
+                {unitTypeTemplates.length === 0 ? <div className="text-sm text-muted-foreground">No project unit types are configured yet.</div> : null}
+                {unitTypeTemplates.map((item) => (
+                  <div key={item.id} className="rounded-lg border p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold">{item.name}</span>
+                          <Badge variant="outline">{item.code}</Badge>
+                          <Badge variant={item.isActive ? 'secondary' : 'outline'}>{item.isActive ? 'Active' : 'Inactive'}</Badge>
+                          <Badge variant="outline">{item.defaultProjectUnitType}</Badge>
+                        </div>
+                        <div className="text-sm text-muted-foreground">{item.description || 'No description'}</div>
+                        <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                          <span>{item.amenities.length} amenity item(s)</span>
+                          <span>Total {item.currency || 'Currency not set'} {item.totalCost.toLocaleString()}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => {
+                          setEditingUnitTypeTemplateId(item.id);
+                          setUnitTypeTemplateForm({
+                            code: item.code,
+                            name: item.name,
+                            description: item.description || '',
+                            defaultProjectUnitType: item.defaultProjectUnitType,
+                            sortOrder: item.sortOrder,
+                            isActive: item.isActive,
+                            currency: item.currency || '',
+                            amenities: item.amenities.map((amenity, index) => ({
+                              inventoryItemId: amenity.inventoryItemId,
+                              itemCode: amenity.itemCode,
+                              amenityName: amenity.amenityName,
+                              quantity: amenity.quantity,
+                              unitCost: amenity.unitCost,
+                              sortOrder: amenity.sortOrder ?? index,
+                            })),
+                          });
+                        }}>Edit</Button>
+                        <Button variant="ghost" size="icon" onClick={() => removeUnitTypeTemplate(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg border p-4 space-y-4">
+                <div className="font-semibold">{editingUnitTypeTemplateId ? 'Edit Unit Type' : 'New Unit Type'}</div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-2"><Label>Code</Label><Input value={unitTypeTemplateForm.code} onChange={(e) => setUnitTypeTemplateForm((prev) => ({ ...prev, code: e.target.value }))} /></div>
+                  <div className="grid gap-2"><Label>Name</Label><Input value={unitTypeTemplateForm.name} onChange={(e) => setUnitTypeTemplateForm((prev) => ({ ...prev, name: e.target.value }))} /></div>
+                  <div className="grid gap-2 md:col-span-2"><Label>Description</Label><Textarea rows={2} value={unitTypeTemplateForm.description || ''} onChange={(e) => setUnitTypeTemplateForm((prev) => ({ ...prev, description: e.target.value }))} /></div>
+                  <div className="grid gap-2">
+                    <Label>Classification</Label>
+                    <Select value={unitTypeTemplateForm.defaultProjectUnitType || UNIT_CLASSIFICATION_OPTIONS[0]} onValueChange={(value) => setUnitTypeTemplateForm((prev) => ({ ...prev, defaultProjectUnitType: value }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{UNIT_CLASSIFICATION_OPTIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Currency</Label>
+                    <Select value={unitTypeTemplateForm.currency || unitTypeCurrencyOptions[0] || unitTypeBaseCurrency.code} onValueChange={(value) => setUnitTypeTemplateForm((prev) => ({ ...prev, currency: value }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {unitTypeCurrencyOptions.map((code) => {
+                          const currency = findProjectCurrency(currencies, code, unitTypeBaseCurrency);
+                          return (
+                            <SelectItem key={code} value={code}>
+                              {formatProjectCurrencyLabel(currency, code)}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2"><Label>Sort Order</Label><Input type="number" value={unitTypeTemplateForm.sortOrder ?? 0} onChange={(e) => setUnitTypeTemplateForm((prev) => ({ ...prev, sortOrder: Number(e.target.value || '0') }))} /></div>
+                  <div className="flex items-center justify-between rounded-md border p-3"><span className="text-sm">Active</span><Switch checked={unitTypeTemplateForm.isActive !== false} onCheckedChange={(checked) => setUnitTypeTemplateForm((prev) => ({ ...prev, isActive: checked }))} /></div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium">Amenities</div>
+                      <div className="text-sm text-muted-foreground">Choose inventory items and store their cost contribution for this unit type.</div>
+                    </div>
+                    <Button variant="outline" onClick={addUnitTypeAmenityRow} disabled={sortedInventoryItems.length === 0}>Add Amenity</Button>
+                  </div>
+                  {(unitTypeTemplateForm.amenities || []).length === 0 ? <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No amenities added yet.</div> : null}
+                  {(unitTypeTemplateForm.amenities || []).map((amenity, index) => (
+                    <div key={`${amenity.inventoryItemId || 'amenity'}-${index}`} className="rounded-md border p-3 space-y-3">
+                      <div className="grid gap-3 md:grid-cols-[1.4fr,1fr,0.7fr,0.8fr,auto]">
+                        <div className="grid gap-2">
+                          <Label>Inventory Item</Label>
+                          <Select value={amenity.inventoryItemId || 'none'} onValueChange={(value) => {
+                            const selectedItem = sortedInventoryItems.find((item) => item.id === value);
+                            updateUnitTypeAmenityRow(index, {
+                              inventoryItemId: value === 'none' ? undefined : value,
+                              itemCode: selectedItem?.itemCode,
+                              amenityName: selectedItem?.name,
+                              unitCost: resolveInventoryItemUnitCost(selectedItem),
+                            });
+                          }}>
+                            <SelectTrigger><SelectValue placeholder="Select inventory item" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No item</SelectItem>
+                              {sortedInventoryItems.map((item) => (
+                                <SelectItem key={item.id} value={item.id}>
+                                  {item.itemCode ? `${item.itemCode} · ${item.name}` : item.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-2"><Label>Amenity Name</Label><Input value={amenity.amenityName || ''} onChange={(e) => updateUnitTypeAmenityRow(index, { amenityName: e.target.value })} /></div>
+                        <div className="grid gap-2"><Label>Qty</Label><Input type="number" min="0" step="0.01" value={amenity.quantity ?? 1} onChange={(e) => updateUnitTypeAmenityRow(index, { quantity: Number(e.target.value || '0') })} /></div>
+                        <div className="grid gap-2"><Label>Unit Cost</Label><Input type="number" min="0" step="0.01" value={amenity.unitCost ?? 0} onChange={(e) => updateUnitTypeAmenityRow(index, { unitCost: Number(e.target.value || '0') })} /></div>
+                        <div className="flex items-end"><Button variant="ghost" size="icon" onClick={() => removeUnitTypeAmenityRow(index)}><Trash2 className="h-4 w-4" /></Button></div>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Line Total {(unitTypeTemplateForm.currency || 'Currency not set')} {((amenity.quantity ?? 1) * (amenity.unitCost ?? 0)).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between rounded-md border bg-muted/30 p-3">
+                    <span className="font-medium">Total Cost</span>
+                    <span className="font-semibold">{unitTypeTemplateForm.currency || 'Currency not set'} {unitTypeTemplateTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={saveUnitTypeTemplate} disabled={saving || !unitTypeTemplateForm.code || !unitTypeTemplateForm.name}>Save Unit Type</Button>
+                  {editingUnitTypeTemplateId && <Button variant="outline" onClick={() => { setEditingUnitTypeTemplateId(null); setUnitTypeTemplateForm(emptyUnitTypeTemplate); }}>Cancel</Button>}
                 </div>
               </div>
             </CardContent>

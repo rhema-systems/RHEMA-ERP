@@ -44,6 +44,7 @@ const createPhaseTemplateForm = (): CreateProjectPhaseTemplateDto => ({
   code: '',
   defaultStatus: 'NotStarted',
   sortOrder: 10,
+  completionWeightPercent: 0,
   isOptional: false,
   isStageGateRequired: false,
   isActive: true,
@@ -223,6 +224,7 @@ export function ProjectPhaseLibraryAdmin({ onChanged }: Props) {
       description: template.description || '',
       defaultStatus: template.defaultStatus,
       sortOrder: template.sortOrder,
+      completionWeightPercent: template.completionWeightPercent,
       isOptional: template.isOptional,
       isStageGateRequired: template.isStageGateRequired,
       isActive: template.isActive,
@@ -382,6 +384,9 @@ export function ProjectPhaseLibraryAdmin({ onChanged }: Props) {
                         <Badge variant="secondary" className="text-[11px]">
                           {formatLabel(template.defaultStatus)}
                         </Badge>
+                        <Badge variant="outline" className="border-emerald-300 text-[11px] text-emerald-700">
+                          {template.completionWeightPercent.toFixed(2)}%
+                        </Badge>
                         {template.projectTypeName ? (
                           <Badge variant="outline" className="border-blue-300 text-[11px] text-blue-700">
                             {template.projectTypeName}
@@ -409,6 +414,7 @@ export function ProjectPhaseLibraryAdmin({ onChanged }: Props) {
                       ) : null}
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500" style={{ marginLeft: `${template.depth * 18}px` }}>
                         <span>Sort {template.sortOrder}</span>
+                        <span>Weight {template.completionWeightPercent.toFixed(2)}%</span>
                         <span>{template.stageGateRules.length} gate rule(s)</span>
                         {template.appliesToDeliveryStructure ? <span>{formatLabel(template.appliesToDeliveryStructure)}</span> : null}
                         {template.appliesToDevelopmentType ? <span>{template.appliesToDevelopmentType}</span> : null}
@@ -543,6 +549,24 @@ export function ProjectPhaseLibraryAdmin({ onChanged }: Props) {
                   }
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phase-template-weight">Completion Weight (%)</Label>
+              <Input
+                id="phase-template-weight"
+                type="number"
+                min={0}
+                max={100}
+                step="0.01"
+                value={phaseTemplateForm.completionWeightPercent ?? 0}
+                onChange={(event) =>
+                  setPhaseTemplateForm((current) => ({
+                    ...current,
+                    completionWeightPercent: Number.isFinite(event.target.valueAsNumber) ? event.target.valueAsNumber : 0,
+                  }))
+                }
+              />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

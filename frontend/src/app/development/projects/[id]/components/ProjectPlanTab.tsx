@@ -1,8 +1,9 @@
-import { type Dispatch, type SetStateAction } from 'react';
+import { useMemo, type Dispatch, type SetStateAction } from 'react';
 import { Maximize2, Pencil, Plus, Save, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -21,6 +22,7 @@ type IdentifiedRecord = { id: string };
 type TaskView = 'tree' | 'kanban' | 'timeline';
 type TimelineBounds = { min: number; max: number; totalDays: number } | null;
 type GanttSummary = { scheduledItems: number; spanDays: number; overdueItems: number; phases: number } | null;
+type FlatProjectPhase = ProjectDetailDto['phases'][number] & { depth: number };
 
 type ProjectPlanTabProps = {
   project: ProjectDetailDto;
@@ -67,6 +69,11 @@ type ProjectPlanTabProps = {
 };
 
 const parseTagList = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
+const flattenProjectPhases = (phases: ProjectDetailDto['phases'], depth = 0): FlatProjectPhase[] =>
+  phases.flatMap((phase) => [{ ...phase, depth }, ...flattenProjectPhases(phase.children || [], depth + 1)]);
+const formatWeight = (value?: number) => `${Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
+const formatWorkComponentContext = (item: Pick<ProjectWorkItemDto, 'projectPhaseName' | 'projectPackageName'>) =>
+  [item.projectPhaseName, item.projectPackageName].filter(Boolean).join(' / ');
 
 function WorkTree({
   items,
@@ -92,6 +99,7 @@ function WorkTree({
             <div>
               <div className="font-medium">{item.title}</div>
               <div className="text-xs text-muted-foreground">{item.nodeType} | {item.status} | {item.percentComplete}%</div>
+              {formatWorkComponentContext(item) ? <div className="text-xs text-muted-foreground">{formatWorkComponentContext(item)}</div> : null}
             </div>
             <div className="flex items-center gap-1">
               <Button variant="ghost" size="sm" onClick={() => onEdit(item)}><Pencil className="h-4 w-4" /></Button>
@@ -148,6 +156,39 @@ export function ProjectPlanTab({
   onApproveResourceAllocation,
   onDeleteResourceAllocation,
 }: ProjectPlanTabProps) {
+  const projectPhases = useMemo(() => flattenProjectPhases(project.phases), [project.phases]);
+  const milestonePhaseIds = milestone.projectPhaseIds ?? [];
+  const assignedPhaseMilestones = useMemo(
+    () => new Map(project.milestones.flatMap((item) => item.phases.map((phase) => [phase.projectPhaseId, item.title] as const))),
+    [project.milestones],
+  );
+  const selectedMilestoneWeight = useMemo(
+    () => milestonePhaseIds.reduce((sum, phaseId) => sum + (projectPhases.find((phase) => phase.id === phaseId)?.completionWeightPercent ?? 0), 0),
+    [milestonePhaseIds, projectPhases],
+  );
+  const workComponentOptions = useMemo(
+    () =>
+      [...project.packages].sort((left, right) =>
+        (left.projectPhaseName || '').localeCompare(right.projectPhaseName || '')
+        || (left.code || left.name).localeCompare(right.code || right.name),
+      ),
+    [project.packages],
+  );
+
+  const toggleMilestonePhase = (phaseId: string, checked: boolean) => {
+    setMilestone((current) => {
+      const currentIds = current.projectPhaseIds ?? [];
+      const nextIds = checked
+        ? Array.from(new Set([...currentIds, phaseId]))
+        : currentIds.filter((item) => item !== phaseId);
+
+      return {
+        ...current,
+        projectPhaseIds: projectPhases.map((phase) => phase.id).filter((id) => nextIds.includes(id)),
+      };
+    });
+  };
+
   return (
     <div className="space-y-6">
       <Card>
@@ -165,6 +206,7 @@ export function ProjectPlanTab({
             <div className="grid gap-2"><Label>% Complete</Label><Input type="number" value={work.percentComplete ?? 0} onChange={(event) => setWork((current) => ({ ...current, percentComplete: Number(event.target.value || '0') }))} /></div>
             <div className="grid gap-2 md:col-span-3"><Label>Title</Label><Input value={work.title} onChange={(event) => setWork((current) => ({ ...current, title: event.target.value }))} /></div>
             <div className="grid gap-2"><Label>Priority</Label><Select value={work.priority || 'none'} onValueChange={(value) => setWork((current) => ({ ...current, priority: value === 'none' ? undefined : value }))}><SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger><SelectContent><SelectItem value="none">No priority</SelectItem>{taskPriorityOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div>
+            <div className="grid gap-2 md:col-span-2"><Label>Work Component</Label><Select value={work.projectPackageId || 'none'} onValueChange={(value) => setWork((current) => ({ ...current, projectPackageId: value === 'none' ? undefined : value }))}><SelectTrigger><SelectValue placeholder="Optional work component" /></SelectTrigger><SelectContent><SelectItem value="none">No work component</SelectItem>{workComponentOptions.map((projectPackage) => <SelectItem key={projectPackage.id} value={projectPackage.id}>{projectPackage.projectPhaseName ? `${projectPackage.projectPhaseName} / ${projectPackage.code ? `${projectPackage.code} - ` : ''}${projectPackage.name}` : projectPackage.code ? `${projectPackage.code} - ${projectPackage.name}` : projectPackage.name}</SelectItem>)}</SelectContent></Select></div>
             <div className="grid gap-2"><Label>Planned Start</Label><Input type="date" value={work.plannedStartDate ? String(work.plannedStartDate).slice(0, 10) : ''} onChange={(event) => setWork((current) => ({ ...current, plannedStartDate: event.target.value || undefined }))} /></div>
             <div className="grid gap-2"><Label>Planned End</Label><Input type="date" value={work.plannedEndDate ? String(work.plannedEndDate).slice(0, 10) : ''} onChange={(event) => setWork((current) => ({ ...current, plannedEndDate: event.target.value || undefined }))} /></div>
             <div className="flex items-end gap-2">
@@ -217,14 +259,15 @@ export function ProjectPlanTab({
                       {items.map((item) => (
                         <div key={item.id} className={`rounded-lg border bg-background p-4 ${editingWorkItemId === item.id ? 'border-primary bg-primary/5' : ''}`}>
                           <div className="flex items-start justify-between gap-2">
-                            <div className="font-medium">{item.title}</div>
-                            <Button variant="ghost" size="sm" onClick={() => onBeginEditWorkItem(item)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <div className="text-xs text-muted-foreground">{item.nodeType} | {item.percentComplete}% complete</div>
-                          {(item.plannedStartDate || item.plannedEndDate) ? <div className="mt-2 text-xs text-muted-foreground">{formatDateLabel(item.plannedStartDate)} - {formatDateLabel(item.plannedEndDate)}</div> : null}
+                          <div className="font-medium">{item.title}</div>
+                          <Button variant="ghost" size="sm" onClick={() => onBeginEditWorkItem(item)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
                         </div>
+                        <div className="text-xs text-muted-foreground">{item.nodeType} | {item.percentComplete}% complete</div>
+                        {formatWorkComponentContext(item) ? <div className="mt-1 text-xs text-muted-foreground">{formatWorkComponentContext(item)}</div> : null}
+                        {(item.plannedStartDate || item.plannedEndDate) ? <div className="mt-2 text-xs text-muted-foreground">{formatDateLabel(item.plannedStartDate)} - {formatDateLabel(item.plannedEndDate)}</div> : null}
+                      </div>
                       ))}
                     </div>
                   </div>
@@ -293,7 +336,80 @@ export function ProjectPlanTab({
             <div className="grid gap-2"><Label>Target Date</Label><Input type="date" value={milestone.targetDate ? String(milestone.targetDate).slice(0, 10) : ''} onChange={(event) => setMilestone((current) => ({ ...current, targetDate: event.target.value }))} /></div>
             <div className="flex items-end"><Button onClick={onAddMilestone}><Plus className="mr-2 h-4 w-4" />Add</Button></div>
           </div>
-          {project.milestones.map((item) => <div key={item.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{item.title}</div><div className="text-sm text-muted-foreground">{formatDateLabel(item.targetDate)} | {item.status}</div></div><Button variant="ghost" size="sm" onClick={() => onDeleteMilestone(item.id)}><Trash2 className="h-4 w-4" /></Button></div>)}
+          {projectPhases.length > 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-slate-900">Milestone Deliverable Phases</div>
+                  <div className="text-xs text-slate-500">Select the phases this milestone will represent. Each phase can only belong to one milestone.</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">{milestonePhaseIds.length} selected</Badge>
+                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">Total Weight {formatWeight(selectedMilestoneWeight)}</Badge>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-2 xl:grid-cols-2">
+                {projectPhases.map((phase) => {
+                  const isChecked = milestonePhaseIds.includes(phase.id);
+                  const assignedMilestone = assignedPhaseMilestones.get(phase.id);
+                  const isDisabled = Boolean(assignedMilestone) && !isChecked;
+
+                  return (
+                    <label key={phase.id} className={`rounded-lg border px-4 py-3 text-sm ${isDisabled ? 'border-amber-200 bg-amber-50/70' : 'border-slate-200 bg-white'}`}>
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          checked={isChecked}
+                          disabled={isDisabled}
+                          onCheckedChange={(checked) => toggleMilestonePhase(phase.id, Boolean(checked))}
+                        />
+                        <div className="min-w-0 flex-1" style={{ paddingLeft: `${phase.depth * 0.75}rem` }}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-slate-900">{phase.name}</span>
+                            {phase.code ? <Badge variant="outline">{phase.code}</Badge> : null}
+                            <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                              {formatWeight(phase.completionWeightPercent)}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {phase.plannedStartDate || phase.plannedEndDate
+                              ? `${formatDateLabel(phase.plannedStartDate)} - ${formatDateLabel(phase.plannedEndDate)}`
+                              : 'No phase schedule dates set yet'}
+                          </div>
+                          {assignedMilestone && !isChecked ? (
+                            <div className="mt-1 text-xs text-amber-700">Already assigned to milestone {assignedMilestone}.</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              Add project phases first to define milestone deliverables from phase checklists.
+            </div>
+          )}
+          {project.milestones.map((item) => (
+            <div key={item.id} className="flex items-start justify-between rounded-lg border p-4">
+              <div className="space-y-2">
+                <div className="font-medium">{item.title}</div>
+                <div className="text-sm text-muted-foreground">{formatDateLabel(item.targetDate)} | {item.status}</div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                    Weight {formatWeight(item.totalWeightPercent)}
+                  </Badge>
+                  {item.phases.map((phase) => (
+                    <Badge key={`${item.id}-${phase.projectPhaseId}`} variant="secondary">
+                      {phase.phaseCode ? `${phase.phaseCode} - ${phase.phaseName}` : phase.phaseName}
+                    </Badge>
+                  ))}
+                  {item.phases.length === 0 ? <span className="text-xs text-muted-foreground">No phases linked</span> : null}
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => onDeleteMilestone(item.id)}><Trash2 className="h-4 w-4" /></Button>
+            </div>
+          ))}
         </CardContent>
       </Card>
 

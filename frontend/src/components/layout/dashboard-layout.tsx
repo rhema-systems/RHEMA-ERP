@@ -14,26 +14,26 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const isAuthenticated = typeof window !== 'undefined' ? authService.isAuthenticated() : false;
   
   return (
-    <SessionTimeoutProvider enabled={isAuthenticated}>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
-        <div className="flex h-screen">
-          {/* Sidebar */}
-          <Sidebar />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+      <div className="flex h-screen">
+        {/* Sidebar */}
+        <Sidebar />
 
-          {/* Main Content */}
-          <div className="flex flex-1 flex-col overflow-hidden">
-            {/* Header */}
+        {/* Main Content */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Header */}
+          <SessionTimeoutProvider enabled={isAuthenticated}>
             <Header />
+          </SessionTimeoutProvider>
 
-            {/* Page Content */}
-            <main className="flex-1 overflow-y-auto">
-              <div className="w-full max-w-none p-6 space-y-6">
-                {children}
-              </div>
-            </main>
-          </div>
+          {/* Page Content */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="w-full max-w-none p-6 space-y-6">
+              {children}
+            </div>
+          </main>
         </div>
       </div>
-    </SessionTimeoutProvider>
+    </div>
   );
 }

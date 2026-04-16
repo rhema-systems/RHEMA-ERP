@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction, type WheelEventHandler } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition, type Dispatch, type RefObject, type SetStateAction, type WheelEventHandler } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { format, getISOWeek } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -19,10 +19,11 @@ import { ReturnRequisitionDialog } from '@/components/inventory/ReturnRequisitio
 import { RequisitionDialog } from '@/components/inventory/RequisitionDialog';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
-import type { ProjectWorkspaceTab } from './projectWorkspaceTabs';
+import { getProjectWorkspaceTabs, PROJECT_WORKSPACE_TAB_LABELS, type ProjectWorkspaceTab } from './projectWorkspaceTabs';
 import { ProjectAccessTab } from './components/ProjectAccessTab';
 import { ProjectAnalysisTab } from './components/ProjectAnalysisTab';
 import { ProjectApprovalsTab } from './components/ProjectApprovalsTab';
+import { ProjectBudgetingTab, type ProjectBoqBudgetWorksheetUpdate } from './components/ProjectBudgetingTab';
 import { ProjectCommercialAdminTab } from './components/ProjectCommercialAdminTab';
 import { ProjectCommercialTab } from './components/ProjectCommercialTab';
 import { ProjectCustomerVariationsTab } from './components/ProjectCustomerVariationsTab';
@@ -48,14 +49,17 @@ import {
   formatProjectCurrencyLabel,
   formatProjectMoney,
   loadProjectCurrencyContext,
+  resolveProjectBaseCurrency,
   type ProjectCurrencyReference,
 } from '@/lib/project-currency';
 import { ArrowLeft, ChevronDown, ChevronRight, Download, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { contractService, type ContractDto } from '@/services/contractService';
 import { type CurrencyListDto } from '@/services/financeCommonService';
-import { inventoryManagementService, type WarehouseDto } from '@/services/inventoryManagementService';
+import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
+import { inventoryManagementService, type InventoryItemDto, type UnitOfMeasureDto, type WarehouseDto } from '@/services/inventoryManagementService';
 import { inventoryRequisitionService, type InventoryRequisitionDto } from '@/services/inventoryRequisitionService';
+import { maintenanceDataService, type Asset as MaintenanceAssetLookupOption } from '@/services/maintenanceDataService';
 import { userService } from '@/services/user';
 import {
   AddProjectMemberDto,
@@ -112,7 +116,9 @@ import {
   ProjectCatalogEntryDto,
   ProjectBoqItemDto,
   ProjectCommercialSummaryDto,
+  ProjectCustomerVariationDto,
   ProjectDetailDto,
+  ProjectDefectLiabilityCaseDto,
   ProjectDrawingDto,
   ProjectFinancialControlSummaryDto,
   ProjectForecastVersionDto,
@@ -139,10 +145,13 @@ import {
   ProjectRfiDto,
   ProjectScheduleAnalysisDto,
   ProjectSiteInstructionDto,
+  ProjectSnagItemDto,
   ProjectSubmittalDto,
   ProjectTenderLookupDto,
   ProjectTemplateDto,
   ProjectTypeDto,
+  ProjectUnitDto,
+  ProjectUnitTypeTemplateDto,
   ProjectVariationOrderDto,
   ProjectWorkspaceDto,
   ProjectWorkItemDto,
@@ -152,6 +161,7 @@ import {
   UpdateProjectDto,
   projectService,
 } from '@/services/projectService';
+import type { FixedAsset } from '@/types/fixed-assets';
 import type { User } from '@/types';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -221,6 +231,7 @@ const MATERIAL_STATUS_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const GANTT_DAY_WIDTH = 36;
 const GANTT_LEFT_GRID_TEMPLATE = '52px 240px 62px 54px 92px 72px 72px 52px';
 const GANTT_LEFT_GRID_WIDTH = 696;
+const PROJECT_WORKSPACE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 type UserLabelLike = {
   id?: string;
@@ -243,6 +254,69 @@ type ContractLabelLike = {
   contractTitle?: string;
   title?: string;
 };
+
+type ProjectWorkspaceCurrencyContext = Awaited<ReturnType<typeof loadProjectCurrencyContext>>;
+
+type ProjectWorkspaceBootstrapData = {
+  types: ProjectTypeDto[];
+  priorities: ProjectPriorityDto[];
+  templates: ProjectTemplateDto[];
+  portfolios: ProjectPortfolioDto[];
+  businessPartners: BusinessPartnerDto[];
+  customerBusinessPartners: BusinessPartnerDto[];
+  unitTypeTemplates: ProjectUnitTypeTemplateDto[];
+};
+
+type ProjectWorkspaceStaticReferenceData = {
+  users: User[];
+  contracts: ContractDto[];
+  currencyContext: ProjectWorkspaceCurrencyContext;
+  unitsOfMeasure: UnitOfMeasureDto[];
+  maintenanceAssets: MaintenanceAssetLookupOption[];
+  companyAssets: FixedAsset[];
+  methodologyCatalog: ProjectCatalogEntryDto[];
+  billingTypeCatalog: ProjectCatalogEntryDto[];
+  fundingSourceCatalog: ProjectCatalogEntryDto[];
+  resourceRoleCatalog: ProjectCatalogEntryDto[];
+  memberRoleCatalog: ProjectCatalogEntryDto[];
+  taskStatusCatalog: ProjectCatalogEntryDto[];
+  taskPriorityCatalog: ProjectCatalogEntryDto[];
+  deliverableStatusCatalog: ProjectCatalogEntryDto[];
+  riskStatusCatalog: ProjectCatalogEntryDto[];
+  riskCategoryCatalog: ProjectCatalogEntryDto[];
+  riskResponseStrategyCatalog: ProjectCatalogEntryDto[];
+  qualityCheckpointStatusCatalog: ProjectCatalogEntryDto[];
+  nonConformanceStatusCatalog: ProjectCatalogEntryDto[];
+  nonConformanceSeverityCatalog: ProjectCatalogEntryDto[];
+  expenseCategoryCatalog: ProjectCatalogEntryDto[];
+  changeTypeCatalog: ProjectCatalogEntryDto[];
+  issueStatusCatalog: ProjectCatalogEntryDto[];
+  changeStatusCatalog: ProjectCatalogEntryDto[];
+  issueSeverityCatalog: ProjectCatalogEntryDto[];
+  timesheetWorkTypeCatalog: ProjectCatalogEntryDto[];
+  decisionStatusCatalog: ProjectCatalogEntryDto[];
+  meetingTypeCatalog: ProjectCatalogEntryDto[];
+  actionItemStatusCatalog: ProjectCatalogEntryDto[];
+  actionItemPriorityCatalog: ProjectCatalogEntryDto[];
+  lessonCategoryCatalog: ProjectCatalogEntryDto[];
+  lessonVisibilityCatalog: ProjectCatalogEntryDto[];
+  assetLinkTypeCatalog: ProjectCatalogEntryDto[];
+  assetLinkStatusCatalog: ProjectCatalogEntryDto[];
+  documentCategoryCatalog: ProjectCatalogEntryDto[];
+  documentTypeCatalog: ProjectCatalogEntryDto[];
+  boqItemTypeCatalog: ProjectCatalogEntryDto[];
+};
+
+type TimedCacheEntry<T> = {
+  loadedAt: number;
+  value: T;
+};
+
+let projectWorkspaceBootstrapCache: TimedCacheEntry<ProjectWorkspaceBootstrapData> | null = null;
+let projectWorkspaceStaticReferenceCache: TimedCacheEntry<ProjectWorkspaceStaticReferenceData> | null = null;
+const projectWorkspaceProgramsCache = new Map<string, TimedCacheEntry<ProjectProgramDto[]>>();
+
+const isWorkspaceCacheFresh = (loadedAt: number) => Date.now() - loadedAt < PROJECT_WORKSPACE_CACHE_TTL_MS;
 
 const normalizeRequisitionStatus = (status: number | string) => {
   if (typeof status === 'number') return status;
@@ -281,6 +355,10 @@ const formatUserLabel = (user: UserLabelLike) => {
 const formatBusinessPartnerLabel = (partner: BusinessPartnerLabelLike) =>
   `${partner.partnerName || partner.displayName || partner.id || 'Unknown partner'}${partner.partnerType ? ` (${partner.partnerType})` : ''}`;
 
+const isCustomerBusinessPartner = (partner: Pick<BusinessPartnerDto, 'partnerType' | 'customerType'>) => {
+  return (partner.partnerType || '').trim().toLowerCase() === 'customer';
+};
+
 const formatContractLabel = (contract: ContractLabelLike) => {
   const contractNumber = contract.contractNumber?.trim();
   const contractTitle = contract.contractTitle?.trim() || contract.title?.trim();
@@ -300,7 +378,7 @@ const resolveCatalogOptions = (entries: ProjectCatalogEntryDto[], fallbackValues
 
 const memberInit: AddProjectMemberDto = { userId: '', role: 'Team Member' };
 const workInit: CreateProjectWorkItemDto = { nodeType: 'Task', title: '', status: 'New', percentComplete: 0, isRollupEnabled: true };
-const milestoneInit: CreateProjectMilestoneDto = { title: '', targetDate: '', status: 'Draft', requiresApproval: false };
+const milestoneInit: CreateProjectMilestoneDto = { title: '', targetDate: '', status: 'Draft', requiresApproval: false, projectPhaseIds: [] };
 const resourceInit: CreateProjectResourceAllocationDto = { userId: '', allocationRole: 'TeamMember', allocationType: 'Hours', allocationValue: 40, plannedHours: 40, startDate: today(), endDate: today(), bookingType: 'Soft', status: 'Requested', requiredSkills: [], requiredCertifications: [], routingPolicy: 'Balanced' };
 const riskInit: CreateProjectRiskDto = { title: '', status: 'Open', probability: 1, impact: 1 };
 const issueInit: CreateProjectIssueDto = { title: '', status: 'Open', severity: 'Medium' };
@@ -309,7 +387,7 @@ const nonConformanceInit: CreateProjectNonConformanceDto = { title: '', severity
 const changeInit: CreateProjectChangeRequestDto = { title: '', status: 'Draft', changeType: 'Scope' };
 const billingInit: CreateProjectBillingScheduleDto = { name: '', billingType: 'Milestone', amount: 0, billingDate: today(), status: 'Draft', isBillable: true };
 const invoiceInit: CreateProjectInvoiceRequestDto = { requestedAmount: 0, currency: '', status: 'Draft' };
-const docInit: AttachProjectDocumentDto = { documentName: '', category: 'General', documentType: 'Attachment', filePath: '', versionLabel: '1.0', status: 'Active', isExternalVisible: false };
+const docInit: AttachProjectDocumentDto = { artifactType: 'Project', documentName: '', category: 'General', documentType: 'Attachment', filePath: '', versionLabel: '1.0', status: 'Active', isExternalVisible: false };
 const commentInit: CreateProjectCommentDto = { body: '', commentType: 'General' };
 const deliverableInit: CreateProjectDeliverableDto = { title: '', status: 'Draft', externalSubmissionAllowed: false, externalSignOffRequired: false, isExternalVisible: false };
 const dependencyInit: CreateProjectTaskDependencyDto = { predecessorWorkItemId: '', successorWorkItemId: '', dependencyType: 'FS', lagDays: 0, isEnforced: true };
@@ -324,8 +402,8 @@ const decisionInit: CreateProjectDecisionDto = { title: '', decisionDate: today(
 const meetingInit: CreateProjectMeetingMinuteDto = { title: '', meetingDate: today(), meetingType: 'Status', minutes: '', attendeesJson: '' };
 const actionItemInit: CreateProjectActionItemDto = { title: '', description: '', status: 'Open', priority: 'Normal', dueDate: today() };
 const lessonLearnedInit: CreateProjectLessonLearnedDto = { title: '', category: 'General', description: '', recommendation: '', appliedPhase: '', visibility: 'Internal' };
-const projectPhaseInit: CreateProjectPhaseDto = { name: '', description: '', code: '', status: 'NotStarted', sortOrder: 0, isOptional: false, isStageGateRequired: false };
-const packageInit: CreateProjectPackageDto = { name: '', packageType: 'WorkPackage', status: 'Planned', currency: '' };
+const projectPhaseInit: CreateProjectPhaseDto = { name: '', description: '', code: '', status: 'NotStarted', sortOrder: 0, isOptional: false, isStageGateRequired: false, completionWeightPercent: 0 };
+const packageInit: CreateProjectPackageDto = { name: '', packageType: 'WorkPackage', status: 'Planned', currency: '', completionWeightPercent: 0 };
 const boqItemInit: CreateProjectBoqItemDto = { projectPackageId: '', description: '', itemType: 'Item', quantity: 1, currency: '' };
 const approvalRegisterItemInit: CreateProjectApprovalRegisterItemDto = { approvalType: 'BuildingPermit', title: '', status: 'Planned', isRequired: true };
 const drawingInit: CreateProjectDrawingDto = { drawingNumber: '', title: '', discipline: 'Architectural', status: 'Draft', isAsBuilt: false };
@@ -333,11 +411,11 @@ const submittalInit: CreateProjectSubmittalDto = { title: '', submittalType: 'Ma
 const rfiInit: CreateProjectRfiDto = { subject: '', question: '', priority: 'Medium', status: 'Draft' };
 const siteInstructionInit: CreateProjectSiteInstructionDto = { title: '', instructionType: 'SiteInstruction', status: 'Draft', currency: '' };
 const variationOrderInit: CreateProjectVariationOrderDto = { title: '', variationType: 'ScopeChange', status: 'Draft', requestedDate: today(), currency: '' };
-const interimValuationInit: CreateProjectInterimValuationDto = { title: '', status: 'Draft', valuationDate: today(), grossWorkValue: 0, netValuationAmount: 0, retentionAmount: 0, currency: '' };
-const paymentCertificateInit: CreateProjectPaymentCertificateDto = { title: '', status: 'Draft', issueDate: today(), grossCertifiedAmount: 0, netCertifiedAmount: 0, retentionHeldAmount: 0, currency: '' };
+const interimValuationInit: CreateProjectInterimValuationDto = { title: '', status: 'Draft', valuationDate: today(), grossWorkValue: 0, netValuationAmount: 0, retentionAmount: 0, currency: '', completedProjectPackageIds: [] };
+const paymentCertificateInit: CreateProjectPaymentCertificateDto = { title: '', status: 'Draft', issueDate: today(), grossCertifiedAmount: 0, netCertifiedAmount: 0, retentionHeldAmount: 0, retentionReleasedAmount: 0, otherDeductionsAmount: 0, currency: '' };
 const extensionOfTimeInit: CreateProjectExtensionOfTimeDto = { title: '', status: 'Draft', requestedDate: today(), daysRequested: 0, daysApproved: 0 };
 const finalAccountInit: UpsertProjectFinalAccountDto = { status: 'Draft', settlementDate: today(), originalContractValue: 0, approvedVariationAmount: 0, certifiedToDate: 0, retentionHeldAmount: 0, retentionReleasedAmount: 0, finalAccountValue: 0, currency: '' };
-const unitInit: CreateProjectUnitDto = { name: '', unitType: 'Unit', status: 'Planned', currency: '', isReleasedForMarket: false };
+const unitInit: CreateProjectUnitDto = { name: '', unitType: 'Unit', status: 'Planned', currency: '', isReleasedForMarket: false, amenities: [] };
 const customerVariationInit: CreateProjectCustomerVariationDto = { title: '', timing: 'PreHandover', status: 'Requested', currency: '', requiresScheduleAdjustment: false };
 const commissioningInit: CreateProjectCommissioningItemDto = { title: '', status: 'Planned', requiresRegulatoryInspection: false };
 const handoverItemInit: CreateProjectHandoverItemDto = { title: '', handoverType: 'PracticalCompletion', status: 'Planned' };
@@ -539,14 +617,19 @@ const formatBaselineVarianceLabel = (days: number) => {
 export default function ProjectWorkspacePage({ initialTab = 'overview' }: { initialTab?: ProjectWorkspaceTab }) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const [, startTabTransition] = useTransition();
   const id = params?.id;
-  const activeTab = initialTab;
+  const [activeTab, setActiveTab] = useState<ProjectWorkspaceTab>(initialTab);
   const navigateToTab = (tab: string) => {
-    if (!id || tab === activeTab) {
+    const nextTab = tab as ProjectWorkspaceTab;
+    if (!id || nextTab === activeTab) {
       return;
     }
 
-    router.push(`/development/projects/${id}/${tab}`);
+    setActiveTab(nextTab);
+    startTabTransition(() => {
+      router.push(`/development/projects/${id}/${nextTab}`, { scroll: false });
+    });
   };
   const ganttChartScrollRef = useRef<HTMLDivElement | null>(null);
   const ganttBottomScrollRef = useRef<HTMLDivElement | null>(null);
@@ -555,17 +638,22 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [types, setTypes] = useState<ProjectTypeDto[]>([]);
   const [priorities, setPriorities] = useState<ProjectPriorityDto[]>([]);
   const [templates, setTemplates] = useState<ProjectTemplateDto[]>([]);
+  const [unitTypeTemplates, setUnitTypeTemplates] = useState<ProjectUnitTypeTemplateDto[]>([]);
   const [portfolios, setPortfolios] = useState<ProjectPortfolioDto[]>([]);
   const [programs, setPrograms] = useState<ProjectProgramDto[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [baseCurrency, setBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [businessPartners, setBusinessPartners] = useState<BusinessPartnerDto[]>([]);
+  const [customerPartnerOptions, setCustomerPartnerOptions] = useState<BusinessPartnerDto[]>([]);
   const [contracts, setContracts] = useState<ContractDto[]>([]);
   const [tenderLookup, setTenderLookup] = useState<ProjectTenderLookupDto[]>([]);
   const [procurementPlanItemLookup, setProcurementPlanItemLookup] = useState<ProjectProcurementPlanItemLookupDto[]>([]);
   const [purchaseRequisitionLookup, setPurchaseRequisitionLookup] = useState<ProjectPurchaseRequisitionLookupDto[]>([]);
   const [purchaseOrderLookup, setPurchaseOrderLookup] = useState<ProjectPurchaseOrderLookupDto[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
+  const [maintenanceAssets, setMaintenanceAssets] = useState<MaintenanceAssetLookupOption[]>([]);
+  const [companyAssets, setCompanyAssets] = useState<FixedAsset[]>([]);
   const [methodologyCatalog, setMethodologyCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [billingTypeCatalog, setBillingTypeCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [fundingSourceCatalog, setFundingSourceCatalog] = useState<ProjectCatalogEntryDto[]>([]);
@@ -596,6 +684,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [assetLinkStatusCatalog, setAssetLinkStatusCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [documentCategoryCatalog, setDocumentCategoryCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [documentTypeCatalog, setDocumentTypeCatalog] = useState<ProjectCatalogEntryDto[]>([]);
+  const [boqItemTypeCatalog, setBoqItemTypeCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [overview, setOverview] = useState<UpdateProjectDto>({ title: '' });
   const [member, setMember] = useState(memberInit);
   const [work, setWork] = useState(workInit);
@@ -658,6 +747,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [phaseGateEvaluations, setPhaseGateEvaluations] = useState<ProjectPhaseGateEvaluationDto[]>([]);
   const [materialRequisitions, setMaterialRequisitions] = useState<InventoryRequisitionDto[]>([]);
   const [materialWarehouses, setMaterialWarehouses] = useState<WarehouseDto[]>([]);
+  const [unitsOfMeasure, setUnitsOfMeasure] = useState<UnitOfMeasureDto[]>([]);
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
   const [materialDialogMode, setMaterialDialogMode] = useState<'create' | 'edit' | 'view'>('create');
   const [selectedMaterialRequisitionId, setSelectedMaterialRequisitionId] = useState<string | undefined>();
@@ -675,6 +765,14 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [materialsLoaded, setMaterialsLoaded] = useState(false);
   const [packageLookupsLoaded, setPackageLookupsLoaded] = useState(false);
   const [referenceDataLoaded, setReferenceDataLoaded] = useState(false);
+  const workspaceTabs = useMemo(
+    () =>
+      getProjectWorkspaceTabs({
+        deliveryStructure: project?.developmentProfile?.deliveryStructure,
+        developmentType: project?.developmentProfile?.developmentType,
+      }),
+    [project?.developmentProfile?.deliveryStructure, project?.developmentProfile?.developmentType],
+  );
   const [taskView, setTaskView] = useState<'tree' | 'kanban' | 'timeline'>('tree');
   const [ganttDialogOpen, setGanttDialogOpen] = useState(false);
   const [collapsedGanttItems, setCollapsedGanttItems] = useState<string[]>([]);
@@ -687,6 +785,10 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [editingInterimValuationId, setEditingInterimValuationId] = useState<string | null>(null);
   const [editingPaymentCertificateId, setEditingPaymentCertificateId] = useState<string | null>(null);
   const [editingExtensionOfTimeId, setEditingExtensionOfTimeId] = useState<string | null>(null);
+  const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
+  const [editingCustomerVariationId, setEditingCustomerVariationId] = useState<string | null>(null);
+  const [editingSnagItemId, setEditingSnagItemId] = useState<string | null>(null);
+  const [editingDefectLiabilityCaseId, setEditingDefectLiabilityCaseId] = useState<string | null>(null);
   const [ganttQuickFilters, setGanttQuickFilters] = useState({
     overdue: false,
     offBaseline: false,
@@ -706,6 +808,42 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       return '';
     }
   }, []);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
+    const projectCurrencyCode = (overview.baseCurrencyCode || project?.baseCurrencyCode)?.trim();
+    if (projectCurrencyCode) {
+      const resolvedProjectCurrency =
+        findProjectCurrency(currencies, projectCurrencyCode, DEFAULT_PROJECT_CURRENCY)
+        ?? {
+          code: projectCurrencyCode,
+          name: projectCurrencyCode,
+          symbol: '',
+          decimalPlaces: DEFAULT_PROJECT_CURRENCY.decimalPlaces,
+        };
+      setBaseCurrency(resolveProjectBaseCurrency(resolvedProjectCurrency, currencies));
+      return;
+    }
+
+    if (currencies.length > 0) {
+      setBaseCurrency(resolveProjectBaseCurrency(undefined, currencies));
+    }
+  }, [overview.baseCurrencyCode, project?.baseCurrencyCode, currencies]);
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+
+    workspaceTabs.forEach((tab) => {
+      if (tab !== activeTab) {
+        router.prefetch(`/development/projects/${id}/${tab}`);
+      }
+    });
+  }, [activeTab, id, router, workspaceTabs]);
 
   const loadAnalysisData = async (projectId: string) => {
     const [insightsResult, analysisResult, budgetRevisionResult, forecastVersionResult] = await Promise.allSettled([
@@ -740,95 +878,172 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   };
 
   const loadReferenceData = async (portfolioId?: string) => {
-    const [loadedUsers, loadedContracts, currencyContext, catalogResults, loadedPrograms] = await Promise.all([
-      userService.searchUsers('').catch(() => []),
-      contractService.getActiveContracts().catch(() => []),
-      loadProjectCurrencyContext(),
-      Promise.allSettled([
-        projectService.getCatalogEntries('methodologies'),
-        projectService.getCatalogEntries('billing-types'),
-        projectService.getCatalogEntries('funding-sources'),
-        projectService.getCatalogEntries('resource-roles'),
-        projectService.getCatalogEntries('member-roles'),
-        projectService.getCatalogEntries('task-statuses'),
-        projectService.getCatalogEntries('task-priorities'),
-        projectService.getCatalogEntries('deliverable-statuses'),
-        projectService.getCatalogEntries('risk-statuses'),
-        projectService.getCatalogEntries('risk-categories'),
-        projectService.getCatalogEntries('risk-response-strategies'),
-        projectService.getCatalogEntries('quality-checkpoint-statuses'),
-        projectService.getCatalogEntries('non-conformance-statuses'),
-        projectService.getCatalogEntries('non-conformance-severities'),
-        projectService.getCatalogEntries('expense-categories'),
-        projectService.getCatalogEntries('change-categories'),
-        projectService.getCatalogEntries('issue-statuses'),
-        projectService.getCatalogEntries('change-statuses'),
-        projectService.getCatalogEntries('issue-severities'),
-        projectService.getCatalogEntries('timesheet-work-types'),
-        projectService.getCatalogEntries('decision-statuses'),
-        projectService.getCatalogEntries('meeting-types'),
-        projectService.getCatalogEntries('action-item-statuses'),
-        projectService.getCatalogEntries('action-item-priorities'),
-        projectService.getCatalogEntries('lesson-categories'),
-        projectService.getCatalogEntries('lesson-visibility-levels'),
-        projectService.getCatalogEntries('asset-link-types'),
-        projectService.getCatalogEntries('asset-link-statuses'),
-        projectService.getCatalogEntries('document-categories'),
-        projectService.getCatalogEntries('document-types'),
-      ]),
-      portfolioId ? projectService.getPrograms(portfolioId).catch(() => []) : Promise.resolve([]),
-    ]);
+    let staticReferenceData = projectWorkspaceStaticReferenceCache?.value;
+    if (!projectWorkspaceStaticReferenceCache || !isWorkspaceCacheFresh(projectWorkspaceStaticReferenceCache.loadedAt)) {
+      const [loadedUsers, loadedContracts, currencyContext, loadedUnitsOfMeasure, loadedMaintenanceAssets, loadedCompanyAssets, catalogResults] = await Promise.all([
+        userService.searchUsers('').catch(() => []),
+        contractService.getActiveContracts().catch(() => []),
+        loadProjectCurrencyContext(),
+        inventoryManagementService.getUnitsOfMeasure(true).catch(() => []),
+        maintenanceDataService.getAssets().catch(() => []),
+        fixedAssetsDataService.getAssets().catch(() => []),
+        Promise.allSettled([
+          projectService.getCatalogEntries('methodologies'),
+          projectService.getCatalogEntries('billing-types'),
+          projectService.getCatalogEntries('funding-sources'),
+          projectService.getCatalogEntries('resource-roles'),
+          projectService.getCatalogEntries('member-roles'),
+          projectService.getCatalogEntries('task-statuses'),
+          projectService.getCatalogEntries('task-priorities'),
+          projectService.getCatalogEntries('deliverable-statuses'),
+          projectService.getCatalogEntries('risk-statuses'),
+          projectService.getCatalogEntries('risk-categories'),
+          projectService.getCatalogEntries('risk-response-strategies'),
+          projectService.getCatalogEntries('quality-checkpoint-statuses'),
+          projectService.getCatalogEntries('non-conformance-statuses'),
+          projectService.getCatalogEntries('non-conformance-severities'),
+          projectService.getCatalogEntries('expense-categories'),
+          projectService.getCatalogEntries('change-categories'),
+          projectService.getCatalogEntries('issue-statuses'),
+          projectService.getCatalogEntries('change-statuses'),
+          projectService.getCatalogEntries('issue-severities'),
+          projectService.getCatalogEntries('timesheet-work-types'),
+          projectService.getCatalogEntries('decision-statuses'),
+          projectService.getCatalogEntries('meeting-types'),
+          projectService.getCatalogEntries('action-item-statuses'),
+          projectService.getCatalogEntries('action-item-priorities'),
+          projectService.getCatalogEntries('lesson-categories'),
+          projectService.getCatalogEntries('lesson-visibility-levels'),
+          projectService.getCatalogEntries('asset-link-types'),
+          projectService.getCatalogEntries('asset-link-statuses'),
+          projectService.getCatalogEntries('document-categories'),
+          projectService.getCatalogEntries('document-types'),
+          projectService.getCatalogEntries('boq-item-types'),
+        ]),
+      ]);
 
-    setUsers(loadedUsers);
-    setContracts(loadedContracts);
-    setCurrencies(currencyContext.activeCurrencies);
-    setBaseCurrency(currencyContext.baseCurrency);
-    setMethodologyCatalog(catalogResults[0].status === 'fulfilled' ? catalogResults[0].value : []);
-    setBillingTypeCatalog(catalogResults[1].status === 'fulfilled' ? catalogResults[1].value : []);
-    setFundingSourceCatalog(catalogResults[2].status === 'fulfilled' ? catalogResults[2].value : []);
-    setResourceRoleCatalog(catalogResults[3].status === 'fulfilled' ? catalogResults[3].value : []);
-    setMemberRoleCatalog(catalogResults[4].status === 'fulfilled' ? catalogResults[4].value : []);
-    setTaskStatusCatalog(catalogResults[5].status === 'fulfilled' ? catalogResults[5].value : []);
-    setTaskPriorityCatalog(catalogResults[6].status === 'fulfilled' ? catalogResults[6].value : []);
-    setDeliverableStatusCatalog(catalogResults[7].status === 'fulfilled' ? catalogResults[7].value : []);
-    setRiskStatusCatalog(catalogResults[8].status === 'fulfilled' ? catalogResults[8].value : []);
-    setRiskCategoryCatalog(catalogResults[9].status === 'fulfilled' ? catalogResults[9].value : []);
-    setRiskResponseStrategyCatalog(catalogResults[10].status === 'fulfilled' ? catalogResults[10].value : []);
-    setQualityCheckpointStatusCatalog(catalogResults[11].status === 'fulfilled' ? catalogResults[11].value : []);
-    setNonConformanceStatusCatalog(catalogResults[12].status === 'fulfilled' ? catalogResults[12].value : []);
-    setNonConformanceSeverityCatalog(catalogResults[13].status === 'fulfilled' ? catalogResults[13].value : []);
-    setExpenseCategoryCatalog(catalogResults[14].status === 'fulfilled' ? catalogResults[14].value : []);
-    setChangeTypeCatalog(catalogResults[15].status === 'fulfilled' ? catalogResults[15].value : []);
-    setIssueStatusCatalog(catalogResults[16].status === 'fulfilled' ? catalogResults[16].value : []);
-    setChangeStatusCatalog(catalogResults[17].status === 'fulfilled' ? catalogResults[17].value : []);
-    setIssueSeverityCatalog(catalogResults[18].status === 'fulfilled' ? catalogResults[18].value : []);
-    setTimesheetWorkTypeCatalog(catalogResults[19].status === 'fulfilled' ? catalogResults[19].value : []);
-    setDecisionStatusCatalog(catalogResults[20].status === 'fulfilled' ? catalogResults[20].value : []);
-    setMeetingTypeCatalog(catalogResults[21].status === 'fulfilled' ? catalogResults[21].value : []);
-    setActionItemStatusCatalog(catalogResults[22].status === 'fulfilled' ? catalogResults[22].value : []);
-    setActionItemPriorityCatalog(catalogResults[23].status === 'fulfilled' ? catalogResults[23].value : []);
-    setLessonCategoryCatalog(catalogResults[24].status === 'fulfilled' ? catalogResults[24].value : []);
-    setLessonVisibilityCatalog(catalogResults[25].status === 'fulfilled' ? catalogResults[25].value : []);
-    setAssetLinkTypeCatalog(catalogResults[26].status === 'fulfilled' ? catalogResults[26].value : []);
-    setAssetLinkStatusCatalog(catalogResults[27].status === 'fulfilled' ? catalogResults[27].value : []);
-    setDocumentCategoryCatalog(catalogResults[28].status === 'fulfilled' ? catalogResults[28].value : []);
-    setDocumentTypeCatalog(catalogResults[29].status === 'fulfilled' ? catalogResults[29].value : []);
+      staticReferenceData = {
+        users: loadedUsers,
+        contracts: loadedContracts,
+        currencyContext,
+        unitsOfMeasure: loadedUnitsOfMeasure,
+        maintenanceAssets: loadedMaintenanceAssets,
+        companyAssets: loadedCompanyAssets,
+        methodologyCatalog: catalogResults[0].status === 'fulfilled' ? catalogResults[0].value : [],
+        billingTypeCatalog: catalogResults[1].status === 'fulfilled' ? catalogResults[1].value : [],
+        fundingSourceCatalog: catalogResults[2].status === 'fulfilled' ? catalogResults[2].value : [],
+        resourceRoleCatalog: catalogResults[3].status === 'fulfilled' ? catalogResults[3].value : [],
+        memberRoleCatalog: catalogResults[4].status === 'fulfilled' ? catalogResults[4].value : [],
+        taskStatusCatalog: catalogResults[5].status === 'fulfilled' ? catalogResults[5].value : [],
+        taskPriorityCatalog: catalogResults[6].status === 'fulfilled' ? catalogResults[6].value : [],
+        deliverableStatusCatalog: catalogResults[7].status === 'fulfilled' ? catalogResults[7].value : [],
+        riskStatusCatalog: catalogResults[8].status === 'fulfilled' ? catalogResults[8].value : [],
+        riskCategoryCatalog: catalogResults[9].status === 'fulfilled' ? catalogResults[9].value : [],
+        riskResponseStrategyCatalog: catalogResults[10].status === 'fulfilled' ? catalogResults[10].value : [],
+        qualityCheckpointStatusCatalog: catalogResults[11].status === 'fulfilled' ? catalogResults[11].value : [],
+        nonConformanceStatusCatalog: catalogResults[12].status === 'fulfilled' ? catalogResults[12].value : [],
+        nonConformanceSeverityCatalog: catalogResults[13].status === 'fulfilled' ? catalogResults[13].value : [],
+        expenseCategoryCatalog: catalogResults[14].status === 'fulfilled' ? catalogResults[14].value : [],
+        changeTypeCatalog: catalogResults[15].status === 'fulfilled' ? catalogResults[15].value : [],
+        issueStatusCatalog: catalogResults[16].status === 'fulfilled' ? catalogResults[16].value : [],
+        changeStatusCatalog: catalogResults[17].status === 'fulfilled' ? catalogResults[17].value : [],
+        issueSeverityCatalog: catalogResults[18].status === 'fulfilled' ? catalogResults[18].value : [],
+        timesheetWorkTypeCatalog: catalogResults[19].status === 'fulfilled' ? catalogResults[19].value : [],
+        decisionStatusCatalog: catalogResults[20].status === 'fulfilled' ? catalogResults[20].value : [],
+        meetingTypeCatalog: catalogResults[21].status === 'fulfilled' ? catalogResults[21].value : [],
+        actionItemStatusCatalog: catalogResults[22].status === 'fulfilled' ? catalogResults[22].value : [],
+        actionItemPriorityCatalog: catalogResults[23].status === 'fulfilled' ? catalogResults[23].value : [],
+        lessonCategoryCatalog: catalogResults[24].status === 'fulfilled' ? catalogResults[24].value : [],
+        lessonVisibilityCatalog: catalogResults[25].status === 'fulfilled' ? catalogResults[25].value : [],
+        assetLinkTypeCatalog: catalogResults[26].status === 'fulfilled' ? catalogResults[26].value : [],
+        assetLinkStatusCatalog: catalogResults[27].status === 'fulfilled' ? catalogResults[27].value : [],
+        documentCategoryCatalog: catalogResults[28].status === 'fulfilled' ? catalogResults[28].value : [],
+        documentTypeCatalog: catalogResults[29].status === 'fulfilled' ? catalogResults[29].value : [],
+        boqItemTypeCatalog: catalogResults[30].status === 'fulfilled' ? catalogResults[30].value : [],
+      };
+
+      projectWorkspaceStaticReferenceCache = {
+        loadedAt: Date.now(),
+        value: staticReferenceData,
+      };
+    }
+
+    const normalizedPortfolioId = portfolioId?.trim();
+    let loadedPrograms: ProjectProgramDto[] = [];
+    if (normalizedPortfolioId) {
+      const cachedPrograms = projectWorkspaceProgramsCache.get(normalizedPortfolioId);
+      if (cachedPrograms && isWorkspaceCacheFresh(cachedPrograms.loadedAt)) {
+        loadedPrograms = cachedPrograms.value;
+      } else {
+        loadedPrograms = await projectService.getPrograms(normalizedPortfolioId).catch(() => []);
+        projectWorkspaceProgramsCache.set(normalizedPortfolioId, {
+          loadedAt: Date.now(),
+          value: loadedPrograms,
+        });
+      }
+    }
+
+    if (!staticReferenceData) {
+      setReferenceDataLoaded(true);
+      return;
+    }
+
+    setUsers(staticReferenceData.users);
+    setContracts(staticReferenceData.contracts);
+    setCurrencies(staticReferenceData.currencyContext.activeCurrencies);
+    setBaseCurrency(staticReferenceData.currencyContext.baseCurrency);
+    setUnitsOfMeasure(staticReferenceData.unitsOfMeasure);
+    setMaintenanceAssets(staticReferenceData.maintenanceAssets);
+    setCompanyAssets(staticReferenceData.companyAssets);
+    setMethodologyCatalog(staticReferenceData.methodologyCatalog);
+    setBillingTypeCatalog(staticReferenceData.billingTypeCatalog);
+    setFundingSourceCatalog(staticReferenceData.fundingSourceCatalog);
+    setResourceRoleCatalog(staticReferenceData.resourceRoleCatalog);
+    setMemberRoleCatalog(staticReferenceData.memberRoleCatalog);
+    setTaskStatusCatalog(staticReferenceData.taskStatusCatalog);
+    setTaskPriorityCatalog(staticReferenceData.taskPriorityCatalog);
+    setDeliverableStatusCatalog(staticReferenceData.deliverableStatusCatalog);
+    setRiskStatusCatalog(staticReferenceData.riskStatusCatalog);
+    setRiskCategoryCatalog(staticReferenceData.riskCategoryCatalog);
+    setRiskResponseStrategyCatalog(staticReferenceData.riskResponseStrategyCatalog);
+    setQualityCheckpointStatusCatalog(staticReferenceData.qualityCheckpointStatusCatalog);
+    setNonConformanceStatusCatalog(staticReferenceData.nonConformanceStatusCatalog);
+    setNonConformanceSeverityCatalog(staticReferenceData.nonConformanceSeverityCatalog);
+    setExpenseCategoryCatalog(staticReferenceData.expenseCategoryCatalog);
+    setChangeTypeCatalog(staticReferenceData.changeTypeCatalog);
+    setIssueStatusCatalog(staticReferenceData.issueStatusCatalog);
+    setChangeStatusCatalog(staticReferenceData.changeStatusCatalog);
+    setIssueSeverityCatalog(staticReferenceData.issueSeverityCatalog);
+    setTimesheetWorkTypeCatalog(staticReferenceData.timesheetWorkTypeCatalog);
+    setDecisionStatusCatalog(staticReferenceData.decisionStatusCatalog);
+    setMeetingTypeCatalog(staticReferenceData.meetingTypeCatalog);
+    setActionItemStatusCatalog(staticReferenceData.actionItemStatusCatalog);
+    setActionItemPriorityCatalog(staticReferenceData.actionItemPriorityCatalog);
+    setLessonCategoryCatalog(staticReferenceData.lessonCategoryCatalog);
+    setLessonVisibilityCatalog(staticReferenceData.lessonVisibilityCatalog);
+    setAssetLinkTypeCatalog(staticReferenceData.assetLinkTypeCatalog);
+    setAssetLinkStatusCatalog(staticReferenceData.assetLinkStatusCatalog);
+    setDocumentCategoryCatalog(staticReferenceData.documentCategoryCatalog);
+    setDocumentTypeCatalog(staticReferenceData.documentTypeCatalog);
+    setBoqItemTypeCatalog(staticReferenceData.boqItemTypeCatalog);
     setPrograms(loadedPrograms);
     setReferenceDataLoaded(true);
   };
 
   const loadPackageLookups = async (projectId: string) => {
-    const [loadedTenders, loadedPlanItems, loadedPurchaseRequisitions, loadedPurchaseOrders] = await Promise.all([
+    const [loadedTenders, loadedPlanItems, loadedPurchaseRequisitions, loadedPurchaseOrders, loadedInventoryItems] = await Promise.all([
       projectService.getTenderLookup().catch(() => []),
       projectService.getProcurementPlanItemLookup(projectId).catch(() => []),
       projectService.getPurchaseRequisitionLookup(projectId).catch(() => []),
       projectService.getPurchaseOrderLookup(projectId).catch(() => []),
+      inventoryManagementService.getInventoryItems({ isActive: true }).catch(() => []),
     ]);
 
     setTenderLookup(loadedTenders);
     setProcurementPlanItemLookup(loadedPlanItems);
     setPurchaseRequisitionLookup(loadedPurchaseRequisitions);
     setPurchaseOrderLookup(loadedPurchaseOrders);
+    setInventoryItems(loadedInventoryItems);
     setPackageLookupsLoaded(true);
   };
 
@@ -837,14 +1052,44 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     try {
       setLoading(true);
       setReferenceDataLoaded(false);
-      const [workspace, t, pr, tpl, pf, bp] = await Promise.all([
-        projectService.getProjectWorkspaceById(id),
-        projectService.getProjectTypes(),
-        projectService.getProjectPriorities(),
-        projectService.getProjectTemplates(),
-        projectService.getPortfolios(),
-        businessPartnerService.getActivePartners(),
-      ]);
+      const workspacePromise = projectService.getProjectWorkspaceById(id);
+      const bootstrapPromise =
+        projectWorkspaceBootstrapCache && isWorkspaceCacheFresh(projectWorkspaceBootstrapCache.loadedAt)
+          ? Promise.resolve(projectWorkspaceBootstrapCache.value)
+          : Promise.all([
+              projectService.getProjectTypes(),
+              projectService.getProjectPriorities(),
+              projectService.getProjectTemplates(),
+              projectService.getPortfolios(),
+              businessPartnerService.getAllPartnersForDropdown(),
+              businessPartnerService
+                .getActivePartners('Customer')
+                .then((partners) => partners.filter((partner) => isCustomerBusinessPartner(partner)))
+                .catch(() =>
+                  businessPartnerService
+                    .getAllPartnersForDropdown()
+                    .then((partners) => partners.filter((partner) => isCustomerBusinessPartner(partner)))
+                    .catch(() => []),
+                ),
+              projectService.getProjectUnitTypeTemplates().catch(() => []),
+            ]).then(([types, priorities, templates, portfolios, businessPartners, customerBusinessPartners, unitTypeTemplates]) => {
+              const bootstrapData: ProjectWorkspaceBootstrapData = {
+                types,
+                priorities,
+                templates,
+                portfolios,
+                businessPartners,
+                customerBusinessPartners,
+                unitTypeTemplates,
+              };
+              projectWorkspaceBootstrapCache = {
+                loadedAt: Date.now(),
+                value: bootstrapData,
+              };
+              return bootstrapData;
+            });
+
+      const [workspace, bootstrap] = await Promise.all([workspacePromise, bootstrapPromise]);
       const p = (workspace as ProjectWorkspaceDto).project;
       setProject(p);
       setFinancialSummary(workspace.financialSummary ?? null);
@@ -854,11 +1099,13 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       setGovernanceSummary(workspace.governanceSummary ?? null);
       setProjectLinkOptions(workspace.linkOptions ?? EMPTY_PROJECT_LINK_OPTIONS);
       setPhaseGateEvaluations(workspace.phaseGateEvaluations ?? []);
-      setTypes(t);
-      setPriorities(pr);
-      setTemplates(tpl);
-      setPortfolios(pf);
-      setBusinessPartners(bp);
+      setTypes(bootstrap.types);
+      setPriorities(bootstrap.priorities);
+      setTemplates(bootstrap.templates);
+      setUnitTypeTemplates(bootstrap.unitTypeTemplates);
+      setPortfolios(bootstrap.portfolios);
+      setBusinessPartners(bootstrap.businessPartners);
+      setCustomerPartnerOptions(bootstrap.customerBusinessPartners ?? bootstrap.businessPartners.filter((partner) => isCustomerBusinessPartner(partner)));
       setAiInsights([]);
       setScheduleAnalysis(null);
       setBudgetRevisions([]);
@@ -869,6 +1116,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       setProcurementPlanItemLookup([]);
       setPurchaseRequisitionLookup([]);
       setPurchaseOrderLookup([]);
+      setInventoryItems([]);
       setPackageLookupsLoaded(false);
       setAnalysisLoaded(false);
       setMaterialsLoaded(false);
@@ -880,8 +1128,8 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         title: p.title, summary: p.summary, businessCase: p.businessCase, objectives: p.objectives, methodology: p.methodology,
         projectTypeId: p.projectTypeId, projectPriorityId: p.projectPriorityId, templateId: p.templateId, portfolioId: p.portfolioId, programId: p.programId,
         sponsorId: p.sponsorId, projectManagerId: p.projectManagerId, businessPartnerId: p.businessPartnerId, contractId: p.contractId,
-        startDate: p.startDate, targetEndDate: p.targetEndDate, estimatedBudget: p.estimatedBudget, approvedBudget: p.approvedBudget,
-        actualCost: p.actualCost, fundingSource: p.fundingSource, budgetStatus: p.budgetStatus, approvalRequired: p.approvalRequired,
+        startDate: p.startDate, targetEndDate: p.targetEndDate, slackMonths: p.slackMonths, estimatedBudget: p.estimatedBudget, approvedBudget: p.approvedBudget,
+        actualCost: p.actualCost, baseCurrencyCode: p.baseCurrencyCode, fundingSource: p.fundingSource, budgetStatus: p.budgetStatus, approvalRequired: p.approvalRequired,
         externalPortalAccessEnabled: p.externalPortalAccessEnabled, externalCollaborationEnabled: p.externalCollaborationEnabled,
         developmentProfile: p.developmentProfile
           ? {
@@ -939,6 +1187,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       setEditingInterimValuationId(null);
       setEditingPaymentCertificateId(null);
       setEditingExtensionOfTimeId(null);
+      setEditingUnitId(null);
       setProjectPackageDraft({ ...packageInit, currency: baseCurrency.code });
       setBoqItemDraft({
         ...boqItemInit,
@@ -984,6 +1233,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         currency: baseCurrency.code,
         projectPhaseId: p.phases[0]?.id,
         projectPackageId: p.packages[0]?.id,
+        projectMilestoneId: p.milestones[0]?.id,
         contractId: p.contractId || p.packages.find((item) => !!item.contractId)?.contractId,
       });
       setPaymentCertificateDraft({
@@ -1037,6 +1287,14 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         currency: baseCurrency.code,
         projectUnitId: p.units[0]?.id,
       });
+      setEditingVariationOrderId(null);
+      setEditingInterimValuationId(null);
+      setEditingPaymentCertificateId(null);
+      setEditingExtensionOfTimeId(null);
+      setEditingUnitId(null);
+      setEditingCustomerVariationId(null);
+      setEditingSnagItemId(null);
+      setEditingDefectLiabilityCaseId(null);
     } catch (error: any) {
       toast.error(error.message || 'Failed to load project');
     } finally {
@@ -1083,6 +1341,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       currency: baseCurrency.code,
       projectPhaseId: project?.phases[0]?.id,
       projectPackageId: project?.packages[0]?.id,
+      projectMilestoneId: project?.milestones[0]?.id,
       contractId: project?.finalAccount?.contractId || project?.contractId || project?.packages.find((item) => !!item.contractId)?.contractId,
     });
     setEditingInterimValuationId(null);
@@ -1107,6 +1366,33 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     });
     setEditingExtensionOfTimeId(null);
   };
+  const resetUnitEditor = () => {
+    setUnitDraft({ ...unitInit, currency: baseCurrency.code });
+    setEditingUnitId(null);
+  };
+  const resetCustomerVariationEditor = () => {
+    setCustomerVariationDraft({
+      ...customerVariationInit,
+      currency: baseCurrency.code,
+      projectUnitId: project?.units[0]?.id,
+    });
+    setEditingCustomerVariationId(null);
+  };
+  const resetSnagEditor = () => {
+    setSnagDraft({
+      ...snagItemInit,
+      projectUnitId: project?.units[0]?.id,
+    });
+    setEditingSnagItemId(null);
+  };
+  const resetDefectLiabilityEditor = () => {
+    setDefectLiabilityDraft({
+      ...defectLiabilityCaseInit,
+      currency: baseCurrency.code,
+      projectUnitId: project?.units[0]?.id,
+    });
+    setEditingDefectLiabilityCaseId(null);
+  };
 
   const beginEditWorkItem = (item: ProjectWorkItemDto, options?: { keepCurrentView?: boolean }) => {
     if (!options?.keepCurrentView) {
@@ -1115,6 +1401,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     setEditingWorkItemId(item.id);
     setWork({
       parentId: item.parentId || undefined,
+      projectPackageId: item.projectPackageId || undefined,
       nodeType: item.nodeType,
       title: item.title,
       description: item.description || undefined,
@@ -1142,6 +1429,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       sortOrder: phase.sortOrder,
       isOptional: phase.isOptional,
       isStageGateRequired: phase.isStageGateRequired,
+      completionWeightPercent: phase.completionWeightPercent ?? 0,
       plannedStartDate: normalizeDateInputValue(phase.plannedStartDate) || undefined,
       plannedEndDate: normalizeDateInputValue(phase.plannedEndDate) || undefined,
       actualStartDate: normalizeDateInputValue(phase.actualStartDate) || undefined,
@@ -1150,17 +1438,20 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   };
   const beginEditProjectPackage = (projectPackage: ProjectPackageDto) => {
     setEditingProjectPackageId(projectPackage.id);
-    setProjectPackageDraft({
-      projectPhaseId: projectPackage.projectPhaseId || undefined,
-      code: projectPackage.code || undefined,
-      name: projectPackage.name,
-      description: projectPackage.description || undefined,
-      packageType: projectPackage.packageType,
-      status: projectPackage.status,
-      sortOrder: projectPackage.sortOrder,
-      procurementRoute: projectPackage.procurementRoute || undefined,
-      contractStrategy: projectPackage.contractStrategy || undefined,
-      businessPartnerId: projectPackage.businessPartnerId || undefined,
+      setProjectPackageDraft({
+        projectPhaseId: projectPackage.projectPhaseId || undefined,
+        code: projectPackage.code || undefined,
+        name: projectPackage.name,
+        description: projectPackage.description || undefined,
+        packageType: projectPackage.packageType,
+        status: projectPackage.status,
+        sortOrder: projectPackage.sortOrder,
+        completionWeightPercent: projectPackage.completionWeightPercent ?? 0,
+        plannedStartDate: normalizeDateInputValue(projectPackage.plannedStartDate) || undefined,
+        plannedEndDate: normalizeDateInputValue(projectPackage.plannedEndDate) || undefined,
+        procurementRoute: projectPackage.procurementRoute || undefined,
+        contractStrategy: projectPackage.contractStrategy || undefined,
+        businessPartnerId: projectPackage.businessPartnerId || undefined,
       tenderId: projectPackage.tenderId || undefined,
       contractId: projectPackage.contractId || undefined,
       procurementPlanItemId: projectPackage.procurementPlanItemId || undefined,
@@ -1185,6 +1476,8 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       quantity: boqItem.quantity ?? undefined,
       unitOfMeasure: boqItem.unitOfMeasure || undefined,
       unitRate: boqItem.unitRate ?? undefined,
+      budgetQuantity: boqItem.budgetQuantity ?? undefined,
+      budgetUnitRate: boqItem.budgetUnitRate ?? undefined,
       budgetAmount: boqItem.budgetAmount ?? undefined,
       committedAmount: boqItem.committedAmount ?? undefined,
       actualAmount: boqItem.actualAmount ?? undefined,
@@ -1223,10 +1516,41 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     });
   };
   const beginEditInterimValuation = (valuation: ProjectInterimValuationDto) => {
+    const normalizeGuid = (value?: string | null) => (value || '').trim().toLowerCase();
+    const resolvedCompletedProjectPackageIds = valuation.completedProjectPackageIds && valuation.completedProjectPackageIds.length > 0
+      ? valuation.completedProjectPackageIds
+      : valuation.projectPackageId
+        ? [valuation.projectPackageId]
+        : [];
+    const relatedPhaseIds = new Set<string>();
+
+    if (valuation.projectPhaseId) {
+      relatedPhaseIds.add(normalizeGuid(valuation.projectPhaseId));
+    }
+
+    resolvedCompletedProjectPackageIds.forEach((projectPackageId) => {
+      const matchedPackage = project?.packages.find((item) => normalizeGuid(item.id) === normalizeGuid(projectPackageId));
+      if (matchedPackage?.projectPhaseId) {
+        relatedPhaseIds.add(normalizeGuid(matchedPackage.projectPhaseId));
+      }
+    });
+
+    const inferredMilestoneId = valuation.projectMilestoneId
+      || project?.milestones.find((milestone) =>
+        relatedPhaseIds.size > 0
+        && Array.from(relatedPhaseIds).every((phaseId) =>
+          milestone.phases.some((phase) => normalizeGuid(phase.projectPhaseId) === phaseId)))
+        ?.id
+      || project?.milestones.find((milestone) =>
+        relatedPhaseIds.size > 0
+        && milestone.phases.some((phase) => relatedPhaseIds.has(normalizeGuid(phase.projectPhaseId))))
+        ?.id;
+
     setEditingInterimValuationId(valuation.id);
     setInterimValuationDraft({
       projectPhaseId: valuation.projectPhaseId || undefined,
       projectPackageId: valuation.projectPackageId || undefined,
+      projectMilestoneId: inferredMilestoneId || undefined,
       contractId: valuation.contractId || undefined,
       valuationNumber: valuation.valuationNumber || undefined,
       title: valuation.title,
@@ -1241,6 +1565,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       netValuationAmount: valuation.netValuationAmount ?? undefined,
       currency: valuation.currency || baseCurrency.code,
       notes: valuation.notes || undefined,
+      completedProjectPackageIds: resolvedCompletedProjectPackageIds,
     });
   };
   const beginEditPaymentCertificate = (certificate: ProjectPaymentCertificateDto) => {
@@ -1284,6 +1609,107 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       notes: extension.notes || undefined,
     });
   };
+  const beginEditProjectUnit = (unit: ProjectUnitDto) => {
+    setEditingUnitId(unit.id);
+    setUnitDraft({
+      projectBuildingId: unit.projectBuildingId || undefined,
+      projectFloorId: unit.projectFloorId || undefined,
+      projectUnitReleaseBatchId: unit.projectUnitReleaseBatchId || undefined,
+      projectUnitTypeTemplateId: unit.projectUnitTypeTemplateId || undefined,
+      isReleasedForMarket: unit.isReleasedForMarket,
+      customerBusinessPartnerId: unit.customerBusinessPartnerId || undefined,
+      salesAgreementId: unit.salesAgreementId || undefined,
+      salesOrderId: unit.salesOrderId || undefined,
+      code: unit.code || undefined,
+      name: unit.name,
+      unitType: unit.unitType || undefined,
+      status: unit.status || undefined,
+      blockName: unit.blockName || undefined,
+      floorLabel: unit.floorLabel || undefined,
+      areaSquareMeters: unit.areaSquareMeters ?? undefined,
+      valuationRate: unit.valuationRate ?? undefined,
+      basePrice: unit.basePrice ?? undefined,
+      currency: unit.currency || baseCurrency.code,
+      handoverDate: normalizeDateInputValue(unit.handoverDate) || undefined,
+      sortOrder: unit.sortOrder,
+      notes: unit.notes || undefined,
+      amenities: (unit.amenities || []).map((amenity, index) => ({
+        inventoryItemId: amenity.inventoryItemId,
+        itemCode: amenity.itemCode,
+        amenityName: amenity.amenityName,
+        quantity: amenity.quantity,
+        unitCost: amenity.unitCost,
+        sortOrder: amenity.sortOrder ?? index,
+      })),
+    });
+  };
+  const beginEditCustomerVariation = (variation: ProjectCustomerVariationDto) => {
+    setEditingCustomerVariationId(variation.id);
+    setCustomerVariationDraft({
+      projectUnitId: variation.projectUnitId || undefined,
+      customerBusinessPartnerId: variation.customerBusinessPartnerId || undefined,
+      salesAgreementId: variation.salesAgreementId || undefined,
+      salesOrderId: variation.salesOrderId || undefined,
+      jobCardId: variation.jobCardId || undefined,
+      workOrderId: variation.workOrderId || undefined,
+      title: variation.title,
+      description: variation.description || undefined,
+      timing: variation.timing,
+      status: variation.status,
+      variationType: variation.variationType || undefined,
+      requestDate: normalizeDateInputValue(variation.requestDate) || undefined,
+      targetCompletionDate: normalizeDateInputValue(variation.targetCompletionDate) || undefined,
+      estimatedAmount: variation.estimatedAmount ?? undefined,
+      quotedAmount: variation.quotedAmount ?? undefined,
+      approvedAmount: variation.approvedAmount ?? undefined,
+      billedAmount: variation.billedAmount ?? undefined,
+      currency: variation.currency || baseCurrency.code,
+      scheduleImpactDays: variation.scheduleImpactDays ?? undefined,
+      requiresScheduleAdjustment: variation.requiresScheduleAdjustment,
+      notes: variation.notes || undefined,
+    });
+  };
+  const beginEditSnagItem = (snagItem: ProjectSnagItemDto) => {
+    setEditingSnagItemId(snagItem.id);
+    setSnagDraft({
+      projectUnitId: snagItem.projectUnitId || undefined,
+      title: snagItem.title,
+      description: snagItem.description || undefined,
+      severity: snagItem.severity,
+      status: snagItem.status,
+      reportedDate: normalizeDateInputValue(snagItem.reportedDate) || undefined,
+      targetClosureDate: normalizeDateInputValue(snagItem.targetClosureDate) || undefined,
+      closedDate: normalizeDateInputValue(snagItem.closedDate) || undefined,
+      raisedByName: snagItem.raisedByName || undefined,
+      responsibleParty: snagItem.responsibleParty || undefined,
+      notes: snagItem.notes || undefined,
+    });
+  };
+  const beginEditDefectLiabilityCase = (defectLiabilityCase: ProjectDefectLiabilityCaseDto) => {
+    setEditingDefectLiabilityCaseId(defectLiabilityCase.id);
+    setDefectLiabilityDraft({
+      projectUnitId: defectLiabilityCase.projectUnitId || undefined,
+      customerBusinessPartnerId: defectLiabilityCase.customerBusinessPartnerId || undefined,
+      jobCardId: defectLiabilityCase.jobCardId || undefined,
+      workOrderId: defectLiabilityCase.workOrderId || undefined,
+      title: defectLiabilityCase.title,
+      description: defectLiabilityCase.description || undefined,
+      status: defectLiabilityCase.status,
+      reportedDate: normalizeDateInputValue(defectLiabilityCase.reportedDate) || undefined,
+      targetResolutionDate: normalizeDateInputValue(defectLiabilityCase.targetResolutionDate) || undefined,
+      resolvedDate: normalizeDateInputValue(defectLiabilityCase.resolvedDate) || undefined,
+      isWarrantyRelated: defectLiabilityCase.isWarrantyRelated,
+      warrantyCategory: defectLiabilityCase.warrantyCategory || undefined,
+      warrantyExpiryDate: normalizeDateInputValue(defectLiabilityCase.warrantyExpiryDate) || undefined,
+      firstResponseDate: normalizeDateInputValue(defectLiabilityCase.firstResponseDate) || undefined,
+      responseSlaDays: defectLiabilityCase.responseSlaDays ?? undefined,
+      resolutionSlaDays: defectLiabilityCase.resolutionSlaDays ?? undefined,
+      rectificationCost: defectLiabilityCase.rectificationCost ?? undefined,
+      chargeableAmount: defectLiabilityCase.chargeableAmount ?? undefined,
+      currency: defectLiabilityCase.currency || baseCurrency.code,
+      notes: defectLiabilityCase.notes || undefined,
+    });
+  };
   const saveWorkEditor = async () => {
     if (!project?.id) {
       return;
@@ -1305,13 +1731,13 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   };
   const saveProjectPhase = async () => {
     if (!project?.id) {
-      return;
+      return false;
     }
 
     const name = projectPhaseDraft.name?.trim();
     if (!name) {
       toast.error('Phase name is required');
-      return;
+      return false;
     }
 
     const payload = {
@@ -1323,14 +1749,23 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       sortOrder: Number.isFinite(projectPhaseDraft.sortOrder) ? Number(projectPhaseDraft.sortOrder) : project.phases.length,
     };
 
+    let saved = false;
     await act(
       () =>
         editingProjectPhaseId
-          ? projectService.updateProjectPhase(editingProjectPhaseId, payload).then(() => Promise.resolve())
-          : projectService.addProjectPhase(project.id, payload).then(() => Promise.resolve()),
+          ? projectService.updateProjectPhase(editingProjectPhaseId, payload).then(() => {
+              saved = true;
+              return Promise.resolve();
+            })
+          : projectService.addProjectPhase(project.id, payload).then(() => {
+              saved = true;
+              return Promise.resolve();
+            }),
       editingProjectPhaseId ? 'Project phase updated' : 'Project phase added',
       resetProjectPhaseEditor,
     );
+
+    return saved;
   };
 
   useEffect(() => { load(); }, [id]);
@@ -1350,7 +1785,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
 
     if (!packageLookupsLoaded && activeTab === 'packages') {
       void loadPackageLookups(project.id).catch(() => {
-        toast.error('Some package lookup data could not be loaded');
+        toast.error('Some work component lookup data could not be loaded');
       });
     }
   }, [activeTab, analysisLoaded, materialsLoaded, packageLookupsLoaded, project?.id]);
@@ -1704,6 +2139,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       const start = new Date(item.plannedStartDate as string).setHours(0, 0, 0, 0);
       const end = new Date(item.plannedEndDate as string).setHours(0, 0, 0, 0);
       const linkedMilestones = project.milestones.filter((milestone) => milestone.workItemId === item.id);
+      const workComponentContext = [item.projectPhaseName, item.projectPackageName].filter(Boolean).join(' / ');
       const ganttCells = ganttColumns.map(() => '');
       const durationDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
       const assignedTo = getResolvedUserLabel(item.assignedToUserId, item.assignedToUserDisplayName);
@@ -1730,7 +2166,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         formatDateLabel(item.plannedStartDate),
         formatDateLabel(item.plannedEndDate),
         `${durationDays}d`,
-        linkedMilestones.map((milestone) => `${milestone.title}${milestone.targetDate ? ` (${formatDateLabel(milestone.targetDate)})` : ''}`).join(', '),
+        linkedMilestones.map((milestone) => `${milestone.title}${milestone.targetDate ? ` (${formatDateLabel(milestone.targetDate)})` : ''}`).join(', ') || workComponentContext,
         ...ganttCells,
       ]);
     });
@@ -1944,7 +2380,8 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       const durationDays = Math.max(1, Math.round((itemEnd - itemStart) / 86400000) + 1);
       const linkedMilestones = project.milestones.filter((milestone) => milestone.workItemId === item.id && milestone.targetDate);
       const itemAssignee = getResolvedUserLabel(item.assignedToUserId, item.assignedToUserDisplayName);
-      const commentsLabel = linkedMilestones.length > 0 ? linkedMilestones.map((milestone) => `${milestone.title} (${formatDateLabel(milestone.targetDate)})`).join(', ') : item.nodeType;
+      const workComponentContext = [item.projectPhaseName, item.projectPackageName].filter(Boolean).join(' / ');
+      const commentsLabel = linkedMilestones.length > 0 ? linkedMilestones.map((milestone) => `${milestone.title} (${formatDateLabel(milestone.targetDate)})`).join(', ') : workComponentContext || item.nodeType;
 
       for (let columnIndex = 0; columnIndex < leftColumnCount; columnIndex += 1) {
         setCellStyle(rowIndex, columnIndex, {
@@ -2132,6 +2569,10 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const taskStatusOptions = useMemo(() => resolveCatalogOptions(taskStatusCatalog, DEFAULT_TASK_STATUSES, work.status), [taskStatusCatalog, work.status]);
   const taskPriorityOptions = useMemo(() => resolveCatalogOptions(taskPriorityCatalog, DEFAULT_TASK_PRIORITIES, work.priority), [taskPriorityCatalog, work.priority]);
   const deliverableStatusOptions = useMemo(() => resolveCatalogOptions(deliverableStatusCatalog, DEFAULT_DELIVERABLE_STATUSES, deliverable.status), [deliverableStatusCatalog, deliverable.status]);
+  const boqItemTypeOptions = useMemo(
+    () => resolveCatalogOptions(boqItemTypeCatalog, DEFAULT_BOQ_ITEM_TYPES, boqItemDraft.itemType),
+    [boqItemDraft.itemType, boqItemTypeCatalog],
+  );
   const riskStatusOptions = useMemo(() => resolveCatalogOptions(riskStatusCatalog, DEFAULT_RISK_STATUSES, risk.status), [riskStatusCatalog, risk.status]);
   const riskCategoryOptions = useMemo(() => resolveCatalogOptions(riskCategoryCatalog, DEFAULT_RISK_CATEGORIES, risk.category), [riskCategoryCatalog, risk.category]);
   const riskResponseStrategyOptions = useMemo(() => resolveCatalogOptions(riskResponseStrategyCatalog, DEFAULT_RISK_RESPONSE_STRATEGIES, risk.responseStrategy), [riskResponseStrategyCatalog, risk.responseStrategy]);
@@ -2143,9 +2584,43 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     () => buildProjectCurrencyOptions(currencies, baseCurrency, invoice.currency),
     [baseCurrency, currencies, invoice.currency],
   );
+  const packageCurrencyOptions = useMemo(
+    () => buildProjectCurrencyOptions(currencies, baseCurrency, projectPackageDraft.currency),
+    [baseCurrency, currencies, projectPackageDraft.currency],
+  );
+  const boqCurrencyOptions = useMemo(
+    () => buildProjectCurrencyOptions(currencies, baseCurrency, boqItemDraft.currency),
+    [baseCurrency, currencies, boqItemDraft.currency],
+  );
+  const projectCurrencyOptions = useMemo(
+    () => buildProjectCurrencyOptions(currencies, baseCurrency, overview.baseCurrencyCode || project?.baseCurrencyCode),
+    [baseCurrency, currencies, overview.baseCurrencyCode, project?.baseCurrencyCode],
+  );
+  const commercialAdminCurrencyOptions = useMemo(
+    () => Array.from(new Set([
+      ...projectCurrencyOptions,
+      ...buildProjectCurrencyOptions(currencies, baseCurrency, variationOrderDraft.currency),
+      ...buildProjectCurrencyOptions(currencies, baseCurrency, interimValuationDraft.currency),
+      ...buildProjectCurrencyOptions(currencies, baseCurrency, paymentCertificateDraft.currency),
+      ...buildProjectCurrencyOptions(currencies, baseCurrency, finalAccountDraft.currency),
+    ])),
+    [
+      baseCurrency,
+      currencies,
+      finalAccountDraft.currency,
+      interimValuationDraft.currency,
+      paymentCertificateDraft.currency,
+      projectCurrencyOptions,
+      variationOrderDraft.currency,
+    ],
+  );
   const expenseCurrencyOptions = useMemo(
     () => buildProjectCurrencyOptions(currencies, baseCurrency, expense.currency),
     [baseCurrency, currencies, expense.currency],
+  );
+  const siteInstructionCurrencyOptions = useMemo(
+    () => buildProjectCurrencyOptions(currencies, baseCurrency, siteInstructionDraft.currency),
+    [baseCurrency, currencies, siteInstructionDraft.currency],
   );
   const changeTypeOptions = useMemo(() => resolveCatalogOptions(changeTypeCatalog, DEFAULT_CHANGE_TYPES, change.changeType), [changeTypeCatalog, change.changeType]);
   const issueStatusOptions = useMemo(() => resolveCatalogOptions(issueStatusCatalog, DEFAULT_ISSUE_STATUSES, issue.status), [issueStatusCatalog, issue.status]);
@@ -2171,9 +2646,12 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     return approvalDraft.status && !values.includes(approvalDraft.status) ? [approvalDraft.status, ...values] : values;
   }, [approvalDraft.status]);
   const projectUnitTypeOptions = useMemo(() => {
-    const values = DEFAULT_PROJECT_UNIT_TYPES;
+    const values = Array.from(new Set([
+      ...DEFAULT_PROJECT_UNIT_TYPES,
+      ...unitTypeTemplates.map((item) => item.defaultProjectUnitType).filter(Boolean),
+    ]));
     return unitDraft.unitType && !values.includes(unitDraft.unitType) ? [unitDraft.unitType, ...values] : values;
-  }, [unitDraft.unitType]);
+  }, [unitDraft.unitType, unitTypeTemplates]);
   const projectUnitStatusOptions = useMemo(() => {
     const values = DEFAULT_PROJECT_UNIT_STATUSES;
     return unitDraft.status && !values.includes(unitDraft.status) ? [unitDraft.status, ...values] : values;
@@ -2187,9 +2665,10 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     return customerVariationDraft.timing && !values.includes(customerVariationDraft.timing) ? [customerVariationDraft.timing, ...values] : values;
   }, [customerVariationDraft.timing]);
   const activeUsers = useMemo(() => users.filter((user) => user.isActive), [users]);
-  const activeBusinessPartners = useMemo(
-    () => businessPartners.filter((partner) => partner.status === 'Active'),
-    [businessPartners],
+  const customerBusinessPartners = useMemo(
+    () => [...customerPartnerOptions]
+      .sort((left, right) => formatBusinessPartnerLabel(left).localeCompare(formatBusinessPartnerLabel(right))),
+    [customerPartnerOptions],
   );
   const activeContracts = useMemo(
     () => contracts.filter((contract) => !overview.businessPartnerId || contract.businessPartnerId === overview.businessPartnerId),
@@ -2371,6 +2850,8 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     act(async () => {
       if (docFile) {
         await projectService.uploadProjectDocument(getProjectId(), docFile, {
+          artifactType: doc.artifactType,
+          artifactId: doc.artifactId,
           documentName: doc.documentName || docFile.name,
           category: doc.category,
           documentType: doc.documentType,
@@ -2452,19 +2933,31 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         resetProjectPhaseEditor();
       }
     });
-  const addProjectPackage = () =>
-    act(
+  const addProjectPackage = async () => {
+    let saved = false;
+    const packagePayload = {
+      ...projectPackageDraft,
+      committedAmount: undefined,
+      actualAmount: undefined,
+      currency: projectPackageDraft.currency || baseCurrency.code,
+    };
+    await act(
       () =>
         (
           editingProjectPackageId
-            ? projectService.updateProjectPackage(editingProjectPackageId, { ...projectPackageDraft, currency: projectPackageDraft.currency || baseCurrency.code })
-            : projectService.addProjectPackage(getProjectId(), { ...projectPackageDraft, currency: projectPackageDraft.currency || baseCurrency.code })
-        ).then(() => Promise.resolve()),
-      editingProjectPackageId ? 'Project package updated' : 'Project package added',
+            ? projectService.updateProjectPackage(editingProjectPackageId, packagePayload)
+            : projectService.addProjectPackage(getProjectId(), packagePayload)
+        ).then(() => {
+          saved = true;
+          return Promise.resolve();
+        }),
+      editingProjectPackageId ? 'Work component updated' : 'Work component added',
       resetProjectPackageEditor,
     );
+    return saved;
+  };
   const deleteProjectPackage = (packageId: string) =>
-    act(() => projectService.deleteProjectPackage(packageId), 'Project package deleted', () => {
+    act(() => projectService.deleteProjectPackage(packageId), 'Work component deleted', () => {
       if (editingProjectPackageId === packageId) {
         resetProjectPackageEditor();
       }
@@ -2473,14 +2966,24 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       }
       setBoqItemDraft((current) => current.projectPackageId === packageId ? { ...boqItemInit, currency: baseCurrency.code } : current);
     });
-  const addProjectBoqItem = () =>
-    act(
+  const addProjectBoqItem = async () => {
+    let saved = false;
+    const boqPayload = {
+      ...boqItemDraft,
+      committedAmount: undefined,
+      actualAmount: undefined,
+      currency: boqItemDraft.currency || baseCurrency.code,
+    };
+    await act(
       () =>
         (
           editingProjectBoqItemId
-            ? projectService.updateProjectBoqItem(editingProjectBoqItemId, { ...boqItemDraft, currency: boqItemDraft.currency || baseCurrency.code })
-            : projectService.addProjectBoqItem(getProjectId(), { ...boqItemDraft, currency: boqItemDraft.currency || baseCurrency.code })
-        ).then(() => Promise.resolve()),
+            ? projectService.updateProjectBoqItem(editingProjectBoqItemId, boqPayload)
+            : projectService.addProjectBoqItem(getProjectId(), boqPayload)
+        ).then(() => {
+          saved = true;
+          return Promise.resolve();
+        }),
       editingProjectBoqItemId ? 'BOQ item updated' : 'BOQ item added',
       () => {
         setEditingProjectBoqItemId(null);
@@ -2491,6 +2994,56 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         }));
       },
     );
+    return saved;
+  };
+  const saveProjectBoqBudgetWorksheet = async (updates: ProjectBoqBudgetWorksheetUpdate[]) => {
+    if (!project || updates.length === 0) {
+      return false;
+    }
+
+    let saved = false;
+    await act(
+      async () => {
+        const updateRequests = updates.map((update) => {
+          const currentItem = project.boqItems.find((item) => item.id === update.boqItemId);
+          if (!currentItem) {
+            throw new Error('One or more BOQ items could not be found while saving the budget worksheet.');
+          }
+
+          return projectService.updateProjectBoqItem(update.boqItemId, {
+            projectPackageId: currentItem.projectPackageId,
+            lineNumber: currentItem.lineNumber,
+            itemCode: currentItem.itemCode,
+            itemType: currentItem.itemType,
+            description: currentItem.description,
+            quantity: currentItem.quantity,
+            unitOfMeasure: currentItem.unitOfMeasure,
+            unitRate: currentItem.unitRate,
+            budgetQuantity: update.budgetQuantity,
+            budgetUnitRate: update.budgetUnitRate,
+            budgetAmount: update.budgetAmount,
+            committedAmount: undefined,
+            actualAmount: undefined,
+            forecastAmount: currentItem.forecastAmount,
+            currency: currentItem.currency || baseCurrency.code,
+            inventoryItemId: currentItem.inventoryItemId,
+            tenderItemId: currentItem.tenderItemId,
+            procurementPlanItemId: currentItem.procurementPlanItemId,
+            purchaseRequisitionItemId: currentItem.purchaseRequisitionItemId,
+            purchaseOrderItemId: currentItem.purchaseOrderItemId,
+            notes: currentItem.notes,
+            sortOrder: currentItem.sortOrder,
+          });
+        });
+
+        await Promise.all(updateRequests);
+        saved = true;
+      },
+      'Budget worksheet updated',
+    );
+
+    return saved;
+  };
   const deleteProjectBoqItem = (boqItemId: string) =>
     act(() => projectService.deleteProjectBoqItem(boqItemId), 'BOQ item deleted', () => {
       if (editingProjectBoqItemId === boqItemId) {
@@ -2637,8 +3190,14 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     });
   const saveFinalAccount = () =>
     act(
-      () => projectService.upsertProjectFinalAccount(getProjectId(), { ...finalAccountDraft, currency: finalAccountDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
-      'Final account saved',
+      () => projectService.upsertProjectFinalAccount(getProjectId(), {
+        contractId: finalAccountDraft.contractId,
+        status: finalAccountDraft.status,
+        settlementDate: finalAccountDraft.settlementDate,
+        currency: finalAccountDraft.currency || baseCurrency.code,
+        notes: finalAccountDraft.notes,
+      }).then(() => Promise.resolve()),
+      'Final account refreshed',
     );
   const addProjectBuilding = (dto: CreateProjectBuildingDto) =>
     act(
@@ -2673,40 +3232,63 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         ? { ...current, projectUnitReleaseBatchId: undefined }
         : current);
     });
-  const addProjectUnit = () =>
+  const saveProjectUnit = () =>
     act(
-      () => projectService.addProjectUnit(getProjectId(), { ...unitDraft, currency: unitDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
-      'Project unit added',
-      () => setUnitDraft({ ...unitInit, currency: baseCurrency.code }),
+      () =>
+        (
+          editingUnitId
+            ? projectService.updateProjectUnit(editingUnitId, { ...unitDraft, currency: unitDraft.currency || baseCurrency.code })
+            : projectService.addProjectUnit(getProjectId(), { ...unitDraft, currency: unitDraft.currency || baseCurrency.code })
+        ).then(() => Promise.resolve()),
+      editingUnitId ? 'Project unit updated' : 'Project unit added',
+      resetUnitEditor,
     );
   const releaseProjectUnit = (unitId: string) =>
     actWithBusyKey(`unit-release:${unitId}`, () => projectService.releaseProjectUnit(unitId), 'Project unit released for market');
   const withdrawProjectUnitRelease = (unitId: string) =>
     actWithBusyKey(`unit-withdraw-release:${unitId}`, () => projectService.withdrawProjectUnitRelease(unitId), 'Project unit withdrawn from market');
   const createSalesAgreementFromProjectUnit = (unitId: string) =>
-    actWithBusyKey(`unit-sales-agreement:${unitId}`, () => projectService.createSalesAgreementFromProjectUnit(unitId), 'Sales agreement created from project unit');
+    actWithBusyKey(
+      `unit-sales-agreement:${unitId}`,
+      () => projectService.createSalesAgreementFromProjectUnit(unitId),
+      'Sales agreement created and linked to the unit. It is now visible in Sales > Agreements.',
+    );
   const createLeaseAgreementFromProjectUnit = (unitId: string) =>
-    actWithBusyKey(`unit-lease-agreement:${unitId}`, () => projectService.createLeaseAgreementFromProjectUnit(unitId), 'Lease agreement created from project unit');
+    actWithBusyKey(
+      `unit-lease-agreement:${unitId}`,
+      () => projectService.createLeaseAgreementFromProjectUnit(unitId),
+      'Lease agreement created and linked to the unit. It is now visible in Sales > Agreements.',
+    );
   const createSalesOrderFromProjectUnit = (unitId: string) =>
-    actWithBusyKey(`unit-sales-order:${unitId}`, () => projectService.createSalesOrderFromProjectUnit(unitId), 'Sales order created from project unit');
+    actWithBusyKey(
+      `unit-sales-order:${unitId}`,
+      () => projectService.createSalesOrderFromProjectUnit(unitId),
+      'Sales order created and linked to the unit. It is now visible in Sales > Orders.',
+    );
   const deleteProjectUnit = (unitId: string) =>
     act(() => projectService.deleteProjectUnit(unitId), 'Project unit deleted', () => {
+      if (editingUnitId === unitId) {
+        resetUnitEditor();
+      }
       setCustomerVariationDraft((current) => current.projectUnitId === unitId
         ? { ...customerVariationInit, currency: baseCurrency.code }
         : current);
     });
-  const addCustomerVariation = () =>
+  const saveCustomerVariation = () =>
     act(
-      () => projectService.addCustomerVariation(getProjectId(), { ...customerVariationDraft, currency: customerVariationDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
-      'Customer variation added',
-      () => setCustomerVariationDraft((current) => ({
-        ...customerVariationInit,
-        currency: baseCurrency.code,
-        projectUnitId: current.projectUnitId,
-      })),
+      () =>
+        editingCustomerVariationId
+          ? projectService.updateCustomerVariation(editingCustomerVariationId, { ...customerVariationDraft, currency: customerVariationDraft.currency || baseCurrency.code }).then(() => Promise.resolve())
+          : projectService.addCustomerVariation(getProjectId(), { ...customerVariationDraft, currency: customerVariationDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
+      editingCustomerVariationId ? 'Customer variation updated' : 'Customer variation added',
+      resetCustomerVariationEditor,
     );
   const deleteCustomerVariation = (variationId: string) =>
-    act(() => projectService.deleteCustomerVariation(variationId), 'Customer variation deleted');
+    act(() => projectService.deleteCustomerVariation(variationId), 'Customer variation deleted', () => {
+      if (editingCustomerVariationId === variationId) {
+        resetCustomerVariationEditor();
+      }
+    });
   const createCustomerVariationJobCard = (variationId: string) =>
     actWithBusyKey(`variation-job-card:${variationId}`, () => projectService.createCustomerVariationJobCard(variationId), 'Job card created from customer variation');
   const createCustomerVariationWorkOrder = (variationId: string) =>
@@ -2745,29 +3327,36 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     });
   const deleteHandoverItem = (handoverItemId: string) =>
     act(() => projectService.deleteProjectHandoverItem(handoverItemId), 'Handover item deleted');
-  const addSnagItem = () =>
+  const saveSnagItem = () =>
     act(
-      () => projectService.addProjectSnagItem(getProjectId(), snagDraft).then(() => Promise.resolve()),
-      'Snag item added',
-      () => setSnagDraft((current) => ({
-        ...snagItemInit,
-        projectUnitId: current.projectUnitId,
-      })),
+      () =>
+        editingSnagItemId
+          ? projectService.updateProjectSnagItem(editingSnagItemId, snagDraft).then(() => Promise.resolve())
+          : projectService.addProjectSnagItem(getProjectId(), snagDraft).then(() => Promise.resolve()),
+      editingSnagItemId ? 'Snag item updated' : 'Snag item added',
+      resetSnagEditor,
     );
   const deleteSnagItem = (snagItemId: string) =>
-    act(() => projectService.deleteProjectSnagItem(snagItemId), 'Snag item deleted');
-  const addDefectLiabilityCase = () =>
+    act(() => projectService.deleteProjectSnagItem(snagItemId), 'Snag item deleted', () => {
+      if (editingSnagItemId === snagItemId) {
+        resetSnagEditor();
+      }
+    });
+  const saveDefectLiabilityCase = () =>
     act(
-      () => projectService.addProjectDefectLiabilityCase(getProjectId(), { ...defectLiabilityDraft, currency: defectLiabilityDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
-      'Defect liability case added',
-      () => setDefectLiabilityDraft((current) => ({
-        ...defectLiabilityCaseInit,
-        currency: baseCurrency.code,
-        projectUnitId: current.projectUnitId,
-      })),
+      () =>
+        editingDefectLiabilityCaseId
+          ? projectService.updateProjectDefectLiabilityCase(editingDefectLiabilityCaseId, { ...defectLiabilityDraft, currency: defectLiabilityDraft.currency || baseCurrency.code }).then(() => Promise.resolve())
+          : projectService.addProjectDefectLiabilityCase(getProjectId(), { ...defectLiabilityDraft, currency: defectLiabilityDraft.currency || baseCurrency.code }).then(() => Promise.resolve()),
+      editingDefectLiabilityCaseId ? 'Defect liability case updated' : 'Defect liability case added',
+      resetDefectLiabilityEditor,
     );
   const deleteDefectLiabilityCase = (defectLiabilityCaseId: string) =>
-    act(() => projectService.deleteProjectDefectLiabilityCase(defectLiabilityCaseId), 'Defect liability case deleted');
+    act(() => projectService.deleteProjectDefectLiabilityCase(defectLiabilityCaseId), 'Defect liability case deleted', () => {
+      if (editingDefectLiabilityCaseId === defectLiabilityCaseId) {
+        resetDefectLiabilityEditor();
+      }
+    });
   const createDefectLiabilityJobCard = (defectLiabilityCaseId: string) =>
     actWithBusyKey(`defect-job-card:${defectLiabilityCaseId}`, () => projectService.createDefectLiabilityJobCard(defectLiabilityCaseId), 'Job card created from defect liability case');
   const createDefectLiabilityWorkOrder = (defectLiabilityCaseId: string) =>
@@ -2852,27 +3441,16 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
       </div>
 
       <Tabs value={activeTab} onValueChange={navigateToTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3 md:grid-cols-6 xl:grid-cols-12">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="phases">Phases</TabsTrigger>
-          <TabsTrigger value="design">Design</TabsTrigger>
-          <TabsTrigger value="plan">Plan</TabsTrigger>
-          <TabsTrigger value="packages">Packages</TabsTrigger>
-          <TabsTrigger value="commercial">Commercial</TabsTrigger>
-          <TabsTrigger value="commercial-admin">Commercial Admin</TabsTrigger>
-          <TabsTrigger value="approvals">Approvals</TabsTrigger>
-          <TabsTrigger value="site-controls">Site</TabsTrigger>
-          <TabsTrigger value="units">Units</TabsTrigger>
-          <TabsTrigger value="variations">Variations</TabsTrigger>
-          <TabsTrigger value="handover">Handover</TabsTrigger>
-          <TabsTrigger value="defects">Defects</TabsTrigger>
-          <TabsTrigger value="execution">Execution</TabsTrigger>
-          <TabsTrigger value="analysis">Analysis</TabsTrigger>
-          <TabsTrigger value="materials">Materials</TabsTrigger>
-          <TabsTrigger value="governance">Governance</TabsTrigger>
-          <TabsTrigger value="access">Access</TabsTrigger>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
+          {workspaceTabs.map((tab) => (
+            <TabsTrigger
+              key={tab}
+              value={tab}
+              className="border bg-muted/60 px-3 py-2 data-[state=active]:border-primary data-[state=active]:bg-background"
+            >
+              {PROJECT_WORKSPACE_TAB_LABELS[tab]}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -2903,6 +3481,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             invoice={invoice}
             setInvoice={setInvoice}
             baseCurrencyCode={baseCurrency.code}
+            projectCurrencyOptions={projectCurrencyOptions}
             invoiceCurrencyOptions={invoiceCurrencyOptions}
             budgetRevision={budgetRevision}
             setBudgetRevision={setBudgetRevision}
@@ -3035,17 +3614,22 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             editingBoqItemId={editingProjectBoqItemId}
             setBoqDraft={setBoqItemDraft}
             activeBusinessPartners={businessPartners}
-            activeContracts={contracts}
-            tenders={tenderLookup}
-            procurementPlanItems={procurementPlanItemLookup}
-            purchaseRequisitions={purchaseRequisitionLookup}
-            purchaseOrders={purchaseOrderLookup}
-            packageTypeOptions={DEFAULT_PACKAGE_TYPES}
-            packageStatusOptions={DEFAULT_PACKAGE_STATUSES}
-            boqItemTypeOptions={DEFAULT_BOQ_ITEM_TYPES}
-            formatMoney={formatMoney}
-            formatCatalogLabel={formatCatalogLabel}
-            onSavePackage={addProjectPackage}
+              activeContracts={contracts}
+              tenders={tenderLookup}
+              procurementPlanItems={procurementPlanItemLookup}
+              purchaseRequisitions={purchaseRequisitionLookup}
+              purchaseOrders={purchaseOrderLookup}
+              inventoryItems={inventoryItems}
+              packageTypeOptions={DEFAULT_PACKAGE_TYPES}
+              packageStatusOptions={DEFAULT_PACKAGE_STATUSES}
+              boqItemTypeOptions={boqItemTypeOptions}
+              unitOfMeasures={unitsOfMeasure}
+              packageCurrencyOptions={packageCurrencyOptions}
+              boqCurrencyOptions={boqCurrencyOptions}
+              getCurrencyOptionLabel={getCurrencyOptionLabel}
+              formatMoney={formatMoney}
+              formatCatalogLabel={formatCatalogLabel}
+              onSavePackage={addProjectPackage}
             onEditPackage={beginEditProjectPackage}
             onCancelPackageEdit={resetProjectPackageEditor}
             onDeletePackage={deleteProjectPackage}
@@ -3053,6 +3637,29 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             onEditBoqItem={beginEditProjectBoqItem}
             onCancelBoqItemEdit={resetProjectBoqItemEditor}
             onDeleteBoqItem={deleteProjectBoqItem}
+          />
+        </TabsContent>
+        <TabsContent value="budgeting" className="space-y-6">
+          <ProjectBudgetingTab
+            project={project}
+            commercialSummary={commercialSummary}
+            activeBusinessPartners={businessPartners}
+            activeContracts={contracts}
+            tenders={tenderLookup}
+            procurementPlanItems={procurementPlanItemLookup}
+            purchaseRequisitions={purchaseRequisitionLookup}
+            purchaseOrders={purchaseOrderLookup}
+            inventoryItems={inventoryItems}
+            packageTypeOptions={DEFAULT_PACKAGE_TYPES}
+            packageStatusOptions={DEFAULT_PACKAGE_STATUSES}
+            boqItemTypeOptions={boqItemTypeOptions}
+            unitOfMeasures={unitsOfMeasure}
+            packageCurrencyOptions={packageCurrencyOptions}
+            boqCurrencyOptions={boqCurrencyOptions}
+            getCurrencyOptionLabel={getCurrencyOptionLabel}
+            formatCatalogLabel={formatCatalogLabel}
+            formatMoney={formatMoney}
+            onSaveBudgetWorksheet={saveProjectBoqBudgetWorksheet}
           />
         </TabsContent>
         <TabsContent value="commercial" className="space-y-6">
@@ -3067,6 +3674,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             phases={project.phases}
             packages={project.packages}
             activeContracts={activeContracts}
+            currencyOptions={commercialAdminCurrencyOptions}
             variationOrderDraft={variationOrderDraft}
             setVariationOrderDraft={setVariationOrderDraft}
             editingVariationOrderId={editingVariationOrderId}
@@ -3088,6 +3696,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             extensionOfTimeStatusOptions={DEFAULT_PROJECT_EXTENSION_OF_TIME_STATUSES}
             finalAccountStatusOptions={DEFAULT_PROJECT_FINAL_ACCOUNT_STATUSES}
             formatCatalogLabel={formatCatalogLabel}
+            getCurrencyOptionLabel={getCurrencyOptionLabel}
             formatDateLabel={formatDateLabel}
             formatMoney={formatMoney}
             onSaveVariationOrder={saveVariationOrder}
@@ -3137,7 +3746,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             rfiPriorityOptions={DEFAULT_PROJECT_RFI_PRIORITIES}
             siteInstructionStatusOptions={DEFAULT_PROJECT_SITE_INSTRUCTION_STATUSES}
             siteInstructionTypeOptions={DEFAULT_PROJECT_SITE_INSTRUCTION_TYPES}
-            currencyOptions={currencyOptions.map((item) => item.code).filter(Boolean)}
+            currencyOptions={siteInstructionCurrencyOptions}
             formatCatalogLabel={formatCatalogLabel}
             formatDateLabel={formatDateLabel}
             formatMoney={formatMoney}
@@ -3150,10 +3759,12 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         <TabsContent value="units" className="space-y-6">
           <ProjectUnitsTab
             project={project}
-            activeBusinessPartners={activeBusinessPartners}
+            activeBusinessPartners={customerBusinessPartners}
             linkOptions={projectLinkOptions}
             unitDraft={unitDraft}
             setUnitDraft={setUnitDraft}
+            editingUnitId={editingUnitId}
+            unitTypeTemplates={unitTypeTemplates}
             unitTypeOptions={projectUnitTypeOptions}
             unitStatusOptions={projectUnitStatusOptions}
             formatCatalogLabel={formatCatalogLabel}
@@ -3166,7 +3777,9 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             onDeleteFloor={deleteProjectFloor}
             onAddUnitReleaseBatch={addProjectUnitReleaseBatch}
             onDeleteUnitReleaseBatch={deleteProjectUnitReleaseBatch}
-            onAddUnit={addProjectUnit}
+            onSaveUnit={saveProjectUnit}
+            onEditUnit={beginEditProjectUnit}
+            onCancelUnitEdit={resetUnitEditor}
             onReleaseUnit={releaseProjectUnit}
             onWithdrawUnitRelease={withdrawProjectUnitRelease}
             onCreateSalesAgreement={createSalesAgreementFromProjectUnit}
@@ -3179,17 +3792,20 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
           <ProjectCustomerVariationsTab
             project={project}
             units={project.units}
-            activeBusinessPartners={activeBusinessPartners}
+            activeBusinessPartners={customerBusinessPartners}
             linkOptions={projectLinkOptions}
             variationDraft={customerVariationDraft}
             setVariationDraft={setCustomerVariationDraft}
+            editingVariationId={editingCustomerVariationId}
             variationStatusOptions={customerVariationStatusOptions}
             variationTimingOptions={customerVariationTimingOptions}
             formatCatalogLabel={formatCatalogLabel}
             formatDateLabel={formatDateLabel}
             formatMoney={formatMoney}
             followThroughBusyKey={followThroughBusyKey}
-            onAddVariation={addCustomerVariation}
+            onSaveVariation={saveCustomerVariation}
+            onEditVariation={beginEditCustomerVariation}
+            onCancelVariationEdit={resetCustomerVariationEditor}
             onDeleteVariation={deleteCustomerVariation}
             onCreateVariationJobCard={createCustomerVariationJobCard}
             onCreateVariationWorkOrder={createCustomerVariationWorkOrder}
@@ -3220,13 +3836,15 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
           <ProjectDefectsTab
             project={project}
             units={project.units}
-            activeBusinessPartners={activeBusinessPartners}
+            activeBusinessPartners={customerBusinessPartners}
             linkOptions={projectLinkOptions}
             postHandoverSummary={postHandoverSummary}
             snagDraft={snagDraft}
             setSnagDraft={setSnagDraft}
+            editingSnagItemId={editingSnagItemId}
             defectLiabilityDraft={defectLiabilityDraft}
             setDefectLiabilityDraft={setDefectLiabilityDraft}
+            editingDefectLiabilityCaseId={editingDefectLiabilityCaseId}
             snagStatusOptions={DEFAULT_PROJECT_SNAG_STATUSES}
             snagSeverityOptions={DEFAULT_PROJECT_SNAG_SEVERITIES}
             defectLiabilityStatusOptions={DEFAULT_PROJECT_DEFECT_LIABILITY_STATUSES}
@@ -3234,9 +3852,13 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             formatDateLabel={formatDateLabel}
             formatMoney={formatMoney}
             followThroughBusyKey={followThroughBusyKey}
-            onAddSnagItem={addSnagItem}
+            onSaveSnagItem={saveSnagItem}
+            onEditSnagItem={beginEditSnagItem}
+            onCancelSnagItemEdit={resetSnagEditor}
             onDeleteSnagItem={deleteSnagItem}
-            onAddDefectLiabilityCase={addDefectLiabilityCase}
+            onSaveDefectLiabilityCase={saveDefectLiabilityCase}
+            onEditDefectLiabilityCase={beginEditDefectLiabilityCase}
+            onCancelDefectLiabilityCaseEdit={resetDefectLiabilityEditor}
             onDeleteDefectLiabilityCase={deleteDefectLiabilityCase}
             onCreateDefectLiabilityJobCard={createDefectLiabilityJobCard}
             onCreateDefectLiabilityWorkOrder={createDefectLiabilityWorkOrder}
@@ -3382,6 +4004,9 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             setAssetLink={setAssetLink}
             assetLinkTypeOptions={assetLinkTypeOptions}
             assetLinkStatusOptions={assetLinkStatusOptions}
+            maintenanceAssets={maintenanceAssets}
+            companyAssets={companyAssets}
+            jobCards={projectLinkOptions.jobCards}
             onAddAssetLink={addAssetLink}
             externalPolicy={externalPolicy}
             setExternalPolicy={setExternalPolicy}
@@ -3438,6 +4063,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
         saveWorkEditor={saveWorkEditor}
         work={work}
         setWork={setWork}
+        projectPackages={project.packages}
         taskStatusOptions={taskStatusOptions}
         formatCatalogLabel={formatCatalogLabel}
         activeUsers={activeUsers}
@@ -3518,6 +4144,7 @@ type ProjectGanttPlannerDialogProps = {
   saveWorkEditor: () => void;
   work: CreateProjectWorkItemDto;
   setWork: Dispatch<SetStateAction<CreateProjectWorkItemDto>>;
+  projectPackages: ProjectPackageDto[];
   taskStatusOptions: string[];
   formatCatalogLabel: (value?: string | null) => string;
   activeUsers: User[];
@@ -3565,6 +4192,7 @@ function ProjectGanttPlannerDialog({
   saveWorkEditor,
   work,
   setWork,
+  projectPackages,
   taskStatusOptions,
   formatCatalogLabel,
   activeUsers,
@@ -3682,6 +4310,7 @@ function ProjectGanttPlannerDialog({
               saveWorkEditor={saveWorkEditor}
               work={work}
               setWork={setWork}
+              projectPackages={projectPackages}
               taskStatusOptions={taskStatusOptions}
               formatCatalogLabel={formatCatalogLabel}
               activeUsers={activeUsers}
@@ -3835,7 +4464,10 @@ function ProjectGanttPlannerDialog({
                                     </span>
                                   ) : null}
                                 </div>
-                                <div className="truncate text-xs text-muted-foreground">{item.nodeType}</div>
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {item.nodeType}
+                                  {item.projectPackageName ? ` · ${[item.projectPhaseName, item.projectPackageName].filter(Boolean).join(' / ')}` : ''}
+                                </div>
                                   </div>
                                 </div>
                             <div className="flex items-center justify-center border-r px-2">

@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction } from 'react';
-import { format } from 'date-fns';
+import { addMonths, format, parseISO } from 'date-fns';
 import { Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -76,6 +76,7 @@ type ProjectOverviewTabProps = {
   invoice: CreateProjectInvoiceRequestDto;
   setInvoice: Dispatch<SetStateAction<CreateProjectInvoiceRequestDto>>;
   baseCurrencyCode: string;
+  projectCurrencyOptions: string[];
   invoiceCurrencyOptions: string[];
   budgetRevision: CreateProjectBudgetRevisionDto;
   setBudgetRevision: Dispatch<SetStateAction<CreateProjectBudgetRevisionDto>>;
@@ -143,6 +144,7 @@ export function ProjectOverviewTab({
   invoice,
   setInvoice,
   baseCurrencyCode,
+  projectCurrencyOptions,
   invoiceCurrencyOptions,
   budgetRevision,
   setBudgetRevision,
@@ -183,6 +185,24 @@ export function ProjectOverviewTab({
   onActivateForecastVersion,
 }: ProjectOverviewTabProps) {
   const lifecyclePhases = flattenProjectPhases(project.phases);
+  const showForecastVersions = false;
+  const slackMonths = typeof overview.slackMonths === 'number' && Number.isFinite(overview.slackMonths)
+    ? overview.slackMonths
+    : project.slackMonths;
+  const trueProjectEndDate = (() => {
+    const targetEndDate = overview.targetEndDate || project.targetEndDate;
+    if (!targetEndDate) {
+      return project.trueEndDate ? String(project.trueEndDate).slice(0, 10) : '';
+    }
+
+    const parsed = parseISO(String(targetEndDate));
+    if (Number.isNaN(parsed.getTime())) {
+      return project.trueEndDate ? String(project.trueEndDate).slice(0, 10) : '';
+    }
+
+    return format(addMonths(parsed, slackMonths || 0), 'yyyy-MM-dd');
+  })();
+
   const updateDevelopmentProfile = (updates: Partial<NonNullable<UpdateProjectDto['developmentProfile']>>) => {
     setOverview((current) => ({
       ...current,
@@ -276,6 +296,11 @@ export function ProjectOverviewTab({
                 {project.developmentProfile?.landReference || overview.developmentProfile?.landReference ? (
                   <div className="mt-1 text-sm text-muted-foreground">Land Ref: {project.developmentProfile?.landReference || overview.developmentProfile?.landReference}</div>
                 ) : null}
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">Project Base Currency</div>
+                <div className="mt-1 text-base font-semibold">{getCurrencyOptionLabel(overview.baseCurrencyCode || project.baseCurrencyCode || baseCurrencyCode)}</div>
+                <div className="mt-1 text-sm text-muted-foreground">Used as the project reporting and default transaction currency.</div>
               </div>
             </div>
           </div>
@@ -468,7 +493,31 @@ export function ProjectOverviewTab({
           </div>
           <div className="grid gap-2"><Label>Start Date</Label><Input type="date" value={overview.startDate ? String(overview.startDate).slice(0, 10) : ''} onChange={(event) => setOverview((current) => ({ ...current, startDate: event.target.value || undefined }))} /></div>
           <div className="grid gap-2"><Label>Target End Date</Label><Input type="date" value={overview.targetEndDate ? String(overview.targetEndDate).slice(0, 10) : ''} onChange={(event) => setOverview((current) => ({ ...current, targetEndDate: event.target.value || undefined }))} /></div>
+          <div className="grid gap-2">
+            <Label>Slack / Delay (Months)</Label>
+            <Input
+              type="number"
+              min={0}
+              value={slackMonths}
+              onChange={(event) => setOverview((current) => ({ ...current, slackMonths: Math.max(0, Number(event.target.value || '0')) }))}
+            />
+            <div className="text-xs text-muted-foreground">Adds buffer after the target end date to derive the true project finish.</div>
+          </div>
+          <div className="grid gap-2">
+            <Label>True Project End</Label>
+            <Input type="date" value={trueProjectEndDate} readOnly className="bg-slate-50 text-slate-700" />
+            <div className="text-xs text-muted-foreground">Calculated as target end date plus the configured slack months.</div>
+          </div>
           <div className="grid gap-2"><Label>Estimated Budget</Label><Input type="number" value={overview.estimatedBudget ?? ''} onChange={(event) => setOverview((current) => ({ ...current, estimatedBudget: event.target.value ? Number(event.target.value) : undefined }))} /></div>
+          <div className="grid gap-2">
+            <Label>Project Base Currency</Label>
+            <Select value={overview.baseCurrencyCode || project.baseCurrencyCode || baseCurrencyCode} onValueChange={(value) => setOverview((current) => ({ ...current, baseCurrencyCode: value }))}>
+              <SelectTrigger><SelectValue placeholder="Select project base currency" /></SelectTrigger>
+              <SelectContent>
+                {projectCurrencyOptions.map((item) => <SelectItem key={item} value={item}>{getCurrencyOptionLabel(item)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid gap-2"><Label>Approved Budget</Label><Input type="number" value={overview.approvedBudget ?? ''} onChange={(event) => setOverview((current) => ({ ...current, approvedBudget: event.target.value ? Number(event.target.value) : undefined }))} /></div>
           <div className="grid gap-2"><Label>Actual Cost</Label><Input type="number" value={overview.actualCost ?? ''} onChange={(event) => setOverview((current) => ({ ...current, actualCost: event.target.value ? Number(event.target.value) : undefined }))} /></div>
           <div className="grid gap-2">
@@ -682,38 +731,40 @@ export function ProjectOverviewTab({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle>Forecast Versions</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-4">
-            <div className="grid gap-2 md:col-span-2"><Label>Name</Label><Input value={forecastVersion.versionName} onChange={(event) => setForecastVersion((current) => ({ ...current, versionName: event.target.value }))} /></div>
-            <div className="grid gap-2"><Label>As Of</Label><Input type="date" value={forecastVersion.asOfDate || today()} onChange={(event) => setForecastVersion((current) => ({ ...current, asOfDate: event.target.value }))} /></div>
-            <div className="grid gap-2"><Label>Activate</Label><Select value={boolValue(forecastVersion.isActive)} onValueChange={(value) => setForecastVersion((current) => ({ ...current, isActive: value === 'true' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="true">Yes</SelectItem><SelectItem value="false">No</SelectItem></SelectContent></Select></div>
-            <div className="grid gap-2"><Label>Forecast Cost</Label><Input type="number" value={forecastVersion.forecastCost} onChange={(event) => setForecastVersion((current) => ({ ...current, forecastCost: Number(event.target.value || '0') }))} /></div>
-            <div className="grid gap-2"><Label>EAC</Label><Input type="number" value={forecastVersion.estimateAtCompletion} onChange={(event) => setForecastVersion((current) => ({ ...current, estimateAtCompletion: Number(event.target.value || '0') }))} /></div>
-            <div className="grid gap-2"><Label>Revenue</Label><Input type="number" value={forecastVersion.forecastRevenue} onChange={(event) => setForecastVersion((current) => ({ ...current, forecastRevenue: Number(event.target.value || '0') }))} /></div>
-            <div className="grid gap-2"><Label>Margin</Label><Input type="number" value={forecastVersion.forecastMargin} onChange={(event) => setForecastVersion((current) => ({ ...current, forecastMargin: Number(event.target.value || '0') }))} /></div>
-            <div className="grid gap-2 md:col-span-3"><Label>Notes</Label><Textarea rows={2} value={forecastVersion.notes || ''} onChange={(event) => setForecastVersion((current) => ({ ...current, notes: event.target.value }))} /></div>
-            <div className="flex items-end"><Button onClick={onCreateForecastVersion}><Plus className="mr-2 h-4 w-4" />Create Forecast</Button></div>
-          </div>
-          <div className="space-y-3">
-            {forecastVersions.length === 0 ? <div className="text-sm text-muted-foreground">No forecast versions have been created yet.</div> : null}
-            {forecastVersions.map((item) => (
-              <div key={item.id} className="flex items-center justify-between rounded-lg border p-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="font-medium">{item.versionName}</div>
-                    <Badge variant="outline">v{item.versionNumber}</Badge>
-                    {item.isActive ? <Badge>Active</Badge> : null}
+      {showForecastVersions ? (
+        <Card>
+          <CardHeader><CardTitle>Forecast Versions</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-4">
+              <div className="grid gap-2 md:col-span-2"><Label>Name</Label><Input value={forecastVersion.versionName} onChange={(event) => setForecastVersion((current) => ({ ...current, versionName: event.target.value }))} /></div>
+              <div className="grid gap-2"><Label>As Of</Label><Input type="date" value={forecastVersion.asOfDate || today()} onChange={(event) => setForecastVersion((current) => ({ ...current, asOfDate: event.target.value }))} /></div>
+              <div className="grid gap-2"><Label>Activate</Label><Select value={boolValue(forecastVersion.isActive)} onValueChange={(value) => setForecastVersion((current) => ({ ...current, isActive: value === 'true' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="true">Yes</SelectItem><SelectItem value="false">No</SelectItem></SelectContent></Select></div>
+              <div className="grid gap-2"><Label>Forecast Cost</Label><Input type="number" value={forecastVersion.forecastCost} onChange={(event) => setForecastVersion((current) => ({ ...current, forecastCost: Number(event.target.value || '0') }))} /></div>
+              <div className="grid gap-2"><Label>EAC</Label><Input type="number" value={forecastVersion.estimateAtCompletion} onChange={(event) => setForecastVersion((current) => ({ ...current, estimateAtCompletion: Number(event.target.value || '0') }))} /></div>
+              <div className="grid gap-2"><Label>Revenue</Label><Input type="number" value={forecastVersion.forecastRevenue} onChange={(event) => setForecastVersion((current) => ({ ...current, forecastRevenue: Number(event.target.value || '0') }))} /></div>
+              <div className="grid gap-2"><Label>Margin</Label><Input type="number" value={forecastVersion.forecastMargin} onChange={(event) => setForecastVersion((current) => ({ ...current, forecastMargin: Number(event.target.value || '0') }))} /></div>
+              <div className="grid gap-2 md:col-span-3"><Label>Notes</Label><Textarea rows={2} value={forecastVersion.notes || ''} onChange={(event) => setForecastVersion((current) => ({ ...current, notes: event.target.value }))} /></div>
+              <div className="flex items-end"><Button onClick={onCreateForecastVersion}><Plus className="mr-2 h-4 w-4" />Create Forecast</Button></div>
+            </div>
+            <div className="space-y-3">
+              {forecastVersions.length === 0 ? <div className="text-sm text-muted-foreground">No forecast versions have been created yet.</div> : null}
+              {forecastVersions.map((item) => (
+                <div key={item.id} className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium">{item.versionName}</div>
+                      <Badge variant="outline">v{item.versionNumber}</Badge>
+                      {item.isActive ? <Badge>Active</Badge> : null}
+                    </div>
+                    <div className="text-sm text-muted-foreground">{formatDateLabel(item.asOfDate)} | forecast {formatMoney(item.forecastCost)} | EAC {formatMoney(item.estimateAtCompletion)} | revenue {formatMoney(item.forecastRevenue)}</div>
                   </div>
-                  <div className="text-sm text-muted-foreground">{formatDateLabel(item.asOfDate)} | forecast {formatMoney(item.forecastCost)} | EAC {formatMoney(item.estimateAtCompletion)} | revenue {formatMoney(item.forecastRevenue)}</div>
+                  {!item.isActive ? <Button variant="outline" size="sm" onClick={() => onActivateForecastVersion(item.id)}>Activate</Button> : null}
                 </div>
-                {!item.isActive ? <Button variant="outline" size="sm" onClick={() => onActivateForecastVersion(item.id)}>Activate</Button> : null}
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

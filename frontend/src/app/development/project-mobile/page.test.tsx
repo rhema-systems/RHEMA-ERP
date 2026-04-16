@@ -98,6 +98,7 @@ describe('ProjectMobilePage', () => {
     });
     vi.mocked(projectService.uploadProjectDocument).mockResolvedValue({
       id: 'doc-1',
+      artifactType: 'Project',
       documentName: 'Configure edge device evidence',
       category: 'FieldEvidence',
       documentType: 'MobileEvidence',

@@ -26,6 +26,7 @@ public class ProjectRepository : GenericRepository<Project>, IProjectRepository
 
     public async Task<Project?> GetDetailByIdAsync(Guid id)
         => await _dbSet
+            .AsNoTracking()
             .Include(x => x.ProjectType)
             .Include(x => x.ProjectPriority)
             .Include(x => x.Template)
@@ -37,6 +38,8 @@ public class ProjectRepository : GenericRepository<Project>, IProjectRepository
             .Include(x => x.BoqItems)
             .Include(x => x.Members)
             .Include(x => x.Milestones)
+                .ThenInclude(x => x.PhaseSelections)
+                .ThenInclude(x => x.ProjectPhase)
             .Include(x => x.ResourceAllocations)
             .Include(x => x.Risks)
             .Include(x => x.Issues)
@@ -46,6 +49,7 @@ public class ProjectRepository : GenericRepository<Project>, IProjectRepository
             .Include(x => x.Documents)
             .Include(x => x.Comments)
             .Include(x => x.InitiationVersions)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == _currentUserProvider.TenantId && !x.IsDeleted);
 
     public async Task<Project?> GetByProjectCodeAsync(string projectCode)

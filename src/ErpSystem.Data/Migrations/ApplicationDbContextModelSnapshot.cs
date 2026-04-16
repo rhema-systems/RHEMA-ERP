@@ -40132,6 +40132,10 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
+                    b.Property<string>("BaseCurrencyCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
                     b.Property<string>("BudgetStatus")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -40233,6 +40237,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("ScopeStatement")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("SlackMonths")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("SponsorId")
                         .HasColumnType("uniqueidentifier");
@@ -40740,6 +40747,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal?>("BudgetAmount")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("BudgetQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("BudgetUnitRate")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<decimal?>("CommittedAmount")
                         .HasColumnType("decimal(18,2)");
@@ -42120,6 +42133,14 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ArtifactType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<string>("Category")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -42212,6 +42233,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ProjectId", "Category");
 
                     b.HasIndex("ProjectId", "IsExternalVisible");
+
+                    b.HasIndex("ProjectId", "ArtifactType", "ArtifactId");
 
                     b.ToTable("ProjectDocuments");
                 });
@@ -43175,6 +43198,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ProjectMilestoneId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("ProjectPackageId")
                         .HasColumnType("uniqueidentifier");
 
@@ -43220,6 +43246,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ContractId");
 
+                    b.HasIndex("ProjectMilestoneId");
+
                     b.HasIndex("ProjectPackageId");
 
                     b.HasIndex("ProjectPhaseId");
@@ -43228,6 +43256,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ProjectId", "ContractId");
 
+                    b.HasIndex("ProjectId", "ProjectMilestoneId");
+
                     b.HasIndex("ProjectId", "Status");
 
                     b.HasIndex("ProjectId", "ValuationDate");
@@ -43235,6 +43265,62 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ProjectId", "ProjectPhaseId", "ProjectPackageId");
 
                     b.ToTable("ProjectInterimValuations");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectInterimValuationPackageCompletion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectInterimValuationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectPackageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectInterimValuationId");
+
+                    b.HasIndex("ProjectPackageId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ProjectInterimValuationId", "ProjectPackageId")
+                        .IsUnique();
+
+                    b.ToTable("ProjectInterimValuationPackageCompletions");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectInvoiceRequest", b =>
@@ -43897,6 +43983,60 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ProjectMilestones");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectMilestonePhase", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectMilestoneId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectPhaseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectPhaseId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ProjectMilestoneId", "ProjectPhaseId")
+                        .IsUnique();
+
+                    b.ToTable("ProjectMilestonePhases");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectNonConformance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -44020,6 +44160,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("CommittedAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal>("CompletionWeightPercent")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<Guid?>("ContractId")
                         .HasColumnType("uniqueidentifier");
 
@@ -44073,6 +44216,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("PlannedEndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PlannedStartDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("ProcurementPlanItemId")
                         .HasColumnType("uniqueidentifier");
@@ -44266,6 +44415,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<decimal>("CompletionWeightPercent")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -44364,6 +44516,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Code")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal>("CompletionWeightPercent")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -45977,6 +46132,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ProjectUnitReleaseBatchId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ProjectUnitTypeTemplateId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ReleasedAt")
                         .HasColumnType("datetime2");
 
@@ -46022,6 +46180,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ProjectUnitReleaseBatchId");
 
+                    b.HasIndex("ProjectUnitTypeTemplateId");
+
                     b.HasIndex("SalesAgreementId");
 
                     b.HasIndex("SalesOrderId");
@@ -46038,6 +46198,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ProjectId", "ProjectUnitReleaseBatchId");
 
+                    b.HasIndex("ProjectId", "ProjectUnitTypeTemplateId");
+
                     b.HasIndex("ProjectId", "SalesAgreementId");
 
                     b.HasIndex("ProjectId", "SalesOrderId");
@@ -46047,6 +46209,79 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ProjectId", "Status");
 
                     b.ToTable("ProjectUnits");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitAmenity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AmenityName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("InventoryItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("ProjectUnitId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ProjectUnitId", "SortOrder");
+
+                    b.ToTable("ProjectUnitAmenities");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitHandoverBatch", b =>
@@ -46233,6 +46468,156 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ProjectId", "Status");
 
                     b.ToTable("ProjectUnitReleaseBatches");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitTypeTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("DefaultProjectUnitType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.HasIndex("TenantId", "IsActive", "SortOrder");
+
+                    b.ToTable("ProjectUnitTypeTemplates");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitTypeTemplateAmenity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AmenityName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectUnitTypeTemplateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("ProjectUnitTypeTemplateId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ProjectUnitTypeTemplateId", "InventoryItemId", "SortOrder");
+
+                    b.ToTable("ProjectUnitTypeTemplateAmenities");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectVariationOrder", b =>
@@ -46436,6 +46821,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ProjectPackageId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
 
@@ -46462,7 +46850,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ParentId");
 
+                    b.HasIndex("ProjectPackageId");
+
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("ProjectId", "ProjectPackageId");
 
                     b.HasIndex("ProjectId", "ParentId", "SortOrder");
 
@@ -65133,6 +65525,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectMilestone", "ProjectMilestone")
+                        .WithMany()
+                        .HasForeignKey("ProjectMilestoneId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Projects.ProjectPackage", "ProjectPackage")
                         .WithMany()
                         .HasForeignKey("ProjectPackageId")
@@ -65153,9 +65550,38 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("Project");
 
+                    b.Navigation("ProjectMilestone");
+
                     b.Navigation("ProjectPackage");
 
                     b.Navigation("ProjectPhase");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectInterimValuationPackageCompletion", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectInterimValuation", "ProjectInterimValuation")
+                        .WithMany("CompletedProjectPackages")
+                        .HasForeignKey("ProjectInterimValuationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectPackage", "ProjectPackage")
+                        .WithMany()
+                        .HasForeignKey("ProjectPackageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProjectInterimValuation");
+
+                    b.Navigation("ProjectPackage");
 
                     b.Navigation("Tenant");
                 });
@@ -65307,6 +65733,33 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectMilestonePhase", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectMilestone", "ProjectMilestone")
+                        .WithMany("PhaseSelections")
+                        .HasForeignKey("ProjectMilestoneId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectPhase", "ProjectPhase")
+                        .WithMany("MilestoneSelections")
+                        .HasForeignKey("ProjectPhaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProjectMilestone");
+
+                    b.Navigation("ProjectPhase");
 
                     b.Navigation("Tenant");
                 });
@@ -65846,6 +66299,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("ProjectUnitReleaseBatchId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectUnitTypeTemplate", "ProjectUnitTypeTemplate")
+                        .WithMany("Units")
+                        .HasForeignKey("ProjectUnitTypeTemplateId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("ErpSystem.Core.Entities.Sales.SalesAgreement", "SalesAgreement")
                         .WithMany()
                         .HasForeignKey("SalesAgreementId")
@@ -65870,9 +66328,37 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("ProjectUnitReleaseBatch");
 
+                    b.Navigation("ProjectUnitTypeTemplate");
+
                     b.Navigation("SalesAgreement");
 
                     b.Navigation("SalesOrder");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitAmenity", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "InventoryItem")
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectUnit", "ProjectUnit")
+                        .WithMany("Amenities")
+                        .HasForeignKey("ProjectUnitId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("InventoryItem");
+
+                    b.Navigation("ProjectUnit");
 
                     b.Navigation("Tenant");
                 });
@@ -65943,6 +66429,44 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitTypeTemplate", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitTypeTemplateAmenity", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "InventoryItem")
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectUnitTypeTemplate", "ProjectUnitTypeTemplate")
+                        .WithMany("Amenities")
+                        .HasForeignKey("ProjectUnitTypeTemplateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("InventoryItem");
+
+                    b.Navigation("ProjectUnitTypeTemplate");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectVariationOrder", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Procurement.Contract", "Contract")
@@ -65996,6 +66520,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectPackage", "ProjectPackage")
+                        .WithMany()
+                        .HasForeignKey("ProjectPackageId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -66005,6 +66534,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Parent");
 
                     b.Navigation("Project");
+
+                    b.Navigation("ProjectPackage");
 
                     b.Navigation("Tenant");
                 });
@@ -68666,9 +69197,19 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Units");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectInterimValuation", b =>
+                {
+                    b.Navigation("CompletedProjectPackages");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectMeetingMinute", b =>
                 {
                     b.Navigation("ActionItems");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectMilestone", b =>
+                {
+                    b.Navigation("PhaseSelections");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectPackage", b =>
@@ -68681,6 +69222,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("ApprovalRegisterItems");
 
                     b.Navigation("Children");
+
+                    b.Navigation("MilestoneSelections");
 
                     b.Navigation("Packages");
                 });
@@ -68718,6 +69261,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnit", b =>
                 {
+                    b.Navigation("Amenities");
+
                     b.Navigation("CommissioningItems");
 
                     b.Navigation("CustomerVariations");
@@ -68736,6 +69281,13 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitReleaseBatch", b =>
                 {
+                    b.Navigation("Units");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Projects.ProjectUnitTypeTemplate", b =>
+                {
+                    b.Navigation("Amenities");
+
                     b.Navigation("Units");
                 });
 

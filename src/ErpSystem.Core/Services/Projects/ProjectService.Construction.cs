@@ -52,6 +52,7 @@ public partial class ProjectService
     public async Task<ProjectPhaseDto> AddProjectPhaseAsync(Guid projectId, CreateProjectPhaseDto dto)
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManagePlan);
+        EnsureChronologicalDateRange(dto.PlannedStartDate, dto.PlannedEndDate, "phase");
 
         if (dto.ParentPhaseId.HasValue)
         {
@@ -79,6 +80,7 @@ public partial class ProjectService
             SortOrder = dto.SortOrder ?? (siblings.Count == 0 ? 0 : siblings.Max(x => x.SortOrder) + 1),
             IsOptional = dto.IsOptional,
             IsStageGateRequired = dto.IsStageGateRequired,
+            CompletionWeightPercent = 0m,
             PlannedStartDate = dto.PlannedStartDate,
             PlannedEndDate = dto.PlannedEndDate,
             ActualStartDate = dto.ActualStartDate,
@@ -96,6 +98,7 @@ public partial class ProjectService
     {
         var entity = await GetProjectPhaseEntityAsync(phaseId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
+        EnsureChronologicalDateRange(dto.PlannedStartDate, dto.PlannedEndDate, "phase");
 
         if (dto.ParentPhaseId == phaseId)
         {
@@ -470,6 +473,7 @@ public partial class ProjectService
         DateTime? plannedEndDate = null;
         DateTime? actualStartDate = null;
         DateTime? actualEndDate = null;
+        decimal completionWeightPercent = 0m;
         var explicitSortOrder = sortOrder;
 
         if (templateElement.ValueKind == JsonValueKind.String)
@@ -488,6 +492,7 @@ public partial class ProjectService
             plannedEndDate = ReadDateTime(templateElement, "plannedEndDate");
             actualStartDate = ReadDateTime(templateElement, "actualStartDate");
             actualEndDate = ReadDateTime(templateElement, "actualEndDate");
+            completionWeightPercent = ReadDecimal(templateElement, "completionWeightPercent");
             if (TryReadInt(templateElement, "sortOrder", out var configuredSortOrder))
             {
                 explicitSortOrder = configuredSortOrder;
@@ -516,6 +521,7 @@ public partial class ProjectService
             IsOptional = isOptional,
             IsStageGateRequired = isStageGateRequired,
             IsTemplateSeeded = true,
+            CompletionWeightPercent = completionWeightPercent,
             PlannedStartDate = plannedStartDate,
             PlannedEndDate = plannedEndDate,
             ActualStartDate = actualStartDate,
@@ -615,6 +621,13 @@ public partial class ProjectService
                 ? parsed
                 : null;
 
+    private static decimal ReadDecimal(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.Number
+            && property.TryGetDecimal(out var parsed)
+                ? decimal.Round(parsed, 2)
+                : 0m;
+
     private static bool TryReadInt(JsonElement element, string propertyName, out int value)
     {
         if (element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out value))
@@ -666,11 +679,23 @@ public partial class ProjectService
         IsOptional = entity.IsOptional,
         IsStageGateRequired = entity.IsStageGateRequired,
         IsTemplateSeeded = entity.IsTemplateSeeded,
+        CompletionWeightPercent = entity.CompletionWeightPercent,
         PlannedStartDate = entity.PlannedStartDate,
         PlannedEndDate = entity.PlannedEndDate,
         ActualStartDate = entity.ActualStartDate,
         ActualEndDate = entity.ActualEndDate
     };
+
+    private static decimal NormalizeCompletionWeightPercent(decimal? completionWeightPercent, string label)
+    {
+        var resolvedWeight = decimal.Round(completionWeightPercent ?? 0m, 2);
+        if (resolvedWeight < 0m || resolvedWeight > 100m)
+        {
+            throw new InvalidOperationException($"The {label} completion weight must be between 0 and 100.");
+        }
+
+        return resolvedWeight;
+    }
 
     private static List<ProjectPhaseDto> MapToPhaseTree(IEnumerable<ProjectPhase> entities)
     {

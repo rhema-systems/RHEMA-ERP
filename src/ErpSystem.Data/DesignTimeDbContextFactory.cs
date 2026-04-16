@@ -42,7 +42,10 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
         });
 
         optionsBuilder.ConfigureWarnings(warnings =>
-            warnings.Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
+            warnings
+                .Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning)
+                .Ignore(CoreEventId.MappedEntityTypeIgnoredWarning)
+                .Ignore(CoreEventId.MappedNavigationIgnoredWarning));
 
         // Create context without tenant filter for migrations
         return new ApplicationDbContext(optionsBuilder.Options);

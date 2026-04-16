@@ -132,8 +132,6 @@ public class SalesOrderService : ISalesOrderService
             salesOrder.TaxAmount = dto.TaxAmount ?? totalTax;
             salesOrder.TotalAmount = subTotal + salesOrder.TaxAmount + salesOrder.ShippingAmount - salesOrder.DiscountAmount;
 
-            await _salesOrderRepo.UpdateAsync(salesOrder);
-
             // Record initial status
             await RecordStatusChangeAsync(salesOrder.Id, null, SalesOrderStatus.Draft, "Sales Order created", bp.TenantId);
 

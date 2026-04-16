@@ -681,6 +681,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectSiteInstruction> ProjectSiteInstructions { get; set; }
     public DbSet<ProjectVariationOrder> ProjectVariationOrders { get; set; }
     public DbSet<ProjectInterimValuation> ProjectInterimValuations { get; set; }
+    public DbSet<ProjectInterimValuationPackageCompletion> ProjectInterimValuationPackageCompletions { get; set; }
     public DbSet<ProjectPaymentCertificate> ProjectPaymentCertificates { get; set; }
     public DbSet<ProjectExtensionOfTime> ProjectExtensionOfTimeRequests { get; set; }
     public DbSet<ProjectFinalAccount> ProjectFinalAccounts { get; set; }
@@ -688,7 +689,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectFloor> ProjectFloors { get; set; }
     public DbSet<ProjectUnitReleaseBatch> ProjectUnitReleaseBatches { get; set; }
     public DbSet<ProjectUnitHandoverBatch> ProjectUnitHandoverBatches { get; set; }
+    public DbSet<ProjectUnitTypeTemplate> ProjectUnitTypeTemplates { get; set; }
+    public DbSet<ProjectUnitTypeTemplateAmenity> ProjectUnitTypeTemplateAmenities { get; set; }
     public DbSet<ProjectUnit> ProjectUnits { get; set; }
+    public DbSet<ProjectUnitAmenity> ProjectUnitAmenities { get; set; }
     public DbSet<ProjectCustomerVariation> ProjectCustomerVariations { get; set; }
     public DbSet<ProjectCommissioningItem> ProjectCommissioningItems { get; set; }
     public DbSet<ProjectHandoverItem> ProjectHandoverItems { get; set; }
@@ -698,6 +702,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectMember> ProjectMembers { get; set; }
     public DbSet<ProjectWorkItem> ProjectWorkItems { get; set; }
     public DbSet<ProjectMilestone> ProjectMilestones { get; set; }
+    public DbSet<ProjectMilestonePhase> ProjectMilestonePhases { get; set; }
     public DbSet<ProjectResourceAllocation> ProjectResourceAllocations { get; set; }
     public DbSet<ProjectRisk> ProjectRisks { get; set; }
     public DbSet<ProjectIssue> ProjectIssues { get; set; }
@@ -1582,6 +1587,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectSiteInstructionConfiguration());
         builder.ApplyConfiguration(new ProjectVariationOrderConfiguration());
         builder.ApplyConfiguration(new ProjectInterimValuationConfiguration());
+        builder.ApplyConfiguration(new ProjectInterimValuationPackageCompletionConfiguration());
         builder.ApplyConfiguration(new ProjectPaymentCertificateConfiguration());
         builder.ApplyConfiguration(new ProjectExtensionOfTimeConfiguration());
         builder.ApplyConfiguration(new ProjectFinalAccountConfiguration());
@@ -1589,7 +1595,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectFloorConfiguration());
         builder.ApplyConfiguration(new ProjectUnitReleaseBatchConfiguration());
         builder.ApplyConfiguration(new ProjectUnitHandoverBatchConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitTypeTemplateConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitTypeTemplateAmenityConfiguration());
         builder.ApplyConfiguration(new ProjectUnitConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitAmenityConfiguration());
         builder.ApplyConfiguration(new ProjectCustomerVariationConfiguration());
         builder.ApplyConfiguration(new ProjectCommissioningItemConfiguration());
         builder.ApplyConfiguration(new ProjectHandoverItemConfiguration());
@@ -1599,6 +1608,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectMemberConfiguration());
         builder.ApplyConfiguration(new ProjectWorkItemConfiguration());
         builder.ApplyConfiguration(new ProjectMilestoneConfiguration());
+        builder.ApplyConfiguration(new ProjectMilestonePhaseConfiguration());
         builder.ApplyConfiguration(new ProjectResourceAllocationConfiguration());
         builder.ApplyConfiguration(new ProjectRiskConfiguration());
         builder.ApplyConfiguration(new ProjectIssueConfiguration());

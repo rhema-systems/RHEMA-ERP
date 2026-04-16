@@ -322,8 +322,6 @@ public partial class ProjectService
                 x.TenantId == _currentUserProvider.TenantId
                 && projectIds.Contains(x.ProjectId)))
             .ToList();
-        var currencyCode = await GetProjectBaseCurrencyCodeAsync();
-
         var packagesByProjectId = packages.GroupBy(x => x.ProjectId).ToDictionary(group => group.Key, group => group.ToList());
         var variationsByProjectId = variationOrders.GroupBy(x => x.ProjectId).ToDictionary(group => group.Key, group => group.ToList());
         var valuationsByProjectId = interimValuations.GroupBy(x => x.ProjectId).ToDictionary(group => group.Key, group => group.ToList());
@@ -334,26 +332,75 @@ public partial class ProjectService
         var rows = new List<ProjectCommercialAdministrationReportItemDto>();
         foreach (var project in projects)
         {
+            var currencyCode = await GetProjectBaseCurrencyCodeAsync(project);
             var projectPackages = packagesByProjectId.GetValueOrDefault(project.Id, []);
             var projectVariations = variationsByProjectId.GetValueOrDefault(project.Id, []);
             var projectValuations = valuationsByProjectId.GetValueOrDefault(project.Id, []);
             var projectCertificates = certificatesByProjectId.GetValueOrDefault(project.Id, []);
             var projectEots = eotByProjectId.GetValueOrDefault(project.Id, []);
             finalAccountByProjectId.TryGetValue(project.Id, out var finalAccount);
+            var conversionCurrencies = projectPackages.Select(x => x.Currency)
+                .Concat(projectVariations.Select(x => x.Currency))
+                .Concat(projectValuations.Select(x => x.Currency))
+                .Concat(projectCertificates.Select(x => x.Currency))
+                .Concat(finalAccount != null ? [finalAccount.Currency] : []);
+            var (conversionTenantBaseCurrencyCode, exchangeRates) = await BuildCurrencyConversionContextAsync(currencyCode, conversionCurrencies);
 
-            var packageForecastAmount = projectPackages.Sum(x => x.ForecastAmount ?? 0m);
+            var packageForecastAmount = SumConvertedAmounts(
+                projectPackages,
+                x => x.ForecastAmount ?? 0m,
+                x => x.Currency,
+                currencyCode,
+                conversionTenantBaseCurrencyCode,
+                exchangeRates,
+                out var packageForecastConversionFailures);
             var approvedBudget = project.ApprovedBudget ?? 0m;
             var unassignedPackageCount = projectPackages.Count(x => !x.ProjectPhaseId.HasValue);
             var packagesOverForecast = projectPackages.Count(x => (x.ForecastAmount ?? 0m) > (x.BudgetAmount ?? 0m) && (x.BudgetAmount ?? 0m) > 0m);
-            var approvedVariationAmount = projectVariations
-                .Where(x => x.Status == ProjectVariationOrderStatuses.Approved || x.Status == ProjectVariationOrderStatuses.Implemented || x.Status == ProjectVariationOrderStatuses.Closed)
-                .Sum(x => x.ApprovedAmount ?? x.EstimatedAmount ?? 0m);
-            var netValuationAmount = projectValuations.Sum(x => x.NetValuationAmount);
-            var netCertifiedAmount = projectCertificates.Sum(x => x.NetCertifiedAmount);
-            var retentionHeldAmount = projectCertificates.Sum(x => x.RetentionHeldAmount) + projectValuations.Sum(x => x.RetentionAmount);
+            var (approvedVariationAmount, variationConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+                projectVariations.Where(x =>
+                    x.Status == ProjectVariationOrderStatuses.Approved
+                    || x.Status == ProjectVariationOrderStatuses.Implemented
+                    || x.Status == ProjectVariationOrderStatuses.Closed),
+                x => x.ApprovedAmount ?? x.EstimatedAmount ?? 0m,
+                x => x.Currency,
+                x => x.ApprovedDate ?? x.ImplementedDate ?? x.RequestedDate,
+                currencyCode);
+            var (netValuationAmount, valuationConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+                projectValuations,
+                x => x.NetValuationAmount,
+                x => x.Currency,
+                x => x.ValuationDate,
+                currencyCode);
+            var (netCertifiedAmount, certificationConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+                projectCertificates,
+                x => x.NetCertifiedAmount,
+                x => x.Currency,
+                x => x.IssueDate,
+                currencyCode);
+            var (certificateRetentionHeldAmount, certificateRetentionConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+                projectCertificates,
+                x => x.RetentionHeldAmount,
+                x => x.Currency,
+                x => x.IssueDate,
+                currencyCode);
+            var (valuationRetentionHeldAmount, valuationRetentionConversionFailures) = await SumConvertedAmountsByEffectiveDateAsync(
+                projectValuations,
+                x => x.RetentionAmount,
+                x => x.Currency,
+                x => x.ValuationDate,
+                currencyCode);
+            var retentionHeldAmount = certificateRetentionHeldAmount + valuationRetentionHeldAmount;
             var approvedExtensionDays = projectEots
                 .Where(x => x.Status == ProjectExtensionOfTimeStatuses.Approved || x.Status == ProjectExtensionOfTimeStatuses.Implemented || x.Status == ProjectExtensionOfTimeStatuses.Closed)
                 .Sum(x => x.DaysApproved ?? 0);
+            var totalConversionFailures =
+                packageForecastConversionFailures
+                + variationConversionFailures
+                + valuationConversionFailures
+                + certificationConversionFailures
+                + certificateRetentionConversionFailures
+                + valuationRetentionConversionFailures;
 
             var alerts = new List<string>();
             if (projectPackages.Count == 0)
@@ -386,13 +433,21 @@ public partial class ProjectService
                 alerts.Add($"Final account is currently {finalAccount.Status}.");
             }
 
+            if (totalConversionFailures > 0)
+            {
+                alerts.Add($"{totalConversionFailures} commercial amount(s) could not be converted to {currencyCode}; those totals still include their source values.");
+            }
+
             rows.Add(new ProjectCommercialAdministrationReportItemDto
             {
                 ProjectId = project.Id,
                 ProjectCode = project.ProjectCode,
                 ProjectTitle = project.Title,
                 ProjectStatus = project.Status,
-                Currency = currencyCode,
+                Currency = string.IsNullOrWhiteSpace(currencyCode) ? conversionTenantBaseCurrencyCode : currencyCode,
+                PackageConversionBasis = "Current active exchange rates",
+                DocumentConversionBasis = "Document-date exchange rates",
+                MissingExchangeRateCount = totalConversionFailures,
                 ApprovedBudget = approvedBudget,
                 PackageForecastAmount = packageForecastAmount,
                 ForecastVarianceAmount = approvedBudget - packageForecastAmount,

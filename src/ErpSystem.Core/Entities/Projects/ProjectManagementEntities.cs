@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
@@ -228,6 +229,22 @@ public static class ProjectInterimValuationStatuses
     public const string Certified = "Certified";
     public const string Paid = "Paid";
     public const string Rejected = "Rejected";
+}
+
+public static class ProjectDocumentArtifactTypes
+{
+    public const string Project = "Project";
+    public const string Phase = "Phase";
+    public const string Package = "Package";
+    public const string WorkItem = "WorkItem";
+}
+
+public static class ProjectUnitInventoryStatuses
+{
+    public const string PendingRelease = "PendingRelease";
+    public const string Released = "Released";
+    public const string Allocated = "Allocated";
+    public const string Invoiced = "Invoiced";
 }
 
 public static class ProjectPaymentCertificateStatuses
@@ -479,6 +496,8 @@ public class ProjectPhaseTemplate : TenantEntity
     public string DefaultStatus { get; set; } = ProjectPhaseStatuses.NotStarted;
 
     public int SortOrder { get; set; }
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal CompletionWeightPercent { get; set; }
     public bool IsOptional { get; set; }
     public bool IsStageGateRequired { get; set; }
     public bool IsActive { get; set; } = true;
@@ -680,6 +699,7 @@ public class Project : TenantEntity
 
     public DateTime? StartDate { get; set; }
     public DateTime? TargetEndDate { get; set; }
+    public int SlackMonths { get; set; }
     public DateTime? ActualStartDate { get; set; }
     public DateTime? ActualEndDate { get; set; }
 
@@ -691,6 +711,9 @@ public class Project : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal? ActualCost { get; set; }
+
+    [MaxLength(10)]
+    public string? BaseCurrencyCode { get; set; }
 
     [MaxLength(50)]
     public string BudgetStatus { get; set; } = "NotStarted";
@@ -860,6 +883,8 @@ public class ProjectPhase : TenantEntity
     public bool IsOptional { get; set; }
     public bool IsStageGateRequired { get; set; }
     public bool IsTemplateSeeded { get; set; }
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal CompletionWeightPercent { get; set; }
     public DateTime? PlannedStartDate { get; set; }
     public DateTime? PlannedEndDate { get; set; }
     public DateTime? ActualStartDate { get; set; }
@@ -873,6 +898,7 @@ public class ProjectPhase : TenantEntity
 
     public virtual ICollection<ProjectPhase> Children { get; set; } = new List<ProjectPhase>();
     public virtual ICollection<ProjectPackage> Packages { get; set; } = new List<ProjectPackage>();
+    public virtual ICollection<ProjectMilestonePhase> MilestoneSelections { get; set; } = new List<ProjectMilestonePhase>();
     public virtual ICollection<ProjectApprovalRegisterItem> ApprovalRegisterItems { get; set; } = new List<ProjectApprovalRegisterItem>();
 }
 
@@ -900,6 +926,10 @@ public class ProjectPackage : TenantEntity
     public string Status { get; set; } = ProjectPackageStatuses.Planned;
 
     public int SortOrder { get; set; }
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal CompletionWeightPercent { get; set; }
+    public DateTime? PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
 
     [MaxLength(100)]
     public string? ProcurementRoute { get; set; }
@@ -968,6 +998,12 @@ public class ProjectBoqItem : TenantEntity
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal? UnitRate { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? BudgetQuantity { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? BudgetUnitRate { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal? BudgetAmount { get; set; }
@@ -1309,6 +1345,7 @@ public class ProjectInterimValuation : TenantEntity
     public Guid ProjectId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectPackageId { get; set; }
+    public Guid? ProjectMilestoneId { get; set; }
     public Guid? ContractId { get; set; }
 
     [MaxLength(100)]
@@ -1360,8 +1397,25 @@ public class ProjectInterimValuation : TenantEntity
     [ForeignKey(nameof(ProjectPackageId))]
     public virtual ProjectPackage? ProjectPackage { get; set; }
 
+    [ForeignKey(nameof(ProjectMilestoneId))]
+    public virtual ProjectMilestone? ProjectMilestone { get; set; }
+
     [ForeignKey(nameof(ContractId))]
     public virtual Contract? Contract { get; set; }
+
+    public virtual ICollection<ProjectInterimValuationPackageCompletion> CompletedProjectPackages { get; set; } = new List<ProjectInterimValuationPackageCompletion>();
+}
+
+public class ProjectInterimValuationPackageCompletion : TenantEntity
+{
+    public Guid ProjectInterimValuationId { get; set; }
+    public Guid ProjectPackageId { get; set; }
+
+    [ForeignKey(nameof(ProjectInterimValuationId))]
+    public virtual ProjectInterimValuation ProjectInterimValuation { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectPackageId))]
+    public virtual ProjectPackage ProjectPackage { get; set; } = null!;
 }
 
 public class ProjectPaymentCertificate : TenantEntity
@@ -1604,6 +1658,60 @@ public class ProjectUnitReleaseBatch : TenantEntity
     public virtual ICollection<ProjectUnit> Units { get; set; } = new List<ProjectUnit>();
 }
 
+public class ProjectUnitTypeTemplate : TenantEntity
+{
+    [Required]
+    [MaxLength(50)]
+    public string Code { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string DefaultProjectUnitType { get; set; } = ProjectUnitTypes.Unit;
+
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+
+    [MaxLength(10)]
+    public string? Currency { get; set; }
+
+    public virtual ICollection<ProjectUnitTypeTemplateAmenity> Amenities { get; set; } = new List<ProjectUnitTypeTemplateAmenity>();
+    public virtual ICollection<ProjectUnit> Units { get; set; } = new List<ProjectUnit>();
+}
+
+public class ProjectUnitTypeTemplateAmenity : TenantEntity
+{
+    public Guid ProjectUnitTypeTemplateId { get; set; }
+    public Guid InventoryItemId { get; set; }
+
+    [MaxLength(100)]
+    public string? ItemCode { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string AmenityName { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Quantity { get; set; } = 1m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnitCost { get; set; }
+
+    public int SortOrder { get; set; }
+
+    [ForeignKey(nameof(ProjectUnitTypeTemplateId))]
+    public virtual ProjectUnitTypeTemplate ProjectUnitTypeTemplate { get; set; } = null!;
+
+    [ForeignKey(nameof(InventoryItemId))]
+    public virtual InventoryItem InventoryItem { get; set; } = null!;
+}
+
 public class ProjectUnitHandoverBatch : TenantEntity
 {
     public Guid ProjectId { get; set; }
@@ -1646,6 +1754,7 @@ public class ProjectUnit : TenantEntity
     public Guid? ProjectBuildingId { get; set; }
     public Guid? ProjectFloorId { get; set; }
     public Guid? ProjectUnitReleaseBatchId { get; set; }
+    public Guid? ProjectUnitTypeTemplateId { get; set; }
     public Guid? CustomerBusinessPartnerId { get; set; }
     public Guid? SalesAgreementId { get; set; }
     public Guid? SalesOrderId { get; set; }
@@ -1704,6 +1813,9 @@ public class ProjectUnit : TenantEntity
     [ForeignKey(nameof(ProjectUnitReleaseBatchId))]
     public virtual ProjectUnitReleaseBatch? ProjectUnitReleaseBatch { get; set; }
 
+    [ForeignKey(nameof(ProjectUnitTypeTemplateId))]
+    public virtual ProjectUnitTypeTemplate? ProjectUnitTypeTemplate { get; set; }
+
     [ForeignKey(nameof(SalesAgreementId))]
     public virtual SalesAgreement? SalesAgreement { get; set; }
 
@@ -1715,6 +1827,34 @@ public class ProjectUnit : TenantEntity
     public virtual ICollection<ProjectHandoverItem> HandoverItems { get; set; } = new List<ProjectHandoverItem>();
     public virtual ICollection<ProjectSnagItem> SnagItems { get; set; } = new List<ProjectSnagItem>();
     public virtual ICollection<ProjectDefectLiabilityCase> DefectLiabilityCases { get; set; } = new List<ProjectDefectLiabilityCase>();
+    public virtual ICollection<ProjectUnitAmenity> Amenities { get; set; } = new List<ProjectUnitAmenity>();
+}
+
+public class ProjectUnitAmenity : TenantEntity
+{
+    public Guid ProjectUnitId { get; set; }
+    public Guid? InventoryItemId { get; set; }
+
+    [MaxLength(100)]
+    public string? ItemCode { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string AmenityName { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Quantity { get; set; } = 1m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnitCost { get; set; }
+
+    public int SortOrder { get; set; }
+
+    [ForeignKey(nameof(ProjectUnitId))]
+    public virtual ProjectUnit ProjectUnit { get; set; } = null!;
+
+    [ForeignKey(nameof(InventoryItemId))]
+    public virtual InventoryItem? InventoryItem { get; set; }
 }
 
 public class ProjectCustomerVariation : TenantEntity
@@ -2011,6 +2151,7 @@ public class ProjectWorkItem : TenantEntity
     public Guid ProjectId { get; set; }
 
     public Guid? ParentId { get; set; }
+    public Guid? ProjectPackageId { get; set; }
 
     [Required]
     [MaxLength(30)]
@@ -2054,6 +2195,9 @@ public class ProjectWorkItem : TenantEntity
     [ForeignKey(nameof(ParentId))]
     public virtual ProjectWorkItem? Parent { get; set; }
 
+    [ForeignKey(nameof(ProjectPackageId))]
+    public virtual ProjectPackage? ProjectPackage { get; set; }
+
     public virtual ICollection<ProjectWorkItem> Children { get; set; } = new List<ProjectWorkItem>();
 }
 
@@ -2083,6 +2227,20 @@ public class ProjectMilestone : TenantEntity
 
     [ForeignKey(nameof(ProjectId))]
     public virtual Project Project { get; set; } = null!;
+
+    public virtual ICollection<ProjectMilestonePhase> PhaseSelections { get; set; } = new List<ProjectMilestonePhase>();
+}
+
+public class ProjectMilestonePhase : TenantEntity
+{
+    public Guid ProjectMilestoneId { get; set; }
+    public Guid ProjectPhaseId { get; set; }
+
+    [ForeignKey(nameof(ProjectMilestoneId))]
+    public virtual ProjectMilestone ProjectMilestone { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectPhaseId))]
+    public virtual ProjectPhase ProjectPhase { get; set; } = null!;
 }
 
 public class ProjectResourceAllocation : TenantEntity
@@ -2411,6 +2569,11 @@ public class ProjectDocument : TenantEntity
     public Guid ProjectId { get; set; }
 
     public Guid? FileUploadRecordId { get; set; }
+
+    [MaxLength(30)]
+    public string ArtifactType { get; set; } = ProjectDocumentArtifactTypes.Project;
+
+    public Guid? ArtifactId { get; set; }
 
     [Required]
     [MaxLength(200)]

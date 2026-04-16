@@ -114,6 +114,7 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.HasIndex(x => new { x.TenantId, x.Status });
         builder.HasIndex(x => new { x.TenantId, x.ProjectTypeId });
         builder.HasIndex(x => new { x.TenantId, x.ExternalPortalAccessEnabled, x.BusinessPartnerId });
+        builder.Property(x => x.BaseCurrencyCode).HasMaxLength(10);
 
         builder.HasOne(x => x.ProjectType)
             .WithMany(x => x.Projects)
@@ -368,6 +369,7 @@ public sealed class ProjectInterimValuationConfiguration : IEntityTypeConfigurat
     {
         builder.HasIndex(x => new { x.ProjectId, x.Status });
         builder.HasIndex(x => new { x.ProjectId, x.ProjectPhaseId, x.ProjectPackageId });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectMilestoneId });
         builder.HasIndex(x => new { x.ProjectId, x.ContractId });
         builder.HasIndex(x => new { x.ProjectId, x.ValuationDate });
 
@@ -386,10 +388,35 @@ public sealed class ProjectInterimValuationConfiguration : IEntityTypeConfigurat
             .HasForeignKey(x => x.ProjectPackageId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(x => x.ProjectMilestone)
+            .WithMany()
+            .HasForeignKey(x => x.ProjectMilestoneId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasOne(x => x.Contract)
             .WithMany()
             .HasForeignKey(x => x.ContractId)
             .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+public sealed class ProjectInterimValuationPackageCompletionConfiguration : IEntityTypeConfiguration<ProjectInterimValuationPackageCompletion>
+{
+    public void Configure(EntityTypeBuilder<ProjectInterimValuationPackageCompletion> builder)
+    {
+        builder.HasIndex(x => x.ProjectInterimValuationId);
+        builder.HasIndex(x => x.ProjectPackageId);
+        builder.HasIndex(x => new { x.ProjectInterimValuationId, x.ProjectPackageId }).IsUnique();
+
+        builder.HasOne(x => x.ProjectInterimValuation)
+            .WithMany(x => x.CompletedProjectPackages)
+            .HasForeignKey(x => x.ProjectInterimValuationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectPackage)
+            .WithMany()
+            .HasForeignKey(x => x.ProjectPackageId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -492,6 +519,7 @@ public sealed class ProjectUnitConfiguration : IEntityTypeConfiguration<ProjectU
         builder.HasIndex(x => new { x.ProjectId, x.ProjectBuildingId });
         builder.HasIndex(x => new { x.ProjectId, x.ProjectFloorId });
         builder.HasIndex(x => new { x.ProjectId, x.ProjectUnitReleaseBatchId });
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectUnitTypeTemplateId });
         builder.HasIndex(x => new { x.ProjectId, x.CustomerBusinessPartnerId });
         builder.HasIndex(x => new { x.ProjectId, x.SalesAgreementId });
         builder.HasIndex(x => new { x.ProjectId, x.SalesOrderId });
@@ -515,6 +543,11 @@ public sealed class ProjectUnitConfiguration : IEntityTypeConfiguration<ProjectU
             .WithMany(x => x.Units)
             .HasForeignKey(x => x.ProjectUnitReleaseBatchId)
             .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasOne(x => x.ProjectUnitTypeTemplate)
+            .WithMany(x => x.Units)
+            .HasForeignKey(x => x.ProjectUnitTypeTemplateId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasOne(x => x.SalesAgreement)
             .WithMany()
@@ -613,6 +646,56 @@ public sealed class ProjectUnitHandoverBatchConfiguration : IEntityTypeConfigura
             .WithMany(x => x.HandoverBatches)
             .HasForeignKey(x => x.ProjectFloorId)
             .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public sealed class ProjectUnitTypeTemplateConfiguration : IEntityTypeConfiguration<ProjectUnitTypeTemplate>
+{
+    public void Configure(EntityTypeBuilder<ProjectUnitTypeTemplate> builder)
+    {
+        builder.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Name });
+        builder.HasIndex(x => new { x.TenantId, x.IsActive, x.SortOrder });
+    }
+}
+
+public sealed class ProjectUnitTypeTemplateAmenityConfiguration : IEntityTypeConfiguration<ProjectUnitTypeTemplateAmenity>
+{
+    public void Configure(EntityTypeBuilder<ProjectUnitTypeTemplateAmenity> builder)
+    {
+        builder.HasIndex(x => x.ProjectUnitTypeTemplateId);
+        builder.HasIndex(x => x.InventoryItemId);
+        builder.HasIndex(x => new { x.ProjectUnitTypeTemplateId, x.InventoryItemId, x.SortOrder });
+
+        builder.HasOne(x => x.ProjectUnitTypeTemplate)
+            .WithMany(x => x.Amenities)
+            .HasForeignKey(x => x.ProjectUnitTypeTemplateId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.InventoryItem)
+            .WithMany()
+            .HasForeignKey(x => x.InventoryItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ProjectUnitAmenityConfiguration : IEntityTypeConfiguration<ProjectUnitAmenity>
+{
+    public void Configure(EntityTypeBuilder<ProjectUnitAmenity> builder)
+    {
+        builder.HasIndex(x => x.ProjectUnitId);
+        builder.HasIndex(x => x.InventoryItemId);
+        builder.HasIndex(x => new { x.ProjectUnitId, x.SortOrder });
+
+        builder.HasOne(x => x.ProjectUnit)
+            .WithMany(x => x.Amenities)
+            .HasForeignKey(x => x.ProjectUnitId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.InventoryItem)
+            .WithMany()
+            .HasForeignKey(x => x.InventoryItemId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -785,10 +868,17 @@ public sealed class ProjectWorkItemConfiguration : IEntityTypeConfiguration<Proj
     public void Configure(EntityTypeBuilder<ProjectWorkItem> builder)
     {
         builder.HasIndex(x => new { x.ProjectId, x.ParentId, x.SortOrder });
+        builder.HasIndex(x => x.ProjectPackageId);
+        builder.HasIndex(x => new { x.ProjectId, x.ProjectPackageId });
 
         builder.HasOne(x => x.Parent)
             .WithMany(x => x.Children)
             .HasForeignKey(x => x.ParentId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ProjectPackage)
+            .WithMany()
+            .HasForeignKey(x => x.ProjectPackageId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
@@ -798,6 +888,25 @@ public sealed class ProjectMilestoneConfiguration : IEntityTypeConfiguration<Pro
     public void Configure(EntityTypeBuilder<ProjectMilestone> builder)
     {
         builder.HasIndex(x => new { x.ProjectId, x.TargetDate });
+    }
+}
+
+public sealed class ProjectMilestonePhaseConfiguration : IEntityTypeConfiguration<ProjectMilestonePhase>
+{
+    public void Configure(EntityTypeBuilder<ProjectMilestonePhase> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectMilestoneId, x.ProjectPhaseId }).IsUnique();
+        builder.HasIndex(x => x.ProjectPhaseId);
+
+        builder.HasOne(x => x.ProjectMilestone)
+            .WithMany(x => x.PhaseSelections)
+            .HasForeignKey(x => x.ProjectMilestoneId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectPhase)
+            .WithMany(x => x.MilestoneSelections)
+            .HasForeignKey(x => x.ProjectPhaseId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -910,8 +1019,12 @@ public sealed class ProjectDocumentConfiguration : IEntityTypeConfiguration<Proj
 {
     public void Configure(EntityTypeBuilder<ProjectDocument> builder)
     {
+        builder.Property(x => x.ArtifactType)
+            .HasMaxLength(30);
+
         builder.HasIndex(x => new { x.ProjectId, x.Category });
         builder.HasIndex(x => new { x.ProjectId, x.IsExternalVisible });
+        builder.HasIndex(x => new { x.ProjectId, x.ArtifactType, x.ArtifactId });
     }
 }
 

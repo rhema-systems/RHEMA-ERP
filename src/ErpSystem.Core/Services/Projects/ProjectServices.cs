@@ -142,6 +142,7 @@ public partial class ProjectService : IProjectService
             foreach (var project in pagedItems)
             {
                 var dto = MapToDto(project);
+                dto.ProgressPercent = await ResolveProjectProgressPercentAsync(project.Id, dto.ProgressPercent);
                 dto.OpenRiskCount = accessibleOpenRiskCounts.TryGetValue(project.Id, out var openRiskCount) ? openRiskCount : 0;
                 dto.OpenIssueCount = accessibleOpenIssueCounts.TryGetValue(project.Id, out var openIssueCount) ? openIssueCount : 0;
                 dto.OverdueMilestoneCount = accessibleOverdueMilestoneCounts.TryGetValue(project.Id, out var overdueMilestoneCount) ? overdueMilestoneCount : 0;
@@ -179,6 +180,7 @@ public partial class ProjectService : IProjectService
         foreach (var project in result.Items)
         {
             var dto = MapToDto(project);
+            dto.ProgressPercent = await ResolveProjectProgressPercentAsync(project.Id, dto.ProgressPercent);
             dto.OpenRiskCount = openRiskCounts.TryGetValue(project.Id, out var openRiskCount) ? openRiskCount : 0;
             dto.OpenIssueCount = openIssueCounts.TryGetValue(project.Id, out var openIssueCount) ? openIssueCount : 0;
             dto.OverdueMilestoneCount = overdueMilestoneCounts.TryGetValue(project.Id, out var overdueMilestoneCount) ? overdueMilestoneCount : 0;
@@ -218,6 +220,7 @@ public partial class ProjectService : IProjectService
         }
 
         var dto = MapToDetailDto(project);
+        dto.ProgressPercent = await ResolveProjectProgressPercentAsync(id, dto.ProgressPercent);
         dto.ResourceAllocations = await EnrichResourceAllocationsAsync(dto.ResourceAllocations, project.ResourceAllocations.ToList());
         dto.Packages = (await GetProjectPackagesAsync(id)).ToList();
         dto.BoqItems = (await GetProjectBoqItemsAsync(id)).ToList();
@@ -242,6 +245,7 @@ public partial class ProjectService : IProjectService
         dto.SnagItems = (await GetProjectSnagItemsAsync(id)).ToList();
         dto.DefectLiabilityCases = (await GetProjectDefectLiabilityCasesAsync(id)).ToList();
         dto.WorkItems = (await GetWorkItemsAsync(id)).ToList();
+        dto.Milestones = (await GetMilestonesAsync(id)).ToList();
         dto.Deliverables = (await GetDeliverablesAsync(id)).ToList();
         dto.TaskDependencies = (await GetTaskDependenciesAsync(id)).ToList();
         dto.Baselines = (await GetBaselinesAsync(id)).ToList();
@@ -260,6 +264,7 @@ public partial class ProjectService : IProjectService
         dto.Closure = await GetClosureAsync(id);
         await ApplyBaselineMetadataAsync(dto);
         await EnrichUserDisplayNamesAsync(dto);
+        await EnrichDocumentArtifactLabelsAsync(id, dto.Documents);
         return dto;
     }
 
@@ -310,6 +315,9 @@ public partial class ProjectService : IProjectService
             throw new InvalidOperationException("Sponsor is required for this project type");
         }
 
+        var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
+        EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
+
         var project = new Project
         {
             TenantId = _currentUserProvider.TenantId,
@@ -335,7 +343,9 @@ public partial class ProjectService : IProjectService
             TenderId = dto.TenderId,
             StartDate = dto.StartDate,
             TargetEndDate = dto.TargetEndDate,
+            SlackMonths = slackMonths,
             EstimatedBudget = dto.EstimatedBudget,
+            BaseCurrencyCode = await ResolveProjectCurrencyAsync(dto.BaseCurrencyCode),
             ScopeStatement = dto.ScopeStatement,
             Assumptions = dto.Assumptions,
             Constraints = dto.Constraints,
@@ -391,6 +401,8 @@ public partial class ProjectService : IProjectService
         }
 
         await ValidatePortfolioProgramAsync(dto.PortfolioId, dto.ProgramId);
+        var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
+        EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
         project.Title = dto.Title.Trim();
         project.Summary = dto.Summary;
         project.BusinessCase = dto.BusinessCase;
@@ -412,7 +424,9 @@ public partial class ProjectService : IProjectService
         project.TenderId = dto.TenderId;
         project.StartDate = dto.StartDate;
         project.TargetEndDate = dto.TargetEndDate;
+        project.SlackMonths = slackMonths;
         project.EstimatedBudget = dto.EstimatedBudget;
+        project.BaseCurrencyCode = await ResolveProjectCurrencyAsync(dto.BaseCurrencyCode, project);
         project.ApprovedBudget = dto.ApprovedBudget ?? project.ApprovedBudget;
         project.ActualCost = dto.ActualCost ?? project.ActualCost;
         project.BudgetStatus = dto.BudgetStatus ?? project.BudgetStatus;
@@ -596,12 +610,15 @@ public partial class ProjectService : IProjectService
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.CreatedAt)
             .ToList();
-        return BuildWorkItemTree(items, null);
+        var packageLookup = (await GetProjectPackageEntitiesAsync(projectId)).ToDictionary(x => x.Id);
+        var phaseLookup = (await GetProjectPhaseEntitiesAsync(projectId)).ToDictionary(x => x.Id);
+        return BuildWorkItemTree(items, null, packageLookup, phaseLookup);
     }
 
     public async Task<ProjectWorkItemDto> AddWorkItemAsync(Guid projectId, CreateProjectWorkItemDto dto)
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManagePlan);
+        var projectPackage = await ValidateProjectWorkItemPackageAsync(projectId, dto.ProjectPackageId);
         await ValidateWorkItemScheduleAsync(project, null, dto);
         var repo = _unitOfWork.Repository<ProjectWorkItem>();
         var siblings = await repo.FindAsync(x => x.ProjectId == projectId && x.ParentId == dto.ParentId && x.TenantId == _currentUserProvider.TenantId);
@@ -610,6 +627,7 @@ public partial class ProjectService : IProjectService
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
             ParentId = dto.ParentId,
+            ProjectPackageId = projectPackage?.Id,
             NodeType = dto.NodeType,
             Title = dto.Title,
             Description = dto.Description,
@@ -642,10 +660,12 @@ public partial class ProjectService : IProjectService
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == workItemId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project work item with ID {workItemId} not found");
         var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
+        var projectPackage = await ValidateProjectWorkItemPackageAsync(entity.ProjectId, dto.ProjectPackageId);
         var planningChanged = entity.PlannedStartDate?.Date != dto.PlannedStartDate?.Date || entity.PlannedEndDate?.Date != dto.PlannedEndDate?.Date;
         await ValidateWorkItemScheduleAsync(project, entity, dto);
 
         entity.ParentId = dto.ParentId;
+        entity.ProjectPackageId = projectPackage?.Id;
         entity.NodeType = dto.NodeType;
         entity.Title = dto.Title;
         entity.Description = dto.Description;
@@ -725,14 +745,16 @@ public partial class ProjectService : IProjectService
     public async Task<IEnumerable<ProjectMilestoneDto>> GetMilestonesAsync(Guid projectId)
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.View);
-        return (await _unitOfWork.Repository<ProjectMilestone>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId))
+        var milestones = (await _unitOfWork.Repository<ProjectMilestone>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId))
             .OrderBy(x => x.TargetDate)
-            .Select(MapToDto);
+            .ToList();
+        return await MapMilestonesAsync(projectId, milestones);
     }
 
     public async Task<ProjectMilestoneDto> AddMilestoneAsync(Guid projectId, CreateProjectMilestoneDto dto)
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManagePlan);
+        var selectedPhaseIds = await ValidateMilestonePhaseSelectionsAsync(projectId, dto.ProjectPhaseIds);
         var entity = new ProjectMilestone
         {
             TenantId = _currentUserProvider.TenantId,
@@ -750,7 +772,9 @@ public partial class ProjectService : IProjectService
 
         await _unitOfWork.Repository<ProjectMilestone>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return MapToDto(entity);
+        await ReplaceMilestonePhaseSelectionsAsync(entity.Id, selectedPhaseIds);
+        await _unitOfWork.SaveChangesAsync();
+        return await GetMilestoneDtoAsync(projectId, entity.Id);
     }
 
     public async Task<IEnumerable<ProjectResourceAllocationDto>> GetResourceAllocationsAsync(Guid projectId)
@@ -982,6 +1006,7 @@ public partial class ProjectService : IProjectService
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == milestoneId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project milestone with ID {milestoneId} not found");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
+        var selectedPhaseIds = await ValidateMilestonePhaseSelectionsAsync(entity.ProjectId, dto.ProjectPhaseIds, milestoneId);
         entity.WorkItemId = dto.WorkItemId;
         entity.Title = dto.Title;
         entity.Description = dto.Description;
@@ -993,7 +1018,9 @@ public partial class ProjectService : IProjectService
         entity.LastModifiedById = _currentUserProvider.UserId;
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return MapToDto(entity);
+        await ReplaceMilestonePhaseSelectionsAsync(entity.Id, selectedPhaseIds);
+        await _unitOfWork.SaveChangesAsync();
+        return await GetMilestoneDtoAsync(entity.ProjectId, entity.Id);
     }
 
     public async Task DeleteMilestoneAsync(Guid milestoneId)
@@ -1003,6 +1030,124 @@ public partial class ProjectService : IProjectService
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
         await _unitOfWork.Repository<ProjectMilestone>().DeleteAsync(milestoneId);
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    private async Task<ProjectMilestoneDto> GetMilestoneDtoAsync(Guid projectId, Guid milestoneId)
+    {
+        var milestone = await _unitOfWork.Repository<ProjectMilestone>().FirstOrDefaultAsync(x =>
+                           x.Id == milestoneId
+                           && x.ProjectId == projectId
+                           && x.TenantId == _currentUserProvider.TenantId)
+                       ?? throw new InvalidOperationException($"Project milestone with ID {milestoneId} not found");
+
+        return (await MapMilestonesAsync(projectId, [milestone])).Single();
+    }
+
+    private async Task<List<ProjectMilestoneDto>> MapMilestonesAsync(Guid projectId, IReadOnlyCollection<ProjectMilestone> milestones)
+    {
+        if (milestones.Count == 0)
+        {
+            return [];
+        }
+
+        var milestoneIds = milestones.Select(x => x.Id).ToHashSet();
+        var phaseSelections = (await _unitOfWork.Repository<ProjectMilestonePhase>().FindAsync(x =>
+                milestoneIds.Contains(x.ProjectMilestoneId)
+                && x.TenantId == _currentUserProvider.TenantId))
+            .ToList();
+        var phaseLookup = (await GetProjectPhaseEntitiesAsync(projectId)).ToDictionary(x => x.Id);
+
+        return milestones
+            .OrderBy(x => x.TargetDate)
+            .ThenBy(x => x.Title)
+            .Select(x => MapToDto(
+                x,
+                phaseSelections.Where(selection => selection.ProjectMilestoneId == x.Id).ToList(),
+                phaseLookup))
+            .ToList();
+    }
+
+    private async Task<List<Guid>> ValidateMilestonePhaseSelectionsAsync(Guid projectId, IEnumerable<Guid>? phaseIds, Guid? currentMilestoneId = null)
+    {
+        var normalizedPhaseIds = (phaseIds ?? Enumerable.Empty<Guid>())
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (normalizedPhaseIds.Count == 0)
+        {
+            return normalizedPhaseIds;
+        }
+
+        var selectedPhases = (await _unitOfWork.Repository<ProjectPhase>().FindAsync(x =>
+                x.ProjectId == projectId
+                && normalizedPhaseIds.Contains(x.Id)
+                && x.TenantId == _currentUserProvider.TenantId))
+            .ToList();
+
+        if (selectedPhases.Count != normalizedPhaseIds.Count)
+        {
+            throw new InvalidOperationException("One or more selected milestone phases could not be found on this project.");
+        }
+
+        var existingSelections = (await _unitOfWork.Repository<ProjectMilestonePhase>().FindAsync(x =>
+                normalizedPhaseIds.Contains(x.ProjectPhaseId)
+                && x.TenantId == _currentUserProvider.TenantId
+                && (!currentMilestoneId.HasValue || x.ProjectMilestoneId != currentMilestoneId.Value)))
+            .ToList();
+
+        if (existingSelections.Count > 0)
+        {
+            var milestoneLookup = (await _unitOfWork.Repository<ProjectMilestone>().FindAsync(x =>
+                    existingSelections.Select(selection => selection.ProjectMilestoneId).Contains(x.Id)
+                    && x.TenantId == _currentUserProvider.TenantId))
+                .ToDictionary(x => x.Id);
+            var phaseLookup = selectedPhases.ToDictionary(x => x.Id);
+            var duplicateLabels = existingSelections
+                .Select(selection =>
+                {
+                    var phaseName = phaseLookup.TryGetValue(selection.ProjectPhaseId, out var phase) ? phase.Name : selection.ProjectPhaseId.ToString();
+                    var milestoneTitle = milestoneLookup.TryGetValue(selection.ProjectMilestoneId, out var milestone) ? milestone.Title : selection.ProjectMilestoneId.ToString();
+                    return $"{phaseName} ({milestoneTitle})";
+                })
+                .Distinct()
+                .OrderBy(label => label)
+                .ToList();
+
+            throw new InvalidOperationException($"These phases are already assigned to another milestone: {string.Join(", ", duplicateLabels)}.");
+        }
+
+        return normalizedPhaseIds;
+    }
+
+    private async Task ReplaceMilestonePhaseSelectionsAsync(Guid milestoneId, IReadOnlyCollection<Guid> phaseIds)
+    {
+        var repository = _unitOfWork.Repository<ProjectMilestonePhase>();
+        var existingSelections = (await repository.FindAsync(x =>
+                x.ProjectMilestoneId == milestoneId
+                && x.TenantId == _currentUserProvider.TenantId))
+            .ToList();
+
+        if (existingSelections.Count > 0)
+        {
+            await repository.DeleteRangeAsync(existingSelections);
+        }
+
+        if (phaseIds.Count == 0)
+        {
+            return;
+        }
+
+        var selections = phaseIds.Select(phaseId => new ProjectMilestonePhase
+        {
+            TenantId = _currentUserProvider.TenantId,
+            ProjectMilestoneId = milestoneId,
+            ProjectPhaseId = phaseId,
+            CreatedBy = _currentUserProvider.Username,
+            CreatedById = _currentUserProvider.UserId
+        }).ToList();
+
+        await repository.AddRangeAsync(selections);
     }
 
     public async Task<IEnumerable<ProjectRiskDto>> GetRisksAsync(Guid projectId)
@@ -1471,7 +1616,7 @@ public partial class ProjectService : IProjectService
         var schedule = await scheduleRepo.FirstOrDefaultAsync(x => x.Id == billingScheduleId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project billing schedule with ID {billingScheduleId} not found");
         var project = await RequireProjectAsync(schedule.ProjectId, ProjectAccessOperation.ManageFinancials);
-        var currencyCode = await GetProjectBaseCurrencyCodeAsync();
+        var currencyCode = await GetProjectBaseCurrencyCodeAsync(project);
 
         var entity = new ProjectInvoiceRequest
         {
@@ -3558,14 +3703,19 @@ public partial class ProjectService : IProjectService
     public async Task<IEnumerable<ProjectDocumentDto>> GetDocumentsAsync(Guid projectId)
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.View);
-        return (await _unitOfWork.Repository<ProjectDocument>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId))
+        var documents = (await _unitOfWork.Repository<ProjectDocument>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId))
             .OrderByDescending(x => x.CreatedAt)
-            .Select(MapToDto);
+            .Select(MapToDto)
+            .ToList();
+        await EnrichDocumentArtifactLabelsAsync(projectId, documents);
+        return documents;
     }
 
     public async Task<ProjectDocumentDto> AttachDocumentAsync(Guid projectId, AttachProjectDocumentDto dto)
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageExecution);
+        var artifactType = NormalizeProjectDocumentArtifactType(dto.ArtifactType);
+        var artifactId = await ValidateProjectDocumentArtifactAsync(project.Id, artifactType, dto.ArtifactId);
         var uploadRecord = await _unitOfWork.Repository<FileUploadRecord>()
             .FirstOrDefaultAsync(x => x.TenantId == _currentUserProvider.TenantId && x.FilePath == dto.FilePath);
         var entity = new ProjectDocument
@@ -3573,6 +3723,8 @@ public partial class ProjectService : IProjectService
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
             FileUploadRecordId = uploadRecord?.Id,
+            ArtifactType = artifactType,
+            ArtifactId = artifactId,
             DocumentName = dto.DocumentName,
             Category = dto.Category,
             DocumentType = dto.DocumentType,
@@ -3596,7 +3748,9 @@ public partial class ProjectService : IProjectService
             ["Category"] = entity.Category,
             ["IsExternalVisible"] = entity.IsExternalVisible
         });
-        return MapToDto(entity);
+        var documentDto = MapToDto(entity);
+        await EnrichDocumentArtifactLabelsAsync(projectId, [documentDto]);
+        return documentDto;
     }
 
     public async Task DeleteDocumentAsync(Guid documentId)
@@ -3606,6 +3760,113 @@ public partial class ProjectService : IProjectService
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
         await _unitOfWork.Repository<ProjectDocument>().DeleteAsync(documentId);
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    private async Task<Guid?> ValidateProjectDocumentArtifactAsync(Guid projectId, string artifactType, Guid? artifactId)
+    {
+        if (string.Equals(artifactType, ProjectDocumentArtifactTypes.Project, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!artifactId.HasValue)
+        {
+            throw new InvalidOperationException($"{artifactType} documents require a related project record.");
+        }
+
+        switch (artifactType)
+        {
+            case ProjectDocumentArtifactTypes.Phase:
+                _ = await _unitOfWork.Repository<ProjectPhase>().FirstOrDefaultAsync(x =>
+                        x.Id == artifactId.Value
+                        && x.ProjectId == projectId
+                        && x.TenantId == _currentUserProvider.TenantId)
+                    ?? throw new InvalidOperationException($"Project phase with ID {artifactId.Value} not found");
+                break;
+            case ProjectDocumentArtifactTypes.Package:
+                _ = await _unitOfWork.Repository<ProjectPackage>().FirstOrDefaultAsync(x =>
+                        x.Id == artifactId.Value
+                        && x.ProjectId == projectId
+                        && x.TenantId == _currentUserProvider.TenantId)
+                    ?? throw new InvalidOperationException($"Work component with ID {artifactId.Value} not found");
+                break;
+            case ProjectDocumentArtifactTypes.WorkItem:
+                _ = await _unitOfWork.Repository<ProjectWorkItem>().FirstOrDefaultAsync(x =>
+                        x.Id == artifactId.Value
+                        && x.ProjectId == projectId
+                        && x.TenantId == _currentUserProvider.TenantId)
+                    ?? throw new InvalidOperationException($"Project work item with ID {artifactId.Value} not found");
+                break;
+            default:
+                throw new InvalidOperationException($"Document relation type '{artifactType}' is not supported.");
+        }
+
+        return artifactId;
+    }
+
+    private async Task EnrichDocumentArtifactLabelsAsync(Guid projectId, IList<ProjectDocumentDto> documents)
+    {
+        if (documents.Count == 0)
+        {
+            return;
+        }
+
+        var phaseIds = documents
+            .Where(x => string.Equals(x.ArtifactType, ProjectDocumentArtifactTypes.Phase, StringComparison.OrdinalIgnoreCase) && x.ArtifactId.HasValue)
+            .Select(x => x.ArtifactId!.Value)
+            .Distinct()
+            .ToList();
+        var packageIds = documents
+            .Where(x => string.Equals(x.ArtifactType, ProjectDocumentArtifactTypes.Package, StringComparison.OrdinalIgnoreCase) && x.ArtifactId.HasValue)
+            .Select(x => x.ArtifactId!.Value)
+            .Distinct()
+            .ToList();
+        var workItemIds = documents
+            .Where(x => string.Equals(x.ArtifactType, ProjectDocumentArtifactTypes.WorkItem, StringComparison.OrdinalIgnoreCase) && x.ArtifactId.HasValue)
+            .Select(x => x.ArtifactId!.Value)
+            .Distinct()
+            .ToList();
+
+        var phaseLookup = phaseIds.Count == 0
+            ? new Dictionary<Guid, ProjectPhase>()
+            : ((await _unitOfWork.Repository<ProjectPhase>().FindAsync(x =>
+                    x.ProjectId == projectId
+                    && x.TenantId == _currentUserProvider.TenantId
+                    && phaseIds.Contains(x.Id)))
+                ?? Enumerable.Empty<ProjectPhase>())
+                .ToDictionary(x => x.Id);
+        var packageLookup = packageIds.Count == 0
+            ? new Dictionary<Guid, ProjectPackage>()
+            : ((await _unitOfWork.Repository<ProjectPackage>().FindAsync(x =>
+                    x.ProjectId == projectId
+                    && x.TenantId == _currentUserProvider.TenantId
+                    && packageIds.Contains(x.Id)))
+                ?? Enumerable.Empty<ProjectPackage>())
+                .ToDictionary(x => x.Id);
+        var workItemLookup = workItemIds.Count == 0
+            ? new Dictionary<Guid, ProjectWorkItem>()
+            : ((await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(x =>
+                    x.ProjectId == projectId
+                    && x.TenantId == _currentUserProvider.TenantId
+                    && workItemIds.Contains(x.Id)))
+                ?? Enumerable.Empty<ProjectWorkItem>())
+                .ToDictionary(x => x.Id);
+
+        foreach (var document in documents)
+        {
+            var normalizedType = NormalizeProjectDocumentArtifactType(document.ArtifactType);
+            document.ArtifactType = normalizedType;
+            document.ArtifactLabel = normalizedType switch
+            {
+                ProjectDocumentArtifactTypes.Phase when document.ArtifactId.HasValue && phaseLookup.TryGetValue(document.ArtifactId.Value, out var phase)
+                    => string.IsNullOrWhiteSpace(phase.Code) ? phase.Name : $"{phase.Code} - {phase.Name}",
+                ProjectDocumentArtifactTypes.Package when document.ArtifactId.HasValue && packageLookup.TryGetValue(document.ArtifactId.Value, out var projectPackage)
+                    => string.IsNullOrWhiteSpace(projectPackage.Code) ? projectPackage.Name : $"{projectPackage.Code} - {projectPackage.Name}",
+                ProjectDocumentArtifactTypes.WorkItem when document.ArtifactId.HasValue && workItemLookup.TryGetValue(document.ArtifactId.Value, out var workItem)
+                    => workItem.Title,
+                _ => "Project",
+            };
+        }
     }
 
     public async Task<IEnumerable<ProjectCommentDto>> GetCommentsAsync(Guid projectId)
@@ -3663,6 +3924,8 @@ public partial class ProjectService : IProjectService
             Summary = x.Summary,
             StartDate = x.StartDate,
             TargetEndDate = x.TargetEndDate,
+            SlackMonths = x.SlackMonths,
+            TrueEndDate = ResolveProjectTrueEndDate(x),
             ProgressPercent = x.ProgressPercent,
             ExternalCollaborationEnabled = x.ExternalCollaborationEnabled,
             OpenMilestoneCount = milestones.Count(m => m.ProjectId == x.Id && !string.Equals(m.Status, "Completed", StringComparison.OrdinalIgnoreCase))
@@ -3746,6 +4009,8 @@ public partial class ProjectService : IProjectService
             Summary = project.Summary,
             StartDate = project.StartDate,
             TargetEndDate = project.TargetEndDate,
+            SlackMonths = project.SlackMonths,
+            TrueEndDate = ResolveProjectTrueEndDate(project),
             ProgressPercent = project.ProgressPercent,
             ExternalCollaborationEnabled = project.ExternalCollaborationEnabled,
             OpenMilestoneCount = project.Milestones.Count(x => !string.Equals(x.Status, "Completed", StringComparison.OrdinalIgnoreCase)),
@@ -5362,6 +5627,7 @@ public partial class ProjectService : IProjectService
             project.ProjectManagerId,
             project.StartDate,
             project.TargetEndDate,
+            project.SlackMonths,
             project.EstimatedBudget,
             project.ScopeStatement,
             project.Assumptions,
@@ -5495,12 +5761,102 @@ public partial class ProjectService : IProjectService
 
     private async Task UpdateProjectProgressAsync(Project project)
     {
-        var workItems = (await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId)).ToList();
-        project.ProgressPercent = CalculateProgress(workItems, null);
+        var packageDrivenProgress = await CalculatePackageDrivenProjectProgressAsync(project.Id);
+        if (packageDrivenProgress.HasValue)
+        {
+            project.ProgressPercent = packageDrivenProgress.Value;
+        }
+        else
+        {
+            var workItems = (await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId)).ToList();
+            project.ProgressPercent = CalculateProgress(workItems, null);
+        }
+
         project.UpdatedBy = _currentUserProvider.Username;
         project.LastModifiedById = _currentUserProvider.UserId;
         await _projectRepository.UpdateAsync(project);
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    private async Task<decimal> ResolveProjectProgressPercentAsync(Guid projectId, decimal fallbackProgressPercent)
+        => await CalculatePackageDrivenProjectProgressAsync(projectId) ?? fallbackProgressPercent;
+
+    private async Task<decimal?> CalculatePackageDrivenProjectProgressAsync(Guid projectId)
+    {
+        var valuationRepository = _unitOfWork.Repository<ProjectInterimValuation>();
+        var completionRepository = _unitOfWork.Repository<ProjectInterimValuationPackageCompletion>();
+        if (valuationRepository == null || completionRepository == null)
+        {
+            return null;
+        }
+
+        var relevantValuations = (await valuationRepository.FindAsync(x =>
+                x.ProjectId == projectId
+                && x.TenantId == _currentUserProvider.TenantId))
+            .Where(x => !string.Equals(x.Status, ProjectInterimValuationStatuses.Rejected, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (relevantValuations.Count == 0)
+        {
+            return null;
+        }
+
+        var valuationIds = relevantValuations.Select(x => x.Id).ToList();
+        var completedPackageIds = (await completionRepository.FindAsync(x =>
+                x.TenantId == _currentUserProvider.TenantId
+                && valuationIds.Contains(x.ProjectInterimValuationId)))
+            .Select(x => x.ProjectPackageId)
+            .Distinct()
+            .ToHashSet();
+
+        foreach (var projectPackageId in relevantValuations
+                     .Where(x => x.ProjectPackageId.HasValue)
+                     .Select(x => x.ProjectPackageId!.Value))
+        {
+            completedPackageIds.Add(projectPackageId);
+        }
+
+        if (completedPackageIds.Count == 0)
+        {
+            return null;
+        }
+
+        var phases = (await GetProjectPhaseEntitiesAsync(projectId)).ToList();
+        var packages = (await GetProjectPackageEntitiesAsync(projectId)).ToList();
+        if (phases.Count == 0 || packages.Count == 0)
+        {
+            return null;
+        }
+
+        decimal totalProgress = 0m;
+        foreach (var phase in phases)
+        {
+            var phasePackages = packages.Where(x => x.ProjectPhaseId == phase.Id).ToList();
+            if (phasePackages.Count == 0)
+            {
+                continue;
+            }
+
+            var totalPackageWeight = phasePackages.Sum(x => Math.Max(0m, x.CompletionWeightPercent));
+            var completedPackageWeight = phasePackages
+                .Where(x => completedPackageIds.Contains(x.Id))
+                .Sum(x => Math.Max(0m, x.CompletionWeightPercent));
+
+            decimal phaseCompletionRatio;
+            if (totalPackageWeight > 0m)
+            {
+                phaseCompletionRatio = decimal.Min(1m, completedPackageWeight / totalPackageWeight);
+            }
+            else
+            {
+                phaseCompletionRatio = phasePackages.Count == 0
+                    ? 0m
+                    : Math.Min(1m, (decimal)phasePackages.Count(x => completedPackageIds.Contains(x.Id)) / phasePackages.Count);
+            }
+
+            totalProgress += Math.Max(0m, phase.CompletionWeightPercent) * phaseCompletionRatio;
+        }
+
+        return decimal.Round(decimal.Min(100m, totalProgress), 2, MidpointRounding.AwayFromZero);
     }
 
     private async Task ValidatePortfolioProgramAsync(Guid? portfolioId, Guid? programId)
@@ -6566,6 +6922,19 @@ public partial class ProjectService : IProjectService
                 _ => artifactType.Trim()
             };
 
+    private static string NormalizeProjectDocumentArtifactType(string? artifactType)
+        => string.IsNullOrWhiteSpace(artifactType)
+            ? ProjectDocumentArtifactTypes.Project
+            : artifactType.Trim() switch
+            {
+                "ProjectHeader" => ProjectDocumentArtifactTypes.Project,
+                "Project" => ProjectDocumentArtifactTypes.Project,
+                "Phase" => ProjectDocumentArtifactTypes.Phase,
+                "Package" or "WorkComponent" => ProjectDocumentArtifactTypes.Package,
+                "WorkItem" => ProjectDocumentArtifactTypes.WorkItem,
+                _ => artifactType.Trim()
+            };
+
     private async Task<List<ProjectWorkItem>> LoadWorkTreeAsync(Guid projectId)
         => (await _unitOfWork.Repository<ProjectWorkItem>()
                 .FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId))
@@ -6611,11 +6980,24 @@ public partial class ProjectService : IProjectService
         return project;
     }
 
-    private IEnumerable<ProjectWorkItemDto> BuildWorkItemTree(List<ProjectWorkItem> allItems, Guid? parentId)
+    private IEnumerable<ProjectWorkItemDto> BuildWorkItemTree(
+        List<ProjectWorkItem> allItems,
+        Guid? parentId,
+        IReadOnlyDictionary<Guid, ProjectPackage> packageLookup,
+        IReadOnlyDictionary<Guid, ProjectPhase> phaseLookup)
         => allItems.Where(x => x.ParentId == parentId).OrderBy(x => x.SortOrder).ThenBy(x => x.CreatedAt).Select(x =>
         {
             var dto = MapToDto(x);
-            dto.Children = BuildWorkItemTree(allItems, x.Id).ToList();
+            if (x.ProjectPackageId.HasValue && packageLookup.TryGetValue(x.ProjectPackageId.Value, out var projectPackage))
+            {
+                dto.ProjectPackageName = projectPackage.Name;
+                dto.ProjectPhaseId = projectPackage.ProjectPhaseId;
+                dto.ProjectPhaseName = projectPackage.ProjectPhaseId.HasValue && phaseLookup.TryGetValue(projectPackage.ProjectPhaseId.Value, out var phase)
+                    ? phase.Name
+                    : null;
+            }
+
+            dto.Children = BuildWorkItemTree(allItems, x.Id, packageLookup, phaseLookup).ToList();
             return dto;
         });
 
@@ -6694,6 +7076,28 @@ public partial class ProjectService : IProjectService
                 throw new InvalidOperationException(violation.Message);
             }
         }
+    }
+
+    private async Task<ProjectPackage?> ValidateProjectWorkItemPackageAsync(Guid projectId, Guid? projectPackageId)
+    {
+        if (!projectPackageId.HasValue)
+        {
+            return null;
+        }
+
+        var repository = _unitOfWork.Repository<ProjectPackage>();
+        if (repository == null)
+        {
+            throw new InvalidOperationException("Project work components are not available.");
+        }
+
+        var projectPackage = await repository.FirstOrDefaultAsync(x =>
+            x.Id == projectPackageId.Value
+            && x.ProjectId == projectId
+            && x.TenantId == _currentUserProvider.TenantId);
+
+        return projectPackage
+            ?? throw new InvalidOperationException($"Work component with ID {projectPackageId.Value} not found");
     }
 
     private ProjectScheduleAnalysisDto BuildScheduleAnalysis(Guid projectId, List<ProjectWorkItem> workItems, List<ProjectTaskDependency> dependencies, bool? hasCircularDependencies = null, int recalculatedItemCount = 0)
@@ -7099,8 +7503,33 @@ public partial class ProjectService : IProjectService
         }
     }
 
+    private static int NormalizeSlackMonths(int? slackMonths)
+    {
+        var resolvedSlackMonths = slackMonths ?? 0;
+        if (resolvedSlackMonths < 0)
+        {
+            throw new InvalidOperationException("Slack or delay months cannot be negative.");
+        }
+
+        return resolvedSlackMonths;
+    }
+
+    private static DateTime? ResolveProjectTrueEndDate(DateTime? targetEndDate, int slackMonths)
+        => targetEndDate?.Date.AddMonths(Math.Max(0, slackMonths));
+
+    private static DateTime? ResolveProjectTrueEndDate(Project project)
+        => ResolveProjectTrueEndDate(project.TargetEndDate, project.SlackMonths);
+
+    private static void EnsureChronologicalDateRange(DateTime? startDate, DateTime? endDate, string label)
+    {
+        if (startDate.HasValue && endDate.HasValue && endDate.Value.Date < startDate.Value.Date)
+        {
+            throw new InvalidOperationException($"The {label} end date cannot be earlier than its start date.");
+        }
+    }
+
     private static ProjectLookupDto MapToLookupDto(Project entity) => new() { Id = entity.Id, ProjectCode = entity.ProjectCode, Title = entity.Title, Status = entity.Status, ProjectTypeName = entity.ProjectType?.Name, PortfolioName = entity.Portfolio?.Name, ProgramName = entity.Program?.Name };
-    private static ProjectDto MapToDto(Project entity) => new() { Id = entity.Id, ProjectCode = entity.ProjectCode, Title = entity.Title, Status = entity.Status, Summary = entity.Summary, ProjectTypeName = entity.ProjectType?.Name, ProjectPriorityName = entity.ProjectPriority?.Name, PortfolioId = entity.PortfolioId, PortfolioName = entity.Portfolio?.Name, ProgramId = entity.ProgramId, ProgramName = entity.Program?.Name, ProjectManagerId = entity.ProjectManagerId, SponsorId = entity.SponsorId, StartDate = entity.StartDate, TargetEndDate = entity.TargetEndDate, EstimatedBudget = entity.EstimatedBudget, ApprovedBudget = entity.ApprovedBudget, ActualCost = entity.ActualCost, ProgressPercent = entity.ProgressPercent, ExternalPortalAccessEnabled = entity.ExternalPortalAccessEnabled, ExternalCollaborationEnabled = entity.ExternalCollaborationEnabled, CreatedAt = entity.CreatedAt };
+    private static ProjectDto MapToDto(Project entity) => new() { Id = entity.Id, ProjectCode = entity.ProjectCode, Title = entity.Title, Status = entity.Status, Summary = entity.Summary, ProjectTypeName = entity.ProjectType?.Name, ProjectPriorityName = entity.ProjectPriority?.Name, PortfolioId = entity.PortfolioId, PortfolioName = entity.Portfolio?.Name, ProgramId = entity.ProgramId, ProgramName = entity.Program?.Name, ProjectManagerId = entity.ProjectManagerId, SponsorId = entity.SponsorId, StartDate = entity.StartDate, TargetEndDate = entity.TargetEndDate, SlackMonths = entity.SlackMonths, TrueEndDate = ResolveProjectTrueEndDate(entity), EstimatedBudget = entity.EstimatedBudget, ApprovedBudget = entity.ApprovedBudget, ActualCost = entity.ActualCost, BaseCurrencyCode = entity.BaseCurrencyCode, ProgressPercent = entity.ProgressPercent, ExternalPortalAccessEnabled = entity.ExternalPortalAccessEnabled, ExternalCollaborationEnabled = entity.ExternalCollaborationEnabled, CreatedAt = entity.CreatedAt };
     private static ProjectDetailDto MapToDetailDto(Project entity) => new()
     {
         Id = entity.Id,
@@ -7131,11 +7560,14 @@ public partial class ProjectService : IProjectService
         TenderId = entity.TenderId,
         StartDate = entity.StartDate,
         TargetEndDate = entity.TargetEndDate,
+        SlackMonths = entity.SlackMonths,
+        TrueEndDate = ResolveProjectTrueEndDate(entity),
         ActualStartDate = entity.ActualStartDate,
         ActualEndDate = entity.ActualEndDate,
         EstimatedBudget = entity.EstimatedBudget,
         ApprovedBudget = entity.ApprovedBudget,
         ActualCost = entity.ActualCost,
+        BaseCurrencyCode = entity.BaseCurrencyCode,
         BudgetStatus = entity.BudgetStatus,
         ProgressPercent = entity.ProgressPercent,
         ApprovalRequired = entity.ApprovalRequired,
@@ -7167,8 +7599,42 @@ public partial class ProjectService : IProjectService
     };
     private static ProjectInitiationVersionDto MapToDto(ProjectInitiationVersion entity) => new() { Id = entity.Id, VersionNumber = entity.VersionNumber, ChangeType = entity.ChangeType, Notes = entity.Notes, CreatedAt = entity.CreatedAt };
     private static ProjectMemberDto MapToDto(ProjectMember entity) => new() { Id = entity.Id, UserId = entity.UserId, Role = entity.Role, IsActive = entity.IsActive, JoinedAt = entity.JoinedAt };
-    private static ProjectWorkItemDto MapToDto(ProjectWorkItem entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, ParentId = entity.ParentId, NodeType = entity.NodeType, Title = entity.Title, Description = entity.Description, Status = entity.Status, Priority = entity.Priority, SortOrder = entity.SortOrder, AssignedToUserId = entity.AssignedToUserId, PlannedStartDate = entity.PlannedStartDate, PlannedEndDate = entity.PlannedEndDate, ActualStartDate = entity.ActualStartDate, ActualEndDate = entity.ActualEndDate, PercentComplete = entity.PercentComplete, IsRollupEnabled = entity.IsRollupEnabled, EffortEstimateHours = entity.EffortEstimateHours, ActualEffortHours = entity.ActualEffortHours, BaselineVarianceDays = 0, IsOffBaseline = false, CanExternalUpdate = false, CanExternalComment = false };
+    private static ProjectWorkItemDto MapToDto(ProjectWorkItem entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, ParentId = entity.ParentId, ProjectPackageId = entity.ProjectPackageId, NodeType = entity.NodeType, Title = entity.Title, Description = entity.Description, Status = entity.Status, Priority = entity.Priority, SortOrder = entity.SortOrder, AssignedToUserId = entity.AssignedToUserId, PlannedStartDate = entity.PlannedStartDate, PlannedEndDate = entity.PlannedEndDate, ActualStartDate = entity.ActualStartDate, ActualEndDate = entity.ActualEndDate, PercentComplete = entity.PercentComplete, IsRollupEnabled = entity.IsRollupEnabled, EffortEstimateHours = entity.EffortEstimateHours, ActualEffortHours = entity.ActualEffortHours, BaselineVarianceDays = 0, IsOffBaseline = false, CanExternalUpdate = false, CanExternalComment = false };
     private static ProjectMilestoneDto MapToDto(ProjectMilestone entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, WorkItemId = entity.WorkItemId, Title = entity.Title, Description = entity.Description, TargetDate = entity.TargetDate, ActualDate = entity.ActualDate, Status = entity.Status, RequiresApproval = entity.RequiresApproval };
+    private static ProjectMilestoneDto MapToDto(ProjectMilestone entity, IReadOnlyCollection<ProjectMilestonePhase> phaseSelections, IReadOnlyDictionary<Guid, ProjectPhase> phaseLookup)
+    {
+        var selectedPhases = phaseSelections
+            .Select(selection => phaseLookup.TryGetValue(selection.ProjectPhaseId, out var phase)
+                ? new ProjectMilestonePhaseSelectionDto
+                {
+                    ProjectPhaseId = phase.Id,
+                    PhaseName = phase.Name,
+                    PhaseCode = phase.Code,
+                    CompletionWeightPercent = phase.CompletionWeightPercent
+                }
+                : null)
+            .Where(phase => phase != null)
+            .Cast<ProjectMilestonePhaseSelectionDto>()
+            .OrderBy(phase => phaseLookup.TryGetValue(phase.ProjectPhaseId, out var resolvedPhase) ? resolvedPhase.SortOrder : int.MaxValue)
+            .ThenBy(phase => phase.PhaseName)
+            .ToList();
+
+        return new ProjectMilestoneDto
+        {
+            Id = entity.Id,
+            ProjectId = entity.ProjectId,
+            WorkItemId = entity.WorkItemId,
+            Title = entity.Title,
+            Description = entity.Description,
+            TargetDate = entity.TargetDate,
+            ActualDate = entity.ActualDate,
+            Status = entity.Status,
+            RequiresApproval = entity.RequiresApproval,
+            TotalWeightPercent = decimal.Round(selectedPhases.Sum(phase => phase.CompletionWeightPercent), 2),
+            ProjectPhaseIds = selectedPhases.Select(phase => phase.ProjectPhaseId).ToList(),
+            Phases = selectedPhases
+        };
+    }
     private static ProjectResourceAllocationDto MapToDto(ProjectResourceAllocation entity, List<ProjectResourceAllocation> allocations) => new()
     {
         Id = entity.Id,
@@ -7328,7 +7794,7 @@ public partial class ProjectService : IProjectService
     private static ProjectActionItemDto MapToDto(ProjectActionItem entity, ProjectMeetingMinute? meeting = null, ProjectWorkItem? workItem = null) => new() { Id = entity.Id, ProjectId = entity.ProjectId, MeetingMinuteId = entity.MeetingMinuteId, WorkItemId = entity.WorkItemId, Title = entity.Title, Description = entity.Description, OwnerId = entity.OwnerId, DueDate = entity.DueDate, CompletedAt = entity.CompletedAt, Status = entity.Status, Priority = entity.Priority, MeetingTitle = meeting?.Title, WorkItemTitle = workItem?.Title };
     private static ProjectLessonLearnedDto MapToDto(ProjectLessonLearned entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, Title = entity.Title, Category = entity.Category, Description = entity.Description, Recommendation = entity.Recommendation, AppliedPhase = entity.AppliedPhase, Visibility = entity.Visibility };
     private static ProjectClosureDto MapToDto(ProjectClosure entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, Status = entity.Status, SubmittedAt = entity.SubmittedAt, ApprovedAt = entity.ApprovedAt, ApprovedById = entity.ApprovedById, FinalBudget = entity.FinalBudget, FinalCost = entity.FinalCost, DeliverablesAccepted = entity.DeliverablesAccepted, TasksCompletedOrWaived = entity.TasksCompletedOrWaived, AssetsReconciled = entity.AssetsReconciled, OpenItemsDisposed = entity.OpenItemsDisposed, ClosureChecklistJson = entity.ClosureChecklistJson, OpenItemsDisposition = entity.OpenItemsDisposition, AssetReconciliationNotes = entity.AssetReconciliationNotes, LessonsLearnedSummary = entity.LessonsLearnedSummary, PostImplementationReview = entity.PostImplementationReview, OverrideReason = entity.OverrideReason, RejectionReason = entity.RejectionReason };
-    private static ProjectDocumentDto MapToDto(ProjectDocument entity) => new() { Id = entity.Id, DocumentName = entity.DocumentName, Category = entity.Category, DocumentType = entity.DocumentType, FilePath = entity.FilePath, PublicUrl = entity.PublicUrl, FileType = entity.FileType, FileSize = entity.FileSize, VersionLabel = entity.VersionLabel, Status = entity.Status, IsExternalVisible = entity.IsExternalVisible, CreatedAt = entity.CreatedAt, ArtifactLabel = entity.DocumentName };
+    private static ProjectDocumentDto MapToDto(ProjectDocument entity) => new() { Id = entity.Id, ArtifactType = entity.ArtifactType, ArtifactId = entity.ArtifactId, DocumentName = entity.DocumentName, Category = entity.Category, DocumentType = entity.DocumentType, FilePath = entity.FilePath, PublicUrl = entity.PublicUrl, FileType = entity.FileType, FileSize = entity.FileSize, VersionLabel = entity.VersionLabel, Status = entity.Status, IsExternalVisible = entity.IsExternalVisible, CreatedAt = entity.CreatedAt, ArtifactLabel = entity.DocumentName };
     private static ProjectCommentDto MapToDto(ProjectComment entity) => new() { Id = entity.Id, WorkItemId = entity.WorkItemId, CommentType = entity.CommentType, Body = entity.Body, MentionedUsersJson = entity.MentionedUsersJson, CreatedAt = entity.CreatedAt, CreatedBy = entity.CreatedBy };
 
     private async Task EnrichUserDisplayNamesAsync(ProjectDetailDto dto)
@@ -7614,6 +8080,7 @@ public partial class ProjectSetupService : IProjectSetupService
         var typeCount = (await _projectTypeRepository.GetAllAsync()).Count();
         var priorityCount = (await _projectPriorityRepository.GetAllAsync()).Count();
         var templateCount = (await _projectTemplateRepository.GetActiveAsync()).Count();
+        var unitTypeTemplateCount = (await _unitOfWork.Repository<ProjectUnitTypeTemplate>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.IsActive)).Count();
         var portfolioCount = (await _projectPortfolioRepository.GetAllAsync()).Count();
         var programCount = (await _projectProgramRepository.GetAllAsync()).Count();
         var phaseTemplateCount = (await _unitOfWork.Repository<ProjectPhaseTemplate>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId)).Count();
@@ -7626,6 +8093,7 @@ public partial class ProjectSetupService : IProjectSetupService
             ProjectTypeCount = typeCount,
             ProjectPriorityCount = priorityCount,
             ProjectTemplateCount = templateCount,
+            ProjectUnitTypeTemplateCount = unitTypeTemplateCount,
             PortfolioCount = portfolioCount,
             ProgramCount = programCount,
             ProjectPhaseTemplateCount = phaseTemplateCount,

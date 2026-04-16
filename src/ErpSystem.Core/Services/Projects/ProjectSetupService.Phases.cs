@@ -77,6 +77,7 @@ public partial class ProjectSetupService
             Description = dto.Description?.Trim(),
             DefaultStatus = NormalizePhaseStatus(dto.DefaultStatus),
             SortOrder = dto.SortOrder,
+            CompletionWeightPercent = NormalizeCompletionWeightPercent(dto.CompletionWeightPercent),
             IsOptional = dto.IsOptional,
             IsStageGateRequired = dto.IsStageGateRequired,
             IsActive = dto.IsActive,
@@ -115,6 +116,7 @@ public partial class ProjectSetupService
         entity.Description = dto.Description?.Trim();
         entity.DefaultStatus = NormalizePhaseStatus(dto.DefaultStatus);
         entity.SortOrder = dto.SortOrder;
+        entity.CompletionWeightPercent = NormalizeCompletionWeightPercent(dto.CompletionWeightPercent);
         entity.IsOptional = dto.IsOptional;
         entity.IsStageGateRequired = dto.IsStageGateRequired;
         entity.IsActive = dto.IsActive;
@@ -429,6 +431,7 @@ public partial class ProjectSetupService
             Description = entity.Description,
             DefaultStatus = entity.DefaultStatus,
             SortOrder = entity.SortOrder,
+            CompletionWeightPercent = entity.CompletionWeightPercent,
             IsOptional = entity.IsOptional,
             IsStageGateRequired = entity.IsStageGateRequired,
             IsActive = entity.IsActive,
@@ -467,6 +470,17 @@ public partial class ProjectSetupService
 
     private static string? NormalizeOptionalValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static decimal NormalizeCompletionWeightPercent(decimal? completionWeightPercent)
+    {
+        var resolvedWeight = decimal.Round(completionWeightPercent ?? 0m, 2);
+        if (resolvedWeight < 0m || resolvedWeight > 100m)
+        {
+            throw new InvalidOperationException("Phase template completion weight must be between 0 and 100.");
+        }
+
+        return resolvedWeight;
+    }
 
     private static string NormalizeRequiredName(string? value, string label)
         => string.IsNullOrWhiteSpace(value)

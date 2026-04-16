@@ -53,9 +53,12 @@ export interface ProjectDto {
   sponsorDisplayName?: string;
   startDate?: string;
   targetEndDate?: string;
+  slackMonths: number;
+  trueEndDate?: string;
   estimatedBudget?: number;
   approvedBudget?: number;
   actualCost?: number;
+  baseCurrencyCode?: string;
   progressPercent: number;
   openRiskCount: number;
   openIssueCount: number;
@@ -87,6 +90,10 @@ export interface ProjectWorkItemDto {
   id: string;
   projectId: string;
   parentId?: string;
+  projectPackageId?: string;
+  projectPackageName?: string;
+  projectPhaseId?: string;
+  projectPhaseName?: string;
   nodeType: string;
   title: string;
   description?: string;
@@ -122,6 +129,16 @@ export interface ProjectMilestoneDto {
   actualDate?: string;
   status: string;
   requiresApproval: boolean;
+  totalWeightPercent: number;
+  projectPhaseIds: string[];
+  phases: ProjectMilestonePhaseSelectionDto[];
+}
+
+export interface ProjectMilestonePhaseSelectionDto {
+  projectPhaseId: string;
+  phaseName: string;
+  phaseCode?: string;
+  completionWeightPercent: number;
 }
 
 export interface ProjectResourceAllocationDto {
@@ -269,6 +286,8 @@ export interface ProjectInvoiceRequestDto {
 
 export interface ProjectDocumentDto {
   id: string;
+  artifactType: string;
+  artifactId?: string;
   documentName: string;
   category: string;
   documentType: string;
@@ -1101,6 +1120,8 @@ export interface ProjectInterimValuationDto {
   projectPhaseName?: string;
   projectPackageId?: string;
   projectPackageName?: string;
+  projectMilestoneId?: string;
+  projectMilestoneTitle?: string;
   contractId?: string;
   contractNumber?: string;
   contractTitle?: string;
@@ -1117,11 +1138,13 @@ export interface ProjectInterimValuationDto {
   netValuationAmount: number;
   currency: string;
   notes?: string;
+  completedProjectPackageIds: string[];
 }
 
 export interface CreateProjectInterimValuationDto {
   projectPhaseId?: string;
   projectPackageId?: string;
+  projectMilestoneId?: string;
   contractId?: string;
   valuationNumber?: string;
   title: string;
@@ -1136,6 +1159,7 @@ export interface CreateProjectInterimValuationDto {
   netValuationAmount?: number;
   currency?: string;
   notes?: string;
+  completedProjectPackageIds?: string[];
 }
 
 export interface UpdateProjectInterimValuationDto extends CreateProjectInterimValuationDto {}
@@ -1242,10 +1266,14 @@ export interface ProjectFinalAccountDto {
   settlementDate?: string;
   originalContractValue: number;
   approvedVariationAmount: number;
+  claimAmount: number;
+  deductionAmount: number;
+  adjustmentAmount: number;
   certifiedToDate: number;
   retentionHeldAmount: number;
   retentionReleasedAmount: number;
   finalAccountValue: number;
+  finalPaymentAmount: number;
   currency: string;
   notes?: string;
 }
@@ -1383,6 +1411,8 @@ export interface ProjectUnitDto {
   projectUnitReleaseBatchCode?: string;
   projectUnitReleaseBatchName?: string;
   projectUnitReleaseBatchStatus?: string;
+  projectUnitTypeTemplateId?: string;
+  projectUnitTypeTemplateName?: string;
   isReleasedForMarket: boolean;
   releasedAt?: string;
   releasedByDisplayName?: string;
@@ -1398,6 +1428,7 @@ export interface ProjectUnitDto {
   salesOrderStatus?: string;
   commercialStatus: string;
   commercialIntent?: string;
+  inventoryStatus: string;
   handoverStatus: string;
   code?: string;
   name: string;
@@ -1411,7 +1442,29 @@ export interface ProjectUnitDto {
   currency: string;
   handoverDate?: string;
   sortOrder: number;
+  totalAmenityCost: number;
   notes?: string;
+  amenities: ProjectUnitAmenityDto[];
+}
+
+export interface ProjectUnitAmenityDto {
+  id: string;
+  inventoryItemId?: string;
+  itemCode?: string;
+  amenityName: string;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+  sortOrder: number;
+}
+
+export interface CreateProjectUnitAmenityDto {
+  inventoryItemId?: string;
+  itemCode?: string;
+  amenityName: string;
+  quantity?: number;
+  unitCost?: number;
+  sortOrder?: number;
 }
 
 export interface ProjectReleasedUnitSalesLookupDto {
@@ -1452,6 +1505,7 @@ export interface CreateProjectUnitDto {
   projectBuildingId?: string;
   projectFloorId?: string;
   projectUnitReleaseBatchId?: string;
+  projectUnitTypeTemplateId?: string;
   isReleasedForMarket?: boolean;
   customerBusinessPartnerId?: string;
   salesAgreementId?: string;
@@ -1469,6 +1523,7 @@ export interface CreateProjectUnitDto {
   handoverDate?: string;
   sortOrder?: number;
   notes?: string;
+  amenities?: CreateProjectUnitAmenityDto[];
 }
 
 export interface UpdateProjectUnitDto extends CreateProjectUnitDto {}
@@ -1731,6 +1786,10 @@ export interface ProjectPhaseCommercialRollupDto {
 export interface ProjectCommercialSummaryDto {
   projectId: string;
   currency: string;
+  packageConversionBasis: string;
+  documentConversionBasis: string;
+  missingExchangeRateCount: number;
+  hasConversionGaps: boolean;
   estimatedBudget: number;
   approvedBudget: number;
   packageBudgetAmount: number;
@@ -1774,6 +1833,7 @@ export interface ProjectPhaseDto {
   isOptional: boolean;
   isStageGateRequired: boolean;
   isTemplateSeeded: boolean;
+  completionWeightPercent: number;
   plannedStartDate?: string;
   plannedEndDate?: string;
   actualStartDate?: string;
@@ -1790,6 +1850,7 @@ export interface CreateProjectPhaseDto {
   sortOrder?: number;
   isOptional?: boolean;
   isStageGateRequired?: boolean;
+  completionWeightPercent?: number;
   plannedStartDate?: string;
   plannedEndDate?: string;
   actualStartDate?: string;
@@ -1868,6 +1929,9 @@ export interface ProjectPackageDto {
   recommendedNextStatus?: string;
   recommendedNextAction?: string;
   sortOrder: number;
+  completionWeightPercent: number;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
   procurementRoute?: string;
   contractStrategy?: string;
   businessPartnerId?: string;
@@ -1901,6 +1965,9 @@ export interface CreateProjectPackageDto {
   packageType?: string;
   status?: string;
   sortOrder?: number;
+  completionWeightPercent?: number;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
   procurementRoute?: string;
   contractStrategy?: string;
   businessPartnerId?: string;
@@ -1932,6 +1999,8 @@ export interface ProjectBoqItemDto {
   quantity: number;
   unitOfMeasure?: string;
   unitRate?: number;
+  budgetQuantity?: number;
+  budgetUnitRate?: number;
   budgetAmount?: number;
   committedAmount?: number;
   actualAmount?: number;
@@ -1955,6 +2024,8 @@ export interface CreateProjectBoqItemDto {
   quantity?: number;
   unitOfMeasure?: string;
   unitRate?: number;
+  budgetQuantity?: number;
+  budgetUnitRate?: number;
   budgetAmount?: number;
   committedAmount?: number;
   actualAmount?: number;
@@ -2167,7 +2238,9 @@ export interface CreateProjectDto {
   tenderId?: string;
   startDate?: string;
   targetEndDate?: string;
+  slackMonths?: number;
   estimatedBudget?: number;
+  baseCurrencyCode?: string;
   scopeStatement?: string;
   assumptions?: string;
   constraints?: string;
@@ -2193,6 +2266,7 @@ export interface AddProjectMemberDto {
 
 export interface CreateProjectWorkItemDto {
   parentId?: string;
+  projectPackageId?: string;
   nodeType: string;
   title: string;
   description?: string;
@@ -2230,6 +2304,7 @@ export interface CreateProjectMilestoneDto {
   actualDate?: string;
   status?: string;
   requiresApproval?: boolean;
+  projectPhaseIds?: string[];
 }
 
 export interface CreateProjectResourceAllocationDto {
@@ -2356,6 +2431,8 @@ export interface UpdateProjectInvoiceRequestWorkflowDto {
 }
 
 export interface AttachProjectDocumentDto {
+  artifactType?: string;
+  artifactId?: string;
   documentName: string;
   category?: string;
   documentType?: string;
@@ -2447,6 +2524,7 @@ export interface ProjectPhaseTemplateDto {
   description?: string;
   defaultStatus: string;
   sortOrder: number;
+  completionWeightPercent: number;
   isOptional: boolean;
   isStageGateRequired: boolean;
   isActive: boolean;
@@ -2464,6 +2542,7 @@ export interface CreateProjectPhaseTemplateDto {
   description?: string;
   defaultStatus?: string;
   sortOrder?: number;
+  completionWeightPercent?: number;
   isOptional?: boolean;
   isStageGateRequired?: boolean;
   isActive?: boolean;
@@ -2543,9 +2622,54 @@ export interface ProjectMasterDataOverviewDto {
   portfolioCount: number;
   programCount: number;
   projectPhaseTemplateCount: number;
+  projectUnitTypeTemplateCount: number;
   projectStageGateRuleCount: number;
   recommendedCatalogs: ProjectCatalogGroupDto[];
   catalogCoverage: ProjectCatalogTypeSummaryDto[];
+}
+
+export interface ProjectUnitTypeTemplateAmenityDto {
+  id: string;
+  inventoryItemId: string;
+  itemCode?: string;
+  amenityName: string;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+  sortOrder: number;
+}
+
+export interface CreateProjectUnitTypeTemplateAmenityDto {
+  inventoryItemId: string;
+  itemCode?: string;
+  amenityName?: string;
+  quantity?: number;
+  unitCost?: number;
+  sortOrder?: number;
+}
+
+export interface ProjectUnitTypeTemplateDto {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  defaultProjectUnitType: string;
+  sortOrder: number;
+  isActive: boolean;
+  currency?: string;
+  totalCost: number;
+  amenities: ProjectUnitTypeTemplateAmenityDto[];
+}
+
+export interface CreateProjectUnitTypeTemplateDto {
+  code: string;
+  name: string;
+  description?: string;
+  defaultProjectUnitType?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+  currency?: string;
+  amenities?: CreateProjectUnitTypeTemplateAmenityDto[];
 }
 
 export interface ProjectCatalogEntryDto {
@@ -3066,6 +3190,9 @@ export interface ProjectCommercialAdministrationReportItemDto {
   projectTitle: string;
   projectStatus: string;
   currency: string;
+  packageConversionBasis: string;
+  documentConversionBasis: string;
+  missingExchangeRateCount: number;
   approvedBudget: number;
   packageForecastAmount: number;
   forecastVarianceAmount: number;
@@ -3418,6 +3545,8 @@ export interface ProjectExternalSummaryDto {
   summary?: string;
   startDate?: string;
   targetEndDate?: string;
+  slackMonths: number;
+  trueEndDate?: string;
   progressPercent: number;
   externalCollaborationEnabled: boolean;
   openMilestoneCount: number;
@@ -7214,6 +7343,58 @@ class ProjectService {
 
     if (!response.ok) throw new Error('Failed to fetch project master data overview');
     return response.json();
+  }
+
+  async getProjectUnitTypeTemplates(includeInactive: boolean = false): Promise<ProjectUnitTypeTemplateDto[]> {
+    const query = includeInactive ? '?includeInactive=true' : '';
+    const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project unit types');
+    return response.json();
+  }
+
+  async createProjectUnitTypeTemplate(dto: CreateProjectUnitTypeTemplateDto): Promise<ProjectUnitTypeTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project unit type');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectUnitTypeTemplate(id: string, dto: CreateProjectUnitTypeTemplateDto): Promise<ProjectUnitTypeTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project unit type');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectUnitTypeTemplate(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project unit type');
+    }
   }
 
   async getCatalogEntries(catalogType: string): Promise<ProjectCatalogEntryDto[]> {

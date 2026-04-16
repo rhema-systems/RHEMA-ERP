@@ -97,6 +97,25 @@ public class ProjectAdministrationController : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("unit-types")]
+    public async Task<ActionResult<IEnumerable<ProjectUnitTypeTemplateDto>>> GetProjectUnitTypeTemplates([FromQuery] bool includeInactive = false)
+        => Ok(await _projectSetupService.GetProjectUnitTypeTemplatesAsync(includeInactive));
+
+    [HttpPost("unit-types")]
+    public async Task<ActionResult<ProjectUnitTypeTemplateDto>> CreateProjectUnitTypeTemplate([FromBody] CreateProjectUnitTypeTemplateDto dto)
+        => Ok(await _projectSetupService.CreateProjectUnitTypeTemplateAsync(dto));
+
+    [HttpPut("unit-types/{id:guid}")]
+    public async Task<ActionResult<ProjectUnitTypeTemplateDto>> UpdateProjectUnitTypeTemplate(Guid id, [FromBody] CreateProjectUnitTypeTemplateDto dto)
+        => Ok(await _projectSetupService.UpdateProjectUnitTypeTemplateAsync(id, dto));
+
+    [HttpDelete("unit-types/{id:guid}")]
+    public async Task<IActionResult> DeleteProjectUnitTypeTemplate(Guid id)
+    {
+        await _projectSetupService.DeleteProjectUnitTypeTemplateAsync(id);
+        return NoContent();
+    }
+
     [HttpGet("phase-templates")]
     public async Task<ActionResult<IEnumerable<ProjectPhaseTemplateDto>>> GetProjectPhaseTemplates([FromQuery] Guid? projectTypeId = null)
         => Ok(await _projectSetupService.GetProjectPhaseTemplatesAsync(projectTypeId));

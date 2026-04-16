@@ -174,6 +174,7 @@ export interface RefreshTokenRequest {
 class ApiService {
   private baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api';
   private token: string | null = null;
+  private readonly enableApiDebugLogging = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
 
   constructor() {
     // Load token from localStorage if available
@@ -458,7 +459,7 @@ class ApiService {
     const method = options.method || 'GET';
     const timestamp = new Date().toISOString();
 
-    if (!silent) {
+    if (!silent && this.enableApiDebugLogging) {
       console.log(`🚀 API ${method} ${endpoint} - ${timestamp}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
       if (method !== 'GET' && config.headers) {
         console.log('📤 Request headers:', config.headers);
@@ -482,7 +483,7 @@ class ApiService {
       const status = response.status;
       const statusText = response.statusText;
 
-      if (!silent) {
+      if (!silent && this.enableApiDebugLogging) {
         if (status >= 200 && status < 300) {
           console.log(`✅ API ${method} ${endpoint} - ${status} ${statusText} (${duration}ms)`);
         } else {
@@ -493,7 +494,7 @@ class ApiService {
       const result = await this.handleResponse<T>(response);
 
       // Log response data for non-GET operations and errors (only if not silent)
-      if (!silent && (method !== 'GET' || status >= 400)) {
+      if (!silent && this.enableApiDebugLogging && (method !== 'GET' || status >= 400)) {
         console.log('📥 Response data:', result);
       }
 
@@ -507,7 +508,7 @@ class ApiService {
           endpoint.includes('/auth/logout');
 
         if (!isAuthEndpoint) {
-          if (!silent) {
+          if (!silent && this.enableApiDebugLogging) {
             console.log('🔄 401 error detected, attempting token refresh...');
           }
 
@@ -515,7 +516,7 @@ class ApiService {
             // Attempt to refresh token
             await this.refreshToken();
 
-            if (!silent) {
+            if (!silent && this.enableApiDebugLogging) {
               console.log('✅ Token refreshed, retrying original request...');
             }
 

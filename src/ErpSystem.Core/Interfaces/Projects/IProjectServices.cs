@@ -353,6 +353,10 @@ public interface IProjectSetupService
     Task<ProjectTemplateDto> CreateProjectTemplateAsync(CreateProjectTemplateDto dto);
     Task<ProjectTemplateDto> UpdateProjectTemplateAsync(Guid id, CreateProjectTemplateDto dto);
     Task DeleteProjectTemplateAsync(Guid id);
+    Task<IEnumerable<ProjectUnitTypeTemplateDto>> GetProjectUnitTypeTemplatesAsync(bool includeInactive = false);
+    Task<ProjectUnitTypeTemplateDto> CreateProjectUnitTypeTemplateAsync(CreateProjectUnitTypeTemplateDto dto);
+    Task<ProjectUnitTypeTemplateDto> UpdateProjectUnitTypeTemplateAsync(Guid id, CreateProjectUnitTypeTemplateDto dto);
+    Task DeleteProjectUnitTypeTemplateAsync(Guid id);
     Task<IEnumerable<ProjectPhaseTemplateDto>> GetProjectPhaseTemplatesAsync(Guid? projectTypeId = null);
     Task<ProjectPhaseTemplateDto> CreateProjectPhaseTemplateAsync(CreateProjectPhaseTemplateDto dto);
     Task<ProjectPhaseTemplateDto> UpdateProjectPhaseTemplateAsync(Guid id, UpdateProjectPhaseTemplateDto dto);

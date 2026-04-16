@@ -41,9 +41,12 @@ public class ProjectDto
     public string? SponsorDisplayName { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? TargetEndDate { get; set; }
+    public int SlackMonths { get; set; }
+    public DateTime? TrueEndDate { get; set; }
     public decimal? EstimatedBudget { get; set; }
     public decimal? ApprovedBudget { get; set; }
     public decimal? ActualCost { get; set; }
+    public string? BaseCurrencyCode { get; set; }
     public decimal ProgressPercent { get; set; }
     public int OpenRiskCount { get; set; }
     public int OpenIssueCount { get; set; }
@@ -71,6 +74,7 @@ public class ProjectDetailDto : ProjectDto
     public Guid? TenderId { get; set; }
     public DateTime? ActualStartDate { get; set; }
     public DateTime? ActualEndDate { get; set; }
+    public string? BaseCurrencyCode { get; set; }
     public string BudgetStatus { get; set; } = string.Empty;
     public bool ApprovalRequired { get; set; }
     public DateTime? SubmittedAt { get; set; }
@@ -188,6 +192,7 @@ public class ProjectPhaseDto
     public bool IsOptional { get; set; }
     public bool IsStageGateRequired { get; set; }
     public bool IsTemplateSeeded { get; set; }
+    public decimal CompletionWeightPercent { get; set; }
     public DateTime? PlannedStartDate { get; set; }
     public DateTime? PlannedEndDate { get; set; }
     public DateTime? ActualStartDate { get; set; }
@@ -208,6 +213,7 @@ public class CreateProjectPhaseDto
     public int? SortOrder { get; set; }
     public bool IsOptional { get; set; }
     public bool IsStageGateRequired { get; set; }
+    public decimal? CompletionWeightPercent { get; set; }
     public DateTime? PlannedStartDate { get; set; }
     public DateTime? PlannedEndDate { get; set; }
     public DateTime? ActualStartDate { get; set; }
@@ -287,6 +293,9 @@ public class ProjectPackageDto
     public string? RecommendedNextStatus { get; set; }
     public string? RecommendedNextAction { get; set; }
     public int SortOrder { get; set; }
+    public decimal CompletionWeightPercent { get; set; }
+    public DateTime? PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
     public string? ProcurementRoute { get; set; }
     public string? ContractStrategy { get; set; }
     public Guid? BusinessPartnerId { get; set; }
@@ -324,6 +333,9 @@ public class CreateProjectPackageDto
     public string PackageType { get; set; } = "WorkPackage";
     public string Status { get; set; } = "Planned";
     public int? SortOrder { get; set; }
+    public decimal? CompletionWeightPercent { get; set; }
+    public DateTime? PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
     public string? ProcurementRoute { get; set; }
     public string? ContractStrategy { get; set; }
     public Guid? BusinessPartnerId { get; set; }
@@ -358,6 +370,8 @@ public class ProjectBoqItemDto
     public decimal Quantity { get; set; }
     public string? UnitOfMeasure { get; set; }
     public decimal? UnitRate { get; set; }
+    public decimal? BudgetQuantity { get; set; }
+    public decimal? BudgetUnitRate { get; set; }
     public decimal? BudgetAmount { get; set; }
     public decimal? CommittedAmount { get; set; }
     public decimal? ActualAmount { get; set; }
@@ -387,6 +401,8 @@ public class CreateProjectBoqItemDto
     public decimal Quantity { get; set; }
     public string? UnitOfMeasure { get; set; }
     public decimal? UnitRate { get; set; }
+    public decimal? BudgetQuantity { get; set; }
+    public decimal? BudgetUnitRate { get; set; }
     public decimal? BudgetAmount { get; set; }
     public decimal? CommittedAmount { get; set; }
     public decimal? ActualAmount { get; set; }
@@ -705,6 +721,8 @@ public class ProjectInterimValuationDto
     public string? ProjectPhaseName { get; set; }
     public Guid? ProjectPackageId { get; set; }
     public string? ProjectPackageName { get; set; }
+    public Guid? ProjectMilestoneId { get; set; }
+    public string? ProjectMilestoneTitle { get; set; }
     public Guid? ContractId { get; set; }
     public string? ContractNumber { get; set; }
     public string? ContractTitle { get; set; }
@@ -721,12 +739,14 @@ public class ProjectInterimValuationDto
     public decimal NetValuationAmount { get; set; }
     public string Currency { get; set; } = string.Empty;
     public string? Notes { get; set; }
+    public List<Guid> CompletedProjectPackageIds { get; set; } = new();
 }
 
 public class CreateProjectInterimValuationDto
 {
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectPackageId { get; set; }
+    public Guid? ProjectMilestoneId { get; set; }
     public Guid? ContractId { get; set; }
     public string? ValuationNumber { get; set; }
 
@@ -744,6 +764,7 @@ public class CreateProjectInterimValuationDto
     public decimal NetValuationAmount { get; set; }
     public string? Currency { get; set; }
     public string? Notes { get; set; }
+    public List<Guid> CompletedProjectPackageIds { get; set; } = new();
 }
 
 public class UpdateProjectInterimValuationDto : CreateProjectInterimValuationDto
@@ -867,10 +888,14 @@ public class ProjectFinalAccountDto
     public DateTime? SettlementDate { get; set; }
     public decimal OriginalContractValue { get; set; }
     public decimal ApprovedVariationAmount { get; set; }
+    public decimal ClaimAmount { get; set; }
+    public decimal DeductionAmount { get; set; }
+    public decimal AdjustmentAmount { get; set; }
     public decimal CertifiedToDate { get; set; }
     public decimal RetentionHeldAmount { get; set; }
     public decimal RetentionReleasedAmount { get; set; }
     public decimal FinalAccountValue { get; set; }
+    public decimal FinalPaymentAmount { get; set; }
     public string Currency { get; set; } = string.Empty;
     public string? Notes { get; set; }
 }
@@ -1038,6 +1063,8 @@ public class ProjectUnitDto
     public string? ProjectUnitReleaseBatchCode { get; set; }
     public string? ProjectUnitReleaseBatchName { get; set; }
     public string? ProjectUnitReleaseBatchStatus { get; set; }
+    public Guid? ProjectUnitTypeTemplateId { get; set; }
+    public string? ProjectUnitTypeTemplateName { get; set; }
     public bool IsReleasedForMarket { get; set; }
     public DateTime? ReleasedAt { get; set; }
     public string? ReleasedByDisplayName { get; set; }
@@ -1053,6 +1080,7 @@ public class ProjectUnitDto
     public string? SalesOrderStatus { get; set; }
     public string CommercialStatus { get; set; } = string.Empty;
     public string? CommercialIntent { get; set; }
+    public string InventoryStatus { get; set; } = string.Empty;
     public string HandoverStatus { get; set; } = string.Empty;
     public string? Code { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1066,7 +1094,34 @@ public class ProjectUnitDto
     public string Currency { get; set; } = string.Empty;
     public DateTime? HandoverDate { get; set; }
     public int SortOrder { get; set; }
+    public decimal TotalAmenityCost { get; set; }
     public string? Notes { get; set; }
+    public List<ProjectUnitAmenityDto> Amenities { get; set; } = new();
+}
+
+public class ProjectUnitAmenityDto
+{
+    public Guid Id { get; set; }
+    public Guid? InventoryItemId { get; set; }
+    public string? ItemCode { get; set; }
+    public string AmenityName { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalCost { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class CreateProjectUnitAmenityDto
+{
+    public Guid? InventoryItemId { get; set; }
+    public string? ItemCode { get; set; }
+
+    [Required]
+    public string AmenityName { get; set; } = string.Empty;
+
+    public decimal Quantity { get; set; } = 1m;
+    public decimal UnitCost { get; set; }
+    public int? SortOrder { get; set; }
 }
 
 public class ProjectReleasedUnitSalesLookupDto
@@ -1121,6 +1176,7 @@ public class CreateProjectUnitDto
     public Guid? ProjectBuildingId { get; set; }
     public Guid? ProjectFloorId { get; set; }
     public Guid? ProjectUnitReleaseBatchId { get; set; }
+    public Guid? ProjectUnitTypeTemplateId { get; set; }
     public bool IsReleasedForMarket { get; set; }
     public Guid? CustomerBusinessPartnerId { get; set; }
     public Guid? SalesAgreementId { get; set; }
@@ -1141,6 +1197,7 @@ public class CreateProjectUnitDto
     public DateTime? HandoverDate { get; set; }
     public int? SortOrder { get; set; }
     public string? Notes { get; set; }
+    public List<CreateProjectUnitAmenityDto> Amenities { get; set; } = new();
 }
 
 public class UpdateProjectUnitDto : CreateProjectUnitDto
@@ -1453,7 +1510,10 @@ public class CreateProjectDto
     public Guid? TenderId { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? TargetEndDate { get; set; }
+    public int? SlackMonths { get; set; }
     public decimal? EstimatedBudget { get; set; }
+    [MaxLength(10)]
+    public string? BaseCurrencyCode { get; set; }
     public string? ScopeStatement { get; set; }
     public string? Assumptions { get; set; }
     public string? Constraints { get; set; }
@@ -1506,6 +1566,10 @@ public class ProjectWorkItemDto
     public Guid Id { get; set; }
     public Guid ProjectId { get; set; }
     public Guid? ParentId { get; set; }
+    public Guid? ProjectPackageId { get; set; }
+    public string? ProjectPackageName { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public string? ProjectPhaseName { get; set; }
     public string NodeType { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -1534,6 +1598,7 @@ public class ProjectWorkItemDto
 public class CreateProjectWorkItemDto
 {
     public Guid? ParentId { get; set; }
+    public Guid? ProjectPackageId { get; set; }
     [Required]
     public string NodeType { get; set; } = "Task";
     [Required]
@@ -1580,6 +1645,17 @@ public class ProjectMilestoneDto
     public DateTime? ActualDate { get; set; }
     public string Status { get; set; } = string.Empty;
     public bool RequiresApproval { get; set; }
+    public decimal TotalWeightPercent { get; set; }
+    public List<Guid> ProjectPhaseIds { get; set; } = new();
+    public List<ProjectMilestonePhaseSelectionDto> Phases { get; set; } = new();
+}
+
+public class ProjectMilestonePhaseSelectionDto
+{
+    public Guid ProjectPhaseId { get; set; }
+    public string PhaseName { get; set; } = string.Empty;
+    public string? PhaseCode { get; set; }
+    public decimal CompletionWeightPercent { get; set; }
 }
 
 public class ProjectResourceAllocationDto
@@ -1667,6 +1743,7 @@ public class CreateProjectMilestoneDto
     public DateTime? ActualDate { get; set; }
     public string Status { get; set; } = "Draft";
     public bool RequiresApproval { get; set; }
+    public List<Guid> ProjectPhaseIds { get; set; } = new();
 }
 
 public class ProjectBillingScheduleDto
@@ -1891,6 +1968,8 @@ public class CreateProjectChangeRequestDto
 public class ProjectDocumentDto
 {
     public Guid Id { get; set; }
+    public string ArtifactType { get; set; } = string.Empty;
+    public Guid? ArtifactId { get; set; }
     public string DocumentName { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string DocumentType { get; set; } = string.Empty;
@@ -1907,6 +1986,8 @@ public class ProjectDocumentDto
 
 public class AttachProjectDocumentDto
 {
+    public string ArtifactType { get; set; } = "Project";
+    public Guid? ArtifactId { get; set; }
     [Required]
     public string DocumentName { get; set; } = string.Empty;
     public string Category { get; set; } = "General";
@@ -2547,6 +2628,60 @@ public class ProjectMobileSummaryDto
     public List<ProjectMobileAssignmentDto> Assignments { get; set; } = new();
 }
 
+public class ProjectUnitTypeTemplateAmenityDto
+{
+    public Guid Id { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public string? ItemCode { get; set; }
+    public string AmenityName { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalCost { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class CreateProjectUnitTypeTemplateAmenityDto
+{
+    [Required]
+    public Guid InventoryItemId { get; set; }
+
+    public string? ItemCode { get; set; }
+    public string? AmenityName { get; set; }
+    public decimal Quantity { get; set; } = 1m;
+    public decimal UnitCost { get; set; }
+    public int? SortOrder { get; set; }
+}
+
+public class ProjectUnitTypeTemplateDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string DefaultProjectUnitType { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; }
+    public string? Currency { get; set; }
+    public decimal TotalCost { get; set; }
+    public List<ProjectUnitTypeTemplateAmenityDto> Amenities { get; set; } = new();
+}
+
+public class CreateProjectUnitTypeTemplateDto
+{
+    [Required]
+    public string Code { get; set; } = string.Empty;
+
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+    public string DefaultProjectUnitType { get; set; } = ProjectUnitTypes.Unit;
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string? Currency { get; set; }
+    public List<CreateProjectUnitTypeTemplateAmenityDto> Amenities { get; set; } = new();
+}
+
 public class ProjectTypeDto
 {
     public Guid Id { get; set; }
@@ -2618,6 +2753,7 @@ public class ProjectPhaseTemplateDto
     public string? Description { get; set; }
     public string DefaultStatus { get; set; } = string.Empty;
     public int SortOrder { get; set; }
+    public decimal CompletionWeightPercent { get; set; }
     public bool IsOptional { get; set; }
     public bool IsStageGateRequired { get; set; }
     public bool IsActive { get; set; }
@@ -2638,6 +2774,7 @@ public class CreateProjectPhaseTemplateDto
     public string? Description { get; set; }
     public string DefaultStatus { get; set; } = "NotStarted";
     public int SortOrder { get; set; }
+    public decimal? CompletionWeightPercent { get; set; }
     public bool IsOptional { get; set; }
     public bool IsStageGateRequired { get; set; }
     public bool IsActive { get; set; } = true;
@@ -3221,6 +3358,8 @@ public class ProjectExternalSummaryDto
     public string? Summary { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? TargetEndDate { get; set; }
+    public int SlackMonths { get; set; }
+    public DateTime? TrueEndDate { get; set; }
     public decimal ProgressPercent { get; set; }
     public bool ExternalCollaborationEnabled { get; set; }
     public int OpenMilestoneCount { get; set; }
@@ -3423,6 +3562,9 @@ public class ProjectCommercialAdministrationReportItemDto
     public string ProjectTitle { get; set; } = string.Empty;
     public string ProjectStatus { get; set; } = string.Empty;
     public string Currency { get; set; } = string.Empty;
+    public string PackageConversionBasis { get; set; } = string.Empty;
+    public string DocumentConversionBasis { get; set; } = string.Empty;
+    public int MissingExchangeRateCount { get; set; }
     public decimal ApprovedBudget { get; set; }
     public decimal PackageForecastAmount { get; set; }
     public decimal ForecastVarianceAmount { get; set; }

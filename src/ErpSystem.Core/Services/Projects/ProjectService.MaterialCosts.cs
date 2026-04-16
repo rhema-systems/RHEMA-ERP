@@ -139,7 +139,12 @@ public partial class ProjectService
             return;
         }
 
-        var baseCurrencyCode = await GetProjectBaseCurrencyCodeAsync();
+        var tenantBaseCurrencyCode = await GetProjectBaseCurrencyCodeAsync();
+        var projectCurrencyCodes = projects.ToDictionary(
+            x => x.Id,
+            x => string.IsNullOrWhiteSpace(x.BaseCurrencyCode)
+                ? tenantBaseCurrencyCode
+                : x.BaseCurrencyCode.Trim().ToUpperInvariant());
 
         var requisitionRepo = _unitOfWork.Repository<InventoryRequisition>();
         var requisitions = (await requisitionRepo.FindAsync(
@@ -282,7 +287,7 @@ public partial class ProjectService
                 UnitOfMeasure = inventoryItem?.UnitOfMeasure,
                 UnitCost = stockMovement.UnitCost,
                 Amount = decimal.Round(amount, 2),
-                Currency = baseCurrencyCode,
+                Currency = projectCurrencyCodes.GetValueOrDefault(requisition.ProjectId.Value, tenantBaseCurrencyCode),
                 HasMissingSourceLink = inventoryItem == null,
                 HasReversalGap = false,
                 Notes = stockMovement.Notes,
@@ -334,7 +339,7 @@ public partial class ProjectService
                     UnitOfMeasure = item.UnitOfMeasure ?? inventoryItem?.UnitOfMeasure,
                     UnitCost = unitCost,
                     Amount = amount,
-                    Currency = baseCurrencyCode,
+                    Currency = projectCurrencyCodes.GetValueOrDefault(requisition.ProjectId!.Value, tenantBaseCurrencyCode),
                     HasMissingSourceLink = false,
                     HasReversalGap = false,
                     Notes = item.Notes ?? requisition.Notes,

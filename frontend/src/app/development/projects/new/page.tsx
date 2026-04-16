@@ -9,8 +9,17 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  buildProjectCurrencyOptions,
+  DEFAULT_PROJECT_CURRENCY,
+  findProjectCurrency,
+  formatProjectCurrencyLabel,
+  loadProjectCurrencyContext,
+  type ProjectCurrencyReference,
+} from '@/lib/project-currency';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { contractService, type ContractDto } from '@/services/contractService';
+import { type CurrencyListDto } from '@/services/financeCommonService';
 import {
   CreateProjectDto,
   ProjectCatalogEntryDto,
@@ -180,6 +189,8 @@ export default function NewProjectPage() {
   const [portfolios, setPortfolios] = useState<ProjectPortfolioDto[]>([]);
   const [programs, setPrograms] = useState<ProjectProgramDto[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
+  const [financeBaseCurrency, setFinanceBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [businessPartners, setBusinessPartners] = useState<BusinessPartnerDto[]>([]);
   const [contracts, setContracts] = useState<ContractDto[]>([]);
   const [methodologyCatalog, setMethodologyCatalog] = useState<ProjectCatalogEntryDto[]>([]);
@@ -188,6 +199,12 @@ export default function NewProjectPage() {
 
   const methodologyOptions = resolveCatalogOptions(methodologyCatalog, DEFAULT_METHODOLOGIES, form.methodology);
   const fundingSourceOptions = resolveCatalogOptions(fundingSourceCatalog, DEFAULT_FUNDING_SOURCES, form.fundingSource);
+  const projectCurrencyOptions = useMemo(
+    () => buildProjectCurrencyOptions(currencies, financeBaseCurrency, form.baseCurrencyCode),
+    [currencies, financeBaseCurrency, form.baseCurrencyCode],
+  );
+  const getCurrencyOptionLabel = (code: string) =>
+    formatProjectCurrencyLabel(findProjectCurrency(currencies, code, financeBaseCurrency), code);
   const activeUsers = useMemo(() => users.filter((user) => user.isActive), [users]);
   const selectedProjectType = useMemo(
     () => types.find((item) => item.id === form.projectTypeId),
@@ -253,7 +270,7 @@ export default function NewProjectPage() {
   useEffect(() => {
     const loadSetup = async () => {
       try {
-        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, loadedContracts] = await Promise.all([
+        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, loadedContracts, currencyContext] = await Promise.all([
           projectService.getProjectTypes(),
           projectService.getProjectPriorities(),
           projectService.getProjectTemplates(),
@@ -264,6 +281,7 @@ export default function NewProjectPage() {
           userService.searchUsers('').catch(() => []),
           businessPartnerService.getAllPartnersForDropdown().catch(() => businessPartnerService.getActivePartners().catch(() => [])),
           contractService.getActiveContracts().catch(() => []),
+          loadProjectCurrencyContext(),
         ]);
         setTypes(loadedTypes);
         setPriorities(loadedPriorities);
@@ -273,6 +291,8 @@ export default function NewProjectPage() {
         setMethodologyCatalog(loadedMethodologies);
         setFundingSourceCatalog(loadedFundingSources);
         setUsers(loadedUsers);
+        setCurrencies(currencyContext.activeCurrencies);
+        setFinanceBaseCurrency(currencyContext.baseCurrency);
         setBusinessPartners(loadedPartners);
         setContracts(loadedContracts);
         setForm((prev) => ({
@@ -283,6 +303,7 @@ export default function NewProjectPage() {
           approvalRequired: settings.defaultApprovalRequired,
           methodology: resolveCatalogOptions(loadedMethodologies, DEFAULT_METHODOLOGIES, prev.methodology)[0] || prev.methodology,
           fundingSource: resolveCatalogOptions(loadedFundingSources, DEFAULT_FUNDING_SOURCES, prev.fundingSource)[0] || prev.fundingSource,
+          baseCurrencyCode: prev.baseCurrencyCode || currencyContext.baseCurrency.code,
         }));
       } catch (error: any) {
         toast.error(error.message || 'Failed to load project setup data');
@@ -329,6 +350,7 @@ export default function NewProjectPage() {
         { field: 'SponsorId', label: 'Sponsor', value: form.sponsorId },
         { field: 'ProjectManagerId', label: 'Project manager', value: form.projectManagerId },
         { field: 'EstimatedBudget', label: 'Estimated budget', value: form.estimatedBudget },
+        { field: 'BaseCurrencyCode', label: 'Project base currency', value: form.baseCurrencyCode },
         { field: 'StartDate', label: 'Start date', value: form.startDate },
         { field: 'TargetEndDate', label: 'Target end date', value: form.targetEndDate },
       ];
@@ -585,6 +607,22 @@ export default function NewProjectPage() {
           <div className="grid gap-2">
             <Label htmlFor="estimated-budget">{labelWithRequired('Estimated Budget', requiredFields.has('EstimatedBudget'))}</Label>
             <Input id="estimated-budget" type="number" value={form.estimatedBudget ?? ''} onChange={(e) => setForm((prev) => ({ ...prev, estimatedBudget: e.target.value ? Number(e.target.value) : undefined }))} />
+          </div>
+          <div className="grid gap-2">
+            <Label>{labelWithRequired('Project Base Currency', requiredFields.has('BaseCurrencyCode'))}</Label>
+            <Select value={form.baseCurrencyCode || financeBaseCurrency.code} onValueChange={(value) => setForm((prev) => ({ ...prev, baseCurrencyCode: value }))}>
+              <SelectTrigger><SelectValue placeholder="Select project base currency" /></SelectTrigger>
+              <SelectContent>
+                {projectCurrencyOptions.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {getCurrencyOptionLabel(item)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="text-xs text-muted-foreground">
+              Finance base currency is {getCurrencyOptionLabel(financeBaseCurrency.code)}. Keep it for standard reporting or choose a project-specific reporting currency.
+            </div>
           </div>
           <div className="grid gap-2">
             <Label>{labelWithRequired('Funding Source', requiredFields.has('FundingSource'))}</Label>

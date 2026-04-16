@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useMemo } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,8 +12,10 @@ import type {
   CreateProjectDefectLiabilityCaseDto,
   ProjectLinkOptionsDto,
   CreateProjectSnagItemDto,
+  ProjectDefectLiabilityCaseDto,
   ProjectDetailDto,
   ProjectPostHandoverSummaryDto,
+  ProjectSnagItemDto,
   ProjectUnitDto,
 } from '@/services/projectService';
 
@@ -25,8 +27,10 @@ type ProjectDefectsTabProps = {
   postHandoverSummary?: ProjectPostHandoverSummaryDto | null;
   snagDraft: CreateProjectSnagItemDto;
   setSnagDraft: Dispatch<SetStateAction<CreateProjectSnagItemDto>>;
+  editingSnagItemId: string | null;
   defectLiabilityDraft: CreateProjectDefectLiabilityCaseDto;
   setDefectLiabilityDraft: Dispatch<SetStateAction<CreateProjectDefectLiabilityCaseDto>>;
+  editingDefectLiabilityCaseId: string | null;
   snagStatusOptions: string[];
   snagSeverityOptions: string[];
   defectLiabilityStatusOptions: string[];
@@ -34,9 +38,13 @@ type ProjectDefectsTabProps = {
   formatDateLabel: (value?: string) => string;
   formatMoney: (value: number | undefined, currency?: string | null, maximumFractionDigits?: number) => string;
   followThroughBusyKey: string | null;
-  onAddSnagItem: () => void;
+  onSaveSnagItem: () => void;
+  onEditSnagItem: (snagItem: ProjectSnagItemDto) => void;
+  onCancelSnagItemEdit: () => void;
   onDeleteSnagItem: (snagItemId: string) => void;
-  onAddDefectLiabilityCase: () => void;
+  onSaveDefectLiabilityCase: () => void;
+  onEditDefectLiabilityCase: (defectLiabilityCase: ProjectDefectLiabilityCaseDto) => void;
+  onCancelDefectLiabilityCaseEdit: () => void;
   onDeleteDefectLiabilityCase: (defectLiabilityCaseId: string) => void;
   onCreateDefectLiabilityJobCard: (defectLiabilityCaseId: string) => void;
   onCreateDefectLiabilityWorkOrder: (defectLiabilityCaseId: string) => void;
@@ -50,8 +58,10 @@ export function ProjectDefectsTab({
   postHandoverSummary,
   snagDraft,
   setSnagDraft,
+  editingSnagItemId,
   defectLiabilityDraft,
   setDefectLiabilityDraft,
+  editingDefectLiabilityCaseId,
   snagStatusOptions,
   snagSeverityOptions,
   defectLiabilityStatusOptions,
@@ -59,9 +69,13 @@ export function ProjectDefectsTab({
   formatDateLabel,
   formatMoney,
   followThroughBusyKey,
-  onAddSnagItem,
+  onSaveSnagItem,
+  onEditSnagItem,
+  onCancelSnagItemEdit,
   onDeleteSnagItem,
-  onAddDefectLiabilityCase,
+  onSaveDefectLiabilityCase,
+  onEditDefectLiabilityCase,
+  onCancelDefectLiabilityCaseEdit,
   onDeleteDefectLiabilityCase,
   onCreateDefectLiabilityJobCard,
   onCreateDefectLiabilityWorkOrder,
@@ -198,7 +212,7 @@ export function ProjectDefectsTab({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-lg border p-4 space-y-4">
-            <div className="font-medium">Add Snag Item</div>
+            <div className="font-medium">{editingSnagItemId ? 'Edit Snag Item' : 'Add Snag Item'}</div>
             <div className="grid gap-4 md:grid-cols-4">
               <div className="grid gap-2 md:col-span-2">
                 <Label>Title</Label>
@@ -257,10 +271,16 @@ export function ProjectDefectsTab({
                 <Textarea rows={2} value={snagDraft.notes || ''} onChange={(event) => setSnagDraft((current) => ({ ...current, notes: event.target.value || undefined }))} />
               </div>
             </div>
-            <div className="flex justify-end">
-              <Button disabled={!snagDraft.title?.trim()} onClick={onAddSnagItem}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Snag Item
+            <div className="flex justify-end gap-2">
+              {editingSnagItemId ? (
+                <Button variant="outline" onClick={onCancelSnagItemEdit}>
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              ) : null}
+              <Button disabled={!snagDraft.title?.trim()} onClick={onSaveSnagItem}>
+                {editingSnagItemId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+                {editingSnagItemId ? 'Save Snag Item' : 'Add Snag Item'}
               </Button>
             </div>
           </div>
@@ -291,9 +311,15 @@ export function ProjectDefectsTab({
                     {item.description ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{item.description}</div> : null}
                     {item.notes ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{item.notes}</div> : null}
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => onDeleteSnagItem(item.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex flex-col items-stretch gap-2 xl:items-end">
+                    <Button variant="outline" size="sm" onClick={() => onEditSnagItem(item)}>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDeleteSnagItem(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -307,7 +333,7 @@ export function ProjectDefectsTab({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-lg border p-4 space-y-4">
-            <div className="font-medium">Add Defect Liability Case</div>
+            <div className="font-medium">{editingDefectLiabilityCaseId ? 'Edit Defect Liability Case' : 'Add Defect Liability Case'}</div>
             {!hasMaintenanceAssetLink ? (
               <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
                 Link a maintenance asset in the Access tab to enable direct job card and work order follow-through for defect cases.
@@ -442,10 +468,16 @@ export function ProjectDefectsTab({
                 <Textarea rows={2} value={defectLiabilityDraft.notes || ''} onChange={(event) => setDefectLiabilityDraft((current) => ({ ...current, notes: event.target.value || undefined }))} />
               </div>
             </div>
-            <div className="flex justify-end">
-              <Button disabled={!defectLiabilityDraft.title?.trim()} onClick={onAddDefectLiabilityCase}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Defect Liability Case
+            <div className="flex justify-end gap-2">
+              {editingDefectLiabilityCaseId ? (
+                <Button variant="outline" onClick={onCancelDefectLiabilityCaseEdit}>
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              ) : null}
+              <Button disabled={!defectLiabilityDraft.title?.trim()} onClick={onSaveDefectLiabilityCase}>
+                {editingDefectLiabilityCaseId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+                {editingDefectLiabilityCaseId ? 'Save Defect Liability Case' : 'Add Defect Liability Case'}
               </Button>
             </div>
           </div>
@@ -493,6 +525,10 @@ export function ProjectDefectsTab({
                     {item.notes ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{item.notes}</div> : null}
                   </div>
                   <div className="flex flex-col items-stretch gap-2 xl:items-end">
+                    <Button variant="outline" size="sm" onClick={() => onEditDefectLiabilityCase(item)}>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
                     {!item.jobCardId ? (
                       <Button
                         variant="outline"

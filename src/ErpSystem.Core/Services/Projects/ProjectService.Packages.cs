@@ -20,6 +20,7 @@ public partial class ProjectService
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManagePlan);
         await ValidateProjectPackageAsync(projectId, dto);
+        var completionWeightPercent = NormalizeCompletionWeightPercent(dto.CompletionWeightPercent, "work component");
 
         var siblings = (await _unitOfWork.Repository<ProjectPackage>().FindAsync(x =>
             x.ProjectId == projectId
@@ -36,6 +37,9 @@ public partial class ProjectService
             PackageType = NormalizeProjectPackageType(dto.PackageType),
             Status = NormalizeProjectPackageStatus(dto.Status),
             SortOrder = dto.SortOrder ?? (siblings.Count == 0 ? 0 : siblings.Max(x => x.SortOrder) + 1),
+            CompletionWeightPercent = completionWeightPercent,
+            PlannedStartDate = dto.PlannedStartDate,
+            PlannedEndDate = dto.PlannedEndDate,
             ProcurementRoute = TrimOrNull(dto.ProcurementRoute),
             ContractStrategy = TrimOrNull(dto.ContractStrategy),
             BusinessPartnerId = dto.BusinessPartnerId,
@@ -63,7 +67,8 @@ public partial class ProjectService
     {
         var entity = await GetProjectPackageEntityAsync(packageId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
-        await ValidateProjectPackageAsync(entity.ProjectId, dto);
+        await ValidateProjectPackageAsync(entity.ProjectId, dto, packageId);
+        var completionWeightPercent = NormalizeCompletionWeightPercent(dto.CompletionWeightPercent, "work component");
 
         entity.ProjectPhaseId = dto.ProjectPhaseId;
         entity.Code = TrimOrNull(dto.Code);
@@ -72,6 +77,9 @@ public partial class ProjectService
         entity.PackageType = NormalizeProjectPackageType(dto.PackageType);
         entity.Status = NormalizeProjectPackageStatus(dto.Status);
         entity.SortOrder = dto.SortOrder ?? entity.SortOrder;
+        entity.CompletionWeightPercent = completionWeightPercent;
+        entity.PlannedStartDate = dto.PlannedStartDate;
+        entity.PlannedEndDate = dto.PlannedEndDate;
         entity.ProcurementRoute = TrimOrNull(dto.ProcurementRoute);
         entity.ContractStrategy = TrimOrNull(dto.ContractStrategy);
         entity.BusinessPartnerId = dto.BusinessPartnerId;
@@ -117,10 +125,19 @@ public partial class ProjectService
         await RequireProjectAsync(projectId, ProjectAccessOperation.View);
         var packages = (await GetProjectPackageEntitiesAsync(projectId)).ToList();
         var packageLookup = packages.ToDictionary(x => x.Id);
-        return (await GetProjectBoqItemEntitiesAsync(projectId))
+        var boqItems = (await GetProjectBoqItemEntitiesAsync(projectId)).ToList();
+        var derivationContext = await BuildProjectCommercialDerivationContextAsync(projectId, packages, boqItems);
+        return boqItems
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.LineNumber)
-            .Select(x => MapToDto(x, packageLookup.TryGetValue(x.ProjectPackageId, out var package) ? package : null))
+            .Select(x =>
+            {
+                var package = packageLookup.TryGetValue(x.ProjectPackageId, out var resolvedPackage) ? resolvedPackage : null;
+                return MapToDto(
+                    x,
+                    package,
+                    DeriveProjectBoqCommercialAmounts(x, package, derivationContext));
+            })
             .ToList();
     }
 
@@ -138,6 +155,12 @@ public partial class ProjectService
         var siblings = (await _unitOfWork.Repository<ProjectBoqItem>().FindAsync(x =>
             x.ProjectPackageId == dto.ProjectPackageId
             && x.TenantId == _currentUserProvider.TenantId)).ToList();
+        var (resolvedBudgetQuantity, resolvedBudgetUnitRate, resolvedBudgetAmount) = ResolveBoqBudgetFields(
+            dto.Quantity,
+            dto.UnitRate,
+            dto.BudgetQuantity,
+            dto.BudgetUnitRate,
+            dto.BudgetAmount);
 
         var entity = new ProjectBoqItem
         {
@@ -151,7 +174,9 @@ public partial class ProjectService
             Quantity = dto.Quantity,
             UnitOfMeasure = TrimOrNull(dto.UnitOfMeasure),
             UnitRate = dto.UnitRate,
-            BudgetAmount = ResolveBoqBudgetAmount(dto.BudgetAmount, dto.Quantity, dto.UnitRate),
+            BudgetQuantity = resolvedBudgetQuantity,
+            BudgetUnitRate = resolvedBudgetUnitRate,
+            BudgetAmount = resolvedBudgetAmount,
             CommittedAmount = dto.CommittedAmount,
             ActualAmount = dto.ActualAmount,
             ForecastAmount = dto.ForecastAmount,
@@ -170,7 +195,7 @@ public partial class ProjectService
         await _unitOfWork.Repository<ProjectBoqItem>().AddAsync(entity);
         await SyncProjectPackageAmountsFromBoqAsync(entity.ProjectPackageId);
         await _unitOfWork.SaveChangesAsync();
-        return MapToDto(entity, package);
+        return (await GetProjectBoqItemsAsync(projectId)).Single(x => x.Id == entity.Id);
     }
 
     public async Task<ProjectBoqItemDto> UpdateProjectBoqItemAsync(Guid boqItemId, UpdateProjectBoqItemDto dto)
@@ -187,6 +212,15 @@ public partial class ProjectService
         await ValidateProjectBoqItemAsync(entity.ProjectId, dto);
 
         var previousPackageId = entity.ProjectPackageId;
+        var (resolvedBudgetQuantity, resolvedBudgetUnitRate, resolvedBudgetAmount) = ResolveBoqBudgetFields(
+            dto.Quantity,
+            dto.UnitRate,
+            dto.BudgetQuantity,
+            dto.BudgetUnitRate,
+            dto.BudgetAmount,
+            entity.BudgetQuantity,
+            entity.BudgetUnitRate,
+            entity.BudgetAmount);
         entity.ProjectPackageId = dto.ProjectPackageId;
         entity.LineNumber = TrimOrNull(dto.LineNumber) ?? entity.LineNumber;
         entity.ItemCode = TrimOrNull(dto.ItemCode);
@@ -195,7 +229,9 @@ public partial class ProjectService
         entity.Quantity = dto.Quantity;
         entity.UnitOfMeasure = TrimOrNull(dto.UnitOfMeasure);
         entity.UnitRate = dto.UnitRate;
-        entity.BudgetAmount = ResolveBoqBudgetAmount(dto.BudgetAmount, dto.Quantity, dto.UnitRate);
+        entity.BudgetQuantity = resolvedBudgetQuantity;
+        entity.BudgetUnitRate = resolvedBudgetUnitRate;
+        entity.BudgetAmount = resolvedBudgetAmount;
         entity.CommittedAmount = dto.CommittedAmount;
         entity.ActualAmount = dto.ActualAmount;
         entity.ForecastAmount = dto.ForecastAmount;
@@ -218,7 +254,7 @@ public partial class ProjectService
         }
 
         await _unitOfWork.SaveChangesAsync();
-        return MapToDto(entity, package);
+        return (await GetProjectBoqItemsAsync(entity.ProjectId)).Single(x => x.Id == entity.Id);
     }
 
     public async Task DeleteProjectBoqItemAsync(Guid boqItemId)
@@ -360,8 +396,11 @@ public partial class ProjectService
         }).ToList();
     }
 
-    private async Task ValidateProjectPackageAsync(Guid projectId, CreateProjectPackageDto dto)
+    private async Task ValidateProjectPackageAsync(Guid projectId, CreateProjectPackageDto dto, Guid? currentPackageId = null)
     {
+        EnsureChronologicalDateRange(dto.PlannedStartDate, dto.PlannedEndDate, "work component");
+        var completionWeightPercent = NormalizeCompletionWeightPercent(dto.CompletionWeightPercent, "work component");
+
         if (dto.ProjectPhaseId.HasValue)
         {
             var phase = await GetProjectPhaseEntityAsync(dto.ProjectPhaseId.Value);
@@ -369,6 +408,22 @@ public partial class ProjectService
             {
                 throw new InvalidOperationException("The selected phase does not belong to this project.");
             }
+
+            if (dto.PlannedStartDate.HasValue && phase.PlannedStartDate.HasValue && dto.PlannedStartDate.Value.Date < phase.PlannedStartDate.Value.Date)
+            {
+                throw new InvalidOperationException("The work component start date cannot be earlier than the selected phase start date.");
+            }
+
+            if (dto.PlannedEndDate.HasValue && phase.PlannedEndDate.HasValue && dto.PlannedEndDate.Value.Date > phase.PlannedEndDate.Value.Date)
+            {
+                throw new InvalidOperationException("The work component end date cannot be later than the selected phase end date.");
+            }
+
+            await ValidateProjectPackageCompletionWeightAsync(projectId, dto.ProjectPhaseId.Value, completionWeightPercent, currentPackageId);
+        }
+        else if (completionWeightPercent > 0m)
+        {
+            throw new InvalidOperationException("Assign the work component to a phase before entering a completion weight.");
         }
 
         await EnsureTenantEntityExistsAsync<BusinessPartner>(dto.BusinessPartnerId, "business partner");
@@ -408,30 +463,69 @@ public partial class ProjectService
         }
     }
 
-    private async Task<List<ProjectPackageDto>> MapProjectPackagesAsync(Guid projectId, IReadOnlyCollection<ProjectPackage> packages, IReadOnlyCollection<ProjectBoqItem> boqItems)
+    private async Task ValidateProjectPackageCompletionWeightAsync(Guid projectId, Guid projectPhaseId, decimal completionWeightPercent, Guid? currentPackageId = null)
     {
+        var existingPackages = (await _unitOfWork.Repository<ProjectPackage>().FindAsync(x =>
+                x.ProjectId == projectId
+                && x.ProjectPhaseId == projectPhaseId
+                && x.TenantId == _currentUserProvider.TenantId))
+            .Where(x => !currentPackageId.HasValue || x.Id != currentPackageId.Value)
+            .ToList();
+        var totalWeightPercent = decimal.Round(existingPackages.Sum(x => x.CompletionWeightPercent) + completionWeightPercent, 2);
+        if (totalWeightPercent > 100m)
+        {
+            throw new InvalidOperationException($"The total work component completion weight for the selected phase cannot exceed 100%. Current total would become {totalWeightPercent}%.");
+        }
+    }
+
+    private async Task<List<ProjectPackageDto>> MapProjectPackagesAsync(
+        Guid projectId,
+        IReadOnlyCollection<ProjectPackage> packages,
+        IReadOnlyCollection<ProjectBoqItem> boqItems,
+        ProjectCommercialDerivationContext? derivationContext = null)
+    {
+        derivationContext ??= await BuildProjectCommercialDerivationContextAsync(projectId, packages, boqItems);
         var referenceContext = await BuildProjectPackageReferenceContextAsync(projectId, packages, boqItems);
+        var rawBoqByPackage = boqItems
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.LineNumber)
+            .GroupBy(x => x.ProjectPackageId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ProjectBoqItem>)group.ToList());
         var boqByPackage = boqItems
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.LineNumber)
             .GroupBy(x => x.ProjectPackageId)
             .ToDictionary(
                 group => group.Key,
-                group => group.Select(item => MapToDto(item, referenceContext.PackageLookup.TryGetValue(item.ProjectPackageId, out var package) ? package : null)).ToList());
+                group => group.Select(item =>
+                {
+                    var package = referenceContext.PackageLookup.TryGetValue(item.ProjectPackageId, out var resolvedPackage) ? resolvedPackage : null;
+                    return MapToDto(item, package, DeriveProjectBoqCommercialAmounts(item, package, derivationContext));
+                }).ToList());
 
         return packages
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.Name)
-            .Select(x => MapToDto(
-                x,
-                referenceContext.PhaseLookup,
-                referenceContext.BusinessPartnerLookup,
-                referenceContext.TenderLookup,
-                referenceContext.ContractLookup,
-                referenceContext.ProcurementPlanLookup,
-                referenceContext.PurchaseRequisitionLookup,
-                referenceContext.PurchaseOrderLookup,
-                boqByPackage.TryGetValue(x.Id, out var items) ? items : []))
+            .Select(x =>
+            {
+                IReadOnlyList<ProjectBoqItemDto> packageBoqItems = boqByPackage.TryGetValue(x.Id, out var items)
+                    ? items
+                    : Array.Empty<ProjectBoqItemDto>();
+                IReadOnlyCollection<ProjectBoqItem> rawPackageBoqItems = rawBoqByPackage.TryGetValue(x.Id, out var rawItems)
+                    ? rawItems
+                    : Array.Empty<ProjectBoqItem>();
+                return MapToDto(
+                    x,
+                    referenceContext.PhaseLookup,
+                    referenceContext.BusinessPartnerLookup,
+                    referenceContext.TenderLookup,
+                    referenceContext.ContractLookup,
+                    referenceContext.ProcurementPlanLookup,
+                    referenceContext.PurchaseRequisitionLookup,
+                    referenceContext.PurchaseOrderLookup,
+                    packageBoqItems,
+                    DeriveProjectPackageCommercialAmounts(x, rawPackageBoqItems, packageBoqItems, derivationContext));
+            })
             .ToList();
     }
 
@@ -554,8 +648,39 @@ public partial class ProjectService
         await _unitOfWork.Repository<ProjectPackage>().UpdateAsync(package);
     }
 
-    private static decimal? ResolveBoqBudgetAmount(decimal? requestedBudget, decimal quantity, decimal? unitRate)
-        => requestedBudget ?? (unitRate.HasValue ? decimal.Round(quantity * unitRate.Value, 2) : null);
+    private static (decimal? BudgetQuantity, decimal? BudgetUnitRate, decimal? BudgetAmount) ResolveBoqBudgetFields(
+        decimal quantity,
+        decimal? unitRate,
+        decimal? requestedBudgetQuantity,
+        decimal? requestedBudgetUnitRate,
+        decimal? requestedBudgetAmount,
+        decimal? existingBudgetQuantity = null,
+        decimal? existingBudgetUnitRate = null,
+        decimal? existingBudgetAmount = null)
+    {
+        decimal? budgetQuantity = requestedBudgetQuantity ?? existingBudgetQuantity ?? quantity;
+        decimal? budgetUnitRate = requestedBudgetUnitRate ?? existingBudgetUnitRate ?? unitRate;
+
+        decimal? budgetAmount;
+        if (budgetQuantity.HasValue && budgetUnitRate.HasValue)
+        {
+            budgetAmount = decimal.Round(budgetQuantity.Value * budgetUnitRate.Value, 2);
+        }
+        else if (requestedBudgetAmount.HasValue)
+        {
+            budgetAmount = decimal.Round(requestedBudgetAmount.Value, 2);
+        }
+        else if (existingBudgetAmount.HasValue)
+        {
+            budgetAmount = decimal.Round(existingBudgetAmount.Value, 2);
+        }
+        else
+        {
+            budgetAmount = unitRate.HasValue ? decimal.Round(quantity * unitRate.Value, 2) : null;
+        }
+
+        return (budgetQuantity, budgetUnitRate, budgetAmount);
+    }
 
     private static string NormalizeProjectPackageStatus(string? value)
         => value?.Trim() switch
@@ -592,7 +717,8 @@ public partial class ProjectService
         IReadOnlyDictionary<Guid, ProcurementPlanItem> procurementPlanLookup,
         IReadOnlyDictionary<Guid, PurchaseRequisition> purchaseRequisitionLookup,
         IReadOnlyDictionary<Guid, PurchaseOrder> purchaseOrderLookup,
-        IReadOnlyList<ProjectBoqItemDto> boqItems)
+        IReadOnlyList<ProjectBoqItemDto> boqItems,
+        ProjectDerivedCommercialAmounts derivedAmounts)
     {
         var phase = entity.ProjectPhaseId.HasValue && phaseLookup.TryGetValue(entity.ProjectPhaseId.Value, out var resolvedPhase)
             ? resolvedPhase
@@ -615,6 +741,9 @@ public partial class ProjectService
         RecommendedNextStatus = ResolveRecommendedNextStatus(phase, entity),
         RecommendedNextAction = BuildRecommendedPackageNextAction(phase, entity),
         SortOrder = entity.SortOrder,
+        CompletionWeightPercent = entity.CompletionWeightPercent,
+        PlannedStartDate = entity.PlannedStartDate,
+        PlannedEndDate = entity.PlannedEndDate,
         ProcurementRoute = entity.ProcurementRoute,
         ContractStrategy = entity.ContractStrategy,
         BusinessPartnerId = entity.BusinessPartnerId,
@@ -640,8 +769,8 @@ public partial class ProjectService
             ? order.OrderNumber
             : null,
         BudgetAmount = entity.BudgetAmount,
-        CommittedAmount = entity.CommittedAmount,
-        ActualAmount = entity.ActualAmount,
+        CommittedAmount = derivedAmounts.CommittedAmount,
+        ActualAmount = derivedAmounts.ActualAmount,
         ForecastAmount = entity.ForecastAmount,
         Currency = entity.Currency,
         Notes = entity.Notes,
@@ -649,7 +778,7 @@ public partial class ProjectService
         };
     }
 
-    private static ProjectBoqItemDto MapToDto(ProjectBoqItem entity, ProjectPackage? package) => new()
+    private static ProjectBoqItemDto MapToDto(ProjectBoqItem entity, ProjectPackage? package, ProjectDerivedCommercialAmounts derivedAmounts) => new()
     {
         Id = entity.Id,
         ProjectId = entity.ProjectId,
@@ -663,9 +792,11 @@ public partial class ProjectService
         Quantity = entity.Quantity,
         UnitOfMeasure = entity.UnitOfMeasure,
         UnitRate = entity.UnitRate,
+        BudgetQuantity = entity.BudgetQuantity,
+        BudgetUnitRate = entity.BudgetUnitRate,
         BudgetAmount = entity.BudgetAmount,
-        CommittedAmount = entity.CommittedAmount,
-        ActualAmount = entity.ActualAmount,
+        CommittedAmount = derivedAmounts.CommittedAmount,
+        ActualAmount = derivedAmounts.ActualAmount,
         ForecastAmount = entity.ForecastAmount,
         Currency = entity.Currency,
         InventoryItemId = entity.InventoryItemId,

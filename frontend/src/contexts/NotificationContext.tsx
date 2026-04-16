@@ -138,11 +138,6 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     setError(null);
   }, []);
 
-  // Initial load of notifications
-  useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
-
   const contextValue: NotificationContextType = {
     notifications,
     unreadCount,

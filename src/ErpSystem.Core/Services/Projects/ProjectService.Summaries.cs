@@ -263,7 +263,7 @@ public partial class ProjectService
                 ? $"{tender.TenderNumber} - {tender.Title}".Trim().TrimEnd('-').Trim()
                 : null
             : null;
-        var inventoryCurrencyCode = await GetProjectBaseCurrencyCodeAsync();
+        var inventoryCurrencyCode = await GetProjectBaseCurrencyCodeAsync(project);
         var warehouseIds = inventoryRequisitions.Select(x => x.WarehouseId).Distinct().ToList();
         var warehouses = warehouseIds.Count == 0
             ? new Dictionary<Guid, string>()
@@ -499,13 +499,14 @@ public partial class ProjectService
 
     private static decimal CalculatePlannedValue(Project project, decimal baselineBudget)
     {
-        if (baselineBudget <= 0m || !project.StartDate.HasValue || !project.TargetEndDate.HasValue)
+        var trueEndDate = ResolveProjectTrueEndDate(project);
+        if (baselineBudget <= 0m || !project.StartDate.HasValue || !trueEndDate.HasValue)
         {
             return 0m;
         }
 
         var startDate = project.StartDate.Value.Date;
-        var endDate = project.TargetEndDate.Value.Date;
+        var endDate = trueEndDate.Value.Date;
         if (endDate <= startDate)
         {
             return 0m;

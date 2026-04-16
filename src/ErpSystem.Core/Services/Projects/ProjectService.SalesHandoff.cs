@@ -11,11 +11,16 @@ public partial class ProjectService
     {
         var unit = await GetProjectUnitEntityAsync(unitId);
         await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
-        EnsureUnitIsReadyForSalesHandoff(unit);
+        EnsureUnitIsReadyForAgreementHandoff(unit);
 
         if (unit.SalesAgreementId.HasValue)
         {
             throw new InvalidOperationException("This unit is already linked to a sales agreement.");
+        }
+
+        if (unit.SalesOrderId.HasValue)
+        {
+            throw new InvalidOperationException("This unit is already linked to a sales order.");
         }
 
         var project = await _projectRepository.GetByIdAsync(unit.ProjectId)
@@ -39,7 +44,7 @@ public partial class ProjectService
         });
 
         unit.SalesAgreementId = agreement.Id;
-        unit.Status = ProjectUnitStatuses.Reserved;
+        unit.Status = ResolvePostSalesHandoffStatus(unit.Status);
         unit.UpdatedBy = _currentUserProvider.Username;
         unit.LastModifiedById = _currentUserProvider.UserId;
 
@@ -52,7 +57,7 @@ public partial class ProjectService
     {
         var unit = await GetProjectUnitEntityAsync(unitId);
         await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
-        EnsureUnitIsReadyForSalesHandoff(unit);
+        EnsureUnitIsReadyForAgreementHandoff(unit);
 
         if (unit.SalesAgreementId.HasValue)
         {
@@ -87,7 +92,7 @@ public partial class ProjectService
         });
 
         unit.SalesAgreementId = agreement.Id;
-        unit.Status = ProjectUnitStatuses.Reserved;
+        unit.Status = ResolvePostSalesHandoffStatus(unit.Status);
         unit.UpdatedBy = _currentUserProvider.Username;
         unit.LastModifiedById = _currentUserProvider.UserId;
 
@@ -100,7 +105,7 @@ public partial class ProjectService
     {
         var unit = await GetProjectUnitEntityAsync(unitId);
         await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
-        EnsureUnitIsReadyForSalesHandoff(unit);
+        EnsureUnitIsReadyForSalesOrderHandoff(unit);
 
         if (unit.SalesOrderId.HasValue)
         {
@@ -132,7 +137,7 @@ public partial class ProjectService
         });
 
         unit.SalesOrderId = salesOrder.Id;
-        unit.Status = ProjectUnitStatuses.Reserved;
+        unit.Status = ResolvePostSalesHandoffStatus(unit.Status);
         unit.UpdatedBy = _currentUserProvider.Username;
         unit.LastModifiedById = _currentUserProvider.UserId;
 
@@ -145,7 +150,7 @@ public partial class ProjectService
     {
         var unit = await GetProjectUnitEntityAsync(unitId);
         await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
-        EnsureUnitIsReadyForSalesLink(unit);
+        EnsureUnitIsReadyForAgreementLink(unit);
 
         var salesAgreement = await EnsureTenantSalesAgreementExistsAsync(salesAgreementId)
             ?? throw new InvalidOperationException("The sales agreement could not be found.");
@@ -162,7 +167,7 @@ public partial class ProjectService
 
         unit.CustomerBusinessPartnerId ??= salesAgreement.BusinessPartnerId;
         unit.SalesAgreementId = salesAgreement.Id;
-        unit.Status = ProjectUnitStatuses.Reserved;
+        unit.Status = ResolvePostSalesHandoffStatus(unit.Status);
         unit.UpdatedBy = _currentUserProvider.Username;
         unit.LastModifiedById = _currentUserProvider.UserId;
 
@@ -175,7 +180,7 @@ public partial class ProjectService
     {
         var unit = await GetProjectUnitEntityAsync(unitId);
         await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
-        EnsureUnitIsReadyForSalesLink(unit);
+        EnsureUnitIsReadyForSalesOrderLink(unit);
 
         var salesOrder = await EnsureTenantSalesOrderExistsAsync(salesOrderId)
             ?? throw new InvalidOperationException("The sales order could not be found.");
@@ -192,7 +197,7 @@ public partial class ProjectService
 
         unit.CustomerBusinessPartnerId ??= salesOrder.BusinessPartnerId;
         unit.SalesOrderId = salesOrder.Id;
-        unit.Status = ProjectUnitStatuses.Reserved;
+        unit.Status = ResolvePostSalesHandoffStatus(unit.Status);
         unit.UpdatedBy = _currentUserProvider.Username;
         unit.LastModifiedById = _currentUserProvider.UserId;
 
@@ -201,47 +206,90 @@ public partial class ProjectService
         return await GetProjectUnitDtoAsync(unit.ProjectId, unit.Id);
     }
 
-    private static void EnsureUnitIsReadyForSalesHandoff(ProjectUnit unit)
+    private static void EnsureUnitIsReadyForAgreementHandoff(ProjectUnit unit)
     {
-        if (!CanUnitStartSalesHandoff(unit))
+        if (!CanUnitCreateAgreementHandoff(unit))
         {
-            if (!unit.IsReleasedForMarket)
-            {
-                throw new InvalidOperationException("Release the unit before creating sales handoff records.");
-            }
-
             if (!unit.CustomerBusinessPartnerId.HasValue)
             {
-                throw new InvalidOperationException("Assign a customer to the unit before creating sales handoff records.");
+                throw new InvalidOperationException("Assign a customer to the unit before creating sales agreement records.");
             }
 
-            throw new InvalidOperationException("This unit can no longer be handed off to Sales from the project workspace.");
+            throw new InvalidOperationException("This unit can no longer be linked to a new sales agreement from the project workspace.");
         }
     }
 
-    private static void EnsureUnitIsReadyForSalesLink(ProjectUnit unit)
+    private static void EnsureUnitIsReadyForSalesOrderHandoff(ProjectUnit unit)
     {
         if (!unit.IsReleasedForMarket)
         {
-            throw new InvalidOperationException("Release the unit before linking it to Sales.");
+            throw new InvalidOperationException("Release the unit before creating a sales order.");
         }
 
-        if (ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.HandedOver)
-            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Occupied)
-            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Archived)
-            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Sold)
-            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Leased))
+        if (!CanUnitCreateSalesOrderHandoff(unit))
         {
-            throw new InvalidOperationException("This unit can no longer be linked to new Sales drafts.");
+            if (!unit.CustomerBusinessPartnerId.HasValue)
+            {
+                throw new InvalidOperationException("Assign a customer to the unit before creating a sales order.");
+            }
+
+            throw new InvalidOperationException("This unit can no longer be linked to a new sales order from the project workspace.");
         }
     }
 
-    private static bool CanUnitStartSalesHandoff(ProjectUnit unit)
+    private static void EnsureUnitIsReadyForAgreementLink(ProjectUnit unit)
+    {
+        if (!CanUnitLinkAgreement(unit))
+        {
+            throw new InvalidOperationException("This unit can no longer be linked to a new sales agreement draft.");
+        }
+    }
+
+    private static void EnsureUnitIsReadyForSalesOrderLink(ProjectUnit unit)
+    {
+        if (!unit.IsReleasedForMarket)
+        {
+            throw new InvalidOperationException("Release the unit before linking it to a sales order.");
+        }
+
+        if (!CanUnitLinkSalesOrder(unit))
+        {
+            throw new InvalidOperationException("This unit can no longer be linked to a new sales order draft.");
+        }
+    }
+
+    private static bool CanUnitCreateAgreementHandoff(ProjectUnit unit)
+        => unit.CustomerBusinessPartnerId.HasValue
+            && !unit.SalesAgreementId.HasValue
+            && !unit.SalesOrderId.HasValue
+            && CanUnitParticipateInSalesHandoff(unit);
+
+    private static bool CanUnitCreateSalesOrderHandoff(ProjectUnit unit)
         => unit.IsReleasedForMarket
             && unit.CustomerBusinessPartnerId.HasValue
-            && !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.HandedOver)
-            && !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Occupied)
-            && !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Archived);
+            && !unit.SalesOrderId.HasValue
+            && CanUnitParticipateInSalesHandoff(unit);
+
+    private static bool CanUnitLinkAgreement(ProjectUnit unit)
+        => !unit.SalesAgreementId.HasValue
+            && !unit.SalesOrderId.HasValue
+            && CanUnitParticipateInSalesHandoff(unit);
+
+    private static bool CanUnitLinkSalesOrder(ProjectUnit unit)
+        => unit.IsReleasedForMarket
+            && !unit.SalesOrderId.HasValue
+            && CanUnitParticipateInSalesHandoff(unit);
+
+    private static bool CanUnitParticipateInSalesHandoff(ProjectUnit unit)
+        => !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Occupied)
+            && !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Archived)
+            && !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Sold)
+            && !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Leased);
+
+    private static string ResolvePostSalesHandoffStatus(string? currentStatus)
+        => ProjectUnitStatusEquals(currentStatus, ProjectUnitStatuses.HandedOver)
+            ? ProjectUnitStatuses.HandedOver
+            : ProjectUnitStatuses.Reserved;
 
     private static string BuildProjectUnitAgreementTitle(Project project, ProjectUnit unit)
         => $"{project.Title} - {unit.Name} Agreement";
