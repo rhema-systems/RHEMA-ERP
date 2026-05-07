@@ -27,6 +27,18 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
     }
 
     /// <summary>
+    /// Get positions by organization unit
+    /// </summary>
+    public async Task<IEnumerable<EmployeePosition>> GetByOrganizationUnitAsync(Guid organizationUnitId)
+    {
+        return await _context.Set<EmployeePosition>()
+            .Where(p => !p.IsDeleted && p.OrganizationUnitId == organizationUnitId)
+            .Include(p => p.OrganizationUnit)
+            .OrderBy(p => p.Title)
+            .ToListAsync();
+    }
+
+    /// <summary>
     /// Get positions by department
     /// </summary>
     public async Task<IEnumerable<EmployeePosition>> GetByDepartmentAsync(Guid departmentId)

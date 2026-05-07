@@ -263,7 +263,7 @@ public class HRDataSeeder
                     PositionId = emp.PositionId,
                     DateEmployed = DateOnly.FromDateTime(DateTime.UtcNow.AddMonths(-12)),
                     StaffStatus = StaffStatus.Active,
-                    ContractType = ContractType.Permanent,
+                    EmploymentType = EmploymentType.Permanent,
                     IsFullTime = true,
                     Gender = Gender.Male, // Simplified for sample data
                     IsActive = true,

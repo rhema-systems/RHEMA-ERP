@@ -196,10 +196,10 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
-        public async Task<IEnumerable<Employee>> GetByContractTypeAsync(ContractType contractType)
+        public async Task<IEnumerable<Employee>> GetByEmploymentTypeAsync(EmploymentType employmentType)
         {
             return await WithBasicIncludes(BaseQuery())
-                .Where(e => e.ContractType == contractType)
+                .Where(e => e.EmploymentType == employmentType)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();

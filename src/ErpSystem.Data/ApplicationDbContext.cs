@@ -261,6 +261,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     #region Employee Management
     
     public DbSet<Employee> Employees { get; set; }
+    public DbSet<EmployeeContact> EmployeeContacts { get; set; }
     public DbSet<EmployeeEmergencyContact> EmployeeEmergencyContacts { get; set; }
     public DbSet<EmployeeDependent> EmployeeDependents { get; set; }
     public DbSet<EmployeeDependentBenefit> EmployeeDependentBenefits { get; set; }
@@ -277,6 +278,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EmployeeSkill> EmployeeSkills { get; set; }
     public DbSet<EmployeeBiometric> EmployeeBiometrics { get; set; }
     public DbSet<EmployeeShiftPreference> EmployeeShiftPreferences { get; set; }
+    public DbSet<Bank> Banks { get; set; }
+    public DbSet<BankBranch> BankBranches { get; set; }
+    public DbSet<EmployeeBankDetail> EmployeeBankDetails { get; set; }
 
     #endregion Employee Management
 
@@ -2771,6 +2775,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
+        builder.Entity<EmployeeContact>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => new { e.EmployeeId, e.IsPrimary });
+            entity.HasIndex(e => e.ContactType);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.Contacts)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // Configure Position History entity
         builder.Entity<EmployeePositionHistory>(entity =>
         {
@@ -2936,7 +2957,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         builder.Entity<EmployeeContractDetail>(entity =>
         {
-            entity.Property(e => e.ContractType).HasConversion<int>();
+            entity.Property(e => e.EmploymentType).HasConversion<int>();
             entity.Property(e => e.PayFrequency).HasConversion<int>();
             entity.Property(e => e.TaxTreatmentType).HasConversion<int>();
             entity.Property(e => e.ContractStatus).HasConversion<int>();
@@ -3080,6 +3101,60 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(e => e.Country)
                 .WithMany()
                 .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Bank>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_Bank_Tenant_Code");
+
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<BankBranch>(entity =>
+        {
+            entity.HasIndex(e => e.BankId);
+            entity.HasIndex(e => new { e.TenantId, e.BankId, e.Code })
+                .HasDatabaseName("IX_BankBranch_Tenant_Bank_Code");
+
+            entity.HasOne(e => e.Bank)
+                .WithMany(b => b.Branches)
+                .HasForeignKey(e => e.BankId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeBankDetail>(entity =>
+        {
+            entity.Property(e => e.AccountType).HasConversion<int>();
+
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeId, e.AccountNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_EmployeeBankDetail_Tenant_Employee_AccountNumber");
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.BankDetails)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Bank)
+                .WithMany()
+                .HasForeignKey(e => e.BankId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
