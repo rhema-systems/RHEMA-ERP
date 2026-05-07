@@ -1412,7 +1412,7 @@ public class EmployeeGuarantor : TenantEntity
 /// <summary>
 /// Represents a bank (financial institution) used as a reference for employee bank details.
 /// </summary>
-public class Bank : TenantEntity
+public class EmployeeBank : TenantEntity
 {
     [Required]
     [MaxLength(200)]
@@ -1434,19 +1434,19 @@ public class Bank : TenantEntity
 
     public bool IsActive { get; set; } = true;
 
-    public virtual ICollection<BankBranch> Branches { get; set; } = new List<BankBranch>();
+    public virtual ICollection<EmployeeBankBranch> Branches { get; set; } = new List<EmployeeBankBranch>();
 }
 
 /// <summary>
 /// Represents a branch of a <see cref="Bank"/>.
 /// </summary>
-public class BankBranch : TenantEntity
+public class EmployeeBankBranch : TenantEntity
 {
     [Required]
     public Guid BankId { get; set; }
 
     [ForeignKey(nameof(BankId))]
-    public virtual Bank Bank { get; set; } = null!;
+    public virtual EmployeeBank Bank { get; set; } = null!;
 
     [Required]
     [MaxLength(200)]
@@ -1493,12 +1493,12 @@ public class EmployeeBankDetail : TenantEntity
     public Guid? BankId { get; set; }
 
     [ForeignKey(nameof(BankId))]
-    public virtual Bank? Bank { get; set; }
+    public virtual EmployeeBank? Bank { get; set; }
 
     public Guid? BranchId { get; set; }
 
     [ForeignKey(nameof(BranchId))]
-    public virtual BankBranch? Branch { get; set; }
+    public virtual EmployeeBankBranch? Branch { get; set; }
 
     // ── Free-text fallback (used when Bank/Branch entities are not selected) ──
  

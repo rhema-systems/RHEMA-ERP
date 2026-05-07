@@ -11,15 +11,15 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Authorize]
-public class BanksController : ControllerBase
+public class EmployeeBanksController : ControllerBase
 {
-    private readonly IBankService _bankService;
-    private readonly IBankBranchService _branchService;
+    private readonly IEmployeeBankService _bankService;
+    private readonly IEmployeeBankBranchService _branchService;
     private readonly ICurrentUserService _currentUserService;
 
-    public BanksController(
-        IBankService bankService,
-        IBankBranchService branchService,
+    public EmployeeBanksController(
+        IEmployeeBankService bankService,
+        IEmployeeBankBranchService branchService,
         ICurrentUserService currentUserService)
     {
         _bankService = bankService;
@@ -39,9 +39,9 @@ public class BanksController : ControllerBase
 
     /// <summary>Get all banks for the current tenant.</summary>
     [HttpGet("api/hr/banks")]
-    [ProducesResponseType(typeof(IReadOnlyList<BankDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<EmployeeBankDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<IReadOnlyList<BankDto>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<EmployeeBankDto>>> GetAll(CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -52,9 +52,9 @@ public class BanksController : ControllerBase
 
     /// <summary>Get active banks only.</summary>
     [HttpGet("api/hr/banks/active")]
-    [ProducesResponseType(typeof(IReadOnlyList<BankDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<EmployeeBankDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<IReadOnlyList<BankDto>>> GetActive(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<EmployeeBankDto>>> GetActive(CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -65,10 +65,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Get a bank by ID.</summary>
     [HttpGet("api/hr/banks/{id:guid}")]
-    [ProducesResponseType(typeof(BankDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BankDto>> GetById(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -86,10 +86,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Get a bank by short code.</summary>
     [HttpGet("api/hr/banks/code/{code}")]
-    [ProducesResponseType(typeof(BankDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BankDto>> GetByCode(string code, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankDto>> GetByCode(string code, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -103,10 +103,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Create a new bank.</summary>
     [HttpPost("api/hr/banks")]
-    [ProducesResponseType(typeof(BankDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BankDto>> Create([FromBody] CreateBankDto dto, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankDto>> Create([FromBody] CreateEmployeeBankDto dto, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -131,11 +131,11 @@ public class BanksController : ControllerBase
 
     /// <summary>Update an existing bank.</summary>
     [HttpPut("api/hr/banks/{id:guid}")]
-    [ProducesResponseType(typeof(BankDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BankDto>> Update(Guid id, [FromBody] UpdateBankDto dto, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankDto>> Update(Guid id, [FromBody] UpdateEmployeeBankDto dto, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -163,10 +163,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Activate a bank.</summary>
     [HttpPatch("api/hr/banks/{id:guid}/activate")]
-    [ProducesResponseType(typeof(BankDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BankDto>> Activate(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankDto>> Activate(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -184,10 +184,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Deactivate a bank.</summary>
     [HttpPatch("api/hr/banks/{id:guid}/deactivate")]
-    [ProducesResponseType(typeof(BankDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BankDto>> Deactivate(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankDto>> Deactivate(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -235,10 +235,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Get all branches for a bank.</summary>
     [HttpGet("api/hr/banks/{bankId:guid}/branches")]
-    [ProducesResponseType(typeof(IReadOnlyList<BankBranchDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<EmployeeBankBranchDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<IReadOnlyList<BankBranchDto>>> GetBranches(Guid bankId, CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<EmployeeBankBranchDto>>> GetBranches(Guid bankId, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -256,9 +256,9 @@ public class BanksController : ControllerBase
 
     /// <summary>Get active branches for a bank.</summary>
     [HttpGet("api/hr/banks/{bankId:guid}/branches/active")]
-    [ProducesResponseType(typeof(IReadOnlyList<BankBranchDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<EmployeeBankBranchDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<IReadOnlyList<BankBranchDto>>> GetActiveBranches(Guid bankId, CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<EmployeeBankBranchDto>>> GetActiveBranches(Guid bankId, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -269,11 +269,11 @@ public class BanksController : ControllerBase
 
     /// <summary>Create a branch under a specific bank.</summary>
     [HttpPost("api/hr/banks/{bankId:guid}/branches")]
-    [ProducesResponseType(typeof(BankBranchDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BankBranchDto>> CreateBranch(Guid bankId, [FromBody] CreateBankBranchDto dto, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankBranchDto>> CreateBranch(Guid bankId, [FromBody] CreateEmployeeBankBranchDto dto, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -301,10 +301,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Get a branch by ID.</summary>
     [HttpGet("api/hr/bank-branches/{id:guid}")]
-    [ProducesResponseType(typeof(BankBranchDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BankBranchDto>> GetBranchById(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankBranchDto>> GetBranchById(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -322,11 +322,11 @@ public class BanksController : ControllerBase
 
     /// <summary>Update an existing branch.</summary>
     [HttpPut("api/hr/bank-branches/{id:guid}")]
-    [ProducesResponseType(typeof(BankBranchDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BankBranchDto>> UpdateBranch(Guid id, [FromBody] UpdateBankBranchDto dto, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankBranchDto>> UpdateBranch(Guid id, [FromBody] UpdateEmployeeBankBranchDto dto, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -354,10 +354,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Activate a branch.</summary>
     [HttpPatch("api/hr/bank-branches/{id:guid}/activate")]
-    [ProducesResponseType(typeof(BankBranchDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BankBranchDto>> ActivateBranch(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankBranchDto>> ActivateBranch(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });
@@ -375,10 +375,10 @@ public class BanksController : ControllerBase
 
     /// <summary>Deactivate a branch.</summary>
     [HttpPatch("api/hr/bank-branches/{id:guid}/deactivate")]
-    [ProducesResponseType(typeof(BankBranchDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BankBranchDto>> DeactivateBranch(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmployeeBankBranchDto>> DeactivateBranch(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "Tenant ID is required." });

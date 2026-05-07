@@ -704,8 +704,8 @@ namespace ErpSystem.Api.Extensions
 
             services.AddScoped<IDepartmentService, DepartmentService>();
             services.AddScoped<IEmployeePositionService, EmployeePositionService>();
-            services.AddScoped<IBankService, BankService>();
-            services.AddScoped<IBankBranchService, BankBranchService>();
+            services.AddScoped<IEmployeeBankService, EmployeeBankService>();
+            services.AddScoped<IEmployeeBankBranchService, EmployeeBankBranchService>();
             
             services.AddScoped<IAppraisalGradeDefinitionService, AppraisalGradeDefinitionService>();
             services.AddScoped<IKpiDefinitionService, KpiDefinitionService>();

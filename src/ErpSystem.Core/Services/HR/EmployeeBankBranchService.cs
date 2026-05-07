@@ -15,12 +15,12 @@ namespace ErpSystem.Core.Services.HR;
 /// - Unique Code invariant enforcement (per bank)
 /// - Delete safety (blocked when referenced by EmployeeBankDetail)
 /// </summary>
-public class BankBranchService : IBankBranchService
+public class EmployeeBankBranchService : IEmployeeBankBranchService
 {
     private readonly IUnitOfWork _unitOfWork;
-    private readonly ILogger<BankBranchService> _logger;
+    private readonly ILogger<EmployeeBankBranchService> _logger;
 
-    public BankBranchService(IUnitOfWork unitOfWork, ILogger<BankBranchService> logger)
+    public EmployeeBankBranchService(IUnitOfWork unitOfWork, ILogger<EmployeeBankBranchService> logger)
     {
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -28,9 +28,9 @@ public class BankBranchService : IBankBranchService
 
     // ── Queries ──────────────────────────────────────────────────────────────
 
-    public async Task<IReadOnlyList<BankBranchDto>> GetByBankAsync(Guid tenantId, Guid bankId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<EmployeeBankBranchDto>> GetByBankAsync(Guid tenantId, Guid bankId, CancellationToken cancellationToken = default)
     {
-        var items = await _unitOfWork.Repository<BankBranch>()
+        var items = await _unitOfWork.Repository<EmployeeBankBranch>()
             .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && br.BankId == bankId)
             .Include(br => br.Bank)
             .Include(br => br.Country)
@@ -41,9 +41,9 @@ public class BankBranchService : IBankBranchService
         return items.Select(br => br.ToDto()).ToList();
     }
 
-    public async Task<IReadOnlyList<BankBranchDto>> GetActiveByBankAsync(Guid tenantId, Guid bankId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<EmployeeBankBranchDto>> GetActiveByBankAsync(Guid tenantId, Guid bankId, CancellationToken cancellationToken = default)
     {
-        var items = await _unitOfWork.Repository<BankBranch>()
+        var items = await _unitOfWork.Repository<EmployeeBankBranch>()
             .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && br.BankId == bankId && br.IsActive)
             .Include(br => br.Bank)
             .Include(br => br.Country)
@@ -54,16 +54,16 @@ public class BankBranchService : IBankBranchService
         return items.Select(br => br.ToDto()).ToList();
     }
 
-    public async Task<BankBranchDto> GetByIdAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<EmployeeBankBranchDto> GetByIdAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
         return entity.ToDto();
     }
 
-    public async Task<BankBranchDto?> GetByCodeAsync(Guid tenantId, Guid bankId, string code, CancellationToken cancellationToken = default)
+    public async Task<EmployeeBankBranchDto?> GetByCodeAsync(Guid tenantId, Guid bankId, string code, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeCode(code);
-        var entity = await _unitOfWork.Repository<BankBranch>()
+        var entity = await _unitOfWork.Repository<EmployeeBankBranch>()
             .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && br.BankId == bankId && br.Code == normalized)
             .Include(br => br.Bank)
             .Include(br => br.Country)
@@ -75,12 +75,12 @@ public class BankBranchService : IBankBranchService
 
     // ── Commands ─────────────────────────────────────────────────────────────
 
-    public async Task<BankBranchDto> CreateAsync(Guid tenantId, CreateBankBranchDto dto, CancellationToken cancellationToken = default)
+    public async Task<EmployeeBankBranchDto> CreateAsync(Guid tenantId, CreateEmployeeBankBranchDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
         // Ensure parent bank exists in this tenant
-        var bankExists = await _unitOfWork.Repository<Bank>()
+        var bankExists = await _unitOfWork.Repository<EmployeeBank>()
             .ExistsAsync(b => b.TenantId == tenantId && !b.IsDeleted && b.Id == dto.BankId);
 
         if (!bankExists)
@@ -98,7 +98,7 @@ public class BankBranchService : IBankBranchService
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
 
-        await _unitOfWork.Repository<BankBranch>().AddAsync(entity);
+        await _unitOfWork.Repository<EmployeeBankBranch>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with nav props for accurate DTO
@@ -107,7 +107,7 @@ public class BankBranchService : IBankBranchService
         return created.ToDto();
     }
 
-    public async Task<BankBranchDto> UpdateAsync(Guid tenantId, UpdateBankBranchDto dto, CancellationToken cancellationToken = default)
+    public async Task<EmployeeBankBranchDto> UpdateAsync(Guid tenantId, UpdateEmployeeBankBranchDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -124,34 +124,34 @@ public class BankBranchService : IBankBranchService
         dto.Apply(entity);
         entity.UpdatedAt = DateTime.UtcNow;
 
-        await _unitOfWork.Repository<BankBranch>().UpdateAsync(entity);
+        await _unitOfWork.Repository<EmployeeBankBranch>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("BankBranch '{Name}' updated for tenant {TenantId}.", entity.Name, tenantId);
         return entity.ToDto();
     }
 
-    public async Task<BankBranchDto> ActivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<EmployeeBankBranchDto> ActivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
         if (!entity.IsActive)
         {
             entity.IsActive = true;
             entity.UpdatedAt = DateTime.UtcNow;
-            await _unitOfWork.Repository<BankBranch>().UpdateAsync(entity);
+            await _unitOfWork.Repository<EmployeeBankBranch>().UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
         return entity.ToDto();
     }
 
-    public async Task<BankBranchDto> DeactivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<EmployeeBankBranchDto> DeactivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
         if (entity.IsActive)
         {
             entity.IsActive = false;
             entity.UpdatedAt = DateTime.UtcNow;
-            await _unitOfWork.Repository<BankBranch>().UpdateAsync(entity);
+            await _unitOfWork.Repository<EmployeeBankBranch>().UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
         return entity.ToDto();
@@ -169,7 +169,7 @@ public class BankBranchService : IBankBranchService
 
         entity.IsDeleted = true;
         entity.DeletedAt = DateTime.UtcNow;
-        await _unitOfWork.Repository<BankBranch>().UpdateAsync(entity);
+        await _unitOfWork.Repository<EmployeeBankBranch>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("BankBranch '{Name}' soft-deleted for tenant {TenantId}.", entity.Name, tenantId);
@@ -178,9 +178,9 @@ public class BankBranchService : IBankBranchService
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private async Task<BankBranch> FindOrThrowAsync(Guid tenantId, Guid id, CancellationToken cancellationToken)
+    private async Task<EmployeeBankBranch> FindOrThrowAsync(Guid tenantId, Guid id, CancellationToken cancellationToken)
     {
-        var entity = await _unitOfWork.Repository<BankBranch>()
+        var entity = await _unitOfWork.Repository<EmployeeBankBranch>()
             .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && br.Id == id)
             .Include(br => br.Bank)
             .Include(br => br.Country)
@@ -191,7 +191,7 @@ public class BankBranchService : IBankBranchService
 
     private async Task<bool> CodeExistsAsync(Guid tenantId, Guid bankId, string normalizedCode, Guid? excludeId, CancellationToken cancellationToken)
     {
-        return await _unitOfWork.Repository<BankBranch>()
+        return await _unitOfWork.Repository<EmployeeBankBranch>()
             .ExistsAsync(br => br.TenantId == tenantId && !br.IsDeleted && br.BankId == bankId
                                 && br.Code == normalizedCode
                                 && (excludeId == null || br.Id != excludeId));

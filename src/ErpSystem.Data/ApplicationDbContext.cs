@@ -278,8 +278,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EmployeeSkill> EmployeeSkills { get; set; }
     public DbSet<EmployeeBiometric> EmployeeBiometrics { get; set; }
     public DbSet<EmployeeShiftPreference> EmployeeShiftPreferences { get; set; }
-    public DbSet<Bank> Banks { get; set; }
-    public DbSet<BankBranch> BankBranches { get; set; }
+    public DbSet<EmployeeBank> EmployeeBanks { get; set; }
+    public DbSet<EmployeeBankBranch> EmployeeBankBranches { get; set; }
     public DbSet<EmployeeBankDetail> EmployeeBankDetails { get; set; }
 
     #endregion Employee Management
@@ -3104,11 +3104,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        builder.Entity<Bank>(entity =>
+        builder.Entity<EmployeeBank>(entity =>
         {
             entity.HasIndex(e => new { e.TenantId, e.Code })
                 .IsUnique()
-                .HasDatabaseName("IX_Bank_Tenant_Code");
+                .HasDatabaseName("IX_EmployeeBank_Tenant_Code");
 
             entity.HasOne(e => e.Country)
                 .WithMany()
@@ -3116,11 +3116,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        builder.Entity<BankBranch>(entity =>
+        builder.Entity<EmployeeBankBranch>(entity =>
         {
             entity.HasIndex(e => e.BankId);
             entity.HasIndex(e => new { e.TenantId, e.BankId, e.Code })
-                .HasDatabaseName("IX_BankBranch_Tenant_Bank_Code");
+                .HasDatabaseName("IX_EmployeeBankBranch_Tenant_Bank_Code");
 
             entity.HasOne(e => e.Bank)
                 .WithMany(b => b.Branches)

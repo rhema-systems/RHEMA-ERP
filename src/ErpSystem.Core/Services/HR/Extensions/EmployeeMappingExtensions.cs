@@ -1268,7 +1268,7 @@ public static class EmployeeMappingExtensions
 
         #region Bank Reference Entities
 
-    public static BankDto ToDto(this Bank b, int branchCount = 0) => new()
+    public static EmployeeBankDto ToDto(this EmployeeBank b, int branchCount = 0) => new()
     {
         Id          = b.Id,
         Name        = b.Name,
@@ -1280,7 +1280,7 @@ public static class EmployeeMappingExtensions
         BranchCount = branchCount,
     };
 
-    public static Bank ToEntity(this CreateBankDto dto) => new()
+    public static EmployeeBank ToEntity(this CreateEmployeeBankDto dto) => new()
     {
         Name      = dto.Name.Trim(),
         Code      = dto.Code.Trim().ToUpperInvariant(),
@@ -1289,7 +1289,7 @@ public static class EmployeeMappingExtensions
         IsActive  = dto.IsActive,
     };
 
-    public static void Apply(this UpdateBankDto dto, Bank b)
+    public static void Apply(this UpdateEmployeeBankDto dto, EmployeeBank b)
     {
         if (dto.Name != null)      b.Name      = dto.Name.Trim();
         if (dto.Code != null)      b.Code      = dto.Code.Trim().ToUpperInvariant();
@@ -1298,7 +1298,7 @@ public static class EmployeeMappingExtensions
         if (dto.IsActive.HasValue)  b.IsActive  = dto.IsActive.Value;
     }
 
-    public static BankBranchDto ToDto(this BankBranch br) => new()
+    public static EmployeeBankBranchDto ToDto(this EmployeeBankBranch br) => new()
     {
         Id          = br.Id,
         BankId      = br.BankId,
@@ -1315,7 +1315,7 @@ public static class EmployeeMappingExtensions
         IsActive    = br.IsActive,
     };
 
-    public static BankBranch ToEntity(this CreateBankBranchDto dto) => new()
+    public static EmployeeBankBranch ToEntity(this CreateEmployeeBankBranchDto dto) => new()
     {
         BankId      = dto.BankId,
         Name        = dto.Name.Trim(),
@@ -1328,7 +1328,7 @@ public static class EmployeeMappingExtensions
         IsActive    = dto.IsActive,
     };
 
-    public static void Apply(this UpdateBankBranchDto dto, BankBranch br)
+    public static void Apply(this UpdateEmployeeBankBranchDto dto, EmployeeBankBranch br)
     {
         if (dto.Name != null)         br.Name        = dto.Name.Trim();
         if (dto.Code != null)         br.Code        = dto.Code.Trim().ToUpperInvariant();

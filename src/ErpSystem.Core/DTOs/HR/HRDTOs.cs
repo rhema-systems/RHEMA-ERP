@@ -1619,7 +1619,7 @@ public class UpdateEmployeeGuarantorDto
 
 // ─── Bank + Branch Reference DTOs ────────────────────────────────────────────
 
-public class BankDto
+public class EmployeeBankDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1631,7 +1631,7 @@ public class BankDto
     public int BranchCount { get; set; }
 }
 
-public class CreateBankDto
+public class CreateEmployeeBankDto
 {
     [Required]
     [MaxLength(200)]
@@ -1649,7 +1649,7 @@ public class CreateBankDto
     public bool IsActive { get; set; } = true;
 }
 
-public class UpdateBankDto
+public class UpdateEmployeeBankDto
 {
     [Required]
     public Guid Id { get; set; }
@@ -1668,7 +1668,7 @@ public class UpdateBankDto
     public bool? IsActive { get; set; }
 }
 
-public class BankBranchDto
+public class EmployeeBankBranchDto
 {
     public Guid Id { get; set; }
     public Guid BankId { get; set; }
@@ -1685,7 +1685,7 @@ public class BankBranchDto
     public bool IsActive { get; set; }
 }
 
-public class CreateBankBranchDto
+public class CreateEmployeeBankBranchDto
 {
     [Required]
     public Guid BankId { get; set; }
@@ -1715,7 +1715,7 @@ public class CreateBankBranchDto
     public bool IsActive { get; set; } = true;
 }
 
-public class UpdateBankBranchDto
+public class UpdateEmployeeBankBranchDto
 {
     [Required]
     public Guid Id { get; set; }
