@@ -675,6 +675,13 @@ public class EmployeeService : IEmployeeService
         return entity.ToDto();
     }
 
+    public async Task<EmployeeContactDto?> GetContactByIdAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(contactId);
+        return entity?.ToDto();
+    }
+
     public async Task<IEnumerable<EmployeeEmergencyContactDto>> GetEmergencyContactsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeEmergencyContact>();
