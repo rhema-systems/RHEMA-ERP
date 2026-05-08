@@ -51,7 +51,7 @@ const ReportTemplates: React.FC<ReportTemplatesProps> = ({ onCreateFromTemplate 
     data: templates = [],
     isLoading,
     error
-  } = useQuery({
+  } = useQuery<ReportTemplate[], Error>({
     queryKey: ['reportTemplates', selectedCategory !== 'all' ? selectedCategory : undefined],
     queryFn: () => reportsService.getReportTemplates(
       selectedCategory !== 'all' ? selectedCategory : undefined
@@ -140,7 +140,7 @@ const ReportTemplates: React.FC<ReportTemplatesProps> = ({ onCreateFromTemplate 
     console.log('Edit template:', templateId)
   }
 
-  const useTemplate = (templateId: string) => {
+  const handleUseTemplate = (templateId: string) => {
     try {
       toast({
         title: 'Creating Report from Template',
@@ -377,7 +377,7 @@ const ReportTemplates: React.FC<ReportTemplatesProps> = ({ onCreateFromTemplate 
                   
                   <Button 
                     size="sm"
-                    onClick={() => useTemplate(template.id)}
+                    onClick={() => handleUseTemplate(template.id)}
                   >
                     Use Template
                   </Button>

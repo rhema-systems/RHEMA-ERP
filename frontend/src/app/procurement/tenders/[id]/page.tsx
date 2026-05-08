@@ -27,7 +27,7 @@ import { Calculator, Shield } from 'lucide-react';
 export default function TenderDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const tenderId = params.id as string;
+  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,7 +62,6 @@ export default function TenderDetailPage() {
     if (tenderId) {
       loadTenderDetails();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenderId]);
 
   const getStatusBadge = (status: string) => {
@@ -111,11 +110,13 @@ export default function TenderDetailPage() {
 
   const handlePublishClick = () => {
     // Pre-fill submission deadline if available
-    if (tender?.submissionDeadline) {
+    const submissionDeadline = tender?.submissionDeadline;
+    const openingDate = tender?.openingDate;
+    if (submissionDeadline) {
       setPublishData(prev => ({
         ...prev,
-        submissionDeadline: new Date(tender.submissionDeadline).toISOString().split('T')[0],
-        openingDate: tender.openingDate ? new Date(tender.openingDate).toISOString().split('T')[0] : '',
+        submissionDeadline: new Date(submissionDeadline).toISOString().split('T')[0],
+        openingDate: openingDate ? new Date(openingDate).toISOString().split('T')[0] : '',
       }));
     }
     setShowPublishDialog(true);
@@ -677,7 +678,7 @@ export default function TenderDetailPage() {
                             <div>
                               <p className="font-medium text-sm">{proposalTemplate.documentName}</p>
                               <p className="text-xs text-gray-500">
-                                Uploaded {proposalTemplate.uploadedAt ? format(new Date(proposalTemplate.uploadedAt), 'PPp') : ''}
+                                Uploaded {proposalTemplate.uploadedAt || proposalTemplate.uploadedDate ? format(new Date(proposalTemplate.uploadedAt || proposalTemplate.uploadedDate || ''), 'PPp') : ''}
                               </p>
                             </div>
                           </div>
@@ -999,7 +1000,7 @@ export default function TenderDetailPage() {
                         <TableCell className="font-medium">{invitation.businessPartnerName}</TableCell>
                         <TableCell>{formatDate(invitation.invitedDate)}</TableCell>
                         <TableCell>
-                          {invitation.notificationSent ? (
+                          {(invitation.notificationSent ?? false) ? (
                             <Badge variant="default" className="bg-green-100 text-green-800">Sent</Badge>
                           ) : (
                             <Badge variant="outline">Not Sent</Badge>

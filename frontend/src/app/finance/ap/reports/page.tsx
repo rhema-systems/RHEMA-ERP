@@ -1,0 +1,339 @@
+'use client';
+
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import {
+    Calendar as CalendarIcon,
+    Download,
+    FileText,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { accountsPayableService } from '@/services/accountsPayableService';
+import { formatCurrency, cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
+
+export default function ApReportsPage() {
+    const [activeTab, setActiveTab] = useState('aging');
+
+    return (
+        <div className="space-y-8 p-8 max-w-[1600px] mx-auto">
+            <div>
+                <h1 className="text-3xl font-bold tracking-tight">AP Reports</h1>
+                <p className="text-muted-foreground mt-2">
+                    Analyze your payables, cash requirements, and generate supplier statements.
+                </p>
+            </div>
+
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+                <TabsList>
+                    <TabsTrigger value="aging">AP Aging Analysis</TabsTrigger>
+                    <TabsTrigger value="cash">Cash Requirements</TabsTrigger>
+                    <TabsTrigger value="statements">Supplier Statements</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="aging">
+                    <ApAgingReportView />
+                </TabsContent>
+
+                <TabsContent value="cash">
+                    <CashRequirementsView />
+                </TabsContent>
+
+                <TabsContent value="statements">
+                    <SupplierStatementsView />
+                </TabsContent>
+            </Tabs>
+        </div>
+    );
+}
+
+function ApAgingReportView() {
+    const [asOfDate, setAsOfDate] = useState<Date>(new Date());
+
+    const { data: agingReport, isLoading } = useQuery({
+        queryKey: ['ap-aging-report', asOfDate],
+        queryFn: () => accountsPayableService.getAgingReport(format(asOfDate, 'yyyy-MM-dd')),
+    });
+
+    return (
+        <Card>
+            <CardHeader>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <CardTitle>Aged Payables (AP Aging)</CardTitle>
+                        <CardDescription>Breakdown of outstanding balances to suppliers by days overdue</CardDescription>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    className={cn(
+                                        "w-[200px] justify-start text-left font-normal",
+                                        !asOfDate && "text-muted-foreground"
+                                    )}
+                                >
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {asOfDate ? format(asOfDate, "PPP") : <span>As of Date</span>}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0">
+                                <Calendar
+                                    mode="single"
+                                    selected={asOfDate}
+                                    onSelect={(date) => date && setAsOfDate(date)}
+                                    initialFocus
+                                />
+                            </PopoverContent>
+                        </Popover>
+                        <Button variant="outline" size="icon">
+                            <Download className="h-4 w-4" />
+                        </Button>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent>
+                {isLoading ? (
+                    <div className="space-y-4">
+                        <Skeleton className="h-12 w-full" />
+                        <Skeleton className="h-64 w-full" />
+                    </div>
+                ) : !agingReport ? (
+                    <div className="text-center py-12 text-muted-foreground">No data available</div>
+                ) : (
+                    <div className="space-y-6">
+                        {/* Summary Bar */}
+                        <div className="grid grid-cols-5 gap-4">
+                            <Card className="bg-muted/30">
+                                <CardContent className="p-4 text-center">
+                                    <div className="text-sm font-medium text-muted-foreground mb-1">Current</div>
+                                    <div className="text-xl font-bold text-green-600">{formatCurrency(agingReport.current)}</div>
+                                </CardContent>
+                            </Card>
+                            <Card className="bg-muted/30">
+                                <CardContent className="p-4 text-center">
+                                    <div className="text-sm font-medium text-muted-foreground mb-1">1 - 30 Days</div>
+                                    <div className="text-xl font-bold text-amber-500">{formatCurrency(agingReport.thirtyDays)}</div>
+                                </CardContent>
+                            </Card>
+                            <Card className="bg-muted/30">
+                                <CardContent className="p-4 text-center">
+                                    <div className="text-sm font-medium text-muted-foreground mb-1">31 - 60 Days</div>
+                                    <div className="text-xl font-bold text-amber-600">{formatCurrency(agingReport.sixtyDays)}</div>
+                                </CardContent>
+                            </Card>
+                            <Card className="bg-muted/30">
+                                <CardContent className="p-4 text-center">
+                                    <div className="text-sm font-medium text-muted-foreground mb-1">61 - 90+ Days</div>
+                                    <div className="text-xl font-bold text-red-600">{formatCurrency(agingReport.ninetyPlusDays)}</div>
+                                </CardContent>
+                            </Card>
+                            <Card className="bg-primary/5 border-primary/20">
+                                <CardContent className="p-4 text-center">
+                                    <div className="text-sm font-medium text-primary mb-1">Total Outstanding</div>
+                                    <div className="text-2xl font-black text-primary">{formatCurrency(agingReport.totalOutstanding)}</div>
+                                    <div className="text-xs text-muted-foreground mt-1">{agingReport.totalSuppliers} suppliers</div>
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        {/* Detailed Table */}
+                        <div className="border rounded-md">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Supplier</TableHead>
+                                        <TableHead className="text-right">Current</TableHead>
+                                        <TableHead className="text-right">1-30 Days</TableHead>
+                                        <TableHead className="text-right">31-60 Days</TableHead>
+                                        <TableHead className="text-right">61-90+ Days</TableHead>
+                                        <TableHead className="text-right">Total Balance</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {agingReport.supplierDetails?.map((supplier, i) => (
+                                        <TableRow key={i}>
+                                            <TableCell className="font-medium">
+                                                {supplier.supplierName}
+                                                <div className="text-xs text-muted-foreground">{supplier.invoiceCount} invoices</div>
+                                            </TableCell>
+                                            <TableCell className="text-right">{supplier.current > 0 ? formatCurrency(supplier.current) : '-'}</TableCell>
+                                            <TableCell className="text-right">{supplier.thirtyDays > 0 ? formatCurrency(supplier.thirtyDays) : '-'}</TableCell>
+                                            <TableCell className="text-right">{supplier.sixtyDays > 0 ? formatCurrency(supplier.sixtyDays) : '-'}</TableCell>
+                                            <TableCell className="text-right">{supplier.ninetyPlusDays > 0 ? formatCurrency(supplier.ninetyPlusDays) : '-'}</TableCell>
+                                            <TableCell className="text-right font-bold text-primary">{formatCurrency(supplier.totalOutstanding)}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                    {(!agingReport.supplierDetails || agingReport.supplierDetails.length === 0) && (
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
+                                                No suppliers with outstanding balances.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                    {agingReport.supplierDetails && agingReport.supplierDetails.length > 0 && (
+                                        <TableRow className="bg-muted/50 font-bold">
+                                            <TableCell>Total</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.current)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.thirtyDays)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.sixtyDays)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.ninetyPlusDays)}</TableCell>
+                                            <TableCell className="text-right text-primary text-lg">{formatCurrency(agingReport.totalOutstanding)}</TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function CashRequirementsView() {
+    const [asOfDate, setAsOfDate] = useState<Date>(new Date());
+
+    const { data: forecastReport, isLoading } = useQuery({
+        queryKey: ['ap-cash-requirements', asOfDate],
+        queryFn: () => accountsPayableService.getCashRequirementForecast(format(asOfDate, 'yyyy-MM-dd')),
+    });
+
+    return (
+        <Card>
+            <CardHeader>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <CardTitle>Cash Requirements Forecast</CardTitle>
+                        <CardDescription>Estimated cash needed to pay obligations over upcoming periods</CardDescription>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    className={cn(
+                                        "w-[200px] justify-start text-left font-normal",
+                                        !asOfDate && "text-muted-foreground"
+                                    )}
+                                >
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {asOfDate ? format(asOfDate, "PPP") : <span>As of Date</span>}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0">
+                                <Calendar
+                                    mode="single"
+                                    selected={asOfDate}
+                                    onSelect={(date) => date && setAsOfDate(date)}
+                                    initialFocus
+                                />
+                            </PopoverContent>
+                        </Popover>
+                        <Button variant="outline" size="icon">
+                            <Download className="h-4 w-4" />
+                        </Button>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent>
+                {isLoading ? (
+                    <div className="space-y-4">
+                        <Skeleton className="h-12 w-full" />
+                        <Skeleton className="h-64 w-full" />
+                    </div>
+                ) : !forecastReport ? (
+                    <div className="text-center py-12 text-muted-foreground">No data available</div>
+                ) : (
+                    <div className="space-y-6">
+                        <div className="flex gap-8 mb-6">
+                            <div>
+                                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total Payable</h3>
+                                <p className="text-3xl font-bold">{formatCurrency(forecastReport.totalPayable)}</p>
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-semibold text-red-500 uppercase tracking-wider">Overdue</h3>
+                                <p className="text-3xl font-bold text-red-600">{formatCurrency(forecastReport.overdueAmount)}</p>
+                            </div>
+                        </div>
+
+                        <div className="border rounded-md">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Period</TableHead>
+                                        <TableHead>Date Range</TableHead>
+                                        <TableHead className="text-right">Invoices</TableHead>
+                                        <TableHead className="text-right">Available Discounts</TableHead>
+                                        <TableHead className="text-right">Amount Required</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {forecastReport.periods?.map((period, i) => (
+                                        <TableRow key={i}>
+                                            <TableCell className="font-semibold">{period.period}</TableCell>
+                                            <TableCell className="text-muted-foreground text-sm">
+                                                {format(new Date(period.periodStart), 'MMM dd')} - {format(new Date(period.periodEnd), 'MMM dd, yyyy')}
+                                            </TableCell>
+                                            <TableCell className="text-right">{period.invoiceCount}</TableCell>
+                                            <TableCell className="text-right text-green-600">{period.discountAvailable > 0 ? formatCurrency(period.discountAvailable) : '-'}</TableCell>
+                                            <TableCell className="text-right font-medium">{formatCurrency(period.amountDue)}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                    {(!forecastReport.periods || forecastReport.periods.length === 0) && (
+                                        <TableRow>
+                                            <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                                                No upcoming payments required.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function SupplierStatementsView() {
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Supplier Statements</CardTitle>
+                <CardDescription>Generate and download account statements for suppliers</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center py-12 text-muted-foreground">
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                <p>Select a supplier and date range to generate a statement.</p>
+                <div className="max-w-md mx-auto mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900 rounded-lg text-sm text-yellow-800 dark:text-yellow-200">
+                    PDF Generation coming soon. Please use individual Supplier Details page to view billing history.
+                </div>
+            </CardContent>
+        </Card>
+    )
+}

@@ -61,6 +61,7 @@ export interface UserInfo {
   accessibleTenants: UserTenantInfo[];
   isActive: boolean;
   roles: string[];
+  permissions: string[];
   createdAt?: string;
   lastLoginAt?: string;
   tenantId?: string;
@@ -125,24 +126,24 @@ export interface TenantDto {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  
+
   // Branding
   logoUrl?: string;
   primaryColor?: string;
   secondaryColor?: string;
   faviconUrl?: string;
   coverImageUrl?: string;
-  
+
   // Contact Information
   domain?: string;
   contactEmail?: string;
   contactPhone?: string;
   address?: string;
-  
+
   // Subscription
   subscriptionStartDate?: string;
   subscriptionEndDate?: string;
-  
+
   // LDAP Configuration
   ldapServer?: string;
   ldapPort?: number;
@@ -150,11 +151,11 @@ export interface TenantDto {
   ldapBindDn?: string;
   ldapBindPassword?: string;
   ldapEnabled?: boolean;
-  
+
   // Default tenant settings
   isDefaultForPublicUsers?: boolean;
   isDefaultForInternalUsers?: boolean;
-  
+
   // Feature flags
   allowSelfRegistration?: boolean;
   publicRegistrationDomains?: string;
@@ -171,13 +172,14 @@ export interface RefreshTokenRequest {
 }
 
 class ApiService {
-  private baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  private baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api';
   private token: string | null = null;
+  private readonly enableApiDebugLogging = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
 
   constructor() {
     // Load token from localStorage if available
     if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('authToken');
+      this.token = localStorage.getItem('authToken') || localStorage.getItem('token');
     }
   }
 
@@ -187,6 +189,8 @@ class ApiService {
 
   private getHeaders(isFormData: boolean = false, includeAuth: boolean = true): HeadersInit {
     const headers: HeadersInit = {};
+
+    this.syncTokenFromStorage();
 
     // Don't set Content-Type for FormData - browser will set it with boundary
     if (!isFormData) {
@@ -198,7 +202,7 @@ class ApiService {
       if (this.isValidJwtFormat(this.token)) {
         headers['Authorization'] = `Bearer ${this.token}`;
       } else {
-        console.warn('Invalid JWT token format detected, clearing token:', 
+        console.warn('Invalid JWT token format detected, clearing token:',
           this.token.length > 50 ? this.token.substring(0, 50) + '...' : this.token);
         this.clearToken();
         // Don't include Authorization header with invalid token
@@ -208,10 +212,51 @@ class ApiService {
     return headers;
   }
 
+  private syncTokenFromStorage(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storedToken = localStorage.getItem('authToken') || localStorage.getItem('token');
+    if (storedToken !== this.token) {
+      this.token = storedToken;
+    }
+  }
+
+  private appendQueryParams(endpoint: string, query?: Record<string, unknown>): string {
+    if (!query) {
+      return endpoint;
+    }
+
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        value.forEach((entry) => params.append(key, String(entry)));
+        continue;
+      }
+
+      params.append(key, String(value));
+    }
+
+    const queryString = params.toString();
+    if (!queryString) {
+      return endpoint;
+    }
+
+    return endpoint.includes('?')
+      ? `${endpoint}&${queryString}`
+      : `${endpoint}?${queryString}`;
+  }
+
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
       let errorData: any = {};
-      
+
       try {
         // Try to parse JSON error response
         const text = await response.text();
@@ -227,16 +272,16 @@ class ApiService {
         // If we can't get any text at all, use status info
         errorData = {};
       }
-      
+
       // Check if this is a 401 (Unauthorized) response - likely a blacklisted token
       if (response.status === 401) {
         // Don't trigger session blacklist event if we're on login/public endpoints
         const url = new URL(response.url);
-        const isPublicEndpoint = url.pathname.includes('/auth/login') || 
-                                url.pathname.includes('/auth/security-settings') || 
-                                url.pathname.includes('/auth/refresh') ||
-                                (url.pathname.includes('/tenant') && !this.token);
-        
+        const isPublicEndpoint = url.pathname.includes('/auth/login') ||
+          url.pathname.includes('/auth/security-settings') ||
+          url.pathname.includes('/auth/refresh') ||
+          (url.pathname.includes('/tenant') && !this.token);
+
         // Only trigger session blacklist if it's not a public endpoint
         // The privateRequest method will handle token refresh attempts first
         if (!isPublicEndpoint && typeof window !== 'undefined') {
@@ -244,20 +289,20 @@ class ApiService {
           // The session blacklist event will be handled by the privateRequest method after retry attempts fail
         }
       }
-      
+
       // Create a proper error with the message from the API response
       // Only fall back to generic HTTP status message if no other message is available
-      const errorMessage = errorData.message || 
-                          errorData.title || 
-                          errorData.error || 
-                          `HTTP ${response.status}: ${response.statusText}`;
+      const errorMessage = errorData.message ||
+        errorData.title ||
+        errorData.error ||
+        `HTTP ${response.status}: ${response.statusText}`;
       const error = new Error(errorMessage);
-      
+
       // Attach additional error details
       (error as any).status = response.status;
       (error as any).statusText = response.statusText;
       (error as any).response = errorData;
-      
+
       throw error;
     }
 
@@ -276,17 +321,18 @@ class ApiService {
       this.clearToken();
       return;
     }
-    
+
     // Validate token format before storing
     if (!this.isValidJwtFormat(token)) {
-      console.error('Attempting to store invalid JWT token format:', 
+      console.error('Attempting to store invalid JWT token format:',
         token.length > 50 ? token.substring(0, 50) + '...' : token);
       return; // Don't store invalid tokens
     }
-    
+
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('authToken', token);
+      localStorage.setItem('token', token);
     }
   }
 
@@ -294,6 +340,7 @@ class ApiService {
     this.token = null;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('authToken');
+      localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
     }
   }
@@ -309,7 +356,7 @@ class ApiService {
     if (response.token) {
       this.setToken(response.token);
     }
-    
+
     if (response.refreshToken && typeof window !== 'undefined') {
       localStorage.setItem('refreshToken', response.refreshToken);
     }
@@ -358,7 +405,7 @@ class ApiService {
     if (response.token) {
       this.setToken(response.token);
     }
-    
+
     if (response.refreshToken && typeof window !== 'undefined') {
       localStorage.setItem('refreshToken', response.refreshToken);
     }
@@ -383,27 +430,27 @@ class ApiService {
   }
 
   // Public request method for admin service
-  public async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  public async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     return this.privateRequest<T>(endpoint, options, true, false);
   }
 
   // Public request method without authentication
-  public async publicRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  public async publicRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     return this.privateRequest<T>(endpoint, options, false, false);
   }
 
   // Silent request method that doesn't log errors to console
-  public async silentRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  public async silentRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     return this.privateRequest<T>(endpoint, options, true, true);
   }
 
   // Rename private request method
   private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true, silent: boolean = false, retryCount: number = 0): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    
+
     // Check if the body is FormData
     const isFormData = options.body instanceof FormData;
-    
+
     const config: RequestInit = {
       headers: this.getHeaders(isFormData, includeAuth),
       ...options,
@@ -411,8 +458,8 @@ class ApiService {
 
     const method = options.method || 'GET';
     const timestamp = new Date().toISOString();
-    
-    if (!silent) {
+
+    if (!silent && this.enableApiDebugLogging) {
       console.log(`🚀 API ${method} ${endpoint} - ${timestamp}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
       if (method !== 'GET' && config.headers) {
         console.log('📤 Request headers:', config.headers);
@@ -432,57 +479,57 @@ class ApiService {
       const response = await fetch(url, config);
       const endTime = Date.now();
       const duration = endTime - startTime;
-      
+
       const status = response.status;
       const statusText = response.statusText;
-      
-      if (!silent) {
+
+      if (!silent && this.enableApiDebugLogging) {
         if (status >= 200 && status < 300) {
           console.log(`✅ API ${method} ${endpoint} - ${status} ${statusText} (${duration}ms)`);
         } else {
           console.log(`❌ API ${method} ${endpoint} - ${status} ${statusText} (${duration}ms)`);
         }
       }
-      
+
       const result = await this.handleResponse<T>(response);
-      
+
       // Log response data for non-GET operations and errors (only if not silent)
-      if (!silent && (method !== 'GET' || status >= 400)) {
+      if (!silent && this.enableApiDebugLogging && (method !== 'GET' || status >= 400)) {
         console.log('📥 Response data:', result);
       }
-      
+
       return result;
     } catch (error: any) {
       // Handle 401 errors with token refresh attempt (only once)
       if (error.status === 401 && includeAuth && retryCount === 0 && this.token) {
         // Don't retry for auth endpoints to avoid infinite loops
-        const isAuthEndpoint = endpoint.includes('/auth/login') || 
-                              endpoint.includes('/auth/refresh') || 
-                              endpoint.includes('/auth/logout');
-        
+        const isAuthEndpoint = endpoint.includes('/auth/login') ||
+          endpoint.includes('/auth/refresh') ||
+          endpoint.includes('/auth/logout');
+
         if (!isAuthEndpoint) {
-          if (!silent) {
+          if (!silent && this.enableApiDebugLogging) {
             console.log('🔄 401 error detected, attempting token refresh...');
           }
-          
+
           try {
             // Attempt to refresh token
             await this.refreshToken();
-            
-            if (!silent) {
+
+            if (!silent && this.enableApiDebugLogging) {
               console.log('✅ Token refreshed, retrying original request...');
             }
-            
+
             // Retry the original request with the new token
             return this.privateRequest<T>(endpoint, options, includeAuth, silent, retryCount + 1);
           } catch (refreshError) {
             if (!silent) {
               console.error('❌ Token refresh failed:', refreshError);
             }
-            
+
             // Clear tokens and trigger session blacklist event
             this.clearToken();
-            
+
             // Trigger session blacklist event since token refresh failed
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('session-blacklisted', {
@@ -492,13 +539,13 @@ class ApiService {
                 }
               }));
             }
-            
+
             // Still throw the original 401 error
             throw error;
           }
         }
       }
-      
+
       if (!silent) {
         console.error(`💥 API ${method} ${endpoint} failed:`, error);
       }
@@ -553,7 +600,7 @@ class ApiService {
     if (response.token) {
       this.setToken(response.token);
     }
-    
+
     return response;
   }
 
@@ -576,13 +623,13 @@ class ApiService {
 
     // Remove any whitespace
     const trimmedToken = token.trim();
-    
+
     if (!trimmedToken) {
       return false;
     }
 
     const parts = trimmedToken.split('.');
-    
+
     // JWT should have exactly 3 parts: header.payload.signature
     if (parts.length !== 3) {
       return false;
@@ -599,16 +646,16 @@ class ApiService {
   }
 
   // Standard HTTP methods
-  public async get<T>(endpoint: string): Promise<T> {
-    return this.privateRequest<T>(endpoint, { method: 'GET' });
+  public async get<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
+    return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' });
   }
 
   // Silent GET method - doesn't log errors to console (useful for expected 404s)
-  public async silentGet<T>(endpoint: string): Promise<T> {
-    return this.privateRequest<T>(endpoint, { method: 'GET' }, true, true);
+  public async silentGet<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
+    return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' }, true, true);
   }
 
-  public async post<T>(endpoint: string, data?: any): Promise<T> {
+  public async post<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'POST' };
     if (data) {
       options.body = JSON.stringify(data);
@@ -616,7 +663,7 @@ class ApiService {
     return this.privateRequest<T>(endpoint, options);
   }
 
-  public async put<T>(endpoint: string, data?: any): Promise<T> {
+  public async put<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PUT' };
     if (data) {
       options.body = JSON.stringify(data);
@@ -624,11 +671,11 @@ class ApiService {
     return this.privateRequest<T>(endpoint, options);
   }
 
-  public async delete<T>(endpoint: string): Promise<T> {
+  public async delete<T = any>(endpoint: string): Promise<T> {
     return this.privateRequest<T>(endpoint, { method: 'DELETE' });
   }
 
-  public async patch<T>(endpoint: string, data?: any): Promise<T> {
+  public async patch<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PATCH' };
     if (data) {
       options.body = JSON.stringify(data);
@@ -638,6 +685,9 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
+// Default export added for backward compatibility — some files use `import apiService from '...'`
+// instead of `import { apiService } from '...'`. Both patterns now work.
+export default apiService;
 
 // Helper function to get stored token for SignalR
 export function getStoredToken(): string | null {
@@ -657,10 +707,10 @@ export async function apiRequest<T>(options: {
   const requestOptions: RequestInit = {
     method,
   };
-  
+
   if (data) {
     requestOptions.body = JSON.stringify(data);
   }
-  
+
   return apiService.request<T>(url, requestOptions);
 }

@@ -235,7 +235,7 @@ public class AuditInterceptor : SaveChangesInterceptor
                 return null;
             }
 
-            return (userId.Value, username, tenantId.Value, ipAddress ?? "Unknown", userAgent);
+            return (userId.Value, username, tenantId.Value, ipAddress ?? "Unknown", userAgent ?? "Unknown");
         }
         catch (Exception ex)
         {

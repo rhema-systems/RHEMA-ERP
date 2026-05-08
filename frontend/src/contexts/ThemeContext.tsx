@@ -79,7 +79,7 @@ export function ThemeProvider({
     if (!enableSystem) return;
 
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    
+
     const updateSystemTheme = (e: MediaQueryListEvent) => {
       setSystemTheme(e.matches ? 'dark' : 'light');
     };
@@ -91,9 +91,9 @@ export function ThemeProvider({
   // Apply theme to document
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
+
     const root = window.document.documentElement;
-    
+
     // Temporarily disable transitions to prevent flash
     if (disableTransitionOnChange && mounted) {
       root.style.setProperty('transition', 'none');
@@ -101,7 +101,7 @@ export function ThemeProvider({
 
     // Remove previous theme classes
     root.classList.remove('light', 'dark');
-    
+
     // Add new theme class
     if (attribute === 'class') {
       root.classList.add(actualTheme);
@@ -112,7 +112,7 @@ export function ThemeProvider({
     // Re-enable transitions
     if (disableTransitionOnChange && mounted) {
       // Force reflow
-      root.offsetHeight;
+      void root.offsetHeight;
       root.style.removeProperty('transition');
     }
   }, [actualTheme, attribute, disableTransitionOnChange, mounted]);
@@ -120,7 +120,7 @@ export function ThemeProvider({
   // Save theme to localStorage
   useEffect(() => {
     if (!mounted) return;
-    
+
     try {
       localStorage.setItem(storageKey, theme);
     } catch (error) {
@@ -177,7 +177,7 @@ export const useTheme = () => {
 // Hook for theme-aware components
 export const useThemeAware = () => {
   const { actualTheme, theme, systemTheme } = useTheme();
-  
+
   return {
     isDark: actualTheme === 'dark',
     isLight: actualTheme === 'light',

@@ -66,7 +66,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? LegalEntityType { get; set; }
     public DateTime? RegistrationDate { get; set; }
     public string? RegistrationCountry { get; set; }
-    public string? VatNumber { get; set; }
+    public new string? VatNumber { get; set; }
 
     // Contact Information
     public string? ContactPerson { get; set; }
@@ -74,7 +74,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? ContactEmail { get; set; }
     public string? ContactPhone { get; set; }
     public string? ContactMobile { get; set; }
-    public string? AlternatePhone { get; set; }
+    public new string? AlternatePhone { get; set; }
     public string? Fax { get; set; }
 
     // Address Information

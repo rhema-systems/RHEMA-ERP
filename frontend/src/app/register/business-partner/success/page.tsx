@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -12,7 +13,7 @@ import jsPDF from 'jspdf';
 export default function RegistrationSuccessPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const registrationId = searchParams.get('id');
+  const registrationId = searchParams?.get('id');
   const [registration, setRegistration] = useState<BusinessPartnerRegistrationDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -23,8 +24,10 @@ export default function RegistrationSuccessPage() {
   }, [registrationId]);
 
   const loadRegistration = async () => {
+    if (!registrationId) return;
+
     try {
-      const data = await businessPartnerRegistrationService.getById(registrationId!);
+      const data = await businessPartnerRegistrationService.getById(registrationId);
       setRegistration(data);
     } catch (error) {
       console.error('Error loading registration:', error);

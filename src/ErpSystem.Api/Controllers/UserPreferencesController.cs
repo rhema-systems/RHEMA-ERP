@@ -25,7 +25,7 @@ namespace ErpSystem.Api.Controllers
         /// Get user's theme preferences
         /// </summary>
         [HttpGet("theme")]
-        public async Task<ActionResult> GetThemePreferences()
+        public ActionResult GetThemePreferences()
         {
             try
             {
@@ -65,7 +65,7 @@ namespace ErpSystem.Api.Controllers
         /// Update user's theme preferences
         /// </summary>
         [HttpPut("theme")]
-        public async Task<ActionResult> UpdateThemePreferences([FromBody] object themePreferencesRequest)
+        public ActionResult UpdateThemePreferences([FromBody] object themePreferencesRequest)
         {
             try
             {
@@ -106,7 +106,7 @@ namespace ErpSystem.Api.Controllers
         /// Reset user's theme preferences to defaults
         /// </summary>
         [HttpPost("theme/reset")]
-        public async Task<ActionResult> ResetThemePreferences()
+        public ActionResult ResetThemePreferences()
         {
             try
             {

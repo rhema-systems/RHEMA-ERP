@@ -29,7 +29,7 @@ interface CriteriaScore {
 export default function BidDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const bidId = params.id as string;
+  const bidId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [payments, setPayments] = useState<TenderPaymentDto[]>([]);
@@ -614,9 +614,9 @@ export default function BidDetailPage() {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <p className="font-medium">{doc.documentName}</p>
-                            <p className="text-sm text-gray-500 font-mono">{doc.fileName}</p>
+                            <p className="text-sm text-gray-500 font-mono">{doc.fileName || doc.documentName}</p>
                             <p className="text-sm text-gray-500 mt-1">
-                              Uploaded: {formatDate(doc.uploadedAt)} • Size: {(doc.fileSize / 1024).toFixed(2)} KB
+                              Uploaded: {formatDate(doc.uploadedAt || doc.uploadedDate)} • Size: {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
                             </p>
                           </div>
                           <Button
@@ -667,9 +667,9 @@ export default function BidDetailPage() {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <p className="font-medium">{doc.documentName}</p>
-                            <p className="text-sm text-gray-500 font-mono">{doc.fileName}</p>
+                            <p className="text-sm text-gray-500 font-mono">{doc.fileName || doc.documentName}</p>
                             <p className="text-sm text-gray-500 mt-1">
-                              Uploaded: {formatDate(doc.uploadedAt)} • Size: {(doc.fileSize / 1024).toFixed(2)} KB
+                              Uploaded: {formatDate(doc.uploadedAt || doc.uploadedDate)} • Size: {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
                             </p>
                           </div>
                           <Button
@@ -732,7 +732,7 @@ export default function BidDetailPage() {
                         <TableRow key={doc.id}>
                           <TableCell><Badge variant="outline">{doc.documentType}</Badge></TableCell>
                           <TableCell>{doc.documentName}</TableCell>
-                          <TableCell>{(doc.fileSize / 1024).toFixed(2)} KB</TableCell>
+                          <TableCell>{((doc.fileSize ?? 0) / 1024).toFixed(2)} KB</TableCell>
                           <TableCell>
                             <Button
                               variant="ghost"
@@ -962,5 +962,3 @@ export default function BidDetailPage() {
     </div>
   );
 }
-
-

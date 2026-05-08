@@ -59,7 +59,7 @@ public class CompanyAssetDetailDto
     // Physical Characteristics
     public string Color { get; set; }
     public string Size { get; set; }
-    public AssetCondition Condition { get; set; }
+    public HRAssetCondition Condition { get; set; }
     public string ConditionName { get; set; }
     public string Specifications { get; set; }
 
@@ -125,7 +125,7 @@ public class CreateCompanyAssetDto
     public string WarrantyProvider { get; set; }
     public string Color { get; set; }
     public string Size { get; set; }
-    public AssetCondition Condition { get; set; }
+    public HRAssetCondition Condition { get; set; }
     public string Specifications { get; set; }
     public Guid? StationId { get; set; }
     public string LocationDetails { get; set; }
@@ -143,7 +143,7 @@ public class UpdateCompanyAssetDto
     public Guid Id { get; set; }
     public string AssetName { get; set; }
     public string Description { get; set; }
-    public AssetCondition Condition { get; set; }
+    public HRAssetCondition Condition { get; set; }
     public string Specifications { get; set; }
     public string LocationDetails { get; set; }
     public decimal? CurrentValue { get; set; }
@@ -195,7 +195,7 @@ public class AssetAssignmentDetailDto
     public string AssignmentNotes { get; set; }
 
     // Condition at Assignment
-    public AssetCondition ConditionAtAssignment { get; set; }
+    public HRAssetCondition ConditionAtAssignment { get; set; }
     public string ConditionAtAssignmentName { get; set; }
     public string ConditionNotes { get; set; }
 
@@ -214,7 +214,7 @@ public class AssetAssignmentDetailDto
     public DateTime? ActualReturnDate { get; set; }
     public Guid? ReturnedToId { get; set; }
     public string ReturnedToName { get; set; }
-    public AssetCondition? ConditionAtReturn { get; set; }
+    public HRAssetCondition? ConditionAtReturn { get; set; }
     public string ConditionAtReturnName { get; set; }
     public string ReturnNotes { get; set; }
     public bool IsDamaged { get; set; }
@@ -248,7 +248,7 @@ public class ReturnAssetDto
 {
     public Guid Id { get; set; }
     public DateTime ActualReturnDate { get; set; }
-    public AssetCondition ConditionAtReturn { get; set; }
+    public HRAssetCondition ConditionAtReturn { get; set; }
     public string ReturnNotes { get; set; }
     public bool IsDamaged { get; set; }
     public string DamageDescription { get; set; }

@@ -1,6 +1,8 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data.Repositories;
+using ErpSystem.Data.Repositories.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -20,6 +22,24 @@ public class UnitOfWork : IUnitOfWork
         _repositories = new Dictionary<Type, object>();
     }
 
+    //FINANCE
+    private IAccountRepository? _accountRepository;
+    private IAccountSegmentStructureRepository? _accountSegmentStructureRepository;
+    private IAccountSegmentValueRepository? _accountSegmentValueRepository;
+    private ISegmentLookupValueRepository? _segmentLookupValueRepository;
+
+    public IAccountRepository Accounts =>
+        _accountRepository ??= new AccountRepository(_context);
+
+    public IAccountSegmentStructureRepository AccountSegmentStructures =>
+        _accountSegmentStructureRepository ??= new AccountSegmentStructureRepository(_context);
+
+    public IAccountSegmentValueRepository AccountSegmentValues =>
+        _accountSegmentValueRepository ??= new AccountSegmentValueRepository(_context);
+
+    public ISegmentLookupValueRepository SegmentLookupValues =>
+        _segmentLookupValueRepository ??= new SegmentLookupValueRepository(_context);
+
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         return await _context.SaveChangesAsync(cancellationToken);
@@ -36,7 +56,7 @@ public class UnitOfWork : IUnitOfWork
         {
             throw new InvalidOperationException("Transaction is already started");
         }
-
+        
         _transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
     }
 
@@ -93,16 +113,15 @@ public class UnitOfWork : IUnitOfWork
     public IGenericRepository<T> Repository<T>() where T : BaseEntity
     {
         var type = typeof(T);
-
-        if (!_repositories.TryGetValue(type, out object? value))
+        
+        if (!_repositories.ContainsKey(type))
         {
-            value = new GenericRepository<T>(_context);
-            _repositories[type] = value;
+            _repositories[type] = new GenericRepository<T>(_context);
         }
-
-        return (IGenericRepository<T>)value;
+        
+        return (IGenericRepository<T>)_repositories[type];
     }
-
+    
     public async Task ExecuteInStrategyAsync(Func<Task> operation, CancellationToken cancellationToken = default)
     {
         var strategy = _context.Database.CreateExecutionStrategy();

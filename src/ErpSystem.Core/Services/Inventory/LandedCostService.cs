@@ -611,10 +611,9 @@ public class LandedCostService : ILandedCostService
             .GetQueryable(m => !m.IsDeleted &&
                                m.ReferenceId == receipt.Id &&
                                m.ReferenceType == ReferenceType.PO &&
-                               m.WarehouseId.HasValue &&
-                               m.WarehouseId.Value != Guid.Empty)
+                               m.WarehouseId != Guid.Empty)
             .AsNoTracking()
-            .Select(m => m.WarehouseId!.Value)
+            .Select(m => m.WarehouseId)
             .FirstOrDefaultAsync();
 
         return movementWarehouse;

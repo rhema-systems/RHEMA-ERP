@@ -116,7 +116,7 @@ public class MaintenanceBackgroundService : BackgroundService
                 // Group by assigned technician for batch notifications
                 var groupedByTechnician = overdueWorkOrders
                     .Where(wo => wo.AssignedTechnicianId.HasValue)
-                    .GroupBy(wo => wo.AssignedTechnicianId.Value);
+                    .GroupBy(wo => wo.AssignedTechnicianId!.Value);
 
                 foreach (var technicianGroup in groupedByTechnician)
                 {
@@ -191,7 +191,7 @@ public class MaintenanceBackgroundService : BackgroundService
             {
                 var groupedByTechnician = upcomingWorkOrders
                     .Where(wo => wo.AssignedTechnicianId.HasValue)
-                    .GroupBy(wo => wo.AssignedTechnicianId.Value);
+                    .GroupBy(wo => wo.AssignedTechnicianId!.Value);
 
                 foreach (var technicianGroup in groupedByTechnician)
                 {

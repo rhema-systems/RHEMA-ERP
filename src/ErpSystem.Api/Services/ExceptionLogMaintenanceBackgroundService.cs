@@ -28,10 +28,17 @@ public sealed class ExceptionLogMaintenanceBackgroundService : BackgroundService
         // Run shortly after startup, then daily.
         await SafeRunOnceAsync(stoppingToken);
 
-        var timer = new PeriodicTimer(TimeSpan.FromHours(24));
-        while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
+        using var timer = new PeriodicTimer(TimeSpan.FromHours(24));
+        try
         {
-            await SafeRunOnceAsync(stoppingToken);
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                await SafeRunOnceAsync(stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown - do not propagate.
         }
     }
 

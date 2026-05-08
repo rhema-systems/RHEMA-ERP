@@ -524,7 +524,7 @@ public class MaintenanceComprehensiveDataSeeder
                 Name = "General Corrective Maintenance QC",
                 Description = "Quality checklist for corrective maintenance work",
                 WorkOrderType = "CM",
-                AssetCategory = (string?)null,
+                AssetCategory = string.Empty,
                 MaintenanceType = "CORR",
                 Items = @"[
                     {""item"":""Root cause identified and documented"",""type"":""Boolean"",""required"":true},

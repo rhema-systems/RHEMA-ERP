@@ -265,7 +265,7 @@ export default function MaintenanceAttachmentsPanel({ entityType, entityId, cate
 
           <div className="max-h-[70vh] overflow-auto rounded-md border bg-muted/10 p-3">
             {previewKind === 'image' ? (
-              // eslint-disable-next-line @next/next/no-img-element
+               
               <img src={previewUrl} alt={previewTitle} className="mx-auto max-h-[66vh] w-auto rounded" />
             ) : previewKind === 'pdf' || previewKind === 'html' ? (
               <iframe src={previewUrl} className="h-[66vh] w-full rounded bg-white" title={previewTitle} />

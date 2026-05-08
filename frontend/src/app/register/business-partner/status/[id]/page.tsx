@@ -34,7 +34,7 @@ const STATUS_CONFIG = {
 export default function RegistrationStatusPage() {
   const params = useParams();
   const router = useRouter();
-  const registrationId = params.id as string;
+  const registrationId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [registration, setRegistration] = useState<BusinessPartnerRegistrationDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

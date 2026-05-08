@@ -157,7 +157,7 @@ const MaintenanceDashboard: React.FC = () => {
 
       {/* Key Metrics Row */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Total Assets"
             value={stats.totalAssets}
@@ -165,7 +165,7 @@ const MaintenanceDashboard: React.FC = () => {
             color="primary.main"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Active Work Orders"
             value={stats.activeWorkOrders}
@@ -173,7 +173,7 @@ const MaintenanceDashboard: React.FC = () => {
             color="info.main"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Overdue Maintenance"
             value={stats.overdueMaintenance}
@@ -182,7 +182,7 @@ const MaintenanceDashboard: React.FC = () => {
             subtext="Requires immediate attention"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Scheduled Today"
             value={stats.scheduledToday}
@@ -194,7 +194,7 @@ const MaintenanceDashboard: React.FC = () => {
 
       {/* Secondary Metrics Row */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Pending Job Cards"
             value={stats.pendingJobCards}
@@ -203,7 +203,7 @@ const MaintenanceDashboard: React.FC = () => {
             subtext="Awaiting approval"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Completion Rate"
             value={`${stats.completionRate}%`}
@@ -212,7 +212,7 @@ const MaintenanceDashboard: React.FC = () => {
             subtext="This month"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Avg Downtime"
             value={`${stats.averageDowntime}h`}
@@ -221,7 +221,7 @@ const MaintenanceDashboard: React.FC = () => {
             subtext="Per incident"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Cost This Month"
             value={`$${(stats.costThisMonth / 1000).toFixed(0)}k`}
@@ -235,7 +235,7 @@ const MaintenanceDashboard: React.FC = () => {
       {/* Charts and Alerts Row */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         {/* Work Order Status Distribution */}
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: 400 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -244,11 +244,11 @@ const MaintenanceDashboard: React.FC = () => {
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
-                    data={workOrderStatuses}
+                    data={workOrderStatuses as unknown as Array<Record<string, string | number>>}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }: any) => `${name} ${(Number(percent ?? 0) * 100).toFixed(0)}%`}
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="value"
@@ -265,7 +265,7 @@ const MaintenanceDashboard: React.FC = () => {
         </Grid>
 
         {/* Maintenance Types */}
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: 400 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -287,7 +287,7 @@ const MaintenanceDashboard: React.FC = () => {
 
       {/* Recent Alerts */}
       <Grid container spacing={3}>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
             <CardContent>
               <Typography variant="h6" gutterBottom>

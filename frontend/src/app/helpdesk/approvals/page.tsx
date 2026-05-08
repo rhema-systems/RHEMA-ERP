@@ -2,15 +2,20 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Eye, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcServiceCatalogService, type WorkflowApprovalItem } from '@/services/ehcServiceCatalogService';
 
 export default function HelpdeskApprovalsPage() {
+  const searchParams = useSearchParams();
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [q, setQ] = useState('');
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -34,8 +39,12 @@ export default function HelpdeskApprovalsPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Approvals</h1>
-          <p className="text-slate-600 mt-1">Items waiting for your approval decisions.</p>
+          <h1 className="text-3xl font-bold">
+            {scopeParam ? `${scopeConfig.moduleLabel} Approvals` : 'Approvals'}
+          </h1>
+          <p className="text-slate-600 mt-1">
+            {scopeParam ? `Approval queue for the ${scopeConfig.listTitle.toLowerCase()} branch.` : 'Items waiting for your approval decisions.'}
+          </p>
         </div>
         <Button variant="outline" onClick={() => refetch()}>
           <RefreshCw className="w-4 h-4 mr-2" /> Refresh
@@ -76,4 +85,3 @@ export default function HelpdeskApprovalsPage() {
     </div>
   );
 }
-

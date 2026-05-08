@@ -6,6 +6,7 @@ import { RefreshCw } from 'lucide-react'
 
 interface SwipeableCardProps {
   children: ReactNode
+  onClick?: () => void
   onSwipeLeft?: () => void
   onSwipeRight?: () => void
   swipeThreshold?: number
@@ -14,11 +15,13 @@ interface SwipeableCardProps {
     icon: React.ElementType
     label: string
     color: string
+    action?: () => void
   }
   rightAction?: {
     icon: React.ElementType
     label: string
     color: string
+    action?: () => void
   }
 }
 
@@ -29,7 +32,8 @@ export const SwipeableCard: React.FC<SwipeableCardProps> = ({
   swipeThreshold = 100,
   className,
   leftAction,
-  rightAction
+  rightAction,
+  onClick,
 }) => {
   const [startX, setStartX] = useState(0)
   const [currentX, setCurrentX] = useState(0)
@@ -59,8 +63,12 @@ export const SwipeableCard: React.FC<SwipeableCardProps> = ({
     if (Math.abs(deltaX) > swipeThreshold) {
       if (deltaX > 0 && onSwipeRight) {
         onSwipeRight()
+      } else if (deltaX > 0 && leftAction?.action) {
+        leftAction.action()
       } else if (deltaX < 0 && onSwipeLeft) {
         onSwipeLeft()
+      } else if (deltaX < 0 && rightAction?.action) {
+        rightAction.action()
       }
     }
     
@@ -112,6 +120,7 @@ export const SwipeableCard: React.FC<SwipeableCardProps> = ({
           transform: `translateX(${transform}px)`,
           transition: isDragging ? 'none' : 'transform 0.2s ease-out'
         }}
+        onClick={onClick}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -125,6 +134,7 @@ export const SwipeableCard: React.FC<SwipeableCardProps> = ({
 interface PullToRefreshProps {
   children: ReactNode
   onRefresh: () => Promise<void>
+  refreshing?: boolean
   refreshThreshold?: number
   className?: string
 }
@@ -132,6 +142,7 @@ interface PullToRefreshProps {
 export const PullToRefresh: React.FC<PullToRefreshProps> = ({
   children,
   onRefresh,
+  refreshing,
   refreshThreshold = 70,
   className
 }) => {
@@ -182,8 +193,9 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
     setCurrentY(0)
   }
 
+  const effectiveRefreshing = refreshing ?? isRefreshing
   const refreshIndicatorOpacity = Math.min(pullDistance / refreshThreshold, 1)
-  const shouldShowRefreshing = isRefreshing || pullDistance > refreshThreshold
+  const shouldShowRefreshing = effectiveRefreshing || pullDistance > refreshThreshold
 
   return (
     <div 
@@ -209,7 +221,7 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
             )} 
           />
           <span className="text-sm font-medium">
-            {isRefreshing ? 'Refreshing...' : 
+            {effectiveRefreshing ? 'Refreshing...' : 
              pullDistance > refreshThreshold ? 'Release to refresh' : 
              'Pull to refresh'}
           </span>
@@ -292,6 +304,7 @@ interface LongPressProps {
   children: ReactNode
   onLongPress: () => void
   onPress?: () => void
+  onPressEnd?: () => void
   delay?: number
   className?: string
 }
@@ -300,11 +313,12 @@ export const LongPress: React.FC<LongPressProps> = ({
   children,
   onLongPress,
   onPress,
+  onPressEnd,
   delay = 500,
   className
 }) => {
   const [isPressed, setIsPressed] = useState(false)
-  const timerRef = useRef<NodeJS.Timeout>()
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleStart = () => {
     setIsPressed(true)
@@ -322,6 +336,7 @@ export const LongPress: React.FC<LongPressProps> = ({
         onPress()
       }
     }
+    onPressEnd?.()
   }
 
   const handleCancel = () => {
@@ -329,6 +344,7 @@ export const LongPress: React.FC<LongPressProps> = ({
     if (timerRef.current) {
       clearTimeout(timerRef.current)
     }
+    onPressEnd?.()
   }
 
   useEffect(() => {

@@ -218,7 +218,7 @@ public class InventoryManagementService : IInventoryManagementService
                 ReferenceType = ReferenceType.WO,
                 ReferenceNumber = request.ReferenceNumber,
                 ReferenceId = request.ReferenceId,
-                WarehouseId = bestLocation.Location?.WarehouseId,
+                WarehouseId = bestLocation.Location?.WarehouseId ?? Guid.Empty,
                 LocationId = bestLocation.LocationId,
                 Notes = $"Allocated for {request.ReferenceNumber}",
                 ProcessedById = request.UserId,

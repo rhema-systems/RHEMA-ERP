@@ -283,6 +283,29 @@ public class WorkflowConditionEvaluator : IWorkflowConditionEvaluator
             });
         }
 
+        if (normalized.Equals("Project", StringComparison.OrdinalIgnoreCase))
+        {
+            variables.AddRange(new[]
+            {
+                new WorkflowVariableInfo { Name = "projectId", DisplayName = "Project ID", DataType = typeof(Guid) },
+                new WorkflowVariableInfo { Name = "projectCode", DisplayName = "Project Code", DataType = typeof(string) },
+                new WorkflowVariableInfo { Name = "title", DisplayName = "Title", DataType = typeof(string) },
+                new WorkflowVariableInfo { Name = "status", DisplayName = "Status", DataType = typeof(string) },
+                new WorkflowVariableInfo { Name = "projectTypeId", DisplayName = "Project Type ID", DataType = typeof(Guid) },
+                new WorkflowVariableInfo { Name = "projectPriorityId", DisplayName = "Project Priority ID", DataType = typeof(Guid) },
+                new WorkflowVariableInfo { Name = "projectManagerId", DisplayName = "Project Manager ID", DataType = typeof(Guid) },
+                new WorkflowVariableInfo { Name = "sponsorId", DisplayName = "Sponsor ID", DataType = typeof(Guid) },
+                new WorkflowVariableInfo { Name = "startDate", DisplayName = "Start Date", DataType = typeof(DateTime) },
+                new WorkflowVariableInfo { Name = "targetEndDate", DisplayName = "Target End Date", DataType = typeof(DateTime) },
+                new WorkflowVariableInfo { Name = "estimatedBudget", DisplayName = "Estimated Budget", DataType = typeof(decimal) },
+                new WorkflowVariableInfo { Name = "approvedBudget", DisplayName = "Approved Budget", DataType = typeof(decimal) },
+                new WorkflowVariableInfo { Name = "actualCost", DisplayName = "Actual Cost", DataType = typeof(decimal) },
+                new WorkflowVariableInfo { Name = "progressPercent", DisplayName = "Progress Percent", DataType = typeof(decimal) },
+                new WorkflowVariableInfo { Name = "approvalRequired", DisplayName = "Approval Required", DataType = typeof(bool) },
+                new WorkflowVariableInfo { Name = "methodology", DisplayName = "Methodology", DataType = typeof(string) }
+            });
+        }
+
         if (normalized.Equals("BusinessPartner", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("Business Partner", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("Supplier", StringComparison.OrdinalIgnoreCase) ||

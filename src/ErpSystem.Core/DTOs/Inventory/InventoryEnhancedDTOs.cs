@@ -1045,6 +1045,8 @@ public class InventoryRequisitionDto
     public string? CostCenter { get; set; }
     public Guid WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public Guid? ProjectId { get; set; }
     public string? ProjectCode { get; set; }
     public RequisitionStatus Status { get; set; }
@@ -1249,6 +1251,33 @@ public class IssueRequisitionDto
 {
     [Required]
     public List<IssueRequisitionItemDto> Items { get; set; } = new();
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
+public class ReturnRequisitionItemDto
+{
+    [Required]
+    public Guid ItemId { get; set; }
+
+    [Required]
+    [Range(0.01, double.MaxValue)]
+    public decimal ReturnedQuantity { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [MaxLength(100)]
+    public string? LotNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? SerialNumber { get; set; }
+}
+
+public class ReturnRequisitionDto
+{
+    [Required]
+    public List<ReturnRequisitionItemDto> Items { get; set; } = new();
 
     [MaxLength(2000)]
     public string? Notes { get; set; }

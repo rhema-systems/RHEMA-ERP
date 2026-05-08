@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../services/auth';
 import { QUERY_KEYS } from '../config/api';
 import type { User, LoginRequest } from '../types';
+import { hasAllPermissionsAccess, hasAnyPermissionAccess, hasPermissionAccess } from '../lib/permissions';
 
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -64,9 +65,13 @@ export function useAuth() {
 
   // Helper functions
   const isAuthenticated = authService.isAuthenticated();
-  const hasRole = (role: string) => authService.hasRole(role);
-  const hasAnyRole = (roles: string[]) => authService.hasAnyRole(roles);
-  const hasAllRoles = (roles: string[]) => authService.hasAllRoles(roles);
+  const currentUser = user ?? authService.getStoredUser();
+  const hasRole = (role: string) => currentUser?.roles?.includes(role) ?? false;
+  const hasAnyRole = (roles: string[]) => roles.some(role => currentUser?.roles?.includes(role));
+  const hasAllRoles = (roles: string[]) => roles.every(role => currentUser?.roles?.includes(role));
+  const hasPermission = (permission: string) => hasPermissionAccess(currentUser, permission);
+  const hasAnyPermission = (permissions: string[]) => hasAnyPermissionAccess(currentUser, permissions);
+  const hasAllPermissions = (permissions: string[]) => hasAllPermissionsAccess(currentUser, permissions);
 
   return {
     // State
@@ -89,5 +94,8 @@ export function useAuth() {
     hasRole,
     hasAnyRole,
     hasAllRoles,
+    hasPermission,
+    hasAnyPermission,
+    hasAllPermissions,
   };
 }

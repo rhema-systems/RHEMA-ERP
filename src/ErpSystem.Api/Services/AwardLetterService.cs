@@ -1,4 +1,5 @@
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
@@ -13,15 +14,18 @@ namespace ErpSystem.Api.Services;
 public class AwardLetterService : IAwardLetterService
 {
     private readonly ApplicationDbContext _context;
+    private readonly ITenantSettingsService _tenantSettingsService;
     private readonly ILogger<AwardLetterService> _logger;
     private readonly IConfiguration _configuration;
 
     public AwardLetterService(
         ApplicationDbContext context, 
+        ITenantSettingsService tenantSettingsService,
         ILogger<AwardLetterService> logger,
         IConfiguration configuration)
     {
         _context = context;
+        _tenantSettingsService = tenantSettingsService;
         _logger = logger;
         _configuration = configuration;
         QuestPDF.Settings.License = LicenseType.Community;
@@ -50,6 +54,8 @@ public class AwardLetterService : IAwardLetterService
         _logger.LogInformation("Generating award letter PDF for award {AwardId}, IsNegotiated: {IsNegotiated}, Amount: {Amount}",
             awardId, award.IsNegotiated, award.AwardedAmount);
 
+        var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+
         var pdfBytes = Document.Create(container =>
         {
             container.Page(page =>
@@ -60,7 +66,7 @@ public class AwardLetterService : IAwardLetterService
                 page.DefaultTextStyle(x => x.FontSize(11).FontColor(Colors.Black));
 
                 page.Header().Element(h => ComposeHeader(h, organizationName, organizationAddress, award));
-                page.Content().Element(c => ComposeContent(c, award, organizationName));
+                page.Content().Element(c => ComposeContent(c, award, organizationName, baseCurrencyCode));
                 page.Footer().Element(f => ComposeFooter(f));
             });
         }).GeneratePdf();
@@ -99,11 +105,12 @@ public class AwardLetterService : IAwardLetterService
         });
     }
 
-    private void ComposeContent(IContainer container, ErpSystem.Core.Entities.Procurement.TenderAward award, string organizationName)
+    private void ComposeContent(IContainer container, ErpSystem.Core.Entities.Procurement.TenderAward award, string organizationName, string baseCurrencyCode)
     {
         var tender = award.Tender;
         var businessPartner = award.BusinessPartner;
         var bid = award.TenderBid;
+        var awardCurrencyCode = string.IsNullOrWhiteSpace(award.Currency) ? baseCurrencyCode : award.Currency.Trim().ToUpperInvariant();
 
         container.PaddingVertical(20).Column(column =>
         {
@@ -184,7 +191,7 @@ public class AwardLetterService : IAwardLetterService
                     table.Cell().Padding(3).Text("Award Amount:").Bold();
                     table.Cell().Padding(3).Text(text =>
                     {
-                        text.Span($"{award.Currency ?? "USD"} {award.AwardedAmount:N2}").Bold().FontSize(13).FontColor(Colors.Green.Darken2);
+                        text.Span($"{awardCurrencyCode} {award.AwardedAmount:N2}").Bold().FontSize(13).FontColor(Colors.Green.Darken2);
                         if (award.IsNegotiated)
                         {
                             text.Span(" (Negotiated)").FontSize(9).FontColor(Colors.Orange.Darken2);
@@ -197,7 +204,7 @@ public class AwardLetterService : IAwardLetterService
                         table.Cell().Padding(3).Text("Original Bid Amount:").Bold();
                         table.Cell().Padding(3).Text(text =>
                         {
-                            text.Span($"{award.Currency ?? "USD"} {award.OriginalBidAmount:N2}").FontColor(Colors.Grey.Darken1);
+                            text.Span($"{awardCurrencyCode} {award.OriginalBidAmount:N2}").FontColor(Colors.Grey.Darken1);
                         });
 
                         var savings = award.OriginalBidAmount - award.AwardedAmount;
@@ -206,7 +213,7 @@ public class AwardLetterService : IAwardLetterService
                             table.Cell().Padding(3).Text("Negotiation Savings:").Bold();
                             table.Cell().Padding(3).Text(text =>
                             {
-                                text.Span($"{award.Currency ?? "USD"} {savings:N2}").FontColor(Colors.Green.Darken2);
+                                text.Span($"{awardCurrencyCode} {savings:N2}").FontColor(Colors.Green.Darken2);
                             });
                         }
                     }

@@ -832,7 +832,6 @@ public class EmployeeContractDetailDto
     public decimal Salary { get; set; }
     public string PayFrequency { get; set; } = string.Empty;
     public PayFrequency? PayFrequencyType { get; set; }
-
     public TaxTreatmentType? TaxTreatmentType { get; set; }
 
     [Range(typeof(decimal), "0", "100")]
@@ -840,7 +839,6 @@ public class EmployeeContractDetailDto
 
     public bool? IsPensionApplicable { get; set; }
     public bool? IsTaxExempt { get; set; }
-
     public ContractStatus? ContractStatus { get; set; }
     public int WorkingHoursPerWeek { get; set; }
     public int VacationDaysPerYear { get; set; }

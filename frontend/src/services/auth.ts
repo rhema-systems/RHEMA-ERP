@@ -1,15 +1,30 @@
 import { apiService } from './api.service';
 import type { LoginRequest, LoginResponse, RequestLoginOtpRequest, RequestLoginOtpResponse, VerifyLoginOtpRequest, User, Tenant } from '../types';
+import { hasAllPermissionsAccess, hasAnyPermissionAccess, hasPermissionAccess } from '../lib/permissions';
+
+const SESSION_ACTIVITY_STORAGE_KEY = 'erp-session-last-activity';
 
 export class AuthService {
+  private markSessionActivityNow(): void {
+    if (typeof window === 'undefined') return;
+
+    localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, Date.now().toString());
+  }
+
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const response = await apiService.login(credentials);
     
     // Store tokens and user info
     if (response.token) {
-      localStorage.setItem('authToken', response.token);
-      localStorage.setItem('refreshToken', response.refreshToken);
+      apiService.setToken(response.token);
+      if (response.refreshToken) {
+        localStorage.setItem('refreshToken', response.refreshToken);
+      }
+      if (response.expiresAt) {
+        localStorage.setItem('tokenExpiry', new Date(response.expiresAt).getTime().toString());
+      }
       localStorage.setItem('user', JSON.stringify(response.user));
+      this.markSessionActivityNow();
     }
     
     return response;
@@ -23,9 +38,15 @@ export class AuthService {
     const response = await apiService.verifyLoginOtp(request);
 
     if (response.token) {
-      localStorage.setItem('authToken', response.token);
-      localStorage.setItem('refreshToken', response.refreshToken);
+      apiService.setToken(response.token);
+      if (response.refreshToken) {
+        localStorage.setItem('refreshToken', response.refreshToken);
+      }
+      if (response.expiresAt) {
+        localStorage.setItem('tokenExpiry', new Date(response.expiresAt).getTime().toString());
+      }
       localStorage.setItem('user', JSON.stringify(response.user));
+      this.markSessionActivityNow();
     }
 
     return response;
@@ -49,27 +70,39 @@ export class AuthService {
 
   async getCurrentUser(): Promise<User> {
     const userInfo = await apiService.getCurrentUser();
-    return {
+    const mappedUser = {
       id: userInfo.id,
       username: userInfo.username,
       email: userInfo.email,
       firstName: userInfo.firstName,
       lastName: userInfo.lastName,
       roles: userInfo.roles,
+      permissions: userInfo.permissions,
       isActive: userInfo.isActive,
       lastLoginAt: userInfo.lastLoginAt,
       createdAt: userInfo.createdAt,
       phoneNumber: userInfo.phoneNumber,
       tenantId: userInfo.tenantId,
     } as User;
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user', JSON.stringify(mappedUser));
+    }
+
+    return mappedUser;
   }
 
   async refreshToken(): Promise<LoginResponse> {
     const response = await apiService.refreshToken();
     
     if (response.token) {
-      localStorage.setItem('authToken', response.token);
-      localStorage.setItem('refreshToken', response.refreshToken);
+      apiService.setToken(response.token);
+      if (response.refreshToken) {
+        localStorage.setItem('refreshToken', response.refreshToken);
+      }
+      if (response.expiresAt) {
+        localStorage.setItem('tokenExpiry', new Date(response.expiresAt).getTime().toString());
+      }
       localStorage.setItem('user', JSON.stringify(response.user));
     }
 
@@ -98,7 +131,7 @@ export class AuthService {
 
   getStoredToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem('authToken');
+    return localStorage.getItem('authToken') || localStorage.getItem('token');
   }
 
   isAuthenticated(): boolean {
@@ -109,16 +142,20 @@ export class AuthService {
   clearTokens(): void {
     if (typeof window === 'undefined') return;
     
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('refreshToken');
+    apiService.clearToken();
+    localStorage.removeItem('token');
+    localStorage.removeItem('tokenExpiry');
     localStorage.removeItem('user');
     localStorage.removeItem('currentTenant');
+    localStorage.removeItem('currentTenantCode');
+    localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);
   }
 
   setCurrentTenant(tenant: Tenant): void {
     if (typeof window === 'undefined') return;
     
     localStorage.setItem('currentTenant', JSON.stringify(tenant));
+    localStorage.setItem('currentTenantCode', tenant.code);
     window.dispatchEvent(new CustomEvent('tenant-changed', { detail: tenant }));
   }
 
@@ -156,6 +193,21 @@ export class AuthService {
     if (!user?.roles) return false;
     
     return roles.every(role => user.roles.includes(role));
+  }
+
+  hasPermission(permission: string): boolean {
+    const user = this.getStoredUser();
+    return hasPermissionAccess(user, permission);
+  }
+
+  hasAnyPermission(permissions: string[]): boolean {
+    const user = this.getStoredUser();
+    return hasAnyPermissionAccess(user, permissions);
+  }
+
+  hasAllPermissions(permissions: string[]): boolean {
+    const user = this.getStoredUser();
+    return hasAllPermissionsAccess(user, permissions);
   }
 }
 

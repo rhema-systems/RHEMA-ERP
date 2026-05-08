@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client"
 
 import React, { useState, useMemo } from 'react'
@@ -242,16 +243,18 @@ export const MobileDataTable = <T extends Record<string, any>>({
 
         // Wrap with swipeable if swipe actions are provided
         if (swipeActions) {
+          const leftSwipeAction = swipeActions.left
+          const rightSwipeAction = swipeActions.right
           return (
             <SwipeableCard
               key={index}
-              leftAction={swipeActions.left ? {
-                ...swipeActions.left,
-                action: () => swipeActions.left!.action(row)
+              leftAction={leftSwipeAction ? {
+                ...leftSwipeAction,
+                action: () => leftSwipeAction.action(row)
               } : undefined}
-              rightAction={swipeActions.right ? {
-                ...swipeActions.right,
-                action: () => swipeActions.right!.action(row)
+              rightAction={rightSwipeAction ? {
+                ...rightSwipeAction,
+                action: () => rightSwipeAction.action(row)
               } : undefined}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >

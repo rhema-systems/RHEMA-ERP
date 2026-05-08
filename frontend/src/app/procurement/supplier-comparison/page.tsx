@@ -56,7 +56,7 @@ export default function SupplierComparisonPage() {
         if (metrics.length > 0) {
           // Get the most recent metric
           const latestMetric = metrics.sort((a, b) => 
-            new Date(b.calculationDate).getTime() - new Date(a.calculationDate).getTime()
+            new Date(b.calculationDate || b.calculatedAt).getTime() - new Date(a.calculationDate || a.calculatedAt).getTime()
           )[0];
           dataMap.set(supplierId, latestMetric);
         }
@@ -367,4 +367,3 @@ export default function SupplierComparisonPage() {
     </div>
   );
 }
-

@@ -32,7 +32,7 @@ interface CriteriaScore {
 export default function EvaluationFormPage() {
   const params = useParams();
   const router = useRouter();
-  const evaluationId = params.id as string;
+  const evaluationId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [evaluation, setEvaluation] = useState<TenderEvaluationDto | null>(null);
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
@@ -551,4 +551,3 @@ export default function EvaluationFormPage() {
     </div>
   );
 }
-

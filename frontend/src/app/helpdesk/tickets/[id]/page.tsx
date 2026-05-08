@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Eye, ExternalLink, Keyboard, Link2, Paperclip, Plus, Send, Ticket, Trash2 } from 'lucide-react';
 
@@ -15,6 +15,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import {
+  buildScopedHelpdeskDetailPath,
+  buildScopedHelpdeskQueuePath,
+  buildScopedHelpdeskTicketsPath,
+  getHelpdeskScopeConfig,
+  inferHelpdeskScopeFromTicket,
+} from '@/lib/helpdesk-scope';
 import {
   ehcInternalTicketService,
   type EhcAllowedTicketTransition,
@@ -47,8 +54,9 @@ const relatedResolveSupportedTypes = new Set([
 
 export default function HelpdeskTicketDetailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
-  const ticketId = params?.id;
+  const ticketId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -116,6 +124,13 @@ export default function HelpdeskTicketDetailPage() {
     queryFn: () => ehcInternalTicketService.getIsWatching(ticketId),
     enabled: Boolean(ticketId),
   });
+
+  const scopeParam = searchParams?.get('scope');
+  const effectiveScope = useMemo(
+    () => scopeParam || (ticket ? inferHelpdeskScopeFromTicket(ticket.ticketType, ticket.source) : null),
+    [scopeParam, ticket],
+  );
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(effectiveScope), [effectiveScope]);
 
   const { data: watchers } = useQuery({
     queryKey: ['ehc', 'internal', 'ticket', ticketId, 'watchers'],
@@ -319,7 +334,7 @@ export default function HelpdeskTicketDetailPage() {
         if (e.key === 'q' || e.key === 'Q') {
           e.preventDefault();
           goPrefixUntilRef.current = 0;
-          router.push('/helpdesk/queue');
+          router.push(buildScopedHelpdeskQueuePath(scopeConfig.scope));
           return;
         }
         if (e.key === 'p' || e.key === 'P') {
@@ -333,7 +348,7 @@ export default function HelpdeskTicketDetailPage() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [qc, router, ticketId, toast]);
+  }, [qc, router, scopeConfig.scope, ticketId, toast]);
 
   const assign = useMutation({
     mutationFn: async () => {
@@ -756,7 +771,7 @@ export default function HelpdeskTicketDetailPage() {
           <CardDescription>Failed to load ticket.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button variant="outline" onClick={() => router.push('/helpdesk/tickets')}>
+          <Button variant="outline" onClick={() => router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
@@ -769,7 +784,7 @@ export default function HelpdeskTicketDetailPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Button variant="outline" onClick={() => router.push('/helpdesk/tickets')}>
+          <Button variant="outline" onClick={() => router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
@@ -1012,7 +1027,7 @@ export default function HelpdeskTicketDetailPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Button size="icon" variant="outline" title="Open" onClick={() => router.push(`/helpdesk/tickets/${l.linkedTicketId}`)}>
+                          <Button size="icon" variant="outline" title="Open" onClick={() => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, l.linkedTicketId))}>
                             <ExternalLink className="h-4 w-4" />
                           </Button>
                           <Button
@@ -1321,7 +1336,7 @@ export default function HelpdeskTicketDetailPage() {
                                 <button
                                   type="button"
                                   className="text-sm font-semibold text-slate-900 hover:underline"
-                                  onClick={() => router.push(`/helpdesk/tickets/${l.linkedTicketId}`)}
+                                  onClick={() => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, l.linkedTicketId))}
                                   title="Open linked ticket"
                                 >
                                   {l.linkedTicketNumber}
@@ -1342,7 +1357,7 @@ export default function HelpdeskTicketDetailPage() {
                                 size="icon"
                                 variant="outline"
                                 title="Open"
-                                onClick={() => router.push(`/helpdesk/tickets/${l.linkedTicketId}`)}
+                                onClick={() => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, l.linkedTicketId))}
                               >
                                 <ExternalLink className="h-4 w-4" />
                               </Button>
@@ -1830,7 +1845,6 @@ export default function HelpdeskTicketDetailPage() {
           {preview?.url ? (
             preview.kind === 'image' ? (
               <div className="rounded-md border bg-white p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={preview.url} alt={preview.name} className="max-h-[70vh] w-full object-contain" />
               </div>
             ) : preview.kind === 'pdf' ? (

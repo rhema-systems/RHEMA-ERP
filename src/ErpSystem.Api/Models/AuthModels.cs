@@ -108,6 +108,7 @@ namespace ErpSystem.Api.Models
 
         public bool IsActive { get; set; }
         public List<string> Roles { get; set; } = new();
+        public List<string> Permissions { get; set; } = new();
 
         // Authentication provider (Local or LDAP)
         public string AuthenticationProvider { get; set; } = "Local";

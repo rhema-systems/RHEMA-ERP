@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client"
 
 // PWA utilities for service worker registration and management
@@ -187,21 +188,23 @@ export class PWAManager {
 
   private syncOfflineData() {
     // Trigger background sync when back online
-    if (this.serviceWorkerRegistration && 'sync' in window.ServiceWorkerRegistration.prototype) {
-      this.serviceWorkerRegistration.sync.register('background-sync')
+    if (this.serviceWorkerRegistration && 'sync' in this.serviceWorkerRegistration) {
+      void (this.serviceWorkerRegistration as ServiceWorkerRegistration & {
+        sync: { register: (tag: string) => Promise<void> }
+      }).sync.register('background-sync')
     }
   }
 
-  private urlBase64ToUint8Array(base64String: string): Uint8Array {
+  private urlBase64ToUint8Array(base64String: string): ArrayBuffer {
     const padding = '='.repeat((4 - base64String.length % 4) % 4)
     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
     const rawData = window.atob(base64)
-    const outputArray = new Uint8Array(rawData.length)
+    const outputArray = new Uint8Array(new ArrayBuffer(rawData.length))
     
     for (let i = 0; i < rawData.length; ++i) {
       outputArray[i] = rawData.charCodeAt(i)
     }
-    return outputArray
+    return outputArray.buffer
   }
 
   // Event handlers
@@ -294,9 +297,11 @@ export class OfflineDataManager {
 
   async storeData(key: string, data: any): Promise<void> {
     if (!this.db) await this.init()
+    if (!this.db) throw new Error('Offline database is not initialized')
+    const db = this.db
     
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['cache'], 'readwrite')
+      const transaction = db.transaction(['cache'], 'readwrite')
       const store = transaction.objectStore('cache')
       
       const request = store.put({
@@ -312,9 +317,11 @@ export class OfflineDataManager {
 
   async getData(key: string): Promise<any> {
     if (!this.db) await this.init()
+    if (!this.db) throw new Error('Offline database is not initialized')
+    const db = this.db
     
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['cache'], 'readonly')
+      const transaction = db.transaction(['cache'], 'readonly')
       const store = transaction.objectStore('cache')
       
       const request = store.get(key)
@@ -329,9 +336,11 @@ export class OfflineDataManager {
 
   async addPendingOperation(operation: any): Promise<void> {
     if (!this.db) await this.init()
+    if (!this.db) throw new Error('Offline database is not initialized')
+    const db = this.db
     
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['pending_operations'], 'readwrite')
+      const transaction = db.transaction(['pending_operations'], 'readwrite')
       const store = transaction.objectStore('pending_operations')
       
       const request = store.add({
@@ -346,9 +355,11 @@ export class OfflineDataManager {
 
   async getPendingOperations(): Promise<any[]> {
     if (!this.db) await this.init()
+    if (!this.db) throw new Error('Offline database is not initialized')
+    const db = this.db
     
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['pending_operations'], 'readonly')
+      const transaction = db.transaction(['pending_operations'], 'readonly')
       const store = transaction.objectStore('pending_operations')
       
       const request = store.getAll()
@@ -360,9 +371,11 @@ export class OfflineDataManager {
 
   async clearPendingOperations(): Promise<void> {
     if (!this.db) await this.init()
+    if (!this.db) throw new Error('Offline database is not initialized')
+    const db = this.db
     
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['pending_operations'], 'readwrite')
+      const transaction = db.transaction(['pending_operations'], 'readwrite')
       const store = transaction.objectStore('pending_operations')
       
       const request = store.clear()

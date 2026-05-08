@@ -201,3 +201,26 @@ export const QUERY_KEYS = {
     ],
   },
 } as const;
+
+export const ASSET_ANALYTICS_QUERY_KEYS = {
+  ASSET_OEE: 'asset-oee',
+  FLEET_OEE: 'fleet-oee',
+  ASSET_RELIABILITY: 'asset-reliability',
+  RELIABILITY_RANKINGS: 'reliability-rankings',
+  BENCHMARKS: 'asset-benchmarks',
+  COMPARISON: 'asset-comparison',
+  RANKINGS: 'asset-rankings',
+  HEALTH_TRENDS: 'asset-health-trends',
+  PREDICTIONS: 'asset-predictions',
+  TRENDS: 'asset-trends',
+  DASHBOARD: 'asset-dashboard',
+  ADVANCED_KPIS: 'asset-advanced-kpis',
+  ROOT_CAUSE_ANALYSIS: 'asset-root-cause-analysis',
+  CRITICALITY_ANALYSIS: 'asset-criticality-analysis',
+  OPTIMIZATION_RECOMMENDATIONS: 'asset-optimization-recommendations',
+  TOTAL_COST_OWNERSHIP: 'asset-total-cost-ownership',
+  COST_EFFICIENCY: 'asset-cost-efficiency',
+  MAINTENANCE_ROI: 'asset-maintenance-roi',
+  ENERGY_PERFORMANCE: 'asset-energy-performance',
+  ENVIRONMENTAL_IMPACT: 'asset-environmental-impact',
+} as const;

@@ -1,5 +1,8 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
@@ -7,13 +10,16 @@ namespace ErpSystem.Core.Services;
 public class JwtBlacklistService : IJwtBlacklistService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IMemoryCache _memoryCache;
     private readonly ILogger<JwtBlacklistService> _logger;
 
     public JwtBlacklistService(
         IUnitOfWork unitOfWork,
+        IMemoryCache memoryCache,
         ILogger<JwtBlacklistService> logger)
     {
         _unitOfWork = unitOfWork;
+        _memoryCache = memoryCache;
         _logger = logger;
     }
 
@@ -33,7 +39,8 @@ public class JwtBlacklistService : IJwtBlacklistService
 
             if (existingBlacklistedToken != null)
             {
-                _logger.LogInformation("Token with JTI {Jti} is already blacklisted", jti);
+                CacheBlacklistStatus(jti, true, existingBlacklistedToken.ExpiresAt);
+                _logger.LogDebug("Token with JTI {Jti} is already blacklisted", jti);
                 return;
             }
 
@@ -48,9 +55,17 @@ public class JwtBlacklistService : IJwtBlacklistService
 
             await _unitOfWork.Repository<BlacklistedToken>().AddAsync(blacklistedToken);
             await _unitOfWork.SaveChangesAsync();
+            CacheBlacklistStatus(jti, true, expiresAt);
 
-            _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId} (reason: {Reason})",
+            _logger.LogDebug("Blacklisted JWT token with JTI {Jti} for user {UserId} (reason: {Reason})",
                 jti, userId, blacklistedToken.Reason);
+        }
+        catch (Exception ex) when (IsDuplicateBlacklistInsert(ex))
+        {
+            CacheBlacklistStatus(jti, true, expiresAt);
+            _logger.LogDebug(
+                "JWT token with JTI {Jti} was already blacklisted by another request. Treating blacklist call as successful.",
+                jti);
         }
         catch (Exception ex)
         {
@@ -69,14 +84,18 @@ public class JwtBlacklistService : IJwtBlacklistService
                 return false;
             }
 
-            _logger.LogInformation("🔍 Blacklist Service: Checking JTI: {Jti}", jti);
+            if (_memoryCache.TryGetValue<bool>(GetCacheKey(jti), out var cachedResult))
+            {
+                _logger.LogDebug("Blacklist cache hit for JTI {Jti}: {IsBlacklisted}", jti, cachedResult);
+                return cachedResult;
+            }
 
             var blacklistedToken = await _unitOfWork.Repository<BlacklistedToken>()
                 .FirstOrDefaultAsync(bt => bt.Jti == jti && !bt.IsDeleted);
 
             var isBlacklisted = blacklistedToken != null;
-            _logger.LogInformation("🔍 Blacklist Service: JTI {Jti} result: {IsBlacklisted} (Token found: {TokenFound})",
-                jti, isBlacklisted, blacklistedToken != null ? "YES" : "NO");
+            CacheBlacklistStatus(jti, isBlacklisted, blacklistedToken?.ExpiresAt);
+            _logger.LogDebug("Blacklist lookup completed for JTI {Jti}: {IsBlacklisted}", jti, isBlacklisted);
 
             if (blacklistedToken != null)
             {
@@ -152,5 +171,48 @@ public class JwtBlacklistService : IJwtBlacklistService
             _logger.LogError(ex, "Error cleaning up expired blacklisted tokens");
             return 0;
         }
+    }
+
+    private void CacheBlacklistStatus(string jti, bool isBlacklisted, DateTime? expiresAt)
+    {
+        var cacheKey = GetCacheKey(jti);
+
+        if (!isBlacklisted)
+        {
+            _memoryCache.Remove(cacheKey);
+            return;
+        }
+
+        var ttl = expiresAt.HasValue
+            ? expiresAt.Value - DateTime.UtcNow
+            : TimeSpan.FromMinutes(5);
+
+        if (ttl <= TimeSpan.Zero)
+        {
+            _memoryCache.Remove(cacheKey);
+            return;
+        }
+
+        _memoryCache.Set(cacheKey, true, ttl);
+    }
+
+    private static string GetCacheKey(string jti) => $"jwt-blacklist:{jti}";
+
+    private static bool IsDuplicateBlacklistInsert(Exception ex)
+    {
+        if (ex is DbUpdateException dbUpdateException && dbUpdateException.InnerException != null)
+        {
+            return IsDuplicateBlacklistInsert(dbUpdateException.InnerException);
+        }
+
+        if (ex is SqlException sqlException)
+        {
+            return sqlException.Number is 2601 or 2627;
+        }
+
+        return !string.IsNullOrWhiteSpace(ex.Message)
+            && ex.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase)
+            && (ex.Message.Contains("BlacklistedTokens", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("IX_BlacklistedTokens_Jti", StringComparison.OrdinalIgnoreCase));
     }
 }

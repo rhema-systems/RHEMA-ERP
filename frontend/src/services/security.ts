@@ -219,6 +219,17 @@ export interface ThreatDetection {
   metadata: Record<string, any>
 }
 
+export interface SecurityPolicy {
+  id: string
+  name: string
+  description: string
+  policyType: string
+  isEnabled: boolean
+  configuration: Record<string, unknown>
+  lastModified: Date
+  modifiedBy: string
+}
+
 // Two-Factor Authentication interfaces
 export interface TwoFactorSettings {
   isEnabled: boolean
@@ -401,71 +412,15 @@ class SecurityService {
 
   // API Methods
   async getSecurityMetrics(): Promise<SecurityMetrics> {
-    try {
-      const response = await apiService.request<SecurityMetrics>('/security/metrics')
-      return response
-    } catch (error) {
-      console.warn('Failed to fetch security metrics, using fallback data:', error)
-      // Return fallback metrics
-      return {
-        twoFactorAdoptionRate: 85,
-        failedLoginAttempts: 23,
-        activeSessions: 142,
-        securityIncidents: 3,
-        passwordCompliance: 92,
-        auditEventsToday: 1247,
-        lastUpdated: new Date().toISOString(),
-        trends: {
-          twoFactorAdoptionRate: 12,
-          failedLoginAttempts: -15,
-          activeSessions: 8,
-          securityIncidents: 0,
-          passwordCompliance: 5,
-          auditEventsToday: 22
-        }
-      }
-    }
+    return await apiService.request<SecurityMetrics>('/security/metrics')
   }
 
   async getSecurityAlerts(dismissed = false): Promise<SecurityAlert[]> {
-    try {
-      const response = await apiService.request<SecurityAlert[]>(`/security/alerts?dismissed=${dismissed}`)
-      return response.map(alert => ({
-        ...alert,
-        timestamp: new Date(alert.timestamp)
-      }))
-    } catch (error) {
-      console.warn('Failed to fetch security alerts, using fallback data:', error)
-      // Return fallback alerts
-      return [
-        {
-          id: '1',
-          type: 'critical',
-          title: 'Multiple Failed Login Attempts',
-          message: 'User john.doe@company.com has 8 failed login attempts from IP 192.168.1.100',
-          timestamp: new Date(Date.now() - 15 * 60 * 1000),
-          dismissed: false,
-          severity: 5,
-          category: 'authentication',
-          source: 'login_monitor',
-          affectedUser: 'john.doe@company.com',
-          ipAddress: '192.168.1.100'
-        },
-        {
-          id: '2',
-          type: 'warning',
-          title: 'Unusual Login Location',
-          message: 'Login detected from new location: Tokyo, Japan for user alice@company.com',
-          timestamp: new Date(Date.now() - 45 * 60 * 1000),
-          dismissed: false,
-          severity: 3,
-          category: 'authentication',
-          source: 'geo_monitor',
-          affectedUser: 'alice@company.com',
-          location: 'Tokyo, Japan'
-        }
-      ]
-    }
+    const response = await apiService.request<SecurityAlert[]>(`/security/alerts?dismissed=${dismissed}`)
+    return response.map(alert => ({
+      ...alert,
+      timestamp: new Date(alert.timestamp)
+    }))
   }
 
   async dismissAlert(alertId: string): Promise<void> {
@@ -480,129 +435,44 @@ class SecurityService {
   }
 
   async getAuditLogs(filter: AuditLogFilter = {}): Promise<AuditLogResponse> {
-    try {
-      const queryParams = new URLSearchParams()
-      
-      if (filter.startDate) queryParams.append('startDate', filter.startDate.toISOString())
-      if (filter.endDate) queryParams.append('endDate', filter.endDate.toISOString())
-      if (filter.userId) queryParams.append('userId', filter.userId)
-      if (filter.userName) queryParams.append('userName', filter.userName)
-      if (filter.action) queryParams.append('action', filter.action)
-      if (filter.resource) queryParams.append('resource', filter.resource)
-      if (filter.result) queryParams.append('result', filter.result)
-      if (filter.risk) queryParams.append('risk', filter.risk)
-      if (filter.ipAddress) queryParams.append('ipAddress', filter.ipAddress)
-      if (filter.searchTerm) queryParams.append('searchTerm', filter.searchTerm)
-      if (filter.page) queryParams.append('page', filter.page.toString())
-      if (filter.pageSize) queryParams.append('pageSize', filter.pageSize.toString())
-      if (filter.sortBy) queryParams.append('sortBy', filter.sortBy)
-      if (filter.sortOrder) queryParams.append('sortOrder', filter.sortOrder)
+    const queryParams = new URLSearchParams()
 
-      const response = await apiService.request<AuditLogResponse>(`/security/audit-logs?${queryParams.toString()}`)
-      
-      return {
-        ...response,
-        entries: response.entries.map(entry => ({
-          ...entry,
-          timestamp: new Date(entry.timestamp)
-        }))
-      }
-    } catch (error) {
-      console.warn('Failed to fetch audit logs, using fallback data:', error)
-      
-      // Return fallback audit logs
-      const mockEntries: AuditLogEntry[] = [
-        {
-          id: '1',
-          timestamp: new Date(Date.now() - 10 * 60 * 1000),
-          userId: 'user-123',
-          userName: 'John Doe',
-          userEmail: 'john.doe@company.com',
-          action: 'LOGIN_SUCCESS',
-          resource: 'Authentication',
-          result: 'success',
-          ipAddress: '192.168.1.100',
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          location: 'New York, NY',
-          details: 'User successfully logged in with 2FA',
-          risk: 'low'
-        },
-        {
-          id: '2',
-          timestamp: new Date(Date.now() - 25 * 60 * 1000),
-          userId: 'user-456',
-          userName: 'Jane Smith',
-          userEmail: 'jane.smith@company.com',
-          action: 'PASSWORD_CHANGE',
-          resource: 'User Management',
-          result: 'success',
-          ipAddress: '192.168.1.105',
-          userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-          location: 'San Francisco, CA',
-          details: 'User changed password successfully',
-          risk: 'medium'
-        }
-      ]
+    if (filter.startDate) queryParams.append('startDate', filter.startDate.toISOString())
+    if (filter.endDate) queryParams.append('endDate', filter.endDate.toISOString())
+    if (filter.userId) queryParams.append('userId', filter.userId)
+    if (filter.userName) queryParams.append('userName', filter.userName)
+    if (filter.action) queryParams.append('action', filter.action)
+    if (filter.resource) queryParams.append('resource', filter.resource)
+    if (filter.result) queryParams.append('result', filter.result)
+    if (filter.risk) queryParams.append('risk', filter.risk)
+    if (filter.ipAddress) queryParams.append('ipAddress', filter.ipAddress)
+    if (filter.searchTerm) queryParams.append('searchTerm', filter.searchTerm)
+    if (filter.page) queryParams.append('page', filter.page.toString())
+    if (filter.pageSize) queryParams.append('pageSize', filter.pageSize.toString())
+    if (filter.sortBy) queryParams.append('sortBy', filter.sortBy)
+    if (filter.sortOrder) queryParams.append('sortOrder', filter.sortOrder)
 
-      return {
-        entries: mockEntries,
-        total: mockEntries.length,
-        page: filter.page || 1,
-        pageSize: filter.pageSize || 50,
-        totalPages: 1,
-        hasNext: false,
-        hasPrevious: false
-      }
+    const response = await apiService.request<AuditLogResponse>(`/security/audit-logs?${queryParams.toString()}`)
+
+    return {
+      ...response,
+      entries: response.entries.map(entry => ({
+        ...entry,
+        timestamp: new Date(entry.timestamp)
+      }))
     }
   }
 
 async getDeviceSessions(): Promise<DeviceSession[]> {
-    try {
-      const response = await apiService.request<DeviceSession[]>('/security/device-sessions')
-      return response.map(session => ({
-        ...session,
-        session: {
-          ...session.session,
-          startTime: new Date(session.session.startTime),
-          lastActivity: new Date(session.session.lastActivity)
-        }
-      }))
-    } catch (error) {
-      console.warn('Failed to fetch device sessions, using fallback data:', error)
-      
-      // Return fallback device sessions
-      return [
-        {
-          id: '1',
-          userId: 'user-123',
-          userName: 'John Doe',
-          userEmail: 'john.doe@company.com',
-          deviceInfo: {
-            type: 'desktop',
-            os: 'Windows 10',
-            browser: 'Chrome 120.0'
-          },
-          location: {
-            city: 'New York',
-            country: 'USA',
-            ip: '192.168.1.100'
-          },
-          session: {
-            sessionId: 'session-123',
-            startTime: new Date(Date.now() - 2 * 60 * 60 * 1000),
-            lastActivity: new Date(Date.now() - 5 * 60 * 1000),
-            isActive: true,
-            duration: 2 * 60 * 60 * 1000
-          },
-          security: {
-            isTrusted: true,
-            riskScore: 2,
-            flags: [],
-            twoFactorEnabled: true
-          }
-        }
-      ]
-    }
+    const response = await apiService.request<DeviceSession[]>('/security/device-sessions')
+    return response.map(session => ({
+      ...session,
+      session: {
+        ...session.session,
+        startTime: new Date(session.session.startTime),
+        lastActivity: new Date(session.session.lastActivity)
+      }
+    }))
   }
 
   // User session management methods using the new Session API
@@ -712,75 +582,19 @@ async getDeviceSessions(): Promise<DeviceSession[]> {
   }
 
   async getSecurityHealthScore(): Promise<SecurityHealthScore> {
-    try {
-      const response = await apiService.request<SecurityHealthScore>('/security/health-score')
-      return {
-        ...response,
-        lastCalculated: new Date(response.lastCalculated)
-      }
-    } catch (error) {
-      console.warn('Failed to fetch security health score, using fallback data:', error)
-      
-      return {
-        overall: 87,
-        categories: {
-          passwordPolicies: 92,
-          twoFactorAdoption: 85,
-          sessionSecurity: 78,
-          accessControls: 95,
-          auditCompliance: 88
-        },
-        recommendations: [
-          {
-            category: 'Two-Factor Authentication',
-            message: 'Increase 2FA adoption rate to reach 95% target',
-            priority: 'medium',
-            actionRequired: true
-          },
-          {
-            category: 'Session Security',
-            message: 'Review session timeout policies for better security',
-            priority: 'low',
-            actionRequired: false
-          }
-        ],
-        lastCalculated: new Date()
-      }
+    const response = await apiService.request<SecurityHealthScore>('/security/health-score')
+    return {
+      ...response,
+      lastCalculated: new Date(response.lastCalculated)
     }
   }
 
   async getThreatDetections(): Promise<ThreatDetection[]> {
-    try {
-      const response = await apiService.request<ThreatDetection[]>('/security/threats')
-      return response.map(threat => ({
-        ...threat,
-        timestamp: new Date(threat.timestamp)
-      }))
-    } catch (error) {
-      console.warn('Failed to fetch threat detections, using fallback data:', error)
-      
-      return [
-        {
-          id: '1',
-          type: 'brute_force',
-          severity: 'critical',
-          title: 'Brute Force Attack Detected',
-          description: 'Multiple failed login attempts from IP 192.168.1.100',
-          timestamp: new Date(Date.now() - 30 * 60 * 1000),
-          source: 'login_monitor',
-          target: 'john.doe@company.com',
-          indicators: [
-            { key: 'failed_attempts', value: '15', risk: 5 },
-            { key: 'time_window', value: '5 minutes', risk: 4 }
-          ],
-          status: 'active',
-          metadata: {
-            ipAddress: '192.168.1.100',
-            userAgent: 'automated_tool'
-          }
-        }
-      ]
-    }
+    const response = await apiService.request<ThreatDetection[]>('/security/threats')
+    return response.map(threat => ({
+      ...threat,
+      timestamp: new Date(threat.timestamp)
+    }))
   }
 
   async updateThreatStatus(threatId: string, status: ThreatDetection['status'], resolution?: string): Promise<void> {
@@ -793,6 +607,14 @@ async getDeviceSessions(): Promise<DeviceSession[]> {
       console.error('Failed to update threat status:', error)
       throw error
     }
+  }
+
+  async getSecurityPolicies(): Promise<SecurityPolicy[]> {
+    const response = await apiService.request<SecurityPolicy[]>('/security/policies')
+    return response.map(policy => ({
+      ...policy,
+      lastModified: new Date(policy.lastModified)
+    }))
   }
 
   // Security Settings methods

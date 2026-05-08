@@ -124,6 +124,16 @@ namespace ErpSystem.Api.Controllers
             return h.StartsWith("support.");
         }
 
+        private async Task<List<string>> GetUserPermissionsAsync(ApplicationUser user)
+        {
+            return await _context.UserRoles
+                .Where(ur => ur.UserId == user.Id)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .Distinct()
+                .OrderBy(name => name)
+                .ToListAsync();
+        }
+
         private async Task<Guid> ResolveTenantIdForCaptchaAsync(string? tenantCode)
         {
             if (!string.IsNullOrWhiteSpace(tenantCode))
@@ -355,6 +365,7 @@ namespace ErpSystem.Api.Controllers
                     CurrentTenantName = tenant?.Name,
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                    Permissions = await GetUserPermissionsAsync(user),
                     AuthenticationProvider = user.AuthenticationProvider.ToString()
                 }
             };
@@ -798,6 +809,7 @@ namespace ErpSystem.Api.Controllers
                         CurrentTenantId = user.TenantId,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        Permissions = await GetUserPermissionsAsync(user),
                         AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
@@ -829,7 +841,9 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Extract JWT token information for blacklisting and session termination
-                string sessionId = null;
+                string? sessionId = null;
+                string? currentTokenJti = null;
+                DateTime? currentTokenExpiresAt = null;
                 var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
                 if (authHeader?.StartsWith("Bearer ") == true)
                 {
@@ -845,15 +859,13 @@ namespace ErpSystem.Api.Controllers
                         else
                         {
                             var jsonToken = tokenHandler.ReadJwtToken(jwt);
-                            var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                            currentTokenJti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
                             var exp = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Exp)?.Value;
                             sessionId = jsonToken.Claims.FirstOrDefault(x => x.Type == "sid")?.Value; // Session ID claim
 
-                            if (!string.IsNullOrEmpty(jti) && !string.IsNullOrEmpty(exp))
+                            if (!string.IsNullOrEmpty(exp) && long.TryParse(exp, out var expiresAtUnixSeconds))
                             {
-                                var expiresAt = DateTimeOffset.FromUnixTimeSeconds(long.Parse(exp)).DateTime;
-                                await _jwtBlacklistService.BlacklistTokenAsync(jti, currentUserId.Value, expiresAt, "User logout");
-                                _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId}", jti, currentUserId.Value);
+                                currentTokenExpiresAt = DateTimeOffset.FromUnixTimeSeconds(expiresAtUnixSeconds).UtcDateTime;
                             }
                         }
                     }
@@ -877,12 +889,55 @@ namespace ErpSystem.Api.Controllers
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed to terminate user session {SessionId} during logout", sessionId);
-                        // Continue with logout even if session termination fails
+
+                        if (!string.IsNullOrEmpty(currentTokenJti) && currentTokenExpiresAt.HasValue)
+                        {
+                            try
+                            {
+                                await _jwtBlacklistService.BlacklistTokenAsync(
+                                    currentTokenJti,
+                                    currentUserId.Value,
+                                    currentTokenExpiresAt.Value,
+                                    "User logout (session termination fallback)");
+                                _logger.LogInformation(
+                                    "Blacklisted current JWT token with JTI {Jti} after session termination fallback for user {UserId}",
+                                    currentTokenJti,
+                                    currentUserId.Value);
+                            }
+                            catch (Exception blacklistEx)
+                            {
+                                _logger.LogWarning(
+                                    blacklistEx,
+                                    "Failed to blacklist JWT token with JTI {Jti} during logout fallback",
+                                    currentTokenJti);
+                            }
+                        }
                     }
                 }
                 else
                 {
                     _logger.LogWarning("No session ID found in JWT token for user {UserId} logout. Attempting to terminate all active sessions.", currentUserId.Value);
+
+                    if (!string.IsNullOrEmpty(currentTokenJti) && currentTokenExpiresAt.HasValue)
+                    {
+                        try
+                        {
+                            await _jwtBlacklistService.BlacklistTokenAsync(
+                                currentTokenJti,
+                                currentUserId.Value,
+                                currentTokenExpiresAt.Value,
+                                "User logout");
+                            _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId}", currentTokenJti, currentUserId.Value);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(
+                                ex,
+                                "Failed to blacklist JWT token during logout without a session ID. JTI: {Jti}",
+                                currentTokenJti);
+                        }
+                    }
+
                     // Fallback: terminate all active sessions for this user
                     try
                     {
@@ -1112,6 +1167,7 @@ namespace ErpSystem.Api.Controllers
                     AccessibleTenants = accessibleTenants,
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                    Permissions = await GetUserPermissionsAsync(user),
                     AuthenticationProvider = user.AuthenticationProvider.ToString()
                 };
 
@@ -1288,6 +1344,7 @@ namespace ErpSystem.Api.Controllers
                         AccessibleTenants = accessibleTenants,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        Permissions = await GetUserPermissionsAsync(user),
                         AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
@@ -1946,6 +2003,27 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        [HttpGet("session-settings")]
+        [Authorize]
+        public async Task<IActionResult> GetSessionSettings()
+        {
+            try
+            {
+                var settings = await _settingsService.GetSecuritySettingsAsync();
+
+                return Ok(new
+                {
+                    sessionTimeoutMinutes = settings?.SessionTimeoutMinutes ?? 30,
+                    jwtTokenLifetimeMinutes = settings?.JwtTokenLifetimeMinutes ?? 60
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving authenticated session settings");
+                return StatusCode(500, new { message = "An error occurred while retrieving session settings" });
+            }
+        }
+
         /// <summary>
         /// Get password policy for authenticated users
         /// </summary>
@@ -2061,13 +2139,13 @@ namespace ErpSystem.Api.Controllers
                 {
                     // Read frontend URL from configuration
                     var frontendUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
-                    var resetUrl = $"{frontendUrl}/reset-password?token={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(user.Email)}";
+                    var resetUrl = $"{frontendUrl}/reset-password?token={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(user.Email ?? string.Empty)}";
 
                     _logger.LogInformation("Generated password reset URL: {ResetUrl}", resetUrl);
 
                     var emailDto = new ErpSystem.Core.Interfaces.Common.EmailDto
                     {
-                        To = user.Email,
+                        To = user.Email ?? string.Empty,
                         Subject = "Password Reset Request",
                         Body = GeneratePasswordResetEmailBody(user.FirstName, resetUrl),
                         IsHtml = true

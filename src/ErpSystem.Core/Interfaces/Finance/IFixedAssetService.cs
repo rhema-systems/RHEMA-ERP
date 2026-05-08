@@ -1,0 +1,27 @@
+using ErpSystem.Core.DTOs.Finance;
+
+namespace ErpSystem.Core.Interfaces.Finance;
+
+public interface IFixedAssetService
+{
+    Task<FixedAssetDto?> GetByIdAsync(Guid id);
+    Task<IEnumerable<FixedAssetDto>> GetAllAsync();
+    Task<FixedAssetDto> CreateAsync(CreateFixedAssetDto dto);
+    Task<FixedAssetDto> UpdateAsync(Guid id, UpdateFixedAssetDto dto);
+    Task DeleteAsync(Guid id);
+    
+    // Bulk Import
+    Task<BulkImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName);
+    Task<byte[]> GenerateImportTemplateAsync();
+
+    // Lifecycle Management
+    Task<FixedAssetDto> ActivateAsync(Guid id, DateTime? placedInServiceDate);
+    Task<FixedAssetDto> PutOnHoldAsync(Guid id, string reason);
+    Task<FixedAssetDto> ResumeAsync(Guid id);
+
+    // Dashboard
+    Task<FixedAssetDashboardDto> GetDashboardAsync();
+
+    // Asset Code Generation
+    Task<string> GenerateAssetCodeAsync(Guid categoryId);
+}

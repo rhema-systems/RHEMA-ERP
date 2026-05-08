@@ -34,8 +34,8 @@ export default function EditTenderPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tenderId = params.id as string;
-  const fromRequisitionId = searchParams.get('fromRequisitionId');
+  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
+  const fromRequisitionId = searchParams?.get('fromRequisitionId') ?? null;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -79,6 +79,8 @@ export default function EditTenderPage() {
     documents: [],
     fees: [],
     invitations: [],
+    invitedBusinessPartnerIds: [],
+    sendNotifications: false,
   });
 
   useEffect(() => {
@@ -166,7 +168,9 @@ export default function EditTenderPage() {
             deliveryLocation: item.deliveryLocation || '',
           })),
         })),
-        items: data.items.map(item => ({
+        items: data.items.map((item, itemIndex) => ({
+          id: item.id,
+          lineNumber: item.lineNumber || itemIndex + 1,
           itemCode: item.itemCode || '',
           description: item.description,
           quantity: item.quantity,
@@ -179,6 +183,8 @@ export default function EditTenderPage() {
         requiresAcceptanceDeclaration: data.requiresAcceptanceDeclaration || false,
         acceptanceDeclarationFile: null, // File is already uploaded, not in form state
         acceptanceDeclarationDocumentName: data.acceptanceDeclarationDocumentName || '',
+        proposalTemplateFile: null,
+        proposalTemplateName: data.documents.find((doc) => doc.documentType === 'ProposalTemplate')?.documentName || '',
         documents: [],
         fees: (data.fees || []).map(fee => ({
           id: fee.id,
@@ -201,6 +207,8 @@ export default function EditTenderPage() {
           responseDate: inv.responseDate,
           declineReason: inv.declineReason,
         })),
+        invitedBusinessPartnerIds: (data.invitations || []).map((inv) => inv.businessPartnerId),
+        sendNotifications: false,
       });
 
       // Determine the last step with data and navigate to it

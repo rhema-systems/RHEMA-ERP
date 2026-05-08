@@ -32,7 +32,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { adminApiService, Role } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
-import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign } from 'lucide-react';
+import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench } from 'lucide-react';
 
 const roleSchema = z.object({
   name: z.string().min(2, 'Role name must be at least 2 characters'),
@@ -97,6 +97,31 @@ const PERMISSION_CATEGORIES = {
       { id: 'settings.read', name: 'View Settings', description: 'View system settings' },
       { id: 'settings.update', name: 'Update Settings', description: 'Modify system settings' },
       { id: 'audit.read', name: 'View Audit Logs', description: 'Access audit trail' },
+    ]
+  },
+  'Module Access': {
+    icon: Briefcase,
+    permissions: [
+      { id: 'project.access', name: 'Access Project Management', description: 'Access the project management module' },
+      { id: 'maintenance.access', name: 'Access Maintenance Management', description: 'Access the maintenance management module' },
+      { id: 'fleet.access', name: 'Access Fleet Management', description: 'Access the fleet management module' },
+    ]
+  },
+  'Administration Modules': {
+    icon: Wrench,
+    permissions: [
+      { id: 'admin.project-management', name: 'Admin Project Management', description: 'Manage project administration settings' },
+      { id: 'admin.maintenance', name: 'Admin Maintenance Management', description: 'Manage maintenance administration settings' },
+      { id: 'admin.fleet-management', name: 'Admin Fleet Management', description: 'Manage fleet administration settings' },
+    ]
+  },
+  'Helpdesk Branch Access': {
+    icon: FileText,
+    permissions: [
+      { id: 'enquiry.internal.access', name: 'Access Internal Enquiry', description: 'Access the internal enquiry backoffice branch' },
+      { id: 'enquiry.external.access', name: 'Access External Enquiry', description: 'Access the external enquiry backoffice branch' },
+      { id: 'support.internal.access', name: 'Access Internal Helpdesk & Complaints', description: 'Access the internal helpdesk and complaints backoffice branch' },
+      { id: 'support.external.access', name: 'Access External Helpdesk & Complaints', description: 'Access the external helpdesk and complaints backoffice branch' },
     ]
   }
 };

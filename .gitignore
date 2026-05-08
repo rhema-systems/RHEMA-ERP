@@ -27,6 +27,7 @@ publish/
 !.vscode/extensions.json
 
 # Visual Studio
+.vs/
 *.suo
 *.user
 *.userosscache
@@ -216,6 +217,7 @@ Thumbs.db
 docs/_site/
 docs/.sass-cache/
 docs/.jekyll-metadata
+comp/
 
 # IDE files
 *.swp
@@ -254,16 +256,55 @@ tools/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 
-# Uploaded files
-uploads/
-**/uploads/
-src/ErpSystem.Api/uploads/
-src/ErpSystem.Api/wwwroot/uploads/
+# Logs and output
+*_log*.txt
+*_error*.txt
+*_output*.txt
+api_crash*.txt
+startup_error.txt
+last_error.txt
+test_account_create.txt
 
-# HTTP logs
-http-logs/
-**/http-logs/
+# Token/auth files (security)
+token_output*.txt
+
+# Debug files
+debug_*.txt
+
+# Local build logs / diagnostics
+build_log.md
+build_error_log.md
+build_log.txt
+build_error_log.txt
+build-output.txt
+build_output.txt
+build-errors.txt
+build_errors.txt
+
+# Project-specific build artifacts (API)
+src/ErpSystem.Api/build-*.txt
+src/ErpSystem.Api/build-*.log
+src/ErpSystem.Api/build-output*.txt
+src/ErpSystem.Api/build-errors*.txt
+
+# Archives
+*.zip
+
+# Local dev helper scripts (ignore if they are personal-only)
+Fix-Backend.ps1
+Quick-Start.ps1
+Start-Dev.ps1
+Stop-Dev.ps1
+
+# Local notes (ignore if personal-only)
+DEV-SERVERS.md
+
+# AI assistant local settings
+.claude/settings.local.json
+
+# API HTTP request logs
 src/ErpSystem.Api/http-logs/
 
-# Migration output
-migration_output.txt
+# Runtime uploads / generated content
+src/ErpSystem.Api/uploads/
+src/ErpSystem.Api/wwwroot/uploads/

@@ -31,6 +31,7 @@ interface WorkOrderType {
   code: string;
   description?: string;
   priority?: string;
+  defaultPriority?: number;
   color?: string;
   estimatedHours?: number;
   isActive: boolean;
@@ -151,13 +152,16 @@ export default function WorkOrderTypesPage() {
     return priorityMap[priority] || 2;
   };
 
-  const getPriorityString = (priority: number) => {
+  const getPriorityString = (priority?: number) => {
     const priorityMap = {
       1: 'Low',
       2: 'Medium',
       3: 'High', 
       4: 'Critical'
     } as any;
+    if (priority === undefined) {
+      return 'Medium';
+    }
     return priorityMap[priority] || 'Medium';
   };
 

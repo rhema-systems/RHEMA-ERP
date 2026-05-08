@@ -19,12 +19,20 @@ export interface User {
   currentTenantName?: string;
   isActive: boolean;
   roles: string[];
+  permissions?: string[];
   phoneNumber?: string;
   createdAt?: string;
   lastLoginAt?: string;
   profilePictureUrl?: string;
   twoFactorEnabled?: boolean;
   authenticationProvider?: 'Local' | 'LDAP';
+  accessibleTenants?: Array<{
+    tenantId: string;
+    tenantCode: string;
+    tenantName: string;
+    isDefault: boolean;
+    accessLevel: string;
+  }>;
 }
 
 // Authentication Types
@@ -91,6 +99,12 @@ export interface DashboardStats {
   totalTenants: number;
   activeUsers: number;
   systemHealth: 'healthy' | 'warning' | 'error';
+  totalRevenue?: number;
+  revenueGrowth?: number;
+  revenueTarget?: number;
+  totalOrders?: number;
+  ordersGrowth?: number;
+  ordersTarget?: number;
 }
 
 // Form Types

@@ -73,8 +73,8 @@ export default function PartnerCategoriesPage() {
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.categoryName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.categoryCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }

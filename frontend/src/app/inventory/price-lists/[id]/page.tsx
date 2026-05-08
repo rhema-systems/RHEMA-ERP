@@ -28,10 +28,19 @@ interface InventoryItemOption {
   listPrice: number;
 }
 
+type PriceListLineFormData = Omit<
+  CreatePriceListLineDto,
+  'discountPercent' | 'minQuantity' | 'unitOfMeasure'
+> & {
+  discountPercent: number;
+  minQuantity: number;
+  unitOfMeasure: string;
+};
+
 export default function PriceListDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [priceList, setPriceList] = useState<PriceListDto | null>(null);
   const [lines, setLines] = useState<PriceListLineDto[]>([]);
@@ -44,7 +53,7 @@ export default function PriceListDetailPage() {
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [selectedLine, setSelectedLine] = useState<PriceListLineDto | null>(null);
   const [bulkPercentage, setBulkPercentage] = useState<number>(0);
-  const [lineFormData, setLineFormData] = useState<CreatePriceListLineDto>({
+  const [lineFormData, setLineFormData] = useState<PriceListLineFormData>({
     inventoryItemId: '', unitOfMeasure: 'EA', basePrice: 0, discountPercent: 0, minQuantity: 1
   });
 

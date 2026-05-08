@@ -184,7 +184,7 @@ namespace ErpSystem.Api.Controllers
         /// Trust or untrust a device based on its fingerprint
         /// </summary>
         [HttpPost("trust")]
-        public async Task<IActionResult> UpdateDeviceTrust([FromBody] UpdateDeviceTrustRequest request)
+        public IActionResult UpdateDeviceTrust([FromBody] UpdateDeviceTrustRequest request)
         {
             try
             {
@@ -212,7 +212,7 @@ namespace ErpSystem.Api.Controllers
         /// Get suspicious activity for current user
         /// </summary>
         [HttpGet("suspicious-activity")]
-        public async Task<IActionResult> GetSuspiciousActivity([FromQuery] int days = 30)
+        public IActionResult GetSuspiciousActivity([FromQuery] int days = 30)
         {
             try
             {

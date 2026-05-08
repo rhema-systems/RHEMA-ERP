@@ -1028,13 +1028,22 @@ public class InventoryItemsController : ControllerBase
     }
 
     /// <summary>
-    /// Helper method to get tenant ID from claims
+    /// Helper method to get tenant ID from the current user context.
+    /// Falls back to the seeded default tenant for authenticated requests that
+    /// do not carry a tenant claim.
     /// </summary>
-    private static Guid GetTenantId()
+    private Guid GetTenantId()
     {
-        // Implementation would extract tenant ID from JWT claims or session
-        // For now, returning a placeholder
-        return Guid.Empty;
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "TenantId was empty while processing inventory item request. Falling back to default tenant {DefaultTenantId}",
+                DefaultTenantId);
+            tenantId = DefaultTenantId;
+        }
+
+        return tenantId;
     }
 }
 

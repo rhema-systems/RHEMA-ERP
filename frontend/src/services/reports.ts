@@ -157,6 +157,7 @@ export interface ReportTemplate {
   type: string;
   chartType?: string;
   isCustom: boolean;
+  isFavorite?: boolean;
   createdBy: string;
   createdAt: string;
   lastUsed?: string;

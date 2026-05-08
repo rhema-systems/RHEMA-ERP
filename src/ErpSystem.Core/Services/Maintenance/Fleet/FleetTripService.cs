@@ -722,6 +722,7 @@ public class FleetTripService : IFleetTripService
             VehicleName = t.VehicleAsset?.Name ?? string.Empty,
             VehicleAssetNumber = t.VehicleAsset?.AssetNumber,
             VehicleLicensePlate = t.VehicleAsset?.LicensePlate,
+            VehicleFuelType = t.VehicleAsset?.FuelType,
             RequestedByUserId = t.RequestedByUserId,
             DriverEmployeeId = t.DriverEmployeeId,
             DriverEmployeeName = driverName,

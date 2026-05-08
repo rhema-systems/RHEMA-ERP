@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { HelpCircle, Search } from 'lucide-react';
 
@@ -11,12 +12,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService, type EhcFaqItem } from '@/services/ehcInternalTicketService';
 
 export default function HelpdeskFaqPage() {
+  const searchParams = useSearchParams();
   const [q, setQ] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const { data: categories } = useQuery({
     queryKey: ['ehc', 'faq', 'categories'],
@@ -48,9 +53,11 @@ export default function HelpdeskFaqPage() {
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <HelpCircle className="h-7 w-7" />
-          FAQs
+            {scopeParam ? `${scopeConfig.moduleLabel} FAQs` : 'FAQs'}
           </h1>
-          <p className="text-slate-600 mt-1">Quick answers to common questions for faster ticket resolution.</p>
+          <p className="text-slate-600 mt-1">
+            {scopeParam ? `Common answers used by the ${scopeConfig.listTitle.toLowerCase()} branch.` : 'Quick answers to common questions for faster ticket resolution.'}
+          </p>
         </div>
       </div>
 

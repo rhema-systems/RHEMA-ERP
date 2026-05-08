@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client";
 
 import React from 'react';
@@ -241,7 +242,7 @@ export function DataTableToolbar<TData>({
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => toolbarActions.delete!(selectedRows)}
+                onClick={() => toolbarActions.delete?.(selectedRows)}
                 disabled={loading}
               >
                 <Trash2Icon className="mr-1 h-3 w-3" />

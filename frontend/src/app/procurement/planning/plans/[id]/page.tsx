@@ -23,7 +23,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 export default function ProcurementPlanDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const planId = params.id as string;
+  const planId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [plan, setPlan] = useState<ProcurementPlanDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1661,7 +1661,7 @@ export default function ProcurementPlanDetailPage() {
               disabled={
                 conversionLoading ||
                 (conversionType === 'purchaseOrder' && !poForm.supplierId) ||
-                (budgetValidation && !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict')
+                Boolean(budgetValidation && !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict')
               }
               className={
                 conversionType === 'tender' ? 'bg-purple-600 hover:bg-purple-700' :
@@ -1697,4 +1697,3 @@ export default function ProcurementPlanDetailPage() {
     </div>
   );
 }
-

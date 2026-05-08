@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { BookOpen, Search } from 'lucide-react';
 
@@ -10,12 +11,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService, type EhcKbArticleDetail, type EhcKbArticleListItem } from '@/services/ehcInternalTicketService';
 
 export default function HelpdeskKnowledgeBasePage() {
+  const searchParams = useSearchParams();
   const [q, setQ] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const { data: categories } = useQuery({
     queryKey: ['ehc', 'kb', 'categories'],
@@ -53,9 +58,11 @@ export default function HelpdeskKnowledgeBasePage() {
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <BookOpen className="h-7 w-7" />
-          Knowledge Base
+          {scopeParam ? `${scopeConfig.moduleLabel} Knowledge Base` : 'Knowledge Base'}
         </h1>
-        <p className="text-slate-600 mt-1">Internal support articles to help agents resolve tickets faster.</p>
+        <p className="text-slate-600 mt-1">
+          {scopeParam ? `Support articles available to the ${scopeConfig.listTitle.toLowerCase()} branch.` : 'Internal support articles to help agents resolve tickets faster.'}
+        </p>
       </div>
 
       <Card>
@@ -147,4 +154,3 @@ export default function HelpdeskKnowledgeBasePage() {
     </div>
   );
 }
-

@@ -249,7 +249,7 @@ public class OptimizedAuditLogController : ControllerBase
     [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
     [EnableRateLimiting("SensitivePolicy")] // Stricter rate limiting for exports
     [ProducesResponseType(typeof(ExportJobResponse), StatusCodes.Status202Accepted)]
-    public async Task<ActionResult<ExportJobResponse>> ExportAuditLogs([FromBody] AuditLogExportRequest request)
+    public ActionResult<ExportJobResponse> ExportAuditLogs([FromBody] AuditLogExportRequest request)
     {
         try
         {

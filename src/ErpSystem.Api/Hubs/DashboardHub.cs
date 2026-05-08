@@ -22,7 +22,7 @@ namespace ErpSystem.Api.Hubs
                 var tenantId = Context.User?.FindFirst("tenant_id")?.Value;
                 var userName = Context.User?.FindFirst(ClaimTypes.Name)?.Value;
 
-                _logger.LogInformation("SignalR connection attempt - ConnectionId: {ConnectionId}, UserId: {UserId}, TenantId: {TenantId}, UserName: {UserName}",
+                _logger.LogDebug("SignalR connection attempt - ConnectionId: {ConnectionId}, UserId: {UserId}, TenantId: {TenantId}, UserName: {UserName}",
                     Context.ConnectionId, userId, tenantId, userName);
 
                 if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(tenantId))
@@ -33,7 +33,7 @@ namespace ErpSystem.Api.Hubs
                     // Add user to user-specific group for personal notifications
                     await Groups.AddToGroupAsync(Context.ConnectionId, $"User_{userId}");
 
-                    _logger.LogInformation("User {UserId} ({UserName}) from tenant {TenantId} successfully connected to dashboard hub with ConnectionId {ConnectionId}",
+                    _logger.LogDebug("User {UserId} ({UserName}) from tenant {TenantId} successfully connected to dashboard hub with ConnectionId {ConnectionId}",
                         userId, userName, tenantId, Context.ConnectionId);
                 }
                 else
@@ -66,7 +66,7 @@ namespace ErpSystem.Api.Hubs
                 }
                 else
                 {
-                    _logger.LogInformation("SignalR clean disconnection - ConnectionId: {ConnectionId}, UserId: {UserId} ({UserName})",
+                    _logger.LogDebug("SignalR clean disconnection - ConnectionId: {ConnectionId}, UserId: {UserId} ({UserName})",
                         Context.ConnectionId, userId, userName);
                 }
 
@@ -76,7 +76,7 @@ namespace ErpSystem.Api.Hubs
                     await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"Tenant_{tenantId}");
                     await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"User_{userId}");
 
-                    _logger.LogInformation("User {UserId} ({UserName}) from tenant {TenantId} removed from SignalR groups", userId, userName, tenantId);
+                    _logger.LogDebug("User {UserId} ({UserName}) from tenant {TenantId} removed from SignalR groups", userId, userName, tenantId);
                 }
 
                 await base.OnDisconnectedAsync(exception);
@@ -92,13 +92,13 @@ namespace ErpSystem.Api.Hubs
         public async Task JoinGroup(string groupName)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
-            _logger.LogInformation("Connection {ConnectionId} joined group {GroupName}", Context.ConnectionId, groupName);
+            _logger.LogDebug("Connection {ConnectionId} joined group {GroupName}", Context.ConnectionId, groupName);
         }
 
         public async Task LeaveGroup(string groupName)
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
-            _logger.LogInformation("Connection {ConnectionId} left group {GroupName}", Context.ConnectionId, groupName);
+            _logger.LogDebug("Connection {ConnectionId} left group {GroupName}", Context.ConnectionId, groupName);
         }
     }
 }

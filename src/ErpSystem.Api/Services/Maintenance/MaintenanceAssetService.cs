@@ -191,9 +191,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         try
         {
             var asset = await _assetRepository.GetByIdAsync(id,
-                a => a.AssetCategory,
-                a => a.ParentAsset,
-                a => a.ChildAssets);
+                a => a.AssetCategory!,
+                a => a.ParentAsset!,
+                a => a.ChildAssets!);
 
             return asset != null ? _mapper.Map<MaintenanceAssetDto>(asset) : null;
         }
@@ -308,9 +308,10 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 Manufacturer = a.Manufacturer,
                 Model = a.Model,
                 Year = a.Year,
-                OwnershipType = a.OwnershipType,
+                OwnershipType = a.OwnershipType.ToString(),
                 LicensePlate = a.LicensePlate,
                 VIN = a.VIN,
+                FuelType = a.FuelType,
                 Status = a.Status.ToString(),
                 Criticality = a.Criticality.ToString(),
                 Location = a.Location,

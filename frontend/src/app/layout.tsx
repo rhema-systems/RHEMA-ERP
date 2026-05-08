@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ReactQueryProvider } from "../lib/react-query";
@@ -17,8 +17,6 @@ export const metadata: Metadata = {
   title: "ERP System - Enterprise Resource Planning",
   description: "Modern enterprise resource planning system",
   manifest: "/manifest.json",
-  themeColor: "#000000",
-  viewport: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -29,6 +27,18 @@ export const metadata: Metadata = {
     apple: "/icon-192.png"
   }
 };
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#000000",
+};
+
+// Force dynamic rendering for all pages — this ERP app requires authentication
+// and cannot be statically pre-rendered at build time.
+export const dynamic = 'force-dynamic';
 
 export default function RootLayout({
   children,

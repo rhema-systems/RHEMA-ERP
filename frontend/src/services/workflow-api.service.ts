@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { compatibleApiService as apiService } from './compatibleApiService';
 import type { ApiResponse } from '../types';
 import type {
@@ -26,11 +27,27 @@ import type {
   WorkflowEntityTypeInfo
 } from '../types/workflow';
 
+type ApiPagedResponse<T> = ApiResponse<T> & {
+  metadata?: {
+    totalCount?: number;
+    page?: number;
+    pageSize?: number;
+  };
+};
+
 /**
  * Service for handling workflow-related API operations
  */
 export class WorkflowApiService {
   private readonly basePath = '/workflow';
+
+  private requireData<T>(response: ApiResponse<T>, errorMessage: string): T {
+    if (response.data === undefined || response.data === null) {
+      throw new Error(errorMessage);
+    }
+
+    return response.data;
+  }
 
   // Workflow Definition Management
 
@@ -55,7 +72,7 @@ export class WorkflowApiService {
     if (filter.createdAfter) params.append('createdAfter', filter.createdAfter.toISOString());
     if (filter.createdBefore) params.append('createdBefore', filter.createdBefore.toISOString());
 
-    const response = await apiService.get<ApiResponse<WorkflowDefinitionAdminDto[]>>(
+    const response = await apiService.get<ApiPagedResponse<WorkflowDefinitionAdminDto[]>>(
       `${this.basePath}/definitions?${params.toString()}`
     );
 
@@ -74,7 +91,7 @@ export class WorkflowApiService {
     const response = await apiService.get<ApiResponse<WorkflowDefinitionDto>>(
       `${this.basePath}/definitions/${id}`
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow definition response did not include data.');
   }
 
   /**
@@ -85,7 +102,7 @@ export class WorkflowApiService {
       `${this.basePath}/definitions`,
       createDto
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow definition creation response did not include data.');
   }
 
   /**
@@ -96,7 +113,7 @@ export class WorkflowApiService {
       `${this.basePath}/definitions/${id}`,
       updateDto
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow definition update response did not include data.');
   }
 
   /**
@@ -115,7 +132,7 @@ export class WorkflowApiService {
     const response = await apiService.post<ApiResponse<WorkflowValidationResult>>(
       `${this.basePath}/definitions/${id}/validate`
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow validation response did not include data.');
   }
 
   /**
@@ -194,7 +211,7 @@ export class WorkflowApiService {
     if (filter.completedAfter) params.append('completedAfter', filter.completedAfter.toISOString());
     if (filter.completedBefore) params.append('completedBefore', filter.completedBefore.toISOString());
 
-    const response = await apiService.get<ApiResponse<WorkflowStatusDto[]>>(
+    const response = await apiService.get<ApiPagedResponse<WorkflowStatusDto[]>>(
       `${this.basePath}/instances?${params.toString()}`
     );
 
@@ -213,7 +230,7 @@ export class WorkflowApiService {
     const response = await apiService.get<ApiResponse<WorkflowStatusDto>>(
       `${this.basePath}/instances/${id}`
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow instance response did not include data.');
   }
 
   /**
@@ -228,7 +245,7 @@ export class WorkflowApiService {
       `${this.basePath}/entity-summary?${params.toString()}`
     );
 
-    return response.data!;
+    return this.requireData(response, 'Workflow entity summary response did not include data.');
   }
 
   /**
@@ -268,7 +285,7 @@ export class WorkflowApiService {
       `${this.basePath}/instances/start`,
       request
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow start response did not include data.');
   }
 
   /**
@@ -279,7 +296,7 @@ export class WorkflowApiService {
       `${this.basePath}/instances/${instanceId}/execute`,
       request
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow execution response did not include data.');
   }
 
   /**
@@ -312,7 +329,7 @@ export class WorkflowApiService {
       `${this.basePath}/steps/${stepInstanceId}/process`,
       request
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow step processing response did not include data.');
   }
 
   /**
@@ -345,7 +362,7 @@ export class WorkflowApiService {
       `${this.basePath}/approvals/${approvalId}/process`,
       request
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow approval response did not include data.');
   }
 
   // Administration and Statistics
@@ -357,7 +374,7 @@ export class WorkflowApiService {
     const response = await apiService.get<ApiResponse<WorkflowSummaryDto>>(
       `${this.basePath}/administration/summary`
     );
-    return response.data!;
+    return this.requireData(response, 'Workflow summary response did not include data.');
   }
 
   /**

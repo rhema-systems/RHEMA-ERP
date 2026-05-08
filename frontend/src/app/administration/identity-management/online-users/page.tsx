@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client";
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
@@ -82,13 +83,14 @@ const bulkCriteriaSchema = z.object({
   browser: z.string().optional(),
   loginTimeBefore: z.date().optional(),
   lastActivityBefore: z.date().optional(),
-  includeCurrentUser: z.boolean().optional().default(false),
+  includeCurrentUser: z.boolean().default(false),
   reason: z.string().min(3, 'Reason must be at least 3 characters').max(500, 'Reason cannot exceed 500 characters')
 });
 
 type FilterFormData = z.infer<typeof filterSchema>;
 type TerminateReasonFormData = z.infer<typeof terminateReasonSchema>;
-type BulkCriteriaFormData = z.infer<typeof bulkCriteriaSchema>;
+type BulkCriteriaFormValues = z.input<typeof bulkCriteriaSchema>;
+type BulkCriteriaFormData = z.output<typeof bulkCriteriaSchema>;
 
 // Enhanced interface that combines SignalR data with session management data
 interface EnhancedUserSession extends UserSession {
@@ -96,6 +98,12 @@ interface EnhancedUserSession extends UserSession {
   status?: 'active' | 'idle' | 'inactive';
   connectionCount?: number;
 }
+
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
 
 export default function OnlineUsersPage() {
   console.log('🚀 OnlineUsersPage component initialized');
@@ -142,7 +150,7 @@ export default function OnlineUsersPage() {
     }
   });
 
-  const bulkCriteriaForm = useForm<BulkCriteriaFormData>({
+  const bulkCriteriaForm = useForm<BulkCriteriaFormValues, unknown, BulkCriteriaFormData>({
     resolver: zodResolver(bulkCriteriaSchema),
     defaultValues: {
       ipAddressPattern: '',
@@ -435,7 +443,7 @@ export default function OnlineUsersPage() {
           aria-label="Select all"
         />
       ),
-      cell: ({ row }) => (
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => (
         <Checkbox
           checked={selectedSessions.has(row.original.sessionId)}
           onCheckedChange={(value) => handleSelectSession(row.original.sessionId, !!value)}
@@ -448,7 +456,7 @@ export default function OnlineUsersPage() {
     {
       accessorKey: 'username',
       header: 'User',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const session = row.original;
         const initials = session.username.substring(0, 2).toUpperCase();
         
@@ -474,7 +482,7 @@ export default function OnlineUsersPage() {
     {
       accessorKey: 'role',
       header: 'Role',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const session = row.original;
         const role = session.role;
         
@@ -513,13 +521,14 @@ export default function OnlineUsersPage() {
     {
       accessorKey: 'status',
       header: 'Status',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const session = row.original;
         const status = session.status;
+        const safeStatus = status ?? 'inactive';
         
         return (
           <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${getActivityStatusColor(status!)}`} />
+            <div className={`w-2 h-2 rounded-full ${getActivityStatusColor(safeStatus)}`} />
             <Badge variant={status === 'active' ? 'default' : 'secondary'}>
               {status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown'}
             </Badge>
@@ -531,7 +540,7 @@ export default function OnlineUsersPage() {
     {
       accessorKey: 'deviceType',
       header: 'Device',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const deviceType = row.original.deviceType;
         
         return (
@@ -546,7 +555,7 @@ export default function OnlineUsersPage() {
     {
       accessorKey: 'ipAddress',
       header: 'IP Address',
-      cell: ({ row }) => (
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => (
         <code className="text-xs bg-muted px-2 py-1 rounded">
           {row.original.ipAddress}
         </code>
@@ -555,7 +564,7 @@ export default function OnlineUsersPage() {
     {
       accessorKey: 'sessionDuration',
       header: 'Session Duration',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const loginTime = row.original.loginTime;
         const duration = formatDistanceToNow(new Date(loginTime));
         const durationColor = getSessionDurationColor(new Date(loginTime));
@@ -572,7 +581,7 @@ export default function OnlineUsersPage() {
     {
       accessorKey: 'lastActivityTime',
       header: 'Last Activity',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const lastActivity = new Date(row.original.lastActivityTime);
         return (
           <div className="text-sm">

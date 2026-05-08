@@ -447,7 +447,7 @@ public class StockAdjustmentService : IStockAdjustmentService
 
                 var effectiveWarehouseId = location != null
                     ? location.InventoryWarehouseId
-                    : (adjustment.WarehouseId ?? Guid.Empty);
+                    : adjustment.WarehouseId;
 
                 var isConsignmentWarehouse = false;
                 if (effectiveWarehouseId != Guid.Empty)
@@ -508,7 +508,7 @@ public class StockAdjustmentService : IStockAdjustmentService
                     ReferenceType = ReferenceType.Adjustment,
                     ReferenceNumber = adjustment.AdjustmentNumber,
                     ReferenceId = adjustment.Id,
-                    WarehouseId = effectiveWarehouseId != Guid.Empty ? effectiveWarehouseId : null,
+                    WarehouseId = effectiveWarehouseId,
                     LocationId = item.LocationId,
                     Notes = $"{adjustment.ReasonCode}: {item.Notes ?? adjustment.Description}",
                     SerialNumber = item.SerialNumber,

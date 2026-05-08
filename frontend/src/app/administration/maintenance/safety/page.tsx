@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { 
+import {
   Plus,
   Search,
   Edit,
@@ -54,6 +54,25 @@ interface SafetyProtocol {
   trainingRecords: number;
   complianceRate: number;
   incidentsLastYear: number;
+}
+
+interface SafetyProtocolFormData {
+  name: string;
+  code: string;
+  description: string;
+  category: string;
+  riskLevel: string;
+  isActive: boolean;
+  isMandatory: boolean;
+  version: string;
+  reviewFrequency: string;
+  applicableAreas: string[];
+  requiredTraining: string[];
+  estimatedTime: number;
+  steps: string[];
+  requiredPPE: string[];
+  emergencyContacts: string[];
+  documents: string[];
 }
 
 const mockSafetyProtocolsData = [
@@ -242,9 +261,9 @@ export default function SafetyProtocolsPage() {
   const [filteredData, setFilteredData] = useState<SafetyProtocol[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<SafetyProtocolFormData>({
     name: '',
     code: '',
     description: '',
@@ -254,13 +273,13 @@ export default function SafetyProtocolsPage() {
     isMandatory: false,
     version: '1.0',
     reviewFrequency: 'Annual',
-    applicableAreas: [],
-    requiredTraining: [],
+    applicableAreas: [] as string[],
+    requiredTraining: [] as string[],
     estimatedTime: 15,
-    steps: [],
-    requiredPPE: [],
-    emergencyContacts: [],
-    documents: []
+    steps: [] as string[],
+    requiredPPE: [] as string[],
+    emergencyContacts: [] as string[],
+    documents: [] as string[]
   });
 
   // Fetch safety protocols from API
@@ -269,20 +288,20 @@ export default function SafetyProtocolsPage() {
       setLoading(true);
       setError(null);
       const token = localStorage.getItem('token');
-      
+
       if (!token) {
         setError('Authentication required. Please log in to access this page.');
         setSafetyProtocolsData([]);
         return;
       }
-      
+
       const response = await fetch('http://localhost:5000/api/maintenance/safety-protocols?pageSize=1000', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) {
         if (response.status === 401) {
           setError('Authentication failed. Please log in again.');
@@ -295,7 +314,7 @@ export default function SafetyProtocolsPage() {
         setSafetyProtocolsData([]);
         return;
       }
-      
+
       const result = await response.json();
       console.log('Safety protocols API response:', result);
       const protocols = result.data || result.items || result || [];
@@ -326,7 +345,7 @@ export default function SafetyProtocolsPage() {
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(item => 
+      filtered = filtered.filter(item =>
         statusFilter === 'active' ? item.isActive : !item.isActive
       );
     }
@@ -345,12 +364,12 @@ export default function SafetyProtocolsPage() {
   const handleCreate = async () => {
     try {
       const token = localStorage.getItem('token');
-      
+
       if (!token) {
         setError('Authentication required. Please log in to create safety protocols.');
         return;
       }
-      
+
       // Map form data to CreateSafetyProtocolDto structure
       const createDto = {
         name: formData.name,
@@ -372,7 +391,7 @@ export default function SafetyProtocolsPage() {
       };
 
       console.log('Sending create request:', createDto);
-      
+
       const response = await fetch('http://localhost:5000/api/maintenance/safety-protocols', {
         method: 'POST',
         headers: {
@@ -381,13 +400,13 @@ export default function SafetyProtocolsPage() {
         },
         body: JSON.stringify(createDto)
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         setError(`Failed to create safety protocol: ${errorText}`);
         return;
       }
-      
+
       // Refresh the list
       await fetchSafetyProtocols();
       setIsCreateDialogOpen(false);
@@ -421,22 +440,22 @@ export default function SafetyProtocolsPage() {
     setIsEditDialogOpen(true);
   };
 
-  const handleView = (protocol: any) => {
+  const handleView = (protocol: SafetyProtocol) => {
     setSelectedProtocol(protocol);
     setIsViewDialogOpen(true);
   };
 
   const handleUpdate = async () => {
     if (!selectedProtocol?.id) return;
-    
+
     try {
       const token = localStorage.getItem('token');
-      
+
       if (!token) {
         setError('Authentication required. Please log in to update safety protocols.');
         return;
       }
-      
+
       // Map form data to UpdateSafetyProtocolDto structure
       const updateDto = {
         name: formData.name,
@@ -458,7 +477,7 @@ export default function SafetyProtocolsPage() {
       };
 
       console.log('Sending update request:', updateDto);
-      
+
       const response = await fetch(`http://localhost:5000/api/maintenance/safety-protocols/${selectedProtocol.id}`, {
         method: 'PUT',
         headers: {
@@ -467,13 +486,13 @@ export default function SafetyProtocolsPage() {
         },
         body: JSON.stringify(updateDto)
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         setError(`Failed to update safety protocol: ${errorText}`);
         return;
       }
-      
+
       // Refresh the list
       await fetchSafetyProtocols();
       setIsEditDialogOpen(false);
@@ -486,15 +505,15 @@ export default function SafetyProtocolsPage() {
 
   const handleDelete = async (id: string | number) => {
     if (!confirm('Are you sure you want to delete this safety protocol?')) return;
-    
+
     try {
       const token = localStorage.getItem('token');
-      
+
       if (!token) {
         setError('Authentication required. Please log in to delete safety protocols.');
         return;
       }
-      
+
       const response = await fetch(`http://localhost:5000/api/maintenance/safety-protocols/${id}`, {
         method: 'DELETE',
         headers: {
@@ -502,13 +521,13 @@ export default function SafetyProtocolsPage() {
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         setError(`Failed to delete safety protocol: ${errorText}`);
         return;
       }
-      
+
       // Refresh the list
       await fetchSafetyProtocols();
     } catch (error) {
@@ -580,7 +599,7 @@ export default function SafetyProtocolsPage() {
                   <Input
                     id="name"
                     value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Enter protocol name"
                   />
                 </div>
@@ -589,27 +608,27 @@ export default function SafetyProtocolsPage() {
                   <Input
                     id="code"
                     value={formData.code}
-                    onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                     placeholder="e.g., LOTO-001"
                   />
                 </div>
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
                   value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   placeholder="Describe this safety protocol..."
                   rows={3}
                 />
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="category">Category</Label>
-                  <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
+                  <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
@@ -626,7 +645,7 @@ export default function SafetyProtocolsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="riskLevel">Risk Level</Label>
-                  <Select value={formData.riskLevel} onValueChange={(value) => setFormData({...formData, riskLevel: value})}>
+                  <Select value={formData.riskLevel} onValueChange={(value) => setFormData({ ...formData, riskLevel: value })}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select risk level" />
                     </SelectTrigger>
@@ -646,7 +665,7 @@ export default function SafetyProtocolsPage() {
                   <Input
                     id="version"
                     value={formData.version}
-                    onChange={(e) => setFormData({...formData, version: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, version: e.target.value })}
                     placeholder="1.0"
                   />
                 </div>
@@ -656,7 +675,7 @@ export default function SafetyProtocolsPage() {
                     id="estimatedTime"
                     type="number"
                     value={formData.estimatedTime}
-                    onChange={(e) => setFormData({...formData, estimatedTime: parseInt(e.target.value) || 15})}
+                    onChange={(e) => setFormData({ ...formData, estimatedTime: parseInt(e.target.value) || 15 })}
                     placeholder="15"
                   />
                 </div>
@@ -664,7 +683,7 @@ export default function SafetyProtocolsPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="reviewFrequency">Review Frequency</Label>
-                <Select value={formData.reviewFrequency} onValueChange={(value) => setFormData({...formData, reviewFrequency: value})}>
+                <Select value={formData.reviewFrequency} onValueChange={(value) => setFormData({ ...formData, reviewFrequency: value })}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select frequency" />
                   </SelectTrigger>
@@ -676,13 +695,13 @@ export default function SafetyProtocolsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2">
                   <Switch
                     id="mandatory"
                     checked={formData.isMandatory}
-                    onCheckedChange={(checked) => setFormData({...formData, isMandatory: checked})}
+                    onCheckedChange={(checked) => setFormData({ ...formData, isMandatory: checked })}
                   />
                   <Label htmlFor="mandatory">Mandatory</Label>
                 </div>
@@ -690,7 +709,7 @@ export default function SafetyProtocolsPage() {
                   <Switch
                     id="active"
                     checked={formData.isActive}
-                    onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+                    onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
                   />
                   <Label htmlFor="active">Active</Label>
                 </div>
@@ -754,7 +773,7 @@ export default function SafetyProtocolsPage() {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -768,7 +787,7 @@ export default function SafetyProtocolsPage() {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -782,7 +801,7 @@ export default function SafetyProtocolsPage() {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -814,7 +833,7 @@ export default function SafetyProtocolsPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            
+
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Status" />
@@ -874,96 +893,96 @@ export default function SafetyProtocolsPage() {
           ) : filteredData.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">No safety protocols found</div>
           ) : (
-          <div className="space-y-4">
-            {filteredData.map((protocol) => (
-              <div key={protocol.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-3 flex-1">
-                    <div className="flex items-center space-x-3">
-                      <Shield className="h-5 w-5 text-blue-500" />
-                      <h3 className="font-semibold">{protocol.name}</h3>
-                      <Badge variant="outline">{protocol.code}</Badge>
-                      <Badge className={getRiskColor(protocol.riskLevel)}>
-                        {protocol.riskLevel} Risk
-                      </Badge>
-                      <Badge className={protocol.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                        {protocol.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                      {protocol.isMandatory && (
-                        <Badge className="bg-red-100 text-red-800">Mandatory</Badge>
-                      )}
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
-                      <div>
-                        <span className="font-medium">Category:</span> {protocol.category}
-                      </div>
-                      <div>
-                        <span className="font-medium">Version:</span> {protocol.version}
-                      </div>
-                      <div>
-                        <span className="font-medium">Est. Time:</span> {protocol.estimatedTime}min
-                      </div>
-                      <div>
-                        <span className="font-medium">Compliance:</span> {protocol.complianceRate}%
-                      </div>
-                      <div>
-                        <span className="font-medium">Last Updated:</span> {protocol.lastUpdated}
-                      </div>
-                      <div>
-                        <span className="font-medium">Next Review:</span> {protocol.nextReviewDate}
-                      </div>
-                      <div>
-                        <span className="font-medium">Training Records:</span> {protocol.trainingRecords}
-                      </div>
-                      <div>
-                        <span className="font-medium">Incidents:</span> {protocol.incidentsLastYear} last year
-                      </div>
-                    </div>
-                    
-                    <p className="text-sm text-muted-foreground">{protocol.description}</p>
-                    
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      <span className="font-medium">Applicable Areas:</span>
-                      {protocol.applicableAreas.slice(0, 3).map((area, index) => (
-                        <Badge key={index} variant="secondary" className="text-xs">
-                          {area}
+            <div className="space-y-4">
+              {filteredData.map((protocol) => (
+                <div key={protocol.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-3 flex-1">
+                      <div className="flex items-center space-x-3">
+                        <Shield className="h-5 w-5 text-blue-500" />
+                        <h3 className="font-semibold">{protocol.name}</h3>
+                        <Badge variant="outline">{protocol.code}</Badge>
+                        <Badge className={getRiskColor(protocol.riskLevel)}>
+                          {protocol.riskLevel} Risk
                         </Badge>
-                      ))}
-                      {protocol.applicableAreas.length > 3 && (
-                        <Badge variant="secondary" className="text-xs">
-                          +{protocol.applicableAreas.length - 3} more
+                        <Badge className={protocol.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                          {protocol.isActive ? 'Active' : 'Inactive'}
                         </Badge>
-                      )}
+                        {protocol.isMandatory && (
+                          <Badge className="bg-red-100 text-red-800">Mandatory</Badge>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
+                        <div>
+                          <span className="font-medium">Category:</span> {protocol.category}
+                        </div>
+                        <div>
+                          <span className="font-medium">Version:</span> {protocol.version}
+                        </div>
+                        <div>
+                          <span className="font-medium">Est. Time:</span> {protocol.estimatedTime}min
+                        </div>
+                        <div>
+                          <span className="font-medium">Compliance:</span> {protocol.complianceRate}%
+                        </div>
+                        <div>
+                          <span className="font-medium">Last Updated:</span> {protocol.lastUpdated}
+                        </div>
+                        <div>
+                          <span className="font-medium">Next Review:</span> {protocol.nextReviewDate}
+                        </div>
+                        <div>
+                          <span className="font-medium">Training Records:</span> {protocol.trainingRecords}
+                        </div>
+                        <div>
+                          <span className="font-medium">Incidents:</span> {protocol.incidentsLastYear} last year
+                        </div>
+                      </div>
+
+                      <p className="text-sm text-muted-foreground">{protocol.description}</p>
+
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <span className="font-medium">Applicable Areas:</span>
+                        {protocol.applicableAreas.slice(0, 3).map((area, index) => (
+                          <Badge key={index} variant="secondary" className="text-xs">
+                            {area}
+                          </Badge>
+                        ))}
+                        {protocol.applicableAreas.length > 3 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{protocol.applicableAreas.length - 3} more
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <Button size="sm" variant="outline" onClick={() => handleView(protocol)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => console.log('Download', protocol.id)}>
-                      <Download className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleEdit(protocol)}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      onClick={() => handleDelete(protocol.id)}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="sm">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
+
+                    <div className="flex items-center space-x-2">
+                      <Button size="sm" variant="outline" onClick={() => handleView(protocol)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => console.log('Download', protocol.id)}>
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleEdit(protocol)}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDelete(protocol.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                      <Button variant="outline" size="sm">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -999,7 +1018,7 @@ export default function SafetyProtocolsPage() {
                   </Badge>
                 </div>
               </div>
-              
+
               <div>
                 <Label>Description</Label>
                 <p className="text-sm text-muted-foreground">{selectedProtocol.description}</p>
@@ -1062,7 +1081,7 @@ export default function SafetyProtocolsPage() {
                 <Input
                   id="edit-name"
                   value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Enter protocol name"
                 />
               </div>
@@ -1071,28 +1090,28 @@ export default function SafetyProtocolsPage() {
                 <Input
                   id="edit-code"
                   value={formData.code}
-                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                   placeholder="e.g., LOTO-001"
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="edit-description">Description</Label>
               <Textarea
                 id="edit-description"
                 value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Describe this safety protocol..."
                 rows={3}
               />
             </div>
-            
+
             <div className="flex items-center space-x-2">
               <Switch
                 id="edit-active"
                 checked={formData.isActive}
-                onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+                onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
               />
               <Label htmlFor="edit-active">Active</Label>
             </div>

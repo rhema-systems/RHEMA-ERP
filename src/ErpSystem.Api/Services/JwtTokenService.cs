@@ -31,7 +31,7 @@ namespace ErpSystem.Api.Services
             return await GenerateTokenAsync(user, null);
         }
 
-        public async Task<string> GenerateTokenAsync(ApplicationUser user, string sessionId)
+        public async Task<string> GenerateTokenAsync(ApplicationUser user, string? sessionId)
         {
             var jwtSettings = _configuration.GetSection("JwtSettings");
             var key = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey not found"));

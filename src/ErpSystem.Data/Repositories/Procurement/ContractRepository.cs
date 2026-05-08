@@ -11,7 +11,7 @@ public class ContractRepository : GenericRepository<Contract>, IContractReposito
 {
     public ContractRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<Contract?> GetByIdAsync(Guid id)
+    public override async Task<Contract?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(c => c.Id == id && !c.IsDeleted)
@@ -137,14 +137,14 @@ public class ContractRepository : GenericRepository<Contract>, IContractReposito
         return contract;
     }
 
-    public async Task<Contract> UpdateAsync(Contract contract)
+    public new async Task<Contract> UpdateAsync(Contract contract)
     {
         contract.UpdatedAt = DateTime.UtcNow;
         _dbSet.Update(contract);
         return await Task.FromResult(contract);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var contract = await _dbSet.FirstOrDefaultAsync(c => c.Id == id);
         if (contract != null)
@@ -170,7 +170,7 @@ public class ContractMilestoneRepository : GenericRepository<ContractMilestone>,
 {
     public ContractMilestoneRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<ContractMilestone?> GetByIdAsync(Guid id)
+    public override async Task<ContractMilestone?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(m => m.Id == id && !m.IsDeleted)
@@ -202,14 +202,14 @@ public class ContractMilestoneRepository : GenericRepository<ContractMilestone>,
         return milestone;
     }
 
-    public async Task<ContractMilestone> UpdateAsync(ContractMilestone milestone)
+    public new async Task<ContractMilestone> UpdateAsync(ContractMilestone milestone)
     {
         milestone.UpdatedAt = DateTime.UtcNow;
         _dbSet.Update(milestone);
         return await Task.FromResult(milestone);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var milestone = await _dbSet.FirstOrDefaultAsync(m => m.Id == id);
         if (milestone != null)
@@ -238,7 +238,7 @@ public class ContractAmendmentRepository : GenericRepository<ContractAmendment>,
 {
     public ContractAmendmentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<ContractAmendment?> GetByIdAsync(Guid id)
+    public override async Task<ContractAmendment?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(a => a.Id == id && !a.IsDeleted)
@@ -275,14 +275,14 @@ public class ContractAmendmentRepository : GenericRepository<ContractAmendment>,
         return amendment;
     }
 
-    public async Task<ContractAmendment> UpdateAsync(ContractAmendment amendment)
+    public new async Task<ContractAmendment> UpdateAsync(ContractAmendment amendment)
     {
         amendment.UpdatedAt = DateTime.UtcNow;
         _dbSet.Update(amendment);
         return await Task.FromResult(amendment);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var amendment = await _dbSet.FirstOrDefaultAsync(a => a.Id == id);
         if (amendment != null)
@@ -307,7 +307,7 @@ public class ContractDocumentRepository : GenericRepository<ContractDocument>, I
 {
     public ContractDocumentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<ContractDocument?> GetByIdAsync(Guid id)
+    public override async Task<ContractDocument?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(d => d.Id == id && !d.IsDeleted)
@@ -330,14 +330,14 @@ public class ContractDocumentRepository : GenericRepository<ContractDocument>, I
         return document;
     }
 
-    public async Task<ContractDocument> UpdateAsync(ContractDocument document)
+    public new async Task<ContractDocument> UpdateAsync(ContractDocument document)
     {
         document.UpdatedAt = DateTime.UtcNow;
         _dbSet.Update(document);
         return await Task.FromResult(document);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var document = await _dbSet.FirstOrDefaultAsync(d => d.Id == id);
         if (document != null)

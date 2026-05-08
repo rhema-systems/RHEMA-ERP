@@ -350,13 +350,11 @@ public class SettingsService : ISettingsService
             {
                 _logger.LogInformation("Retrieved public security settings from tenant {TenantId}: CAPTCHA enabled = {CaptchaEnabled}",
                     defaultSettings.TenantId, defaultSettings.CaptchaEnabled);
-            }
-            else
-            {
-                _logger.LogWarning("No security settings found in database for public access");
+                return defaultSettings;
             }
 
-            return defaultSettings;
+            _logger.LogDebug("No persisted security settings found for public access. Using built-in defaults.");
+            return new Security();
         }
         catch (Exception ex)
         {

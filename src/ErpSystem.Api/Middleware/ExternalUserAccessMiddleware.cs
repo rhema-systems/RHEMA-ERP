@@ -4,7 +4,7 @@ using ErpSystem.Shared;
 namespace ErpSystem.Api.Middleware;
 
 /// <summary>
-/// Enforces a hard boundary between external (Local auth) portal users and internal ERP APIs.
+/// Enforces a hard boundary between external portal users and internal ERP APIs.
 /// External users are only allowed to access a curated list of API route prefixes.
 /// </summary>
 public sealed class ExternalUserAccessMiddleware : IMiddleware
@@ -30,6 +30,9 @@ public sealed class ExternalUserAccessMiddleware : IMiddleware
         // Support portal (external)
         "/api/ehc/external",
 
+        // Project portal endpoints for linked external parties
+        "/api/projects/external",
+
         // Profile self-service endpoints
         "/api/user/profile",
         "/api/user/change-password",
@@ -50,9 +53,15 @@ public sealed class ExternalUserAccessMiddleware : IMiddleware
             return;
         }
 
-        var authProvider = user.FindFirstValue("auth_provider");
-        var isExternalUser = string.Equals(authProvider, AuthenticationProvider.Local.ToString(), StringComparison.OrdinalIgnoreCase);
+        var isExternalUser = user.IsInRole(Constants.Roles.ExternalUser);
         if (!isExternalUser)
+        {
+            await next(context);
+            return;
+        }
+
+        // Allow admin-privileged users through even if their auth provider is Local
+        if (user.IsInRole("SuperAdmin") || user.IsInRole("TenantAdmin"))
         {
             await next(context);
             return;

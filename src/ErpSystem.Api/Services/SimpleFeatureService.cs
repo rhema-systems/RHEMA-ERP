@@ -3,7 +3,7 @@ namespace ErpSystem.Web.Services
     public interface IFeatureService
     {
         bool IsEnabled(string featureName);
-        T GetValue<T>(string featureName, T defaultValue = default);
+        T GetValue<T>(string featureName, T defaultValue = default!);
         Dictionary<string, object> GetAllFeatures();
     }
 
@@ -30,7 +30,7 @@ namespace ErpSystem.Web.Services
             return GetValue<bool>(featureName, false);
         }
 
-        public T GetValue<T>(string featureName, T defaultValue = default)
+        public T GetValue<T>(string featureName, T defaultValue = default!)
         {
             if (_features.TryGetValue(featureName, out var value))
             {
@@ -120,11 +120,11 @@ namespace ErpSystem.Web.Services
             _logger = logger;
         }
 
-        public async Task<object> GetSystemInfoAsync()
+        public Task<object> GetSystemInfoAsync()
         {
             try
             {
-                return new
+                return Task.FromResult<object>(new
                 {
                     Environment = _environment.EnvironmentName,
                     ApplicationName = _environment.ApplicationName,
@@ -137,22 +137,22 @@ namespace ErpSystem.Web.Services
                     RuntimeVersion = Environment.Version.ToString(),
                     IsDevelopment = _environment.IsDevelopment(),
                     Timestamp = DateTime.UtcNow
-                };
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to get system info");
-                return new { Error = ex.Message };
+                return Task.FromResult<object>(new { Error = ex.Message });
             }
         }
 
-        public async Task<object> GetHealthInfoAsync()
+        public Task<object> GetHealthInfoAsync()
         {
             try
             {
                 var process = System.Diagnostics.Process.GetCurrentProcess();
 
-                return new
+                return Task.FromResult<object>(new
                 {
                     Status = "Healthy",
                     Uptime = DateTime.UtcNow.Subtract(process.StartTime),
@@ -174,20 +174,20 @@ namespace ErpSystem.Web.Services
                         Gen2Collections = GC.CollectionCount(2)
                     },
                     Timestamp = DateTime.UtcNow
-                };
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to get health info");
-                return new { Error = ex.Message };
+                return Task.FromResult<object>(new { Error = ex.Message });
             }
         }
 
-        public async Task<object> GetEnvironmentInfoAsync()
+        public Task<object> GetEnvironmentInfoAsync()
         {
             try
             {
-                return new
+                return Task.FromResult<object>(new
                 {
                     Environment = _environment.EnvironmentName,
                     ContentRoot = _environment.ContentRootPath,
@@ -201,12 +201,12 @@ namespace ErpSystem.Web.Services
                         DOTNET_ENVIRONMENT = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
                     },
                     Timestamp = DateTime.UtcNow
-                };
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to get environment info");
-                return new { Error = ex.Message };
+                return Task.FromResult<object>(new { Error = ex.Message });
             }
         }
     }

@@ -32,11 +32,11 @@ public class PerformanceAnalyzer : IPerformanceAnalyzer
         _serviceProvider = serviceProvider;
     }
 
-    public async Task<PerformanceMetrics> GetCurrentMetricsAsync()
+    public Task<PerformanceMetrics> GetCurrentMetricsAsync()
     {
         var process = Process.GetCurrentProcess();
 
-        return new PerformanceMetrics
+        return Task.FromResult(new PerformanceMetrics
         {
             Timestamp = DateTime.UtcNow,
             MemoryUsage = new MemoryMetrics
@@ -49,7 +49,7 @@ public class PerformanceAnalyzer : IPerformanceAnalyzer
             ProcessorTime = process.TotalProcessorTime,
             ThreadCount = process.Threads.Count,
             HandleCount = process.HandleCount
-        };
+        });
     }
 
     public async Task<DatabasePerformanceMetrics> AnalyzeDatabasePerformanceAsync()
@@ -87,26 +87,28 @@ public class PerformanceAnalyzer : IPerformanceAnalyzer
         }
     }
 
-    public async Task<ApiPerformanceMetrics> AnalyzeApiPerformanceAsync()
+    public Task<ApiPerformanceMetrics> AnalyzeApiPerformanceAsync()
     {
         // This would typically analyze API response times from collected metrics
         // For now, we'll return a basic structure
-        return new ApiPerformanceMetrics
+        return Task.FromResult(new ApiPerformanceMetrics
         {
             AverageResponseTime = TimeSpan.FromMilliseconds(150), // Placeholder
             P95ResponseTime = TimeSpan.FromMilliseconds(500),     // Placeholder
             RequestsPerSecond = 25.5,                            // Placeholder
             ErrorRate = 0.02                                     // 2% error rate placeholder
-        };
+        });
     }
 
-    public async Task LogSlowQuery(string query, TimeSpan duration, string source)
+    public Task LogSlowQuery(string query, TimeSpan duration, string source)
     {
         if (duration.TotalMilliseconds > 1000) // Log queries slower than 1 second
         {
             _logger.LogWarning("Slow query detected: {Duration}ms in {Source}. Query: {Query}",
                 duration.TotalMilliseconds, source, query);
         }
+
+        return Task.CompletedTask;
     }
 
     private async Task<TimeSpan> MeasureConnectionTimeAsync()

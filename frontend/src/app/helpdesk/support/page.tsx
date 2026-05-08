@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Users } from 'lucide-react';
 
@@ -10,11 +11,15 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService, type EhcAgentReplyProfile } from '@/services/ehcInternalTicketService';
 
 export default function HelpdeskSupportPage() {
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['ehc', 'internal', 'agent-profile', 'reply'],
@@ -54,9 +59,11 @@ export default function HelpdeskSupportPage() {
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Users className="h-7 w-7" />
-          Customer Support
+          {scopeParam ? `${scopeConfig.moduleLabel} Customer Support` : 'Customer Support'}
         </h1>
-        <p className="text-slate-600 mt-1">Agent tools and preferences for communicating with requesters.</p>
+        <p className="text-slate-600 mt-1">
+          {scopeParam ? `Agent tools for the ${scopeConfig.listTitle.toLowerCase()} branch.` : 'Agent tools and preferences for communicating with requesters.'}
+        </p>
       </div>
 
       <Card>
@@ -109,4 +116,3 @@ export default function HelpdeskSupportPage() {
     </div>
   );
 }
-

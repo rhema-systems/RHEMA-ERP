@@ -20,24 +20,59 @@ interface TenantProviderProps {
   children: ReactNode;
 }
 
+const resolveStoredTenantCode = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const storedCode = localStorage.getItem('currentTenantCode');
+  if (storedCode) {
+    return storedCode;
+  }
+
+  const storedTenantRaw = localStorage.getItem('currentTenant');
+  if (storedTenantRaw) {
+    try {
+      const storedTenant = JSON.parse(storedTenantRaw) as Partial<Tenant> & { tenantCode?: string };
+      const tenantCode = storedTenant.code || storedTenant.tenantCode;
+      if (typeof tenantCode === 'string' && tenantCode) {
+        return tenantCode;
+      }
+    } catch {
+      // ignore malformed tenant cache
+    }
+  }
+
+  const storedUserRaw = localStorage.getItem('user');
+  if (storedUserRaw) {
+    try {
+      const storedUser = JSON.parse(storedUserRaw) as { currentTenantCode?: string | null };
+      if (typeof storedUser.currentTenantCode === 'string' && storedUser.currentTenantCode) {
+        return storedUser.currentTenantCode;
+      }
+    } catch {
+      // ignore malformed user cache
+    }
+  }
+
+  return null;
+};
+
 export function TenantProvider({ children }: TenantProviderProps) {
   const [currentTenantCode, setCurrentTenantCodeState] = useState<string | null>(null);
+  const [hasHydratedTenantCode, setHasHydratedTenantCode] = useState(false);
 
   // Get all tenants - only if authenticated
   const { data: apiTenants = [], isLoading: isLoadingTenants, error: tenantsError } = useQuery({
     queryKey: ['tenants'],
-    queryFn: async () => {
-      console.log('TenantContext: Calling getTenants API...');
-      const result = await apiService.getTenants();
-      console.log('TenantContext: API response:', result);
-      return result;
-    },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    queryFn: () => apiService.getTenants(),
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 1 hour
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: (failureCount, error: any) => {
-      console.log('TenantContext: Query failed, retry attempt:', failureCount, error);
       // Don't retry on 401 errors - user is not authenticated
       if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
-        console.log('TenantContext: 401 error detected, stopping retries');
         return false;
       }
       return failureCount < 2;
@@ -57,16 +92,29 @@ export function TenantProvider({ children }: TenantProviderProps) {
     logoUrl: t.logoUrl
   }));
 
-  // Get current tenant based on stored code
-  const currentTenant = tenants.find(t => t.code === currentTenantCode) || null;
+  const storedCurrentTenant = authService.getCurrentTenant();
+  const currentTenant =
+    tenants.find(t => t.code === currentTenantCode) ||
+    (storedCurrentTenant?.code === currentTenantCode ? storedCurrentTenant : null);
 
   // Initialize from localStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const storedCode = localStorage.getItem('currentTenantCode');
-      setCurrentTenantCodeState(storedCode);
+      setCurrentTenantCodeState(resolveStoredTenantCode());
+      setHasHydratedTenantCode(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!hasHydratedTenantCode || currentTenantCode) {
+      return;
+    }
+
+    const fallbackCode = resolveStoredTenantCode();
+    if (fallbackCode) {
+      setCurrentTenantCodeState(fallbackCode);
+    }
+  }, [currentTenantCode, hasHydratedTenantCode]);
 
   // Listen for tenant changes from auth service
   useEffect(() => {
@@ -84,13 +132,11 @@ export function TenantProvider({ children }: TenantProviderProps) {
 
     const handleTenantChanged = (event: CustomEvent) => {
       const code = resolveCode(event.detail);
-      console.log('TenantContext: Received tenant-changed event:', event.detail, '=>', code);
       if (code !== null) setCurrentTenantCode(code);
     };
 
     const handleTenantSelected = (event: CustomEvent) => {
       const code = resolveCode(event.detail);
-      console.log('TenantContext: Received tenant-selected event:', event.detail, '=>', code);
       if (code !== null) setCurrentTenantCode(code);
     };
 
@@ -104,7 +150,6 @@ export function TenantProvider({ children }: TenantProviderProps) {
 
   // Update localStorage when tenant code changes
   const setCurrentTenantCode = (code: string | null) => {
-    console.log('TenantContext: Setting tenant code:', code);
     setCurrentTenantCodeState(code);
     if (typeof window !== 'undefined') {
       if (code) {
@@ -114,17 +159,6 @@ export function TenantProvider({ children }: TenantProviderProps) {
       }
     }
   };
-
-  // Debug logging for tenant state changes
-  useEffect(() => {
-    console.log('TenantContext state:', {
-      currentTenantCode,
-      currentTenant: currentTenant?.name,
-      tenantCount: tenants.length,
-      isLoadingTenants,
-      error: tenantsError?.message
-    });
-  }, [currentTenantCode, currentTenant, tenants, isLoadingTenants, tenantsError]);
 
   // Log tenant loading errors
   useEffect(() => {
@@ -138,7 +172,7 @@ export function TenantProvider({ children }: TenantProviderProps) {
     currentTenant,
     currentTenantCode,
     setCurrentTenantCode,
-    isLoadingTenants,
+    isLoadingTenants: !hasHydratedTenantCode || isLoadingTenants,
   };
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;

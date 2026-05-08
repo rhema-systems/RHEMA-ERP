@@ -30,6 +30,7 @@ type AssetCategoryDto = {
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const FUEL_TYPE_OPTIONS = ['Petrol', 'Diesel', 'Electric', 'Hybrid'] as const;
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('token') || localStorage.getItem('authToken');
@@ -88,6 +89,7 @@ export default function FleetVehiclesPage() {
     status: 'Active',
     licensePlate: '',
     vin: '',
+    fuelType: '',
     manufacturer: '',
     model: '',
     serialNumber: '',
@@ -134,7 +136,7 @@ export default function FleetVehiclesPage() {
         toast({ title: 'Failed to load categories', description: e?.message || String(e), variant: 'destructive' });
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   React.useEffect(() => {
@@ -157,6 +159,7 @@ export default function FleetVehiclesPage() {
       status: v.status || 'Active',
       licensePlate: v.licensePlate || '',
       vin: v.vin || '',
+      fuelType: v.fuelType || '',
       manufacturer: v.manufacturer || '',
       model: v.model || '',
       serialNumber: '',
@@ -516,6 +519,22 @@ export default function FleetVehiclesPage() {
             <div className="space-y-2">
               <Label>VIN</Label>
               <Input value={editForm.vin || ''} onChange={(e) => setEditForm((p) => ({ ...p, vin: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Fuel Type</Label>
+              <Select value={editForm.fuelType || 'none'} onValueChange={(value) => setEditForm((p) => ({ ...p, fuelType: value === 'none' ? null : value }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select fuel type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select fuel type</SelectItem>
+                  {FUEL_TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">

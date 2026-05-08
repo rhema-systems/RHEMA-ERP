@@ -100,10 +100,11 @@ export function PerformanceReviewDialog({
     let endDate: Date;
 
     if (reviewPeriod === 'Monthly') {
-      startDate = new Date(year, reviewMonth - 1, 1);
-      endDate = new Date(year, reviewMonth, 0); // Last day of month
+      const month = reviewMonth ?? 1;
+      startDate = new Date(year, month - 1, 1);
+      endDate = new Date(year, month, 0); // Last day of month
     } else if (reviewPeriod === 'Quarterly') {
-      const quarterStartMonth = (reviewQuarter - 1) * 3;
+      const quarterStartMonth = ((reviewQuarter ?? 1) - 1) * 3;
       startDate = new Date(year, quarterStartMonth, 1);
       endDate = new Date(year, quarterStartMonth + 3, 0); // Last day of quarter
     } else {
@@ -442,4 +443,3 @@ export function PerformanceReviewDialog({
     </Dialog>
   );
 }
-

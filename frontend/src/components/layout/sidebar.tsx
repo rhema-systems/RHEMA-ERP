@@ -53,6 +53,12 @@ import {
   Droplet,
   BookOpen,
   MessageSquare,
+  Smartphone,
+  RotateCcw,
+  CalendarClock,
+  Phone,
+  Swords,
+  BookTemplate,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -65,6 +71,7 @@ interface NavItem {
   icon: React.ComponentType<any>;
   children?: NavItem[];
   roles?: string[];
+  permissions?: string[];
 }
 
 const navigationItems: NavItem[] = [
@@ -78,11 +85,135 @@ const navigationItems: NavItem[] = [
     href: '/finance',
     icon: CreditCard,
     children: [
-      { title: 'Accounts', href: '/finance/accounts', icon: CreditCard },
-      { title: 'Invoices', href: '/finance/invoices', icon: CreditCard },
+      { title: 'Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
+      {
+        title: 'General Ledger',
+        href: '/finance/general-ledger',
+        icon: FileText,
+        children: [
+          { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
+          { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
+        ],
+      },
+      {
+        title: 'Segmented Accounts',
+        href: '/finance/segmented-accounts',
+        icon: FolderTree,
+        children: [
+          { title: 'Segment Structure', href: '/finance/settings/segments', icon: FolderTree },
+          { title: 'Segment Values', href: '/finance/settings/segments?tab=values', icon: Database },
+          { title: 'Account Generator', href: '/finance/accounts/generate', icon: FileText },
+        ],
+      },
+      {
+        title: 'Fiscal Management',
+        href: '/finance/fiscal',
+        icon: Calendar,
+        children: [
+          { title: 'Fiscal Years', href: '/finance/fiscal-years', icon: Calendar },
+          { title: 'Fiscal Periods', href: '/finance/fiscal-periods', icon: Calendar },
+        ],
+      },
+      {
+        title: 'Fixed Assets',
+        href: '/finance/fixed-assets',
+        icon: Package,
+        children: [
+          { title: 'Dashboard', href: '/finance/fixed-assets/dashboard', icon: LayoutDashboard },
+          { title: 'Asset Register', href: '/finance/fixed-assets/register', icon: FileText },
+          { title: 'Categories', href: '/finance/fixed-assets/categories', icon: FolderTree },
+          { title: 'Depreciation', href: '/finance/fixed-assets/depreciation', icon: TrendingUp },
+          { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: BarChart3 },
+          { title: 'Transfers', href: '/finance/fixed-assets/transfers', icon: Activity },
+          { title: 'Disposals', href: '/finance/fixed-assets/disposals', icon: FileText },
+          { title: 'Verification', href: '/finance/fixed-assets/verification', icon: ClipboardCheck },
+          { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: TrendingUp },
+          { title: 'Capital Projects', href: '/finance/fixed-assets/capital-projects', icon: Briefcase },
+          { title: 'Leases (IFRS 16)', href: '/finance/fixed-assets/leases', icon: FileText },
+          { title: 'Import', href: '/finance/fixed-assets/import', icon: FileText },
+          { title: 'Reports', href: '/finance/fixed-assets/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Accounts Payable',
+        href: '/finance/ap',
+        icon: FileText,
+        children: [
+          { title: 'Dashboard', href: '/finance/ap/dashboard', icon: LayoutDashboard },
+          { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
+          { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
+          { title: 'Reports', href: '/finance/ap/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Accounts Receivable',
+        href: '/finance/ar',
+        icon: Users,
+        children: [
+          { title: 'Dashboard', href: '/finance/ar/dashboard', icon: LayoutDashboard },
+          { title: 'Customers', href: '/finance/ar/customers', icon: Users },
+          { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
+          { title: 'Payments', href: '/finance/ar/payments', icon: CreditCard },
+          { title: 'Reports', href: '/finance/ar/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Cash Management',
+        href: '/finance/cash',
+        icon: CreditCard,
+        children: [
+          { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building },
+          { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
+          { title: 'Bank Reconciliation', href: '/finance/cash/reconciliation', icon: ClipboardCheck },
+          { title: 'Cash Reports', href: '/finance/cash/reports', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Budgeting',
+        href: '/finance/budgeting',
+        icon: BarChart3,
+        children: [
+          { title: 'Scenarios', href: '/finance/budgeting/scenarios', icon: BarChart3 },
+          { title: 'My Returns', href: '/finance/budgeting/my-returns', icon: FileText },
+        ],
+      },
+      {
+        title: 'Unit Accounting',
+        href: '/finance/unit-accounting',
+        icon: BarChart3,
+        children: [
+          { title: 'Unit Types', href: '/finance/unit-types', icon: FileText },
+          { title: 'Unit Accounts', href: '/finance/unit-accounts', icon: BarChart3 },
+          { title: 'Unit Journal Entries', href: '/finance/unit-journal-entries', icon: FileText },
+          { title: 'Ratio Definitions', href: '/finance/ratio-definitions', icon: BarChart3 },
+          { title: 'Unit Budgets', href: '/finance/unit-budgets', icon: BarChart3 },
+          { title: 'Allocations', href: '/finance/allocations', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Multi-Currency',
+        href: '/finance/multi-currency',
+        icon: CreditCard,
+        children: [
+          { title: 'Currencies', href: '/finance/currencies', icon: CreditCard },
+          { title: 'Exchange Rates', href: '/finance/exchange-rates', icon: BarChart3 },
+          { title: 'Revaluation', href: '/finance/revaluation', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Taxation',
+        href: '/finance/tax',
+        icon: BarChart3,
+        children: [
+          { title: 'Tax Configuration', href: '/finance/tax/configuration', icon: Settings },
+          { title: 'Taxes', href: '/finance/tax/configuration/taxes', icon: FileText },
+          { title: 'Tax Groups', href: '/finance/tax/configuration/groups', icon: FileText },
+          { title: 'Tax Calculator', href: '/finance/tax/calculator', icon: BarChart3 },
+          { title: 'Tax Reports', href: '/finance/tax/reports', icon: FileText },
+        ],
+      },
       { title: 'Financial Reports', href: '/finance/reports', icon: BarChart3 },
-      { title: 'Budgets', href: '/finance/budgets', icon: CreditCard },
-      { title: 'Transactions', href: '/finance/transactions', icon: CreditCard },
+      { title: 'Settings', href: '/finance/settings', icon: Settings },
     ],
   },
   {
@@ -98,66 +229,74 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Development',
-    href: '/development',
-    icon: Building,
+    title: 'Maintenance Mngt',
+    href: '/maintenance',
+    icon: Wrench,
+    permissions: ['maintenance.access'],
     children: [
-      {
-        title: 'Maintenance Mngt',
-        href: '/maintenance',
-        icon: Wrench,
-        children: [
-          { title: 'Dashboard', href: '/maintenance/dashboard', icon: LayoutDashboard },
-          { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
-          { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
-          { title: 'Assets', href: '/maintenance/assets', icon: Package },
-          { title: 'Asset Admission', href: '/maintenance/asset-admission', icon: ClipboardCheck },
-          { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
-          { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
-          { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },
-          { title: 'Condition Monitoring', href: '/maintenance/condition-monitoring', icon: Activity },
-          // Emergency Maintenance temporarily hidden
-          // { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
-          // Inspections temporarily hidden
-          // { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
-          { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
-          { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
-          // Reports temporarily hidden
-          // { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
-          // Asset Analytics temporarily hidden
-          // { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
-        ],
-      },
-      {
-        title: 'Fleet management',
-        href: '/maintenance/fleet',
-        icon: Truck,
-        children: [
-          { title: 'Dashboard', href: '/maintenance/fleet/dashboard', icon: LayoutDashboard },
-          { title: 'Fleets', href: '/maintenance/fleet/vehicles', icon: Truck },
-          { title: 'Trips', href: '/maintenance/fleet/trips', icon: MapPin },
-          { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
-          { title: 'Fuel (Reports)', href: '/maintenance/fleet/fuel', icon: Droplet },
-          { title: 'Defects', href: '/maintenance/fleet/defects', icon: AlertTriangle },
-          { title: 'Incidents', href: '/maintenance/fleet/incidents', icon: AlertTriangle },
-          { title: 'Tyres', href: '/maintenance/fleet/tyres', icon: Package },
-          { title: 'Batteries', href: '/maintenance/fleet/batteries', icon: Package },
-          { title: 'External Repairs', href: '/maintenance/fleet/external-repairs', icon: Wrench },
-          { title: 'Costs', href: '/maintenance/fleet/costs', icon: DollarSign },
-          { title: 'PM Plans', href: '/maintenance/fleet/pm', icon: Calendar },
-        ],
-      },
-      {
-        title: 'Project Mngt',
-        href: '/development/project-management',
-        icon: Briefcase,
-        children: [
-          { title: 'Projects', href: '/development/projects', icon: Briefcase },
-          { title: 'Tasks', href: '/development/tasks', icon: FileText },
-          { title: 'Resources', href: '/development/resources', icon: Users },
-          { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
-        ],
-      },
+      { title: 'Dashboard', href: '/maintenance/dashboard', icon: LayoutDashboard },
+      { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
+      { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
+      { title: 'Assets', href: '/maintenance/assets', icon: Package },
+      { title: 'Asset Admission', href: '/maintenance/asset-admission', icon: ClipboardCheck },
+      { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
+      { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
+      { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },
+      { title: 'Condition Monitoring', href: '/maintenance/condition-monitoring', icon: Activity },
+      // Emergency Maintenance temporarily hidden
+      // { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
+      // Inspections temporarily hidden
+      // { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
+      { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
+      { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
+      // Reports temporarily hidden
+      // { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
+      // Asset Analytics temporarily hidden
+      // { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
+    ],
+  },
+  {
+    title: 'Fleet Management',
+    href: '/maintenance/fleet',
+    icon: Truck,
+    permissions: ['fleet.access'],
+    children: [
+      { title: 'Dashboard', href: '/maintenance/fleet/dashboard', icon: LayoutDashboard },
+      { title: 'Fleets', href: '/maintenance/fleet/vehicles', icon: Truck },
+      { title: 'Trips', href: '/maintenance/fleet/trips', icon: MapPin },
+      { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
+      { title: 'Fuel (Reports)', href: '/maintenance/fleet/fuel', icon: Droplet },
+      { title: 'Defects', href: '/maintenance/fleet/defects', icon: AlertTriangle },
+      { title: 'Incidents', href: '/maintenance/fleet/incidents', icon: AlertTriangle },
+      { title: 'Tyres', href: '/maintenance/fleet/tyres', icon: Package },
+      { title: 'Batteries', href: '/maintenance/fleet/batteries', icon: Package },
+      { title: 'External Repairs', href: '/maintenance/fleet/external-repairs', icon: Wrench },
+      { title: 'Costs', href: '/maintenance/fleet/costs', icon: DollarSign },
+      { title: 'PM Plans', href: '/maintenance/fleet/pm', icon: Calendar },
+    ],
+  },
+  {
+    title: 'Project Mngt',
+    href: '/development/projects',
+    icon: Briefcase,
+    permissions: ['project.access'],
+    children: [
+      { title: 'Projects', href: '/development/projects', icon: Briefcase },
+      { title: 'Operations', href: '/development/project-operations', icon: Activity },
+      { title: 'Portfolios', href: '/development/portfolios', icon: FolderTree },
+      { title: 'Programs', href: '/development/programs', icon: Target },
+      { title: 'Dependencies', href: '/development/project-dependencies', icon: AlertCircle },
+      { title: 'Analytics', href: '/development/project-analytics', icon: TrendingUp },
+      { title: 'Reports', href: '/development/project-reports', icon: FileCheck },
+      { title: 'Approvals', href: '/development/project-approvals', icon: ClipboardCheck },
+      { title: 'Billing', href: '/development/project-billing', icon: DollarSign },
+      { title: 'Materials', href: '/development/project-materials', icon: Package },
+      { title: 'Mobile', href: '/development/project-mobile', icon: Smartphone },
+      { title: 'Tasks', href: '/development/tasks', icon: FileText },
+      { title: 'Timesheets', href: '/development/timesheets', icon: Clock },
+      { title: 'Expenses', href: '/development/expenses', icon: DollarSign },
+      { title: 'Resources', href: '/development/resources', icon: Users },
+      { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
     ],
   },
   {
@@ -242,26 +381,67 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    title: 'CRM',
+    href: '/crm',
+    icon: Users,
+    children: [
+      { title: 'Overview', href: '/crm', icon: LayoutDashboard },
+      { title: 'Accounts', href: '/crm/accounts', icon: Building2 },
+      { title: 'Collaboration', href: '/crm/collaboration', icon: Workflow },
+      { title: 'Service', href: '/crm/service', icon: MessageSquare },
+      { title: 'Risk', href: '/crm/risk', icon: AlertTriangle },
+      { title: 'Readiness', href: '/crm/readiness', icon: ShieldCheck },
+      { title: 'Contacts', href: '/crm/contacts', icon: Mail },
+      { title: 'Leads', href: '/crm/leads', icon: Users },
+      { title: 'Campaigns', href: '/crm/campaigns', icon: Megaphone },
+      { title: 'Opportunities', href: '/crm/opportunities', icon: TrendingUp },
+      { title: 'Conversions', href: '/crm/conversions', icon: FolderTree },
+      { title: 'Renewals', href: '/crm/renewals', icon: AlertTriangle },
+      { title: 'Activities', href: '/crm/activities', icon: Activity },
+      { title: 'Quotes', href: '/crm/quotes', icon: FileText },
+      { title: 'Projects', href: '/crm/projects', icon: Briefcase },
+      { title: 'Contracts', href: '/crm/contracts', icon: FileCheck },
+      { title: 'Tenders', href: '/crm/tenders', icon: Gavel },
+      { title: 'Forecast', href: '/crm/forecast', icon: Target },
+      { title: 'Reports', href: '/crm/reports', icon: BarChart3 },
+    ],
+  },
+  {
     title: 'Sales',
     href: '/sales',
     icon: ShoppingCart,
     children: [
-      { title: 'Customers', href: '/sales/customers', icon: Users },
-      { title: 'Orders', href: '/sales/orders', icon: ShoppingCart },
-      { title: 'Quotes', href: '/sales/quotes', icon: FileText },
-      { title: 'Invoicing', href: '/sales/invoicing', icon: CreditCard },
-      { title: 'Sales Pipeline', href: '/sales/pipeline', icon: BarChart3 },
-    ],
-  },
-  {
-    title: 'Marketing',
-    href: '/marketing',
-    icon: Megaphone,
-    children: [
-      { title: 'Campaigns', href: '/marketing/campaigns', icon: Megaphone },
-      { title: 'Leads', href: '/marketing/leads', icon: Users },
-      { title: 'Contacts', href: '/marketing/contacts', icon: Users },
-      { title: 'Analytics', href: '/marketing/analytics', icon: BarChart3 },
+      { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
+      { title: 'Delivery Notes', href: '/sales/deliveries', icon: Truck },
+      { title: 'Sales Agreements', href: '/sales/agreements', icon: FileText },
+      {
+        title: 'CRM',
+        href: '/sales/crm',
+        icon: Users,
+        children: [
+          { title: 'Leads', href: '/sales/crm/leads', icon: Users },
+          { title: 'Opportunities', href: '/sales/crm/opportunities', icon: Target },
+          { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
+          { title: 'Activities', href: '/sales/crm/activities', icon: Activity },
+        ],
+      },
+      { title: 'Return Orders', href: '/sales/return-orders', icon: RotateCcw },
+      { title: 'Credit Notes', href: '/sales/credit-notes', icon: CreditCard },
+      { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
+      {
+        title: 'Collections',
+        href: '/sales/collections',
+        icon: Phone,
+        children: [
+          { title: 'Activities', href: '/sales/collections', icon: Phone },
+          { title: 'Payment Plans', href: '/sales/collections/plans', icon: CalendarClock },
+        ],
+      },
+      { title: 'Commissions', href: '/sales/commissions', icon: Award },
+      { title: 'Forecasts', href: '/sales/forecasts', icon: TrendingUp },
+      { title: 'Competitors', href: '/sales/competitors', icon: Swords },
+      { title: 'Reports', href: '/sales/reports', icon: BarChart3 },
+      { title: 'Journal Templates', href: '/sales/journal-templates', icon: BookTemplate },
     ],
   },
   {
@@ -277,19 +457,80 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Enquiry & Helpdesk',
-    href: '/helpdesk',
+    title: 'Enquiry',
+    href: '/helpdesk/enquiry',
+    icon: MessageSquare,
+    children: [
+      {
+        title: 'Internal',
+        href: '/helpdesk/enquiry/internal',
+        icon: Building,
+        permissions: ['enquiry.internal.access'],
+        children: [
+          { title: 'Dashboard', href: '/helpdesk/enquiry/internal/dashboard', icon: BarChart3 },
+          { title: 'Enquiries', href: '/helpdesk/enquiry/internal', icon: FileText },
+          { title: 'Queue', href: '/helpdesk/enquiry/internal/queue', icon: ClipboardList },
+          { title: 'New Enquiry', href: '/helpdesk/enquiry/internal/new', icon: MessageSquare },
+          { title: 'Problems', href: '/helpdesk/enquiry/internal/problems', icon: AlertCircle },
+          { title: 'Knowledge Base', href: '/helpdesk/enquiry/internal/knowledge-base', icon: FileText },
+          { title: 'FAQs', href: '/helpdesk/enquiry/internal/faq', icon: HelpCircle },
+        ],
+      },
+      {
+        title: 'External',
+        href: '/helpdesk/enquiry/external',
+        icon: Users,
+        permissions: ['enquiry.external.access'],
+        children: [
+          { title: 'Dashboard', href: '/helpdesk/enquiry/external/dashboard', icon: BarChart3 },
+          { title: 'Enquiries', href: '/helpdesk/enquiry/external', icon: FileText },
+          { title: 'Queue', href: '/helpdesk/enquiry/external/queue', icon: ClipboardList },
+          { title: 'New Enquiry', href: '/helpdesk/enquiry/external/new', icon: MessageSquare },
+          { title: 'Problems', href: '/helpdesk/enquiry/external/problems', icon: AlertCircle },
+          { title: 'Knowledge Base', href: '/helpdesk/enquiry/external/knowledge-base', icon: FileText },
+          { title: 'FAQs', href: '/helpdesk/enquiry/external/faq', icon: HelpCircle },
+        ],
+      },
+    ],
+  },
+  {
+    title: 'Helpdesk & Complaints',
+    href: '/helpdesk/helpdesk-complaints',
     icon: HelpCircle,
     children: [
-      { title: 'Dashboard', href: '/helpdesk/dashboard', icon: BarChart3 },
-      { title: 'Queue', href: '/helpdesk/queue', icon: ClipboardList },
-      { title: 'Tickets', href: '/helpdesk/tickets', icon: FileText },
-      { title: 'Approvals', href: '/helpdesk/approvals', icon: Workflow },
-      { title: 'Service Requests', href: '/helpdesk/requests', icon: ClipboardList },
-      { title: 'Problems', href: '/helpdesk/problems', icon: AlertCircle },
-      { title: 'Knowledge Base', href: '/helpdesk/knowledge-base', icon: FileText },
-      { title: 'Customer Support', href: '/helpdesk/support', icon: Users },
-      { title: 'FAQs', href: '/helpdesk/faq', icon: HelpCircle },
+      {
+        title: 'Internal',
+        href: '/helpdesk/helpdesk-complaints/internal',
+        icon: Building,
+        permissions: ['support.internal.access'],
+        children: [
+          { title: 'Dashboard', href: '/helpdesk/helpdesk-complaints/internal/dashboard', icon: BarChart3 },
+          { title: 'Tickets', href: '/helpdesk/helpdesk-complaints/internal', icon: FileText },
+          { title: 'Queue', href: '/helpdesk/helpdesk-complaints/internal/queue', icon: ClipboardList },
+          { title: 'New Ticket', href: '/helpdesk/helpdesk-complaints/internal/new', icon: FileText },
+          { title: 'Approvals', href: '/helpdesk/helpdesk-complaints/internal/approvals', icon: Workflow },
+          { title: 'Service Requests', href: '/helpdesk/helpdesk-complaints/internal/requests', icon: ClipboardList },
+          { title: 'Problems', href: '/helpdesk/helpdesk-complaints/internal/problems', icon: AlertCircle },
+          { title: 'Knowledge Base', href: '/helpdesk/helpdesk-complaints/internal/knowledge-base', icon: FileText },
+          { title: 'FAQs', href: '/helpdesk/helpdesk-complaints/internal/faq', icon: HelpCircle },
+        ],
+      },
+      {
+        title: 'External',
+        href: '/helpdesk/helpdesk-complaints/external',
+        icon: Users,
+        permissions: ['support.external.access'],
+        children: [
+          { title: 'Dashboard', href: '/helpdesk/helpdesk-complaints/external/dashboard', icon: BarChart3 },
+          { title: 'Tickets', href: '/helpdesk/helpdesk-complaints/external', icon: FileText },
+          { title: 'Queue', href: '/helpdesk/helpdesk-complaints/external/queue', icon: ClipboardList },
+          { title: 'New Ticket', href: '/helpdesk/helpdesk-complaints/external/new', icon: FileText },
+          { title: 'Customer Support', href: '/helpdesk/helpdesk-complaints/external/support', icon: Users },
+          { title: 'Problems', href: '/helpdesk/helpdesk-complaints/external/problems', icon: AlertCircle },
+          { title: 'Knowledge Base', href: '/helpdesk/helpdesk-complaints/external/knowledge-base', icon: FileText },
+          { title: 'FAQs', href: '/helpdesk/helpdesk-complaints/external/faq', icon: HelpCircle },
+        ],
+      },
     ],
   },
   {
@@ -417,44 +658,50 @@ const navigationItems: NavItem[] = [
         ],
       },
       {
-        title: 'Development',
-        href: '/administration/development',
-        icon: Building,
+        title: 'Project Mngt',
+        href: '/administration/project-management',
+        icon: Briefcase,
+        permissions: ['admin.project-management'],
         children: [
-          {
-            title: 'Project Mngt',
-            href: '/administration/development/project-management',
-            icon: Briefcase,
-            children: [
-              { title: 'Project Templates', href: '/administration/development/templates', icon: Briefcase },
-              { title: 'Task Categories', href: '/administration/development/task-categories', icon: FileText },
-              { title: 'Development Stages', href: '/administration/development/stages', icon: BarChart3 },
-              { title: 'Resource Types', href: '/administration/development/resource-types', icon: Users },
-            ],
-          },
-          {
-            title: 'Maintenance Mngt',
-            href: '/administration/maintenance',
-            icon: Wrench,
-            children: [
-              { title: 'Maintenance Settings', href: '/administration/maintenance/maintenance-settings', icon: Settings },
-              { title: 'Trip Destinations', href: '/administration/maintenance/fleet-trip-destinations', icon: MapPin },
-              { title: 'Compliance Templates', href: '/administration/maintenance/fleet-compliance-templates', icon: ClipboardList },
-              { title: 'Asset Categories', href: '/administration/maintenance/asset-categories', icon: Package },
-              { title: 'Work Order Types', href: '/administration/maintenance/work-order-types', icon: FileText },
-              { title: 'Maintenance Types', href: '/administration/maintenance/maintenance-types', icon: Wrench },
-              { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
-              { title: 'Task Templates', href: '/administration/maintenance/task-templates', icon: FileText },
-              { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
-              { title: 'Admission Checklists', href: '/administration/maintenance/admission-checklists', icon: ClipboardCheck },
-              // The following advanced maintenance admin menus are temporarily hidden:
-              { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
-              // { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
-              // { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
-              // { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
-              // { title: 'Safety Protocols', href: '/administration/maintenance/safety', icon: Shield },
-            ],
-          },
+          { title: 'Overview', href: '/administration/project-management', icon: Briefcase },
+          { title: 'Project Types', href: '/administration/project-management/types', icon: FileText },
+          { title: 'Priorities', href: '/administration/project-management/priorities', icon: BarChart3 },
+          { title: 'BOQ Item Types', href: '/administration/project-management/item-types', icon: Package },
+          { title: 'Templates', href: '/administration/project-management/templates', icon: Users },
+          { title: 'Unit Types', href: '/administration/project-management/unit-types', icon: Building2 },
+          { title: 'Settings', href: '/administration/project-management/settings', icon: Settings },
+        ],
+      },
+      {
+        title: 'Maintenance Mngt',
+        href: '/administration/maintenance',
+        icon: Wrench,
+        permissions: ['admin.maintenance'],
+        children: [
+          { title: 'Maintenance Settings', href: '/administration/maintenance/maintenance-settings', icon: Settings },
+          { title: 'Asset Categories', href: '/administration/maintenance/asset-categories', icon: Package },
+          { title: 'Work Order Types', href: '/administration/maintenance/work-order-types', icon: FileText },
+          { title: 'Maintenance Types', href: '/administration/maintenance/maintenance-types', icon: Wrench },
+          { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
+          { title: 'Task Templates', href: '/administration/maintenance/task-templates', icon: FileText },
+          { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
+          { title: 'Admission Checklists', href: '/administration/maintenance/admission-checklists', icon: ClipboardCheck },
+          { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
+          // { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
+          // { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
+          // { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
+          // { title: 'Safety Protocols', href: '/administration/maintenance/safety', icon: Shield },
+        ],
+      },
+      {
+        title: 'Fleet Management',
+        href: '/administration/fleet-management',
+        icon: Truck,
+        permissions: ['admin.fleet-management'],
+        children: [
+          { title: 'Fleet Settings', href: '/administration/fleet-management/settings', icon: Settings },
+          { title: 'Trip Destinations', href: '/administration/fleet-management/trip-destinations', icon: MapPin },
+          { title: 'Compliance Templates', href: '/administration/fleet-management/compliance-templates', icon: ClipboardList },
         ],
       },
           {
@@ -526,51 +773,85 @@ export function Sidebar({ className }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [hoveredChild, setHoveredChild] = useState<string | null>(null);
   const [hoveredGrandChild, setHoveredGrandChild] = useState<string | null>(null);
-  const [menuPositions, setMenuPositions] = useState<{ [key: string]: { x: number; y: number } }>({});
+  const [menuPositions, setMenuPositions] = useState<{ [key: string]: { x: number; y: number; height: number } }>({});
   const [activeMenuPath, setActiveMenuPath] = useState<string[]>([]);
-  const [mouseInMenu, setMouseInMenu] = useState(false);
-  const [lastMousePosition, setLastMousePosition] = useState({ x: 0, y: 0 });
-  const [isMovingToChild, setIsMovingToChild] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const moveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pathname = usePathname();
-  const { hasAnyRole } = useAuth();
+  const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const openTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pathname = usePathname() ?? '';
+  const { hasAnyRole, hasAnyPermission } = useAuth();
 
   useEffect(() => {
     setMounted(true);
-    
-    // Track global mouse movement for safe zone detection
-    const handleMouseMove = (e: MouseEvent) => {
-      setLastMousePosition({ x: e.clientX, y: e.clientY });
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) {
+        return;
+      }
+
+      if (sidebarRef.current?.contains(target) || target.closest('[data-sidebar-flyout="true"]')) {
+        return;
+      }
+
+      clearMenus();
     };
-    
-    document.addEventListener('mousemove', handleMouseMove);
-    return () => document.removeEventListener('mousemove', handleMouseMove);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        clearMenus();
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current);
+      }
+      if (openTimeoutRef.current) {
+        clearTimeout(openTimeoutRef.current);
+      }
+    };
   }, []);
 
-  const isMouseMovingTowardsMenu = (menuPosition: { x: number; y: number }, currentMouse: { x: number; y: number }, previousMouse: { x: number; y: number }) => {
-    // Calculate if mouse is moving in the general direction of the menu
-    const menuVector = {
-      x: menuPosition.x - previousMouse.x,
-      y: menuPosition.y - previousMouse.y
-    };
-    
-    const mouseVector = {
-      x: currentMouse.x - previousMouse.x,
-      y: currentMouse.y - previousMouse.y
-    };
-    
-    // Dot product to check if vectors are pointing in similar direction
-    const dotProduct = menuVector.x * mouseVector.x + menuVector.y * mouseVector.y;
-    const menuMagnitude = Math.sqrt(menuVector.x * menuVector.x + menuVector.y * menuVector.y);
-    const mouseMagnitude = Math.sqrt(mouseVector.x * mouseVector.x + mouseVector.y * mouseVector.y);
-    
-    if (menuMagnitude === 0 || mouseMagnitude === 0) return false;
-    
-    // Cosine similarity - if > 0.3, mouse is moving roughly toward menu
-    const similarity = dotProduct / (menuMagnitude * mouseMagnitude);
-    return similarity > 0.3;
+  useEffect(() => {
+    if (!mounted) {
+      return;
+    }
+
+    clearMenus();
+  }, [pathname, mounted]);
+
+  const cancelPendingClose = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const cancelPendingOpen = () => {
+    if (openTimeoutRef.current) {
+      clearTimeout(openTimeoutRef.current);
+      openTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleMenuClose = (delay = 420) => {
+    cancelPendingClose();
+    closeTimeoutRef.current = setTimeout(() => {
+      clearMenus();
+    }, delay);
+  };
+
+  const scheduleMenuOpen = (callback: () => void, delay = 90) => {
+    cancelPendingOpen();
+    openTimeoutRef.current = setTimeout(() => {
+      callback();
+      openTimeoutRef.current = null;
+    }, delay);
   };
 
   const calculateMenuPosition = (rect: DOMRect, menuKey: string, estimatedHeight: number = 400) => {
@@ -610,7 +891,8 @@ export function Sidebar({ className }: SidebarProps) {
     return { x, y };
   };
 
-  const handleMainItemHover = (itemTitle: string, event: React.MouseEvent) => {
+  const openMainItemMenu = (itemTitle: string, event: React.MouseEvent) => {
+    if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     
     // Estimate menu height based on number of children
@@ -619,15 +901,28 @@ export function Sidebar({ className }: SidebarProps) {
     const estimatedHeight = Math.min(600, (childCount * 40) + 16); // 40px per item + padding
     
     const position = calculateMenuPosition(rect, itemTitle, estimatedHeight);
-    setMenuPositions({ [itemTitle]: position });
+    setMenuPositions({
+      [itemTitle]: {
+        ...position,
+        height: estimatedHeight,
+      },
+    });
     setHoveredItem(itemTitle);
     setHoveredChild(null);
     setHoveredGrandChild(null);
     setActiveMenuPath([itemTitle]);
-    setMouseInMenu(true);
   };
 
-  const handleChildItemHover = (parentTitle: string, childTitle: string, event: React.MouseEvent) => {
+  const handleMainItemHover = (itemTitle: string, event: React.MouseEvent) => {
+    cancelPendingClose();
+    if (hoveredItem === itemTitle && !hoveredChild && !hoveredGrandChild) {
+      return;
+    }
+    scheduleMenuOpen(() => openMainItemMenu(itemTitle, event));
+  };
+
+  const openChildItemMenu = (parentTitle: string, childTitle: string, event: React.MouseEvent) => {
+    if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}`;
     
@@ -640,15 +935,26 @@ export function Sidebar({ className }: SidebarProps) {
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
     setMenuPositions(prev => ({ 
       ...prev, 
-      [menuKey]: position 
+      [menuKey]: {
+        ...position,
+        height: estimatedHeight,
+      },
     }));
     setHoveredChild(childTitle);
     setHoveredGrandChild(null);
     setActiveMenuPath([parentTitle, childTitle]);
-    setMouseInMenu(true);
   };
 
-  const handleGrandChildItemHover = (parentTitle: string, childTitle: string, grandChildTitle: string, event: React.MouseEvent) => {
+  const handleChildItemHover = (parentTitle: string, childTitle: string, event: React.MouseEvent) => {
+    cancelPendingClose();
+    if (hoveredChild === childTitle && hoveredItem === parentTitle && !hoveredGrandChild) {
+      return;
+    }
+    scheduleMenuOpen(() => openChildItemMenu(parentTitle, childTitle, event), 75);
+  };
+
+  const openGrandChildItemMenu = (parentTitle: string, childTitle: string, grandChildTitle: string, event: React.MouseEvent) => {
+    if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}-${grandChildTitle}`;
     
@@ -662,92 +968,60 @@ export function Sidebar({ className }: SidebarProps) {
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
     setMenuPositions(prev => ({ 
       ...prev, 
-      [menuKey]: position 
+      [menuKey]: {
+        ...position,
+        height: estimatedHeight,
+      },
     }));
     setHoveredGrandChild(grandChildTitle);
     setActiveMenuPath([parentTitle, childTitle, grandChildTitle]);
-    setMouseInMenu(true);
+  };
+
+  const handleGrandChildItemHover = (parentTitle: string, childTitle: string, grandChildTitle: string, event: React.MouseEvent) => {
+    cancelPendingClose();
+    if (hoveredGrandChild === grandChildTitle && hoveredChild === childTitle && hoveredItem === parentTitle) {
+      return;
+    }
+    scheduleMenuOpen(() => openGrandChildItemMenu(parentTitle, childTitle, grandChildTitle, event), 60);
   };
 
   const handleMenuMouseEnter = () => {
-    setMouseInMenu(true);
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
+    cancelPendingClose();
+    cancelPendingOpen();
+  };
+
+  const getBridgeStyle = (fromX: number, menuKey: string) => {
+    const targetMenu = menuPositions[menuKey];
+    if (!targetMenu) {
+      return undefined;
     }
+
+    return {
+      left: Math.min(fromX, targetMenu.x) - 12,
+      top: targetMenu.y - 32,
+      width: Math.abs(targetMenu.x - fromX) + 24,
+      height: Math.max(targetMenu.height + 64, 180),
+      pointerEvents: 'auto' as const,
+      backgroundColor: 'transparent',
+    };
   };
 
   const clearMenus = () => {
+    cancelPendingClose();
+    cancelPendingOpen();
     setHoveredItem(null);
     setHoveredChild(null);
     setHoveredGrandChild(null);
     setActiveMenuPath([]);
     setMenuPositions({});
-    setMouseInMenu(false);
   };
 
-  const handleMenuMouseLeave = (event: React.MouseEvent) => {
-    setMouseInMenu(false);
-    
-    // Check if mouse is moving toward a child menu
-    const currentMouse = { x: event.clientX, y: event.clientY };
-    
-    // Check if moving toward first level child menu
-    if (hoveredItem && menuPositions[hoveredItem]) {
-      const isMovingToChild = isMouseMovingTowardsMenu(
-        menuPositions[hoveredItem],
-        currentMouse,
-        lastMousePosition
-      );
-      
-      if (isMovingToChild) {
-        setIsMovingToChild(true);
-        // Give more time when moving toward child
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      if (!mouseInMenu) clearMenus();
-      setIsMovingToChild(false);
-    }, 1200);
-        return;
-      }
-    }
-    
-    // Check if moving toward second level child menu
-    if (hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}`]) {
-      const isMovingToChild = isMouseMovingTowardsMenu(
-        menuPositions[`${hoveredItem}-${hoveredChild}`],
-        currentMouse,
-        lastMousePosition
-      );
-      
-      if (isMovingToChild) {
-        setIsMovingToChild(true);
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        timeoutRef.current = setTimeout(() => {
-          if (!mouseInMenu) clearMenus();
-          setIsMovingToChild(false);
-        }, 800);
-        return;
-      }
-    }
-    
-    // Default behavior - longer timeout for better UX
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    timeoutRef.current = setTimeout(() => {
-      clearMenus();
-    }, 900);
+  const handleMenuMouseLeave = () => {
+    scheduleMenuClose();
   };
 
   const handleSidebarMouseLeave = () => {
-    setMouseInMenu(false);
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    timeoutRef.current = setTimeout(() => {
-      clearMenus();
-    }, 1000);
+    scheduleMenuClose();
   };
 
   const toggleSection = (title: string) => {
@@ -772,13 +1046,28 @@ export function Sidebar({ className }: SidebarProps) {
     if (!mounted) {
       return items;
     }
-    
-    return items.filter(item => {
+
+    return items.reduce<NavItem[]>((acc, item) => {
       if (item.roles && !hasAnyRole(item.roles)) {
-        return false;
+        return acc;
       }
-      return true;
-    });
+
+      if (item.permissions && !hasAnyPermission(item.permissions)) {
+        return acc;
+      }
+
+      const children = item.children ? filterNavItems(item.children) : undefined;
+      if (item.children && (!children || children.length === 0)) {
+        return acc;
+      }
+
+      acc.push({
+        ...item,
+        children,
+      });
+
+      return acc;
+    }, []);
   };
 
   return (
@@ -826,6 +1115,14 @@ export function Sidebar({ className }: SidebarProps) {
               {hasChildren ? (
                 <button
                   onMouseEnter={(e) => handleMainItemHover(item.title, e)}
+                  onClick={(e) => {
+                    if (hoveredItem === item.title) {
+                      clearMenus();
+                      return;
+                    }
+                    cancelPendingOpen();
+                    openMainItemMenu(item.title, e);
+                  }}
                   className={cn(
                     'flex w-full items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
                     itemIsActive
@@ -864,15 +1161,9 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Invisible Bridge for First Level Menu */}
       {hoveredItem && menuPositions[hoveredItem] && (
         <div
+          data-sidebar-flyout="true"
           className="fixed z-40"
-          style={{
-            left: Math.min(collapsed ? 64 : 288, menuPositions[hoveredItem].x),
-            top: menuPositions[hoveredItem].y - 20,
-            width: Math.abs(menuPositions[hoveredItem].x - (collapsed ? 64 : 288)) + 16,
-            height: 120,
-            pointerEvents: 'auto',
-            backgroundColor: 'transparent'
-          }}
+          style={getBridgeStyle(collapsed ? 64 : 288, hoveredItem)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />
@@ -881,6 +1172,7 @@ export function Sidebar({ className }: SidebarProps) {
       {/* First Level Floating Submenu */}
       {hoveredItem && menuPositions[hoveredItem] && (
         <div
+          data-sidebar-flyout="true"
           className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[hoveredItem].x,
@@ -903,6 +1195,16 @@ export function Sidebar({ className }: SidebarProps) {
                   {childHasChildren ? (
                     <button
                       onMouseEnter={(e) => handleChildItemHover(hoveredItem, child.title, e)}
+                      onClick={(e) => {
+                        if (hoveredChild === child.title) {
+                          setHoveredChild(null);
+                          setHoveredGrandChild(null);
+                          setActiveMenuPath([hoveredItem]);
+                          return;
+                        }
+                        cancelPendingOpen();
+                        openChildItemMenu(hoveredItem, child.title, e);
+                      }}
                       className="w-full flex items-center gap-3 px-4 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       <ChildIcon className="h-4 w-4 flex-shrink-0" />
@@ -912,6 +1214,7 @@ export function Sidebar({ className }: SidebarProps) {
                   ) : (
                     <Link
                       href={child.href}
+                      onClick={clearMenus}
                       className={cn(
                         'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                         childIsActive
@@ -932,15 +1235,9 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Invisible Bridge for Second Level Menu */}
       {hoveredChild && hoveredItem && menuPositions[hoveredItem] && menuPositions[`${hoveredItem}-${hoveredChild}`] && (
         <div
+          data-sidebar-flyout="true"
           className="fixed z-40"
-          style={{
-            left: Math.min(menuPositions[hoveredItem].x + 224, menuPositions[`${hoveredItem}-${hoveredChild}`].x),
-            top: menuPositions[`${hoveredItem}-${hoveredChild}`].y - 20,
-            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}`].x - (menuPositions[hoveredItem].x + 224)) + 16,
-            height: 120,
-            pointerEvents: 'auto',
-            backgroundColor: 'transparent'
-          }}
+          style={getBridgeStyle(menuPositions[hoveredItem].x + 224, `${hoveredItem}-${hoveredChild}`)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />
@@ -949,6 +1246,7 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Second Level Floating Submenu */}
       {hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}`] && (
         <div
+          data-sidebar-flyout="true"
           className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[`${hoveredItem}-${hoveredChild}`].x,
@@ -972,6 +1270,15 @@ export function Sidebar({ className }: SidebarProps) {
                   {grandchildHasChildren ? (
                     <button
                       onMouseEnter={(e) => handleGrandChildItemHover(hoveredItem, hoveredChild, grandchild.title, e)}
+                      onClick={(e) => {
+                        if (hoveredGrandChild === grandchild.title) {
+                          setHoveredGrandChild(null);
+                          setActiveMenuPath([hoveredItem, hoveredChild]);
+                          return;
+                        }
+                        cancelPendingOpen();
+                        openGrandChildItemMenu(hoveredItem, hoveredChild, grandchild.title, e);
+                      }}
                       className="w-full flex items-center gap-3 px-4 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 transition-colors"
                     >
                       <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
@@ -981,6 +1288,7 @@ export function Sidebar({ className }: SidebarProps) {
                   ) : (
                     <Link
                       href={grandchild.href}
+                      onClick={clearMenus}
                       className={cn(
                         'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                         grandchildIsActive
@@ -1001,15 +1309,9 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Invisible Bridge for Third Level Menu */}
       {hoveredGrandChild && hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}`] && menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`] && (
         <div
+          data-sidebar-flyout="true"
           className="fixed z-40"
-          style={{
-            left: Math.min(menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224, menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x),
-            top: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].y - 20,
-            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x - (menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224)) + 16,
-            height: 120,
-            pointerEvents: 'auto',
-            backgroundColor: 'transparent'
-          }}
+          style={getBridgeStyle(menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224, `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />
@@ -1018,6 +1320,7 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Third Level Floating Submenu */}
       {hoveredGrandChild && hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`] && (
         <div
+          data-sidebar-flyout="true"
           className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x,
@@ -1040,6 +1343,7 @@ export function Sidebar({ className }: SidebarProps) {
                 <Link
                   key={greatGrandchild.title}
                   href={greatGrandchild.href}
+                  onClick={clearMenus}
                   className={cn(
                     'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                     greatGrandchildIsActive

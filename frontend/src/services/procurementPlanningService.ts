@@ -390,9 +390,14 @@ export interface ProcurementScheduleDto {
   isOptimalTiming: boolean;
   timingRationale?: string;
   considerSeasonalPricing: boolean;
+  seasonalNotes?: string;
   considerCashFlow: boolean;
+  cashFlowNotes?: string;
   status: string;
+  storageLimitations?: string;
   consolidationOpportunity: boolean;
+  consolidationNotes?: string;
+  notes?: string;
   createdAt: string;
 }
 
@@ -432,14 +437,19 @@ export interface CreateProcurementScheduleDto {
 export interface MarketAnalysisDto {
   id: string;
   analysisCode: string;
+  analysisNumber?: string;
   title: string;
   description?: string;
   itemCategory?: string;
   itemDescription?: string;
+  itemName?: string;
   analysisPeriodStart: string;
   analysisPeriodEnd: string;
   historicalAveragePrice: number;
+  averagePrice?: number;
   currentMarketPrice: number;
+  minimumPrice?: number;
+  maximumPrice?: number;
   forecastedPrice: number;
   priceTrend: string;
   priceChangePercent: number;
@@ -453,6 +463,7 @@ export interface MarketAnalysisDto {
   seasonalPattern?: string;
   preparedByName?: string;
   preparedDate?: string;
+  analysisDate?: string;
   status: string;
   createdAt: string;
 }
@@ -526,14 +537,19 @@ export interface CreatePriceHistoryDto {
 export interface SupplierConsolidationDto {
   id: string;
   consolidationCode: string;
+  consolidationNumber?: string;
   title: string;
   description?: string;
   itemCategory?: string;
   analysisPeriodStart: string;
   analysisPeriodEnd: string;
   currentSupplierCount: number;
+  targetSupplierCount?: number;
   recommendedSupplierCount: number;
+  consolidationStrategy?: string;
+  currentAnnualSpend?: number;
   totalSpend: number;
+  projectedSavings?: number;
   potentialSavings: number;
   currency: string;
   opportunityLevel: string;
@@ -580,18 +596,22 @@ export interface CreateSupplierConsolidationDto {
 export interface EmergencyProcurementPlanDto {
   id: string;
   planCode: string;
+  planNumber?: string;
   title: string;
   description?: string;
   departmentId?: string;
   departmentName?: string;
   emergencyType: string;
   criticalityLevel: string;
+  emergencyBudgetReserve?: number;
   budgetReserve: number;
   utilizedReserve: number;
   remainingReserve: number;
   currency: string;
   maxApprovalLimit: number;
+  validFrom?: string;
   effectiveDate?: string;
+  validTo?: string;
   expiryDate?: string;
   lastReviewDate?: string;
   nextReviewDate?: string;
@@ -1362,4 +1382,3 @@ export const commonService = {
     }
   },
 };
-

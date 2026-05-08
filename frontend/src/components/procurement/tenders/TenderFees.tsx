@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
 import { useState } from 'react';
@@ -76,9 +77,10 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
     if (tenderId) {
       // Save via API
       try {
+        const amount = currentFee.amount ?? 0;
         const feeDto: CreateTenderFeeDto = {
           feeType: currentFee.feeType,
-          amount: currentFee.amount!,
+          amount,
           currency: currentFee.currency,
           paymentMethod: currentFee.paymentMethod,
           isMandatory: currentFee.isMandatory,
@@ -132,14 +134,18 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
     } else {
       // Save to local state only (no tender yet)
       console.log('TenderFees - No tender yet, saving to local state only');
+      const feeToSave = {
+        ...currentFee,
+        amount: currentFee.amount ?? 0,
+      };
       if (editingIndex !== null) {
         const updated = [...formData.fees];
-        updated[editingIndex] = currentFee;
+        updated[editingIndex] = feeToSave;
         updateFormData({ fees: updated });
         toast.success('Fee updated');
       } else {
         updateFormData({
-          fees: [...formData.fees, currentFee]
+          fees: [...formData.fees, feeToSave]
         });
         toast.success('Fee added');
       }
@@ -480,5 +486,3 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
     </div>
   );
 }
-
-

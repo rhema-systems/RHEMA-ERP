@@ -21,7 +21,9 @@ import {
 } from 'lucide-react';
 import {
   businessPartnerRegistrationService,
+  type CreateBusinessPartnerRegistrationDto,
   type RegistrationFormData,
+  type UpdateBusinessPartnerRegistrationDto,
 } from '@/services/businessPartnerRegistrationService';
 import { toast } from 'sonner';
 
@@ -98,14 +100,31 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
     return errors.length === 0;
   };
 
+  const buildRegistrationDraftPayload = (): CreateBusinessPartnerRegistrationDto => ({
+    partnerType: formData.partnerType,
+    companyName: formData.companyName,
+    registrationNumber: formData.registrationNumber,
+    email: formData.email,
+    phone: formData.phone,
+    registrationData: JSON.stringify(formData),
+  });
+
   const handleSaveDraft = async () => {
     try {
       setSaving(true);
       if (registrationId) {
-        await businessPartnerRegistrationService.update(registrationId, formData);
+        const updatePayload: UpdateBusinessPartnerRegistrationDto = {
+          companyName: formData.companyName,
+          registrationNumber: formData.registrationNumber,
+          email: formData.email,
+          phone: formData.phone,
+          registrationData: JSON.stringify(formData),
+          completionPercentage: businessPartnerRegistrationService.calculateCompletionPercentage(formData),
+        };
+        await businessPartnerRegistrationService.update(registrationId, updatePayload);
         toast.success('Draft saved successfully');
       } else {
-        const created = await businessPartnerRegistrationService.create(formData);
+        const created = await businessPartnerRegistrationService.create(buildRegistrationDraftPayload());
         setRegistrationId(created.id);
         toast.success('Draft created successfully');
       }
@@ -165,11 +184,11 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
       case 2:
         return <ContactInformation formData={formData} updateFormData={updateFormData} />;
       case 3:
-        return <DocumentUpload formData={formData} updateFormData={updateFormData} />;
+        return <DocumentUpload formData={formData} updateFormData={updateFormData} registrationId={registrationId} />;
       case 4:
         return <LicenseInformation formData={formData} updateFormData={updateFormData} />;
       case 5:
-        return <RegistrationSummary formData={formData} />;
+        return <RegistrationSummary formData={formData} onSubmit={handleSubmit} loading={loading} />;
       default:
         return null;
     }
@@ -337,4 +356,3 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
     </Dialog>
   );
 }
-

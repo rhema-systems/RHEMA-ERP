@@ -1,5 +1,12 @@
+using System.Text.Json;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
@@ -13,6 +20,7 @@ namespace ErpSystem.Web.Services
     public interface IDatabaseSeedingService
     {
         Task SeedAsync();
+        Task SeedWithoutMigrationAsync();
         Task SeedBasicDataAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
@@ -41,18 +49,26 @@ namespace ErpSystem.Web.Services
             _environment = environment;
         }
 
-        public async Task SeedAsync()
+        public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
+
+        public Task SeedWithoutMigrationAsync() => SeedCoreAsync(applyMigrations: false);
+
+        private async Task SeedCoreAsync(bool applyMigrations)
         {
             try
             {
                 _logger.LogInformation("Starting database seeding...");
 
-                // Ensure database is created and migrated
-                await _context.Database.MigrateAsync();
+                if (applyMigrations)
+                {
+                    // Ensure database is created and migrated
+                    await _context.Database.MigrateAsync();
+                }
 
                 // Always ensure roles exist (safe/idempotent; required for new module roles on existing DBs)
                 _logger.LogInformation("Ensuring roles are seeded...");
                 await SeedRolesAsync();
+                await SeedRolePermissionAssignmentsAsync();
 
                 // Check if we already have seed data
                 var hasData = await HasSeedDataAsync();
@@ -64,7 +80,7 @@ namespace ErpSystem.Web.Services
                 else
                 {
                     _logger.LogInformation("Basic data already exists, skipping basic seeding");
-
+                    
                     // But always ensure tenant modules are seeded
                     _logger.LogInformation("Ensuring tenant modules are seeded...");
                     await SeedDefaultTenantModulesAsync();
@@ -73,6 +89,10 @@ namespace ErpSystem.Web.Services
                 // Always ensure baseline EHC workflow exists (required for ticket lifecycle management)
                 _logger.LogInformation("Ensuring EHC workflow is seeded...");
                 await EnsureEhcWorkflowSeededAsync();
+                _logger.LogInformation("Ensuring project workflows are seeded...");
+                await EnsureProjectWorkflowsSeededAsync();
+                _logger.LogInformation("Ensuring project catalog defaults are seeded...");
+                await EnsureProjectCatalogDefaultsSeededAsync();
 
                 // Always ensure baseline EHC workflow routing rules exist (workflow selection by type/category/priority/department)
                 _logger.LogInformation("Ensuring EHC workflow routing rules are seeded...");
@@ -93,25 +113,47 @@ namespace ErpSystem.Web.Services
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
                 _logger.LogInformation("Ensuring EHC notification topics are seeded...");
-                await EnsureEhcNotificationTopicsSeededAsync();
+                try
+                {
+                    await EnsureEhcNotificationTopicsSeededAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "EHC notification topic seeding failed (table may not exist yet). Continuing...");
+                    _context.ChangeTracker.Clear();
+                }
 
                 // Always seed/update test users in development to ensure correct passwords
                 if (_environment.IsDevelopment())
                 {
                     _logger.LogInformation("Ensuring test users have correct passwords...");
                     await SeedTestUsersAsync();
+                    _logger.LogInformation("Ensuring project demo data is seeded...");
+                    await EnsureProjectDemoDataSeededAsync();
 
                     // Always ensure maintenance configuration is seeded in development
                     _logger.LogInformation("Ensuring maintenance configuration is seeded...");
-                    await SeedMaintenanceConfigurationAsync();
-
+                    // await SeedMaintenanceConfigurationAsync();
+                    
                     // Seed comprehensive maintenance data (inventory, assets, templates, checklists)
                     _logger.LogInformation("Ensuring comprehensive maintenance data is seeded...");
-                    await SeedMaintenanceComprehensiveDataAsync();
-
+                    // await SeedMaintenanceComprehensiveDataAsync();
+                    
                     // Seed quality control checklists
                     _logger.LogInformation("Ensuring QC checklists are seeded...");
-                    await SeedQualityControlChecklistsAsync();
+                    try
+                    {
+                        await SeedQualityControlChecklistsAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "QC checklist seeding failed (schema mismatch). Continuing...");
+                        _context.ChangeTracker.Clear();
+                    }
+                    
+                    // Seed finance data (currencies, accounts, fiscal years, settings)
+                    _logger.LogInformation("Ensuring finance data is seeded...");
+                    await SeedFinanceDataAsync();
 
                     // Seed EHC helpdesk demo data (tickets, feedback, problems, service requests, channels, compliance)
                     _logger.LogInformation("Ensuring EHC helpdesk demo data is seeded...");
@@ -133,13 +175,15 @@ namespace ErpSystem.Web.Services
             }
         }
 
+
+
         public async Task SeedBasicDataAsync()
         {
             _logger.LogInformation("Seeding basic data...");
 
             // Seed default tenant
             await SeedDefaultTenantAsync();
-
+            
             // Seed default tenant modules
             await SeedDefaultTenantModulesAsync();
 
@@ -147,12 +191,3838 @@ namespace ErpSystem.Web.Services
             await SeedHRDataAsync();
 
             // Seed maintenance configuration (work order types, priority levels, maintenance types)
-            await SeedMaintenanceConfigurationAsync();
+            // await SeedMaintenanceConfigurationAsync();
+
+            // Seed finance data (currencies, accounts, fiscal years, settings)
+            await SeedFinanceDataAsync();
 
             // Seed baseline EHC workflow definition
             await EnsureEhcWorkflowSeededAsync();
+            await EnsureProjectWorkflowsSeededAsync();
+            await EnsureProjectCatalogDefaultsSeededAsync();
 
             _logger.LogInformation("Basic data seeding completed");
+        }
+
+        private async Task EnsureProjectWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    await EnsureWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode: "Project",
+                        entityName: "Project",
+                        entityClassName: typeof(Project).FullName,
+                        definitionName: "Project Approval",
+                        description: "Baseline project initiation approval: Draft -> PendingApproval -> Planned.",
+                        approvalRoleNames: new[] { Constants.Roles.TenantAdmin, Constants.Roles.Manager });
+
+                    await EnsureWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode: "ProjectBudgetRevision",
+                        entityName: "Project Budget Revision",
+                        entityClassName: typeof(ProjectBudgetRevision).FullName,
+                        definitionName: "Project Budget Revision Approval",
+                        description: "Baseline project budget revision approval: Draft -> PendingApproval -> Approved.",
+                        approvalRoleNames: new[] { "Finance User", Constants.Roles.TenantAdmin });
+
+                    await EnsureWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode: "ProjectClosure",
+                        entityName: "Project Closure",
+                        entityClassName: typeof(ProjectClosure).FullName,
+                        definitionName: "Project Closure Approval",
+                        description: "Baseline project closure approval: Draft -> PendingApproval -> Closed.",
+                        approvalRoleNames: new[] { Constants.Roles.Manager, Constants.Roles.TenantAdmin });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed project workflows");
+            }
+        }
+
+        private async Task EnsureProjectCatalogDefaultsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants
+                    .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
+                    .Select(t => new { t.Id })
+                    .ToListAsync();
+
+                var catalogGroups = ProjectCatalogDefaults.GetRecommendedCatalogs();
+                foreach (var tenant in tenants)
+                {
+                    var existing = await _context.ProjectCatalogEntries
+                        .Where(entry => !entry.IsDeleted && entry.TenantId == tenant.Id)
+                        .Select(entry => new { entry.CatalogType, entry.Code })
+                        .ToListAsync();
+
+                    var existingKeys = existing
+                        .Select(entry => $"{entry.CatalogType}::{entry.Code}")
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    var created = false;
+                    foreach (var group in catalogGroups)
+                    {
+                        for (var index = 0; index < group.Items.Count; index++)
+                        {
+                            var item = group.Items[index];
+                            var key = $"{group.Key}::{item.Code}";
+                            if (existingKeys.Contains(key))
+                            {
+                                continue;
+                            }
+
+                            _context.ProjectCatalogEntries.Add(new ProjectCatalogEntry
+                            {
+                                Id = Guid.NewGuid(),
+                                TenantId = tenant.Id,
+                                CatalogType = group.Key,
+                                Code = item.Code,
+                                Name = item.Name,
+                                SortOrder = (index + 1) * 10,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                CreatedBy = "System"
+                            });
+
+                            existingKeys.Add(key);
+                            created = true;
+                        }
+                    }
+
+                    if (created)
+                    {
+                        await _context.SaveChangesAsync();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed project catalog defaults");
+            }
+        }
+
+        private async Task EnsureProjectDemoDataSeededAsync()
+        {
+            try
+            {
+                var tenantIds = await _context.Tenants
+                    .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
+                    .Select(t => t.Id)
+                    .ToListAsync();
+
+                foreach (var tenantId in tenantIds)
+                {
+                    await EnsureProjectDemoDataSeededAsync(tenantId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed project demo data");
+            }
+        }
+
+        private async Task EnsureProjectDemoDataSeededAsync(Guid tenantId)
+        {
+            var activeUsers = await _userManager.Users
+                .Where(user => user.TenantId == tenantId && user.IsActive)
+                .OrderBy(user => user.UserName)
+                .ToListAsync();
+
+            if (activeUsers.Count == 0)
+            {
+                _logger.LogWarning("Skipping project demo data for tenant {TenantId} because no active users were found.", tenantId);
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            var sponsor = activeUsers.First();
+            var projectManager = activeUsers.Skip(1).FirstOrDefault() ?? sponsor;
+            var financeOwner = activeUsers.Skip(2).FirstOrDefault() ?? projectManager;
+            var teamMember = activeUsers.Skip(3).FirstOrDefault() ?? financeOwner;
+
+            var department = await _context.Departments
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                .OrderBy(item => item.Name)
+                .FirstOrDefaultAsync();
+
+            var location = await _context.Locations
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                .OrderBy(item => item.Name)
+                .FirstOrDefaultAsync();
+
+            var customer = await _context.BusinessPartners
+                .FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.RegistrationStatus == "Approved"
+                    && (item.PartnerType == "Customer" || item.PartnerType == "Both"));
+
+            if (customer == null)
+            {
+                customer = new BusinessPartner
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PartnerCode = "CUST-DEMO-PM",
+                    PartnerName = "Northwind Transformation Group",
+                    PartnerType = "Customer",
+                    LegalName = "Northwind Transformation Group",
+                    PrimaryContactName = "Ava Collins",
+                    PrimaryEmail = "projects@northwind.example",
+                    PrimaryPhone = "+1-555-0133",
+                    PhysicalCity = "Accra",
+                    PhysicalCountry = "Ghana",
+                    RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved",
+                    ApprovedById = sponsor.Id,
+                    ApprovedDate = now.AddDays(-120),
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.BusinessPartners.Add(customer);
+            }
+
+            var implementationType = await EnsureProjectTypeAsync(
+                tenantId,
+                "IMPLEMENTATION",
+                "Implementation Project",
+                "Customer or internal delivery engagements executed against an approved plan.",
+                requiresSponsor: true,
+                requiresApproval: true);
+            var internalType = await EnsureProjectTypeAsync(
+                tenantId,
+                "INTERNAL",
+                "Internal Initiative",
+                "Operational improvement and transformation initiatives owned internally.",
+                requiresSponsor: true,
+                requiresApproval: true);
+            var capexType = await EnsureProjectTypeAsync(
+                tenantId,
+                "CAPEX",
+                "Capital Project",
+                "Asset or facilities improvement work with formal budget controls.",
+                requiresSponsor: true,
+                requiresApproval: true);
+            var constructionType = await EnsureProjectTypeAsync(
+                tenantId,
+                "CONSTRUCTION",
+                "Construction Development",
+                "Building and civil works projects covering design, approvals, procurement, construction, handover, and defects-liability follow-through.",
+                requiresSponsor: true,
+                requiresApproval: true);
+            var renovationType = await EnsureProjectTypeAsync(
+                tenantId,
+                "RENOVATION_FITOUT",
+                "Renovation / Fit-Out",
+                "Renovation, refurbishment, and fit-out projects with phased handover and change-heavy execution.",
+                requiresSponsor: true,
+                requiresApproval: true);
+
+            var highPriority = await EnsureProjectPriorityAsync(tenantId, "HIGH", "High", "#DC2626", 10);
+            var mediumPriority = await EnsureProjectPriorityAsync(tenantId, "MEDIUM", "Medium", "#D97706", 20);
+            var lowPriority = await EnsureProjectPriorityAsync(tenantId, "LOW", "Low", "#2563EB", 30);
+
+            var portfolio = await _context.ProjectPortfolios
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "PORTFOLIO-TRANSFORM");
+            if (portfolio == null)
+            {
+                portfolio = new ProjectPortfolio
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = "PORTFOLIO-TRANSFORM",
+                    Name = "Enterprise Transformation Portfolio",
+                    Description = "Priority projects for customer delivery, internal transformation, and capital improvement.",
+                    Status = "Active",
+                    StrategicObjective = "Improve delivery control, cash flow, and operating resilience.",
+                    OwnerId = sponsor.Id,
+                    SponsorId = sponsor.Id,
+                    StartDate = now.Date.AddMonths(-3),
+                    TargetEndDate = now.Date.AddMonths(12),
+                    BudgetCap = 1500000m,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectPortfolios.Add(portfolio);
+            }
+
+            var program = await _context.ProjectPrograms
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "PROGRAM-ERP-DELIVERY");
+            if (program == null)
+            {
+                program = new ProjectProgram
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PortfolioId = portfolio.Id,
+                    Code = "PROGRAM-ERP-DELIVERY",
+                    Name = "ERP Delivery Program",
+                    Description = "Cross-functional delivery work covering implementation, adoption, and stabilization.",
+                    Status = "Active",
+                    ProgramManagerId = projectManager.Id,
+                    SponsorId = sponsor.Id,
+                    StartDate = now.Date.AddMonths(-2),
+                    TargetEndDate = now.Date.AddMonths(10),
+                    BudgetCap = 850000m,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectPrograms.Add(program);
+            }
+
+            var realEstatePortfolio = await _context.ProjectPortfolios
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "PORTFOLIO-REAL-ESTATE");
+            if (realEstatePortfolio == null)
+            {
+                realEstatePortfolio = new ProjectPortfolio
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = "PORTFOLIO-REAL-ESTATE",
+                    Name = "Real Estate Development Portfolio",
+                    Description = "Residential, commercial, and refurbishment developments managed with construction-specific controls.",
+                    Status = "Active",
+                    StrategicObjective = "Deliver Ghana construction projects with stronger package, unit, handover, and commercial governance.",
+                    OwnerId = sponsor.Id,
+                    SponsorId = sponsor.Id,
+                    StartDate = now.Date.AddMonths(-1),
+                    TargetEndDate = now.Date.AddMonths(18),
+                    BudgetCap = 9500000m,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectPortfolios.Add(realEstatePortfolio);
+            }
+
+            var housingProgram = await _context.ProjectPrograms
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "PROGRAM-ACCRA-HOUSING");
+            if (housingProgram == null)
+            {
+                housingProgram = new ProjectProgram
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PortfolioId = realEstatePortfolio.Id,
+                    Code = "PROGRAM-ACCRA-HOUSING",
+                    Name = "Accra Housing Delivery Program",
+                    Description = "Urban apartment and mixed-use developments with staged procurement, unit sales, and handover controls.",
+                    Status = "Active",
+                    ProgramManagerId = projectManager.Id,
+                    SponsorId = sponsor.Id,
+                    StartDate = now.Date.AddMonths(-1),
+                    TargetEndDate = now.Date.AddMonths(15),
+                    BudgetCap = 6200000m,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectPrograms.Add(housingProgram);
+            }
+
+            var template = await _context.ProjectTemplates
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "TPL-ERP-IMPLEMENTATION");
+            if (template == null)
+            {
+                template = new ProjectTemplate
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = "TPL-ERP-IMPLEMENTATION",
+                    Name = "ERP Implementation Template",
+                    Description = "Baseline phases, deliverables, and controls for ERP delivery projects.",
+                    ProjectTypeId = implementationType.Id,
+                    VersionLabel = "1.0",
+                    TemplateDefinitionJson = JsonSerializer.Serialize(new
+                    {
+                        phases = new[] { "Initiation", "Design", "Build", "Test", "Go Live", "Stabilization" },
+                        milestones = new[] { "Design Sign-off", "UAT Complete", "Go Live" },
+                        roles = new[] { "Project Manager", "Functional Lead", "Technical Lead", "Finance Analyst" }
+                    }),
+                    IsActive = true,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectTemplates.Add(template);
+            }
+
+            var apartmentTemplate = await EnsureProjectTemplateAsync(
+                tenantId,
+                "TPL-GH-APARTMENT-MULTIUNIT",
+                "Ghana Apartment Development - Multi Unit",
+                "Recommended defaults for apartment developments delivered as multiple saleable units with phased commercialization and unit-by-unit handover.",
+                constructionType.Id,
+                "1.0",
+                BuildGhanaApartmentMultiUnitTemplateDefinitionJson());
+
+            var wholeBuildingTemplate = await EnsureProjectTemplateAsync(
+                tenantId,
+                "TPL-GH-WHOLE-BUILDING",
+                "Ghana Whole-Building Development",
+                "Recommended defaults for single whole-building developments such as offices, schools, warehouses, and owner-occupied facilities.",
+                constructionType.Id,
+                "1.0",
+                BuildGhanaWholeBuildingTemplateDefinitionJson());
+
+            var renovationTemplate = await EnsureProjectTemplateAsync(
+                tenantId,
+                "TPL-GH-RENOVATION-FITOUT",
+                "Ghana Renovation / Fit-Out",
+                "Recommended defaults for refurbishment, shell-and-core completion, and tenant fit-out projects.",
+                renovationType.Id,
+                "1.0",
+                BuildGhanaRenovationFitOutTemplateDefinitionJson());
+
+            var settings = await _context.ProjectManagementSettings
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted);
+            if (settings == null)
+            {
+                settings = new ProjectManagementSettings
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectNumberFormat = "PRJ-{YYYY}-{####}",
+                    RequireSponsor = true,
+                    DefaultApprovalRequired = true,
+                    DefaultProjectTypeId = implementationType.Id,
+                    DefaultProjectPriorityId = mediumPriority.Id,
+                    DefaultTemplateId = template.Id,
+                    MandatoryFieldsByTypeJson = JsonSerializer.Serialize(new
+                    {
+                        IMPLEMENTATION = new[] { "SponsorId", "ProjectManagerId", "EstimatedBudget", "StartDate", "TargetEndDate" },
+                        INTERNAL = new[] { "SponsorId", "ProjectManagerId", "StartDate" },
+                        CAPEX = new[] { "SponsorId", "EstimatedBudget", "FundingSource" }
+                    }),
+                    Notes = "Development seed defaults for project setup and numbering.",
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectManagementSettings.Add(settings);
+            }
+
+            settings.MandatoryFieldsByTypeJson = MergeProjectMandatoryFieldsByTypeJson(settings.MandatoryFieldsByTypeJson);
+
+            await _context.SaveChangesAsync();
+            await NormalizeProjectDemoFundingSourcesAsync(tenantId);
+            var baseCurrencyCode = await ResolveBaseCurrencyCodeAsync(tenantId);
+
+            var apartmentDeveloper = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CUST-GH-GOLDCOAST",
+                "Golden Coast Homes Ltd",
+                "Customer",
+                sponsor.Id,
+                "+233-302-100-200",
+                "developments@goldencoasthomes.example",
+                "Accra");
+
+            var apartmentBuyerOne = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CUST-GH-AMA-MENSAH",
+                "Ama Mensah",
+                "Customer",
+                sponsor.Id,
+                "+233-244-001-101",
+                "ama.mensah@example.com",
+                "Accra");
+
+            var apartmentBuyerTwo = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CUST-GH-KWESI-OWUSU",
+                "Kwesi Owusu",
+                "Customer",
+                sponsor.Id,
+                "+233-244-001-202",
+                "kwesi.owusu@example.com",
+                "Accra");
+
+            var apartmentContractor = await EnsureApprovedBusinessPartnerAsync(
+                tenantId,
+                "CONT-GH-ADOM-BUILD",
+                "Adom Construction Ltd",
+                "Contractor",
+                sponsor.Id,
+                "+233-302-880-440",
+                "tenders@adomconstruction.example",
+                "Accra");
+
+            await EnsureProjectDemoSeededAsync(
+                tenantId,
+                "PRJ-DEMO-1001",
+                () => CreateImplementationProject(
+                    tenantId,
+                    implementationType,
+                    highPriority,
+                    template,
+                    portfolio,
+                    program,
+                    sponsor,
+                    projectManager,
+                    financeOwner,
+                    teamMember,
+                    department,
+                    location,
+                    customer,
+                    baseCurrencyCode,
+                    now));
+
+            await EnsureProjectDemoSeededAsync(
+                tenantId,
+                "PRJ-DEMO-1002",
+                () => CreateInternalPlanningProject(
+                    tenantId,
+                    internalType,
+                    mediumPriority,
+                    template,
+                    portfolio,
+                    program,
+                    sponsor,
+                    projectManager,
+                    financeOwner,
+                    department,
+                    location,
+                    baseCurrencyCode,
+                    now));
+
+            await EnsureProjectDemoSeededAsync(
+                tenantId,
+                "PRJ-DEMO-1003",
+                () => CreateClosedCapexProject(
+                    tenantId,
+                    capexType,
+                    lowPriority,
+                    portfolio,
+                    sponsor,
+                    projectManager,
+                    financeOwner,
+                    teamMember,
+                    department,
+                    location,
+                    customer,
+                    baseCurrencyCode,
+                    now));
+
+            await EnsureProjectDemoSeededAsync(
+                tenantId,
+                "PRJ-DEMO-2001",
+                () => CreateAccraApartmentDevelopmentProject(
+                    tenantId,
+                    constructionType,
+                    highPriority,
+                    apartmentTemplate,
+                    realEstatePortfolio,
+                    housingProgram,
+                    sponsor,
+                    projectManager,
+                    financeOwner,
+                    teamMember,
+                    department,
+                    location,
+                    apartmentDeveloper,
+                    apartmentBuyerOne,
+                    apartmentBuyerTwo,
+                    apartmentContractor,
+                    baseCurrencyCode,
+                    now));
+            await EnsureAccraApartmentDevelopmentPhasePackagesSeededAsync(tenantId, baseCurrencyCode, now);
+
+            await EnsureProjectDemoInterdependenciesSeededAsync(tenantId, projectManager, financeOwner, now);
+            await EnsureProjectDemoQualityDataSeededAsync(tenantId, sponsor, financeOwner, teamMember, now);
+            await EnsureProjectDemoProcurementAndMaterialDataSeededAsync(tenantId, customer, financeOwner, department, now);
+        }
+
+        private async Task EnsureProjectDemoSeededAsync(Guid tenantId, string projectCode, Action create)
+        {
+            var exists = await _context.Projects
+                .AnyAsync(project => project.TenantId == tenantId && !project.IsDeleted && project.ProjectCode == projectCode);
+            if (exists)
+            {
+                return;
+            }
+
+            create();
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureAccraApartmentDevelopmentPhasePackagesSeededAsync(Guid tenantId, string baseCurrencyCode, DateTime now)
+        {
+            var project = await _context.Projects
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.ProjectCode == "PRJ-DEMO-2001")
+                .Select(item => new
+                {
+                    item.Id,
+                    item.BaseCurrencyCode
+                })
+                .FirstOrDefaultAsync();
+
+            if (project == null)
+            {
+                return;
+            }
+
+            var phases = await _context.ProjectPhases
+                .Where(item => item.TenantId == tenantId && item.ProjectId == project.Id && !item.IsDeleted)
+                .ToListAsync();
+
+            if (phases.Count == 0)
+            {
+                return;
+            }
+
+            var phaseByCode = phases
+                .Where(item => !string.IsNullOrWhiteSpace(item.Code))
+                .ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            var existingPackages = await _context.ProjectPackages
+                .Where(item => item.TenantId == tenantId && item.ProjectId == project.Id && !item.IsDeleted)
+                .ToListAsync();
+
+            var packageByCode = existingPackages
+                .Where(item => !string.IsNullOrWhiteSpace(item.Code))
+                .ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            var existingBoqItems = await _context.ProjectBoqItems
+                .Where(item => item.TenantId == tenantId && item.ProjectId == project.Id && !item.IsDeleted)
+                .ToListAsync();
+
+            var boqItemCodes = existingBoqItems
+                .Where(item => !string.IsNullOrWhiteSpace(item.ItemCode))
+                .Select(item => item.ItemCode!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var defaultPartnerId = existingPackages
+                .Where(item => item.BusinessPartnerId.HasValue)
+                .Select(item => item.BusinessPartnerId!.Value)
+                .FirstOrDefault();
+
+            var currencyCode = string.IsNullOrWhiteSpace(project.BaseCurrencyCode) ? baseCurrencyCode : project.BaseCurrencyCode!;
+            var createdPackageCount = 0;
+            var createdBoqCount = 0;
+            var nextSortOrder = existingPackages.Count == 0 ? 100 : existingPackages.Max(item => item.SortOrder) + 10;
+
+            ProjectPackage EnsurePackage(
+                string packageCode,
+                string phaseCode,
+                string name,
+                string status,
+                decimal budgetAmount,
+                decimal? committedAmount,
+                decimal? actualAmount,
+                decimal? forecastAmount,
+                string description,
+                string notes)
+            {
+                if (packageByCode.TryGetValue(packageCode, out var existingPackage))
+                {
+                    return existingPackage;
+                }
+
+                if (!phaseByCode.TryGetValue(phaseCode, out var phase))
+                {
+                    throw new InvalidOperationException($"Phase {phaseCode} was not found while seeding demo package coverage for PRJ-DEMO-2001.");
+                }
+
+                var package = new ProjectPackage
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = project.Id,
+                    ProjectPhaseId = phase.Id,
+                    Code = packageCode,
+                    Name = name,
+                    Description = description,
+                    PackageType = ProjectPackageTypes.WorkPackage,
+                    Status = status,
+                    SortOrder = nextSortOrder,
+                    ProcurementRoute = "Traditional",
+                    ContractStrategy = "SubcontractPackages",
+                    BusinessPartnerId = defaultPartnerId == Guid.Empty ? null : defaultPartnerId,
+                    BudgetAmount = budgetAmount,
+                    CommittedAmount = committedAmount,
+                    ActualAmount = actualAmount,
+                    ForecastAmount = forecastAmount,
+                    Currency = currencyCode,
+                    Notes = notes,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                nextSortOrder += 10;
+                createdPackageCount++;
+                packageByCode[packageCode] = package;
+                _context.ProjectPackages.Add(package);
+                return package;
+            }
+
+            void EnsureBoq(
+                string packageCode,
+                string lineNumber,
+                string itemCode,
+                string description,
+                decimal quantity,
+                string unitOfMeasure,
+                decimal? unitRate,
+                decimal budgetAmount,
+                decimal? committedAmount,
+                decimal? actualAmount,
+                decimal? forecastAmount,
+                string? notes = null)
+            {
+                if (boqItemCodes.Contains(itemCode))
+                {
+                    return;
+                }
+
+                if (!packageByCode.TryGetValue(packageCode, out var package))
+                {
+                    throw new InvalidOperationException($"Package {packageCode} was not found while seeding BOQ coverage for PRJ-DEMO-2001.");
+                }
+                var sortOrder = int.TryParse(lineNumber, out var parsedLineNumber) ? Math.Max(0, parsedLineNumber - 1) : 0;
+
+                _context.ProjectBoqItems.Add(new ProjectBoqItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = project.Id,
+                    ProjectPackageId = package.Id,
+                    LineNumber = lineNumber,
+                    ItemCode = itemCode,
+                    ItemType = ProjectBoqItemTypes.Item,
+                    Description = description,
+                    Quantity = quantity,
+                    UnitOfMeasure = unitOfMeasure,
+                    UnitRate = unitRate,
+                    BudgetAmount = budgetAmount,
+                    CommittedAmount = committedAmount,
+                    ActualAmount = actualAmount,
+                    ForecastAmount = forecastAmount,
+                    Currency = currencyCode,
+                    Notes = notes,
+                    SortOrder = sortOrder,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                });
+
+                boqItemCodes.Add(itemCode);
+                createdBoqCount++;
+            }
+
+            EnsurePackage(
+                "PKG-FEAS",
+                "FEASIBILITY",
+                "Feasibility & Site Due Diligence",
+                ProjectPackageStatuses.Completed,
+                118000m,
+                118000m,
+                116500m,
+                116500m,
+                "Topographic survey, geotechnical investigation, feasibility reviews, and preliminary commercial studies.",
+                "Closed out during the initial go/no-go and land due-diligence cycle.");
+            EnsurePackage(
+                "PKG-CONCEPT",
+                "CONCEPT_DESIGN",
+                "Concept Design Coordination",
+                ProjectPackageStatuses.Completed,
+                176000m,
+                176000m,
+                172400m,
+                172400m,
+                "Architectural concept options, massing coordination, and elemental cost alignment.",
+                "Approved concept set used to launch scheme design and buyer mix planning.");
+            EnsurePackage(
+                "PKG-DDETAIL",
+                "DETAILED_DESIGN",
+                "Detailed Design & IFC Documentation",
+                ProjectPackageStatuses.Completed,
+                264000m,
+                264000m,
+                259800m,
+                259800m,
+                "Detailed architectural, structural, and MEP documentation including coordinated IFC issue and BOQ support.",
+                "Issued-for-construction set closed and superseded by current as-built revision control.");
+            EnsurePackage(
+                "PKG-APPROVAL",
+                "APPROVALS",
+                "Statutory Approvals & Utility Clearances",
+                ProjectPackageStatuses.Completed,
+                92000m,
+                92000m,
+                88750m,
+                88750m,
+                "Permit submissions, utility applications, authority fees, and compliance follow-through.",
+                "Occupancy certificate remains on the approval register, but the main approvals package is substantially complete.");
+            EnsurePackage(
+                "PKG-PROC",
+                "PROCUREMENT",
+                "Tendering, Awards & Package Procurement",
+                ProjectPackageStatuses.Completed,
+                138000m,
+                132500m,
+                126400m,
+                133900m,
+                "Tender preparation, bid evaluation, package awards, and mobilisation procurement planning.",
+                "Main trade packages have already been awarded and transitioned into execution.");
+            EnsurePackage(
+                "PKG-COMM",
+                "COMMISSIONING",
+                "Commissioning & Systems Testing",
+                ProjectPackageStatuses.Active,
+                148000m,
+                133000m,
+                58100m,
+                152600m,
+                "Common services commissioning, lift witness testing, fire alarm integration, and authority witness support.",
+                "Closely tied to common-area energisation and batch handover readiness.");
+            EnsurePackage(
+                "PKG-HAND",
+                "HANDOVER",
+                "Phased Unit Handover & Closeout",
+                ProjectPackageStatuses.Active,
+                104000m,
+                64200m,
+                28150m,
+                109500m,
+                "Unit readiness walks, handover packs, client inspections, and closeout documentation by release batch.",
+                "Batch 1 is active and later release batches remain forecast-driven.");
+            EnsurePackage(
+                "PKG-DLP",
+                "DEFECTS_LIABILITY",
+                "Defects Response & Warranty Support",
+                ProjectPackageStatuses.Active,
+                68000m,
+                22000m,
+                8450m,
+                68000m,
+                "Early defects-response cover, warranty coordination, and retained closeout support for handed-over units.",
+                "Active for the units already handed over under the phased turnover model.");
+
+            EnsureBoq("PKG-FEAS", "1", "FEAS-SITE", "Geotechnical investigation, topographic survey, and feasibility reporting", 1m, "LS", 118000m, 118000m, 118000m, 116500m, 116500m);
+            EnsureBoq("PKG-CONCEPT", "1", "CONCEPT-ARCH", "Concept design studies, space planning, and elemental cost plan coordination", 1m, "LS", 176000m, 176000m, 176000m, 172400m, 172400m);
+            EnsureBoq("PKG-DDETAIL", "1", "DETAIL-IFC", "Coordinated IFC drawings, design calculations, and final BOQ support", 1m, "LS", 264000m, 264000m, 264000m, 259800m, 259800m);
+            EnsureBoq("PKG-APPROVAL", "1", "APPROVAL-STAT", "Statutory submissions, permit fees, and utility clearance follow-up", 1m, "LS", 92000m, 92000m, 92000m, 88750m, 88750m);
+            EnsureBoq("PKG-PROC", "1", "PROC-TENDER", "Tendering, evaluations, award documentation, and supplier onboarding", 1m, "LS", 138000m, 138000m, 132500m, 126400m, 133900m);
+            EnsureBoq("PKG-COMM", "1", "COMM-SYS", "System testing, lift witness activities, and integrated commissioning closeout", 1m, "LS", 148000m, 148000m, 133000m, 58100m, 152600m);
+            EnsureBoq("PKG-HAND", "1", "HAND-B1", "Batch handover inspections, O&M pack issue, and client closeout walkthroughs", 1m, "LS", 104000m, 104000m, 64200m, 28150m, 109500m);
+            EnsureBoq("PKG-DLP", "1", "DLP-RESP", "Defects response mobilisation, warranty coordination, and rectification cover", 1m, "LS", 68000m, 68000m, 22000m, 8450m, 68000m);
+
+            if (createdPackageCount == 0 && createdBoqCount == 0)
+            {
+                return;
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation(
+                "Seeded {PackageCount} additional phase package(s) and {BoqCount} BOQ line(s) for project PRJ-DEMO-2001 in tenant {TenantId}.",
+                createdPackageCount,
+                createdBoqCount,
+                tenantId);
+        }
+
+        private async Task<ProjectType> EnsureProjectTypeAsync(
+            Guid tenantId,
+            string code,
+            string name,
+            string description,
+            bool requiresSponsor,
+            bool requiresApproval)
+        {
+            var entity = await _context.ProjectTypes
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == code);
+
+            if (entity != null)
+            {
+                return entity;
+            }
+
+            entity = new ProjectType
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Code = code,
+                Name = name,
+                Description = description,
+                IsActive = true,
+                RequiresSponsor = requiresSponsor,
+                RequiresApproval = requiresApproval,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "System"
+            };
+
+            _context.ProjectTypes.Add(entity);
+            return entity;
+        }
+
+        private async Task<ProjectPriority> EnsureProjectPriorityAsync(Guid tenantId, string code, string name, string colorHex, int sortOrder)
+        {
+            var entity = await _context.ProjectPriorities
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == code);
+
+            if (entity != null)
+            {
+                return entity;
+            }
+
+            entity = new ProjectPriority
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Code = code,
+                Name = name,
+                ColorHex = colorHex,
+                SortOrder = sortOrder,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "System"
+            };
+
+            _context.ProjectPriorities.Add(entity);
+            return entity;
+        }
+
+        private async Task<ProjectTemplate> EnsureProjectTemplateAsync(
+            Guid tenantId,
+            string code,
+            string name,
+            string description,
+            Guid? projectTypeId,
+            string versionLabel,
+            string templateDefinitionJson)
+        {
+            var entity = await _context.ProjectTemplates
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == code);
+
+            if (entity == null)
+            {
+                entity = new ProjectTemplate
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = code,
+                    Name = name,
+                    Description = description,
+                    ProjectTypeId = projectTypeId,
+                    VersionLabel = versionLabel,
+                    TemplateDefinitionJson = templateDefinitionJson,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.ProjectTemplates.Add(entity);
+                return entity;
+            }
+
+            entity.Name = name;
+            entity.Description = description;
+            entity.ProjectTypeId = projectTypeId;
+            entity.VersionLabel = versionLabel;
+            entity.TemplateDefinitionJson = templateDefinitionJson;
+            entity.IsActive = true;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = "System";
+            return entity;
+        }
+
+        private async Task<BusinessPartner> EnsureApprovedBusinessPartnerAsync(
+            Guid tenantId,
+            string code,
+            string name,
+            string partnerType,
+            Guid approvedById,
+            string phone,
+            string email,
+            string city)
+        {
+            var entity = await _context.BusinessPartners
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.PartnerCode == code);
+
+            if (entity == null)
+            {
+                entity = new BusinessPartner
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PartnerCode = code,
+                    PartnerName = name,
+                    LegalName = name,
+                    PartnerType = partnerType,
+                    PrimaryPhone = phone,
+                    PrimaryEmail = email,
+                    PhysicalCity = city,
+                    PhysicalCountry = "Ghana",
+                    RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved",
+                    ApprovedById = approvedById,
+                    ApprovedDate = DateTime.UtcNow.AddDays(-45),
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.BusinessPartners.Add(entity);
+                return entity;
+            }
+
+            entity.PartnerName = name;
+            entity.LegalName = name;
+            entity.PartnerType = partnerType;
+            entity.PrimaryPhone = phone;
+            entity.PrimaryEmail = email;
+            entity.PhysicalCity = city;
+            entity.PhysicalCountry = "Ghana";
+            entity.RegistrationStatus = "Approved";
+            entity.ApprovalStatus = "Approved";
+            entity.ApprovedById = approvedById;
+            entity.ApprovedDate ??= DateTime.UtcNow.AddDays(-45);
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = "System";
+            return entity;
+        }
+
+        private static string MergeProjectMandatoryFieldsByTypeJson(string? currentJson)
+        {
+            Dictionary<string, List<string>> settings;
+            try
+            {
+                settings = string.IsNullOrWhiteSpace(currentJson)
+                    ? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+                    : JsonSerializer.Deserialize<Dictionary<string, List<string>>>(currentJson) ?? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                settings = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            settings["IMPLEMENTATION"] = new[] { "SponsorId", "ProjectManagerId", "EstimatedBudget", "StartDate", "TargetEndDate" }.ToList();
+            settings["INTERNAL"] = new[] { "SponsorId", "ProjectManagerId", "StartDate" }.ToList();
+            settings["CAPEX"] = new[] { "SponsorId", "EstimatedBudget", "FundingSource" }.ToList();
+            settings["CONSTRUCTION"] = new[] { "SponsorId", "ProjectManagerId", "EstimatedBudget", "StartDate", "TargetEndDate", "FundingSource" }.ToList();
+            settings["RENOVATION_FITOUT"] = new[] { "SponsorId", "ProjectManagerId", "StartDate", "TargetEndDate", "BusinessPartnerId" }.ToList();
+
+            return JsonSerializer.Serialize(settings);
+        }
+
+        private static string BuildGhanaApartmentMultiUnitTemplateDefinitionJson()
+            => JsonSerializer.Serialize(new
+            {
+                developmentProfile = new
+                {
+                    deliveryStructure = ProjectDeliveryStructures.MultiUnit,
+                    developmentType = "Residential",
+                    procurementRoute = "Traditional",
+                    contractStrategy = "SubcontractPackages",
+                    handoverStrategy = "UnitByUnitHandover",
+                    fundingArrangement = "Developer Equity + Off-plan Sales",
+                    notes = "Recommended Ghana apartment-development defaults with package procurement, phased unit release, and unit-by-unit handover."
+                },
+                projectPhases = new object[]
+                {
+                    new { code = "FEASIBILITY", name = "Feasibility", isStageGateRequired = true },
+                    new { code = "CONCEPT_DESIGN", name = "Concept Design", isStageGateRequired = true },
+                    new { code = "DETAILED_DESIGN", name = "Detailed Design", isStageGateRequired = true },
+                    new { code = "APPROVALS", name = "Approvals & Permits", isStageGateRequired = true },
+                    new { code = "PROCUREMENT", name = "Procurement", isStageGateRequired = true },
+                    new { code = "CONSTRUCTION", name = "Construction", isStageGateRequired = false },
+                    new { code = "COMMISSIONING", name = "Testing & Commissioning", isStageGateRequired = true },
+                    new { code = "HANDOVER", name = "Handover", isStageGateRequired = true },
+                    new { code = "DEFECTS_LIABILITY", name = "Defects Liability", isStageGateRequired = false }
+                },
+                workItems = new object[]
+                {
+                    new { nodeType = ProjectWorkItemNodeTypes.Phase, title = "Mobilize design consultants", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare apartment unit mix and floor schedule", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare package procurement strategy", status = "New", priority = "Normal" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Plan phased unit release and handover readiness", status = "New", priority = "Normal" }
+                },
+                milestones = new object[]
+                {
+                    new { title = "Planning approval secured", status = "Draft", requiresApproval = true },
+                    new { title = "Main contract award completed", status = "Draft", requiresApproval = true },
+                    new { title = "Practical completion for first units", status = "Draft", requiresApproval = true },
+                    new { title = "First unit handover completed", status = "Draft", requiresApproval = true }
+                }
+            });
+
+        private static string BuildGhanaWholeBuildingTemplateDefinitionJson()
+            => JsonSerializer.Serialize(new
+            {
+                developmentProfile = new
+                {
+                    deliveryStructure = ProjectDeliveryStructures.WholeDevelopment,
+                    developmentType = "Commercial",
+                    procurementRoute = "Traditional",
+                    contractStrategy = "LumpSum",
+                    handoverStrategy = "SingleHandover",
+                    fundingArrangement = "Customer Contract / Capex Funding",
+                    notes = "Recommended defaults for whole-building delivery such as schools, offices, warehouses, and owner-occupied facilities."
+                },
+                projectPhases = new object[]
+                {
+                    new { code = "FEASIBILITY", name = "Feasibility", isStageGateRequired = true },
+                    new { code = "CONCEPT_DESIGN", name = "Concept Design", isStageGateRequired = true },
+                    new { code = "DETAILED_DESIGN", name = "Detailed Design", isStageGateRequired = true },
+                    new { code = "APPROVALS", name = "Approvals & Permits", isStageGateRequired = true },
+                    new { code = "PROCUREMENT", name = "Procurement", isStageGateRequired = true },
+                    new { code = "CONSTRUCTION", name = "Construction", isStageGateRequired = false },
+                    new { code = "COMMISSIONING", name = "Testing & Commissioning", isStageGateRequired = true },
+                    new { code = "HANDOVER", name = "Handover", isStageGateRequired = true },
+                    new { code = "DEFECTS_LIABILITY", name = "Defects Liability", isStageGateRequired = false }
+                },
+                workItems = new object[]
+                {
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Confirm client brief and building performance targets", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare whole-building procurement and contract plan", status = "New", priority = "Normal" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Plan integrated commissioning and final handover", status = "New", priority = "Normal" }
+                },
+                milestones = new object[]
+                {
+                    new { title = "Building permit approved", status = "Draft", requiresApproval = true },
+                    new { title = "Contract execution complete", status = "Draft", requiresApproval = true },
+                    new { title = "Practical completion achieved", status = "Draft", requiresApproval = true }
+                }
+            });
+
+        private static string BuildGhanaRenovationFitOutTemplateDefinitionJson()
+            => JsonSerializer.Serialize(new
+            {
+                developmentProfile = new
+                {
+                    deliveryStructure = ProjectDeliveryStructures.WholeDevelopment,
+                    developmentType = "Renovation",
+                    procurementRoute = "Negotiated",
+                    contractStrategy = "MeasuredWorks",
+                    handoverStrategy = "PhasedHandover",
+                    fundingArrangement = "Client Budget / Fit-Out Allowance",
+                    notes = "Recommended defaults for renovation and fit-out work with phased handover, high change frequency, and measurement-driven commercial control."
+                },
+                projectPhases = new object[]
+                {
+                    new { code = "FEASIBILITY", name = "Feasibility", isStageGateRequired = true, isOptional = true },
+                    new { code = "CONCEPT_DESIGN", name = "Concept Design", isStageGateRequired = true },
+                    new { code = "DETAILED_DESIGN", name = "Detailed Design", isStageGateRequired = true },
+                    new { code = "APPROVALS", name = "Approvals & Permits", isStageGateRequired = false },
+                    new { code = "PROCUREMENT", name = "Procurement", isStageGateRequired = true },
+                    new { code = "CONSTRUCTION", name = "Construction", isStageGateRequired = false },
+                    new { code = "COMMISSIONING", name = "Testing & Commissioning", isStageGateRequired = true },
+                    new { code = "HANDOVER", name = "Handover", isStageGateRequired = true }
+                },
+                workItems = new object[]
+                {
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Survey existing condition and confirm demolition scope", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Freeze finish selections and client alterations process", status = "New", priority = "High" },
+                    new { nodeType = ProjectWorkItemNodeTypes.Task, title = "Prepare phased handover plan by work zone", status = "New", priority = "Normal" }
+                },
+                milestones = new object[]
+                {
+                    new { title = "Existing-condition sign-off complete", status = "Draft", requiresApproval = true },
+                    new { title = "Fit-out package award complete", status = "Draft", requiresApproval = true },
+                    new { title = "Zone handover achieved", status = "Draft", requiresApproval = true }
+                }
+            });
+
+        private async Task NormalizeProjectDemoFundingSourcesAsync(Guid tenantId)
+        {
+            var projects = await _context.Projects
+                .Where(project =>
+                    project.TenantId == tenantId
+                    && !project.IsDeleted
+                    && (project.ProjectCode == "PRJ-DEMO-1001" || project.ProjectCode == "PRJ-DEMO-1002" || project.ProjectCode == "PRJ-DEMO-1003"))
+                .ToListAsync();
+
+            if (projects.Count == 0)
+            {
+                return;
+            }
+
+            var changed = false;
+            foreach (var project in projects)
+            {
+                var normalizedFundingSource = project.ProjectCode switch
+                {
+                    "PRJ-DEMO-1001" => "Customer Contract",
+                    "PRJ-DEMO-1002" => "Internal Budget",
+                    "PRJ-DEMO-1003" => "Capex Allocation",
+                    _ => project.FundingSource
+                };
+
+                if (!string.Equals(project.FundingSource, normalizedFundingSource, StringComparison.Ordinal))
+                {
+                    project.FundingSource = normalizedFundingSource;
+                    project.UpdatedAt = DateTime.UtcNow;
+                    project.UpdatedBy = "System";
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        private async Task EnsureProjectDemoInterdependenciesSeededAsync(
+            Guid tenantId,
+            ApplicationUser projectManager,
+            ApplicationUser financeOwner,
+            DateTime now)
+        {
+            var demoProjects = await _context.Projects
+                .Where(project =>
+                    project.TenantId == tenantId
+                    && !project.IsDeleted
+                    && (project.ProjectCode == "PRJ-DEMO-1001"
+                        || project.ProjectCode == "PRJ-DEMO-1002"
+                        || project.ProjectCode == "PRJ-DEMO-1003"))
+                .Select(project => new
+                {
+                    project.Id,
+                    project.ProjectCode
+                })
+                .ToListAsync();
+
+            if (demoProjects.Count < 3)
+            {
+                return;
+            }
+
+            var projectByCode = demoProjects.ToDictionary(project => project.ProjectCode, StringComparer.OrdinalIgnoreCase);
+            var seeds = new[]
+            {
+                new
+                {
+                    SourceProjectId = projectByCode["PRJ-DEMO-1001"].Id,
+                    TargetProjectId = projectByCode["PRJ-DEMO-1002"].Id,
+                    DependencyType = "Reporting",
+                    Title = "UAT readiness metrics feed PMO rollout",
+                    Status = "Monitoring",
+                    ImpactLevel = "High",
+                    OwnerId = financeOwner.Id,
+                    DueDate = now.Date.AddDays(10),
+                    Description = "The customer rollout needs the PMO reporting templates before readiness reporting can be finalized.",
+                    MitigationPlan = "Review the shared readiness pack in the weekly PMO cadence and lock the reporting handoff date."
+                },
+                new
+                {
+                    SourceProjectId = projectByCode["PRJ-DEMO-1002"].Id,
+                    TargetProjectId = projectByCode["PRJ-DEMO-1003"].Id,
+                    DependencyType = "LessonsLearned",
+                    Title = "Closure lessons feed governance template refresh",
+                    Status = "Open",
+                    ImpactLevel = "Medium",
+                    OwnerId = projectManager.Id,
+                    DueDate = now.Date.AddDays(-2),
+                    Description = "The PMO rollout still needs the warehouse refresh closure lessons before the governance checklist pack is finalized.",
+                    MitigationPlan = "Capture the closure insights in the next PMO workshop and update the template set immediately after review."
+                }
+            };
+
+            var existing = await _context.ProjectInterdependencies
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                .Select(item => new
+                {
+                    item.SourceProjectId,
+                    item.TargetProjectId,
+                    item.DependencyType,
+                    item.Title
+                })
+                .ToListAsync();
+
+            var changed = false;
+            foreach (var seed in seeds)
+            {
+                var exists = existing.Any(item =>
+                    item.SourceProjectId == seed.SourceProjectId
+                    && item.TargetProjectId == seed.TargetProjectId
+                    && string.Equals(item.DependencyType, seed.DependencyType, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.Title, seed.Title, StringComparison.OrdinalIgnoreCase));
+
+                if (exists)
+                {
+                    continue;
+                }
+
+                _context.ProjectInterdependencies.Add(new ProjectInterdependency
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    SourceProjectId = seed.SourceProjectId,
+                    TargetProjectId = seed.TargetProjectId,
+                    DependencyType = seed.DependencyType,
+                    Status = seed.Status,
+                    ImpactLevel = seed.ImpactLevel,
+                    OwnerId = seed.OwnerId,
+                    DueDate = seed.DueDate,
+                    Title = seed.Title,
+                    Description = seed.Description,
+                    MitigationPlan = seed.MitigationPlan,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                });
+
+                changed = true;
+            }
+
+            if (changed)
+            {
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        private async Task EnsureProjectDemoQualityDataSeededAsync(
+            Guid tenantId,
+            ApplicationUser sponsor,
+            ApplicationUser financeOwner,
+            ApplicationUser teamMember,
+            DateTime now)
+        {
+            var implementationProject = await _context.Projects
+                .AsNoTracking()
+                .Where(project => project.TenantId == tenantId && !project.IsDeleted && project.ProjectCode == "PRJ-DEMO-1001")
+                .Select(project => new { project.Id })
+                .FirstOrDefaultAsync();
+
+            if (implementationProject == null)
+            {
+                return;
+            }
+
+            var deliverable = await _context.ProjectDeliverables
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.ProjectId == implementationProject.Id && !item.IsDeleted)
+                .OrderBy(item => item.CreatedAt)
+                .Select(item => new { item.Id })
+                .FirstOrDefaultAsync();
+
+            var workItem = await _context.ProjectWorkItems
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.ProjectId == implementationProject.Id && !item.IsDeleted)
+                .OrderByDescending(item => item.NodeType == ProjectWorkItemNodeTypes.Task)
+                .ThenBy(item => item.SortOrder)
+                .Select(item => new { item.Id })
+                .FirstOrDefaultAsync();
+
+            if (!await _context.ProjectQualityCheckpoints.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ProjectId == implementationProject.Id
+                    && item.Title == "Wave 1 readiness quality review"))
+            {
+                var checkpointId = Guid.NewGuid();
+                _context.ProjectQualityCheckpoints.Add(new ProjectQualityCheckpoint
+                {
+                    Id = checkpointId,
+                    TenantId = tenantId,
+                    ProjectId = implementationProject.Id,
+                    WorkItemId = workItem?.Id,
+                    DeliverableId = deliverable?.Id,
+                    QaOwnerId = financeOwner.Id,
+                    Title = "Wave 1 readiness quality review",
+                    Description = "Confirm configuration evidence, issue disposition, and UAT pack completeness before customer review.",
+                    Status = "InReview",
+                    DueDate = now.Date.AddDays(6),
+                    RequiresQaSignOff = true,
+                    CreatedAt = now.AddDays(-4),
+                    CreatedBy = "System"
+                });
+
+                _context.ProjectNonConformances.Add(new ProjectNonConformance
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = implementationProject.Id,
+                    QualityCheckpointId = checkpointId,
+                    DeliverableId = deliverable?.Id,
+                    OwnerId = teamMember.Id,
+                    Title = "Inventory evidence screenshots use obsolete warehouse labels",
+                    Description = "The current evidence pack still shows superseded warehouse names in two UAT scenarios.",
+                    Severity = "Medium",
+                    Status = "Open",
+                    TargetResolutionDate = now.Date.AddDays(4),
+                    CorrectiveAction = "Refresh screenshots from the approved warehouse master and rerun the affected scripts.",
+                    PreventiveAction = "Include evidence-pack validation in the pre-review checklist.",
+                    CreatedAt = now.AddDays(-2),
+                    CreatedBy = "System"
+                });
+
+                await _context.SaveChangesAsync();
+            }
+
+            if (!await _context.ProjectQualityCheckpoints.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ProjectId == implementationProject.Id
+                    && item.Status == "SignedOff"))
+            {
+                _context.ProjectQualityCheckpoints.Add(new ProjectQualityCheckpoint
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = implementationProject.Id,
+                    DeliverableId = deliverable?.Id,
+                    QaOwnerId = sponsor.Id,
+                    Title = "Design pack approval evidence",
+                    Description = "Historical quality checkpoint showing completed QA sign-off on the approved design pack.",
+                    Status = "SignedOff",
+                    DueDate = now.Date.AddDays(-12),
+                    RequiresQaSignOff = true,
+                    SignedOffAt = now.AddDays(-11),
+                    SignedOffById = sponsor.Id,
+                    SignOffNotes = "Approved after design review and control walkthrough.",
+                    CreatedAt = now.AddDays(-13),
+                    CreatedBy = "System"
+                });
+
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        private async Task EnsureProjectDemoProcurementAndMaterialDataSeededAsync(
+            Guid tenantId,
+            BusinessPartner customer,
+            ApplicationUser financeOwner,
+            Department? department,
+            DateTime now)
+        {
+            var implementationProject = await _context.Projects
+                .FirstOrDefaultAsync(project => project.TenantId == tenantId && !project.IsDeleted && project.ProjectCode == "PRJ-DEMO-1001");
+            if (implementationProject == null)
+            {
+                return;
+            }
+            var baseCurrencyCode = await ResolveBaseCurrencyCodeAsync(tenantId);
+
+            var effectiveDepartment = department
+                ?? await _context.Departments
+                    .AsNoTracking()
+                    .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                    .OrderBy(item => item.Name)
+                    .FirstOrDefaultAsync();
+            if (effectiveDepartment == null)
+            {
+                effectiveDepartment = new Department
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Name = "Project Delivery",
+                    Code = "PRJ-DEL",
+                    Description = "Fallback seeded department for project procurement and material demo flows.",
+                    DepartmentType = DepartmentType.Operations,
+                    IsActive = true,
+                    Color = "#2563EB",
+                    Icon = "briefcase",
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+
+                _context.Departments.Add(effectiveDepartment);
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("Seeded fallback active department {DepartmentCode} for tenant {TenantId} so project procurement/material demo data can be created.", effectiveDepartment.Code, tenantId);
+            }
+
+            var category = await _context.InventoryCategories
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "PROJECT-DEMO");
+            if (category == null)
+            {
+                category = new InventoryCategory
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Name = "Project Demo Materials",
+                    Code = "PROJECT-DEMO",
+                    Description = "Seeded category for project procurement and material flows.",
+                    IsActive = true,
+                    DefaultUnitOfMeasure = "EA",
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+                _context.InventoryCategories.Add(category);
+            }
+
+            var warehouse = await _context.Warehouses
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.Code == "DEMO-PM");
+            if (warehouse == null)
+            {
+                warehouse = new Warehouse
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Name = "Project Demo Warehouse",
+                    Code = "DEMO-PM",
+                    Description = "Seeded warehouse for project material demonstrations.",
+                    IsActive = true,
+                    WarehouseType = "Standard",
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+                _context.Warehouses.Add(warehouse);
+            }
+
+            var inventoryItem = await _context.InventoryItems
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted && item.ItemCode == "PM-BARCODE-DEVICE");
+            if (inventoryItem == null)
+            {
+                inventoryItem = new InventoryItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ItemCode = "PM-BARCODE-DEVICE",
+                    Name = "Barcode Device Kit",
+                    Description = "Seeded device kit for project material and procurement flows.",
+                    CategoryId = category.Id,
+                    UnitOfMeasure = "EA",
+                    StandardCost = 750m,
+                    AverageCost = 750m,
+                    LastPurchaseCost = 750m,
+                    CurrentStock = 25m,
+                    AvailableStock = 20m,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+                _context.InventoryItems.Add(inventoryItem);
+            }
+
+            await _context.SaveChangesAsync();
+
+            if (!await _context.PurchaseRequisitions.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ProjectId == implementationProject.Id
+                    && item.RequisitionNumber == "PR-DEMO-1001-A"))
+            {
+                _context.PurchaseRequisitions.Add(new PurchaseRequisition
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    RequisitionNumber = "PR-DEMO-1001-A",
+                    RequisitionDate = now.AddDays(-6),
+                    RequestedById = financeOwner.Id,
+                    RequiredDate = now.Date.AddDays(9),
+                    Status = "Submitted",
+                    Priority = "High",
+                    Department = effectiveDepartment.Name,
+                    Justification = "Additional label printers required before cutover readiness.",
+                    RequisitionType = PurchaseRequisitionType.ProjectPurchase,
+                    ProjectId = implementationProject.Id,
+                    ProjectCode = implementationProject.ProjectCode,
+                    ProjectName = implementationProject.Title,
+                    Currency = baseCurrencyCode,
+                    PreferredBusinessPartnerId = customer.Id,
+                    TotalAmount = 3200m,
+                    CreatedAt = now.AddDays(-6),
+                    CreatedBy = "System"
+                });
+            }
+
+            if (!await _context.PurchaseRequisitions.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ProjectId == implementationProject.Id
+                    && item.RequisitionNumber == "PR-DEMO-1001-B"))
+            {
+                var orderedPrId = Guid.NewGuid();
+                var purchaseOrderId = Guid.NewGuid();
+                var purchaseOrderItemId = Guid.NewGuid();
+                var receiptId = Guid.NewGuid();
+
+                _context.PurchaseRequisitions.Add(new PurchaseRequisition
+                {
+                    Id = orderedPrId,
+                    TenantId = tenantId,
+                    RequisitionNumber = "PR-DEMO-1001-B",
+                    RequisitionDate = now.AddDays(-12),
+                    RequestedById = financeOwner.Id,
+                    RequiredDate = now.Date.AddDays(4),
+                    Status = "Ordered",
+                    Priority = "High",
+                    Department = effectiveDepartment.Name,
+                    Justification = "Mobile scanners needed for inventory validation and warehouse cutover.",
+                    RequisitionType = PurchaseRequisitionType.ProjectPurchase,
+                    ProjectId = implementationProject.Id,
+                    ProjectCode = implementationProject.ProjectCode,
+                    ProjectName = implementationProject.Title,
+                    Currency = baseCurrencyCode,
+                    PreferredBusinessPartnerId = customer.Id,
+                    ApprovedById = financeOwner.Id,
+                    ApprovedAt = now.AddDays(-11),
+                    TotalAmount = 4500m,
+                    CreatedAt = now.AddDays(-12),
+                    CreatedBy = "System"
+                });
+
+                _context.PurchaseOrders.Add(new PurchaseOrder
+                {
+                    Id = purchaseOrderId,
+                    TenantId = tenantId,
+                    OrderNumber = "PO-DEMO-1001-01",
+                    BusinessPartnerId = customer.Id,
+                    OrderDate = now.AddDays(-10),
+                    RequiredDate = now.Date.AddDays(3),
+                    Status = "PartiallyReceived",
+                    RequestedById = financeOwner.Id,
+                    ApprovedById = financeOwner.Id,
+                    ApprovedAt = now.AddDays(-10),
+                    SubTotal = 4500m,
+                    TotalAmount = 4500m,
+                    SourceRequisitionId = orderedPrId,
+                    SourceRequisitionNumber = "PR-DEMO-1001-B",
+                    CreatedAt = now.AddDays(-10),
+                    CreatedBy = "System"
+                });
+
+                _context.PurchaseOrderItems.Add(new PurchaseOrderItem
+                {
+                    Id = purchaseOrderItemId,
+                    TenantId = tenantId,
+                    PurchaseOrderId = purchaseOrderId,
+                    InventoryItemId = inventoryItem.Id,
+                    ItemDescription = "Barcode Device Kit",
+                    OrderedQuantity = 6m,
+                    ReceivedQuantity = 6m,
+                    RemainingQuantity = 0m,
+                    UnitOfMeasure = "EA",
+                    UnitPrice = 750m,
+                    LineTotal = 4500m,
+                    LandedUnitCost = 750m,
+                    CreatedAt = now.AddDays(-10),
+                    CreatedBy = "System"
+                });
+
+                _context.PurchaseOrderReceipts.Add(new PurchaseOrderReceipt
+                {
+                    Id = receiptId,
+                    TenantId = tenantId,
+                    PurchaseOrderId = purchaseOrderId,
+                    ReceiptNumber = "RCV-DEMO-1001-01",
+                    ReceiptDate = now.AddDays(-2),
+                    Status = "Received",
+                    ReceivedById = financeOwner.Id,
+                    RequiresInspection = true,
+                    Notes = "Devices received and awaiting final inspection before deployment.",
+                    CreatedAt = now.AddDays(-2),
+                    CreatedBy = "System"
+                });
+
+                _context.PurchaseOrderReceiptItems.Add(new PurchaseOrderReceiptItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ReceiptId = receiptId,
+                    PurchaseOrderItemId = purchaseOrderItemId,
+                    ReceivedQuantity = 6m,
+                    AcceptedQuantity = 6m,
+                    UnitOfMeasure = "EA",
+                    CreatedAt = now.AddDays(-2),
+                    CreatedBy = "System"
+                });
+            }
+
+            if (!await _context.InventoryRequisitions.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ProjectId == implementationProject.Id
+                    && item.RequisitionNumber == "IR-DEMO-1001-01"))
+            {
+                _context.InventoryRequisitions.Add(new InventoryRequisition
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    RequisitionNumber = "IR-DEMO-1001-01",
+                    Description = "Issue barcode devices to the project delivery team for customer validation.",
+                    DepartmentId = effectiveDepartment.Id,
+                    DepartmentName = effectiveDepartment.Name,
+                    WarehouseId = warehouse.Id,
+                    ProjectId = implementationProject.Id,
+                    ProjectCode = implementationProject.ProjectCode,
+                    RequestDate = now.AddDays(-3),
+                    RequiredDate = now.Date.AddDays(-1),
+                    ApprovalDate = now.AddDays(-3),
+                    IssuedDate = now.AddDays(-2),
+                    Status = RequisitionStatus.PartiallyIssued,
+                    RequisitionType = RequisitionType.ProjectRequisition,
+                    Priority = "High",
+                    RequestedById = financeOwner.Id,
+                    ApprovedById = financeOwner.Id,
+                    IssuedById = financeOwner.Id,
+                    TotalItems = 1,
+                    TotalQuantity = 8m,
+                    TotalValue = 6000m,
+                    Purpose = "Seeded project material issue for inventory reconciliation and cost tracking.",
+                    CreatedAt = now.AddDays(-3),
+                    CreatedBy = "System",
+                    Items =
+                    {
+                        new InventoryRequisitionItem
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenantId,
+                            InventoryItemId = inventoryItem.Id,
+                            ItemCode = inventoryItem.ItemCode,
+                            ItemName = inventoryItem.Name,
+                            RequestedQuantity = 8m,
+                            ApprovedQuantity = 8m,
+                            IssuedQuantity = 8m,
+                            UnitCost = 750m,
+                            LineValue = 6000m,
+                            UnitOfMeasure = "EA",
+                            CreatedAt = now.AddDays(-3),
+                            CreatedBy = "System"
+                        }
+                    }
+                });
+            }
+
+            if (!await _context.ProjectExpenses.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ProjectId == implementationProject.Id
+                    && item.Category == "Materials"
+                    && item.Notes == "Seeded material consumption posting for project reconciliation."))
+            {
+                _context.ProjectExpenses.Add(new ProjectExpense
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = implementationProject.Id,
+                    UserId = financeOwner.Id,
+                    ExpenseDate = now.AddDays(-2),
+                    Category = "Materials",
+                    Currency = baseCurrencyCode,
+                    Amount = 3500m,
+                    TaxAmount = 0m,
+                    IsBillable = true,
+                    Status = "Approved",
+                    Notes = "Seeded material consumption posting for project reconciliation.",
+                    ApprovedById = financeOwner.Id,
+                    ApprovedAt = now.AddDays(-2),
+                    CreatedAt = now.AddDays(-2),
+                    CreatedBy = "System"
+                });
+            }
+
+            if (!await _context.ProjectExpenses.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ProjectId == implementationProject.Id
+                    && item.Category == "Materials"
+                    && item.Notes == "Seeded material return adjustment for project reconciliation."))
+            {
+                _context.ProjectExpenses.Add(new ProjectExpense
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = implementationProject.Id,
+                    UserId = financeOwner.Id,
+                    ExpenseDate = now.AddDays(-1),
+                    Category = "Materials",
+                    Currency = baseCurrencyCode,
+                    Amount = -500m,
+                    TaxAmount = 0m,
+                    IsBillable = false,
+                    Status = "Approved",
+                    Notes = "Seeded material return adjustment for project reconciliation.",
+                    ApprovedById = financeOwner.Id,
+                    ApprovedAt = now.AddDays(-1),
+                    CreatedAt = now.AddDays(-1),
+                    CreatedBy = "System"
+                });
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private void CreateAccraApartmentDevelopmentProject(
+            Guid tenantId,
+            ProjectType constructionType,
+            ProjectPriority highPriority,
+            ProjectTemplate apartmentTemplate,
+            ProjectPortfolio realEstatePortfolio,
+            ProjectProgram housingProgram,
+            ApplicationUser sponsor,
+            ApplicationUser projectManager,
+            ApplicationUser financeOwner,
+            ApplicationUser teamMember,
+            Department? department,
+            Location? location,
+            BusinessPartner apartmentDeveloper,
+            BusinessPartner apartmentBuyerOne,
+            BusinessPartner apartmentBuyerTwo,
+            BusinessPartner apartmentContractor,
+            string baseCurrencyCode,
+            DateTime now)
+        {
+            var projectId = Guid.NewGuid();
+            var project = new Project
+            {
+                Id = projectId,
+                TenantId = tenantId,
+                ProjectCode = "PRJ-DEMO-2001",
+                Title = "Airport Hills Residences Block A",
+                Summary = "Six-floor apartment development in Accra with 24 apartments, phased release, buyer variations, and unit-by-unit handover.",
+                BusinessCase = "Deliver a commercially viable residential block with controlled package procurement, phased unit sales, and post-handover support.",
+                Objectives = "Complete Block A, commission services, release apartments to market, and manage buyer changes through closeout.",
+                StrategicAlignment = "Residential development growth and phased property sales",
+                ProjectTypeId = constructionType.Id,
+                ProjectPriorityId = highPriority.Id,
+                TemplateId = apartmentTemplate.Id,
+                PortfolioId = realEstatePortfolio.Id,
+                ProgramId = housingProgram.Id,
+                Status = ProjectStatuses.InProgress,
+                Methodology = "Waterfall",
+                SponsorId = sponsor.Id,
+                ProjectManagerId = projectManager.Id,
+                DepartmentId = department?.Id,
+                LocationId = location?.Id,
+                CustomerId = apartmentDeveloper.Id,
+                BusinessPartnerId = apartmentDeveloper.Id,
+                StartDate = now.Date.AddMonths(-8),
+                TargetEndDate = now.Date.AddMonths(6),
+                ActualStartDate = now.Date.AddMonths(-8).AddDays(5),
+                EstimatedBudget = 6200000m,
+                ApprovedBudget = 6450000m,
+                ActualCost = 4685000m,
+                BudgetStatus = "Approved",
+                ProgressPercent = 74m,
+                ApprovalRequired = true,
+                SubmittedAt = now.AddMonths(-9),
+                ApprovedAt = now.AddMonths(-9).AddDays(4),
+                ScopeStatement = "Construct Block A, commission common services, market apartments, support buyer alterations, and hand over units progressively.",
+                Assumptions = "Statutory approvals remain valid and buyer finish selections are frozen by release batch.",
+                Constraints = "Lift certification, utility energisation, and buyer finish changes sit on the critical path.",
+                ExpectedBenefits = "Earlier unit sales, cleaner package cost tracking, and stronger post-handover support records.",
+                FundingSource = "Developer Equity + Off-plan Sales",
+                StatusRemarks = "Structure is substantially complete, finishes are active, and phased handover has started for early units.",
+                ExternalPortalAccessEnabled = true,
+                ExternalCollaborationEnabled = true,
+                CreatedAt = now.AddMonths(-9),
+                CreatedBy = "System"
+            };
+
+            _context.Projects.Add(project);
+            _context.ProjectDevelopmentProfiles.Add(new ProjectDevelopmentProfile
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                DeliveryStructure = ProjectDeliveryStructures.MultiUnit,
+                DevelopmentType = "Residential",
+                SiteName = "Airport Hills, Block A",
+                SiteAddress = "Airport Hills Enclave, Accra, Ghana",
+                LandReference = "AH/RES/BLK-A/2026",
+                ProcurementRoute = "Traditional",
+                ContractStrategy = "SubcontractPackages",
+                ConsultantTeam = "ArchPlan Studio, Volta Structures, Prime MEP Consult",
+                FundingArrangement = "Developer Equity + Off-plan Sales",
+                HandoverStrategy = "UnitByUnitHandover",
+                Notes = "Seeded Ghana apartment scenario with phased commercialization, buyer variations, commissioning, and defects control.",
+                CreatedAt = now.AddMonths(-9),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectInitiationVersions.Add(new ProjectInitiationVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                SnapshotJson = JsonSerializer.Serialize(new
+                {
+                    project.ProjectCode,
+                    project.Title,
+                    project.Status,
+                    project.EstimatedBudget,
+                    project.StartDate,
+                    project.TargetEndDate
+                }),
+                ChangeType = "Approved",
+                Notes = "Initial approved residential development brief and baseline.",
+                CreatedAt = now.AddMonths(-9).AddDays(4),
+                CreatedBy = "System"
+            });
+
+            ProjectPhase MakePhase(string code, string name, string status, int sortOrder, bool stageGate, bool optional, DateTime? plannedStart, DateTime? plannedEnd, DateTime? actualStart, DateTime? actualEnd)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    Code = code,
+                    Name = name,
+                    Status = status,
+                    SortOrder = sortOrder,
+                    IsOptional = optional,
+                    IsStageGateRequired = stageGate,
+                    IsTemplateSeeded = true,
+                    PlannedStartDate = plannedStart,
+                    PlannedEndDate = plannedEnd,
+                    ActualStartDate = actualStart,
+                    ActualEndDate = actualEnd,
+                    CreatedAt = now.AddMonths(-9).AddDays(6 + sortOrder),
+                    CreatedBy = "System"
+                };
+
+            var phases = new[]
+            {
+                MakePhase("FEASIBILITY", "Feasibility", ProjectPhaseStatuses.Completed, 0, true, false, now.Date.AddMonths(-10), now.Date.AddMonths(-9).AddDays(5), now.Date.AddMonths(-10), now.Date.AddMonths(-9).AddDays(2)),
+                MakePhase("CONCEPT_DESIGN", "Concept Design", ProjectPhaseStatuses.Completed, 1, true, false, now.Date.AddMonths(-9).AddDays(3), now.Date.AddMonths(-8).AddDays(8), now.Date.AddMonths(-9).AddDays(4), now.Date.AddMonths(-8).AddDays(10)),
+                MakePhase("DETAILED_DESIGN", "Detailed Design", ProjectPhaseStatuses.Completed, 2, true, false, now.Date.AddMonths(-8).AddDays(9), now.Date.AddMonths(-6).AddDays(12), now.Date.AddMonths(-8).AddDays(10), now.Date.AddMonths(-6).AddDays(15)),
+                MakePhase("APPROVALS", "Approvals & Permits", ProjectPhaseStatuses.Completed, 3, true, false, now.Date.AddMonths(-7), now.Date.AddMonths(-5).AddDays(20), now.Date.AddMonths(-7).AddDays(3), now.Date.AddMonths(-5).AddDays(25)),
+                MakePhase("PROCUREMENT", "Procurement", ProjectPhaseStatuses.Completed, 4, true, false, now.Date.AddMonths(-6).AddDays(5), now.Date.AddMonths(-3).AddDays(10), now.Date.AddMonths(-6).AddDays(7), now.Date.AddMonths(-3).AddDays(2)),
+                MakePhase("CONSTRUCTION", "Construction", ProjectPhaseStatuses.InProgress, 5, false, false, now.Date.AddMonths(-5), now.Date.AddMonths(4), now.Date.AddMonths(-5).AddDays(3), null),
+                MakePhase("COMMISSIONING", "Testing & Commissioning", ProjectPhaseStatuses.InProgress, 6, true, false, now.Date.AddDays(-14), now.Date.AddMonths(3), now.Date.AddDays(-10), null),
+                MakePhase("HANDOVER", "Handover", ProjectPhaseStatuses.InProgress, 7, true, false, now.Date.AddDays(-7), now.Date.AddMonths(4), now.Date.AddDays(-4), null),
+                MakePhase("DEFECTS_LIABILITY", "Defects Liability", ProjectPhaseStatuses.InProgress, 8, false, false, now.Date.AddDays(-3), now.Date.AddMonths(16), now.Date.AddDays(-2), null)
+            };
+
+            _context.ProjectPhases.AddRange(phases);
+            var phaseByCode = phases.ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            ProjectPackage MakePackage(string code, string name, string status, int sortOrder, decimal budget, decimal? committed, decimal? actual, decimal? forecast, string description, string notes)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectPhaseId = phaseByCode["CONSTRUCTION"].Id,
+                    Code = code,
+                    Name = name,
+                    Description = description,
+                    PackageType = ProjectPackageTypes.TradePackage,
+                    Status = status,
+                    SortOrder = sortOrder,
+                    ProcurementRoute = "Traditional",
+                    ContractStrategy = "SubcontractPackages",
+                    BusinessPartnerId = apartmentContractor.Id,
+                    BudgetAmount = budget,
+                    CommittedAmount = committed,
+                    ActualAmount = actual,
+                    ForecastAmount = forecast,
+                    Currency = baseCurrencyCode,
+                    Notes = notes,
+                    CreatedAt = now.AddMonths(-5).AddDays(sortOrder),
+                    CreatedBy = "System"
+                };
+
+            var packages = new[]
+            {
+                MakePackage("PKG-SUB", "Substructure", ProjectPackageStatuses.Completed, 0, 820000m, 820000m, 810500m, 810500m, "Foundations, retaining walls, and ground beams.", "Completed and certified in the prior valuation cycle."),
+                MakePackage("PKG-SUP", "Superstructure", ProjectPackageStatuses.Active, 1, 1650000m, 1625000m, 1510000m, 1668000m, "RC frame, blockwork, roofing, and shell completion.", "Final roof waterproofing and stair-core finishes remain open."),
+                MakePackage("PKG-ELEC", "Electrical & ELV", ProjectPackageStatuses.Active, 2, 540000m, 470000m, 281000m, 552000m, "Power, lighting, fire alarm, and access control.", "Common-area testing has started ahead of final lift energisation."),
+                MakePackage("PKG-PLUMB", "Plumbing & Drainage", ProjectPackageStatuses.Active, 3, 425000m, 362000m, 238500m, 432000m, "Water supply, drainage, sanitary fixtures, and pumps.", "Upper-floor fixture installation and pump calibration are in progress."),
+                MakePackage("PKG-FIN", "Finishes & Joinery", ProjectPackageStatuses.Active, 4, 910000m, 708000m, 468500m, 936000m, "Internal finishes, tiling, kitchens, wardrobes, and painting.", "Buyer finish changes are controlled through the customer variation log."),
+                MakePackage("PKG-EXT", "External Works & Landscaping", ProjectPackageStatuses.ProcurementPending, 5, 265000m, null, null, 278000m, "Boundary wall, paving, drainage tie-ins, and landscaping.", "Final release is pending utility trench reinstatement.")
+            };
+
+            _context.ProjectPackages.AddRange(packages);
+            var packageByCode = packages.ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            ProjectBoqItem MakeBoq(string packageCode, string lineNumber, string itemCode, string description, decimal quantity, string uom, decimal? unitRate, decimal budget, decimal? committed, decimal? actual, decimal? forecast)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectPackageId = packageByCode[packageCode].Id,
+                    LineNumber = lineNumber,
+                    ItemCode = itemCode,
+                    ItemType = ProjectBoqItemTypes.Item,
+                    Description = description,
+                    Quantity = quantity,
+                    UnitOfMeasure = uom,
+                    UnitRate = unitRate,
+                    BudgetAmount = budget,
+                    CommittedAmount = committed,
+                    ActualAmount = actual,
+                    ForecastAmount = forecast,
+                    Currency = baseCurrencyCode,
+                    SortOrder = int.Parse(lineNumber) - 1,
+                    CreatedAt = now.AddMonths(-4),
+                    CreatedBy = "System"
+                };
+
+            _context.ProjectBoqItems.AddRange(
+                MakeBoq("PKG-SUB", "1", "SUB-FOUND", "Reinforced concrete foundations and ground beams", 1m, "LS", 810500m, 820000m, 820000m, 810500m, 810500m),
+                MakeBoq("PKG-SUP", "1", "SUP-FRAME", "RC frame, slabs, and blockwork shell", 1m, "LS", 1600000m, 1650000m, 1625000m, 1510000m, 1668000m),
+                MakeBoq("PKG-ELEC", "1", "ELEC-COMMON", "Common-area distribution boards, lighting, and ELV rough-in", 1m, "LS", 540000m, 540000m, 470000m, 281000m, 552000m),
+                MakeBoq("PKG-PLUMB", "1", "PLUMB-RISERS", "Water risers, sanitary stacks, and pump-room fit-out", 1m, "LS", 425000m, 425000m, 362000m, 238500m, 432000m),
+                MakeBoq("PKG-FIN", "1", "FIN-APT", "Apartment finishes, joinery, tiling, and painting", 24m, "UNIT", 37916.67m, 910000m, 708000m, 468500m, 936000m),
+                MakeBoq("PKG-EXT", "1", "EXT-LAND", "External paving, drainage tie-ins, and landscaping", 1m, "LS", 265000m, 265000m, null, null, 278000m));
+
+            ProjectApprovalRegisterItem MakeApproval(string phaseCode, string type, string title, string authority, string status, string? reference, DateTime? submitted, DateTime? targetDecision, DateTime? approved, string notes)
+                => new()
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectPhaseId = phaseByCode[phaseCode].Id,
+                    ApprovalType = type,
+                    Title = title,
+                    AuthorityName = authority,
+                    ReferenceNumber = reference,
+                    Status = status,
+                    IsRequired = true,
+                    SubmittedDate = submitted,
+                    TargetDecisionDate = targetDecision,
+                    ApprovedDate = approved,
+                    Notes = notes,
+                    CreatedAt = now.AddMonths(-6),
+                    CreatedBy = "System"
+                };
+
+            _context.ProjectApprovalRegisterItems.AddRange(
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.PlanningPermission, "Planning permission for Block A", "Accra Metropolitan Assembly", ProjectApprovalRegisterStatuses.Approved, "AMA/PLAN/BLOCKA/26/014", now.Date.AddMonths(-7).AddDays(10), now.Date.AddMonths(-6).AddDays(18), now.Date.AddMonths(-6).AddDays(15), "Approved with standard drainage and parking conditions."),
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.BuildingPermit, "Building permit for residential block", "Accra Metropolitan Assembly", ProjectApprovalRegisterStatuses.Approved, "AMA/BLD/BLOCKA/26/052", now.Date.AddMonths(-6).AddDays(3), now.Date.AddMonths(-5).AddDays(5), now.Date.AddMonths(-5).AddDays(2), "Permit covers six floors plus rooftop plant room."),
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.FireClearance, "Fire service installation clearance", "Ghana National Fire Service", ProjectApprovalRegisterStatuses.Submitted, "GNFS/BLOCKA/26/033", now.Date.AddDays(-18), now.Date.AddDays(9), null, "Awaiting final witness test of alarm and hydrant systems."),
+                MakeApproval("APPROVALS", ProjectApprovalRegisterTypes.UtilityClearance, "Utility energisation clearance", "ECG / Ghana Water", ProjectApprovalRegisterStatuses.Approved, "UTIL/BLOCKA/26/017", now.Date.AddMonths(-1), now.Date.AddDays(-10), now.Date.AddDays(-8), "Permanent services are live for common areas and test apartments."),
+                MakeApproval("HANDOVER", ProjectApprovalRegisterTypes.OccupancyCertificate, "Occupancy certificate for phased unit handover", "Accra Metropolitan Assembly", ProjectApprovalRegisterStatuses.InPreparation, "AMA/OCC/BLOCKA/26/PH1", null, now.Date.AddMonths(1), null, "Batch 1 submission will cover the first handed-over units and shared services."));
+
+            var units = new List<ProjectUnit>();
+            for (var floor = 1; floor <= 6; floor++)
+            {
+                for (var position = 1; position <= 4; position++)
+                {
+                    var index = ((floor - 1) * 4) + (position - 1);
+                    var code = $"A{floor}{position:00}";
+                    var areaSquareMeters = position is 2 or 3 ? 124m : 96m;
+                    var valuationRate = 15500m + (floor * 175m) + (position is 2 or 3 ? 350m : 0m);
+                    var status = index switch
+                    {
+                        < 2 => ProjectUnitStatuses.HandedOver,
+                        < 8 => ProjectUnitStatuses.Sold,
+                        < 14 => ProjectUnitStatuses.Reserved,
+                        < 22 => ProjectUnitStatuses.Available,
+                        _ => ProjectUnitStatuses.Planned
+                    };
+
+                    var customerId = status switch
+                    {
+                        ProjectUnitStatuses.HandedOver or ProjectUnitStatuses.Sold or ProjectUnitStatuses.Reserved
+                            => index % 2 == 0 ? apartmentBuyerOne.Id : apartmentBuyerTwo.Id,
+                        _ => (Guid?)null
+                    };
+
+                    var released = status != ProjectUnitStatuses.Planned;
+                    units.Add(new ProjectUnit
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        ProjectId = projectId,
+                        CustomerBusinessPartnerId = customerId,
+                        IsReleasedForMarket = released,
+                        ReleasedAt = released ? now.Date.AddDays(-45 + index) : null,
+                        ReleasedById = released ? projectManager.Id : null,
+                        Code = code,
+                        Name = $"Apartment {code}",
+                        UnitType = ProjectUnitTypes.Apartment,
+                        Status = status,
+                        BlockName = "Block A",
+                        FloorLabel = $"Floor {floor}",
+                        AreaSquareMeters = areaSquareMeters,
+                        ValuationRate = valuationRate,
+                        BasePrice = Math.Round(areaSquareMeters * valuationRate, 2, MidpointRounding.AwayFromZero),
+                        Currency = baseCurrencyCode,
+                        HandoverDate = status == ProjectUnitStatuses.HandedOver ? now.Date.AddDays(-(12 - index)) : null,
+                        SortOrder = index,
+                        Notes = status switch
+                        {
+                            ProjectUnitStatuses.HandedOver => "Buyer handover complete; unit has entered early defects monitoring.",
+                            ProjectUnitStatuses.Sold => "Sold unit awaiting final finishes or commissioning closeout before handover.",
+                            ProjectUnitStatuses.Reserved => "Reserved for buyer pending full sales completion and finish confirmation.",
+                            ProjectUnitStatuses.Available => "Released to market for active sales and leasing conversations.",
+                            _ => "Held back from release until top-floor finishes are ready."
+                        },
+                        CreatedAt = now.AddMonths(-2).AddDays(index),
+                        CreatedBy = "System"
+                    });
+                }
+            }
+
+            _context.ProjectUnits.AddRange(units);
+            var unitByCode = units.ToDictionary(item => item.Code!, StringComparer.OrdinalIgnoreCase);
+
+            _context.ProjectCustomerVariations.AddRange(
+                new ProjectCustomerVariation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A203"].Id,
+                    CustomerBusinessPartnerId = apartmentBuyerOne.Id,
+                    Title = "Upgrade kitchen finishes and extend breakfast counter",
+                    Description = "Buyer requested upgraded quartz worktops, revised splashback selection, and a longer breakfast counter in Apartment A203.",
+                    VariationType = "BuyerFinishUpgrade",
+                    Timing = ProjectCustomerVariationTimings.PreHandover,
+                    Status = ProjectCustomerVariationStatuses.Approved,
+                    RequestDate = now.Date.AddDays(-16),
+                    TargetCompletionDate = now.Date.AddDays(12),
+                    EstimatedAmount = 42000m,
+                    QuotedAmount = 45500m,
+                    ApprovedAmount = 45500m,
+                    Currency = baseCurrencyCode,
+                    RequiresScheduleAdjustment = true,
+                    ScheduleImpactDays = 5,
+                    Notes = "Approved after commercial review; finish package sequence has been adjusted.",
+                    CreatedAt = now.Date.AddDays(-16),
+                    CreatedBy = "System"
+                },
+                new ProjectCustomerVariation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A101"].Id,
+                    CustomerBusinessPartnerId = apartmentBuyerTwo.Id,
+                    Title = "Post-handover wardrobe and utility-cabinet modification",
+                    Description = "Buyer requested an additional utility cabinet and modified wardrobe shelving after taking possession of Apartment A101.",
+                    VariationType = "PostHandoverAlteration",
+                    Timing = ProjectCustomerVariationTimings.PostHandover,
+                    Status = ProjectCustomerVariationStatuses.Billed,
+                    RequestDate = now.Date.AddDays(-9),
+                    TargetCompletionDate = now.Date.AddDays(-2),
+                    CompletedDate = now.Date.AddDays(-3),
+                    EstimatedAmount = 16500m,
+                    QuotedAmount = 18500m,
+                    ApprovedAmount = 18500m,
+                    BilledAmount = 18500m,
+                    Currency = baseCurrencyCode,
+                    Notes = "Delivered as a billable post-handover alteration and invoiced to the buyer.",
+                    CreatedAt = now.Date.AddDays(-9),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectCommissioningItems.AddRange(
+                new ProjectCommissioningItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    Title = "Fire alarm, smoke detection, and emergency lighting tests",
+                    SystemArea = "Life Safety",
+                    Status = ProjectCommissioningItemStatuses.Completed,
+                    RequiresRegulatoryInspection = true,
+                    PlannedDate = now.Date.AddDays(-12),
+                    CompletedDate = now.Date.AddDays(-8),
+                    CertificateReference = "COMM-LS-001",
+                    ResponsibleParty = "Prime MEP Consult",
+                    SortOrder = 0,
+                    Notes = "Witness test complete for the first occupancy batch.",
+                    CreatedAt = now.Date.AddDays(-12),
+                    CreatedBy = "System"
+                },
+                new ProjectCommissioningItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    Title = "Passenger lift load test and certification",
+                    SystemArea = "Vertical Transportation",
+                    Status = ProjectCommissioningItemStatuses.ReadyForInspection,
+                    RequiresRegulatoryInspection = true,
+                    PlannedDate = now.Date.AddDays(6),
+                    ResponsibleParty = "Adom Construction Ltd",
+                    SortOrder = 1,
+                    Notes = "Awaiting final inspector slot confirmation.",
+                    CreatedAt = now.Date.AddDays(-5),
+                    CreatedBy = "System"
+                },
+                new ProjectCommissioningItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A101"].Id,
+                    Title = "Final electrical and plumbing validation for Apartment A101",
+                    SystemArea = "Unit Services",
+                    Status = ProjectCommissioningItemStatuses.Completed,
+                    PlannedDate = now.Date.AddDays(-18),
+                    CompletedDate = now.Date.AddDays(-13),
+                    CertificateReference = "COMM-A101-006",
+                    ResponsibleParty = "Prime MEP Consult",
+                    SortOrder = 2,
+                    Notes = "Released for phased buyer handover.",
+                    CreatedAt = now.Date.AddDays(-18),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectHandoverItems.AddRange(
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    HandoverType = ProjectHandoverItemTypes.PracticalCompletion,
+                    Title = "Practical completion for Batch 1 apartments",
+                    Status = ProjectHandoverItemStatuses.InPreparation,
+                    ResponsibleParty = "Project Manager",
+                    ReferenceNumber = "PC-B1-2026-01",
+                    TargetDate = now.Date.AddDays(18),
+                    SortOrder = 0,
+                    Notes = "Batch 1 includes the first four apartments and related common services.",
+                    CreatedAt = now.Date.AddDays(-6),
+                    CreatedBy = "System"
+                },
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    HandoverType = ProjectHandoverItemTypes.AsBuiltDrawing,
+                    Title = "As-built drawings and O&M pack for Block A",
+                    Status = ProjectHandoverItemStatuses.Ready,
+                    ResponsibleParty = "Prime MEP Consult",
+                    ReferenceNumber = "AB-BLOCKA-01",
+                    TargetDate = now.Date.AddDays(7),
+                    SortOrder = 1,
+                    Notes = "Ready for sponsor review before occupancy submission.",
+                    CreatedAt = now.Date.AddDays(-8),
+                    CreatedBy = "System"
+                },
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A101"].Id,
+                    HandoverType = ProjectHandoverItemTypes.KeyHandover,
+                    Title = "Key handover for Apartment A101",
+                    Status = ProjectHandoverItemStatuses.Completed,
+                    ResponsibleParty = "Sales & Handover Desk",
+                    ReferenceNumber = "KEY-A101",
+                    TargetDate = now.Date.AddDays(-14),
+                    CompletedDate = now.Date.AddDays(-12),
+                    SortOrder = 2,
+                    Notes = "Buyer took possession after snag clearance and services demonstration.",
+                    CreatedAt = now.Date.AddDays(-14),
+                    CreatedBy = "System"
+                },
+                new ProjectHandoverItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A102"].Id,
+                    HandoverType = ProjectHandoverItemTypes.KeyHandover,
+                    Title = "Key handover for Apartment A102",
+                    Status = ProjectHandoverItemStatuses.Completed,
+                    ResponsibleParty = "Sales & Handover Desk",
+                    ReferenceNumber = "KEY-A102",
+                    TargetDate = now.Date.AddDays(-10),
+                    CompletedDate = now.Date.AddDays(-8),
+                    SortOrder = 3,
+                    Notes = "Second early unit handover completed with signed acceptance pack.",
+                    CreatedAt = now.Date.AddDays(-10),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectSnagItems.AddRange(
+                new ProjectSnagItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A204"].Id,
+                    Title = "Balcony door alignment adjustment",
+                    Description = "Door leaf on the living-room balcony opening needs alignment before buyer demonstration.",
+                    Severity = ProjectSnagSeverities.Medium,
+                    Status = ProjectSnagStatuses.InProgress,
+                    ReportedDate = now.Date.AddDays(-6),
+                    TargetClosureDate = now.Date.AddDays(3),
+                    RaisedByName = "Site QA Team",
+                    ResponsibleParty = "Finishes Subcontractor",
+                    Notes = "Included in the current snag-closing round.",
+                    CreatedAt = now.Date.AddDays(-6),
+                    CreatedBy = "System"
+                },
+                new ProjectSnagItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ProjectUnitId = unitByCode["A503"].Id,
+                    Title = "Kitchen backsplash tile replacement",
+                    Description = "Two backsplash tiles cracked during appliance installation and require replacement.",
+                    Severity = ProjectSnagSeverities.Low,
+                    Status = ProjectSnagStatuses.Open,
+                    ReportedDate = now.Date.AddDays(-2),
+                    TargetClosureDate = now.Date.AddDays(5),
+                    RaisedByName = "Clerk of Works",
+                    ResponsibleParty = "Finishes Subcontractor",
+                    Notes = "Hold release of unit until replacement tiles are fitted and checked.",
+                    CreatedAt = now.Date.AddDays(-2),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectDefectLiabilityCases.Add(new ProjectDefectLiabilityCase
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                ProjectUnitId = unitByCode["A101"].Id,
+                CustomerBusinessPartnerId = apartmentBuyerTwo.Id,
+                Title = "Water heater pressure fluctuation after occupancy",
+                Description = "Buyer reported intermittent water-heater pressure drop during the first week of occupancy.",
+                Status = ProjectDefectLiabilityStatuses.UnderReview,
+                ReportedDate = now.Date.AddDays(-4),
+                TargetResolutionDate = now.Date.AddDays(2),
+                IsWarrantyRelated = true,
+                WarrantyExpiryDate = now.Date.AddMonths(12),
+                RectificationCost = 1200m,
+                ChargeableAmount = 0m,
+                Currency = baseCurrencyCode,
+                Notes = "Treated as warranty rectification under the defects liability process.",
+                CreatedAt = now.Date.AddDays(-4),
+                CreatedBy = "System"
+            });
+        }
+
+        private void CreateImplementationProject(
+            Guid tenantId,
+            ProjectType implementationType,
+            ProjectPriority highPriority,
+            ProjectTemplate template,
+            ProjectPortfolio portfolio,
+            ProjectProgram program,
+            ApplicationUser sponsor,
+            ApplicationUser projectManager,
+            ApplicationUser financeOwner,
+            ApplicationUser teamMember,
+            Department? department,
+            Location? location,
+            BusinessPartner customer,
+            string baseCurrencyCode,
+            DateTime now)
+        {
+            var projectId = Guid.NewGuid();
+            var phaseId = Guid.NewGuid();
+            var designTaskId = Guid.NewGuid();
+            var buildTaskId = Guid.NewGuid();
+            var checklistId = Guid.NewGuid();
+            var milestoneId = Guid.NewGuid();
+            var deliverableId = Guid.NewGuid();
+            var qualityCheckpointId = Guid.NewGuid();
+            var nonConformanceId = Guid.NewGuid();
+            var scheduleId = Guid.NewGuid();
+            var invoiceRequestId = Guid.NewGuid();
+            var meetingId = Guid.NewGuid();
+
+            var project = new Project
+            {
+                Id = projectId,
+                TenantId = tenantId,
+                ProjectCode = "PRJ-DEMO-1001",
+                Title = "Northwind ERP Rollout",
+                Summary = "Customer-facing ERP implementation covering finance, inventory, procurement, and reporting.",
+                BusinessCase = "Replace fragmented legacy tools with a governed ERP delivery model and faster billing cadence.",
+                Objectives = "Deliver core ERP modules, train users, and transition the customer to support with auditable controls.",
+                StrategicAlignment = "Customer delivery excellence",
+                ProjectTypeId = implementationType.Id,
+                ProjectPriorityId = highPriority.Id,
+                TemplateId = template.Id,
+                PortfolioId = portfolio.Id,
+                ProgramId = program.Id,
+                Status = ProjectStatuses.InProgress,
+                Methodology = "Hybrid",
+                SponsorId = sponsor.Id,
+                ProjectManagerId = projectManager.Id,
+                DepartmentId = department?.Id,
+                LocationId = location?.Id,
+                CustomerId = customer.Id,
+                BusinessPartnerId = customer.Id,
+                StartDate = now.Date.AddDays(-45),
+                TargetEndDate = now.Date.AddDays(75),
+                ActualStartDate = now.Date.AddDays(-42),
+                EstimatedBudget = 180000m,
+                ApprovedBudget = 195000m,
+                ActualCost = 28750m,
+                BudgetStatus = "Approved",
+                ProgressPercent = 58m,
+                ApprovalRequired = true,
+                SubmittedAt = now.AddDays(-55),
+                ApprovedAt = now.AddDays(-52),
+                ScopeStatement = "Finance, procurement, inventory, dashboards, and controlled customer collaboration.",
+                Assumptions = "Core customer team remains available for design reviews and UAT.",
+                Constraints = "Go-live must align with quarter-end controls and contract milestones.",
+                ExpectedBenefits = "Faster close cycle, stronger inventory control, and earlier invoice generation.",
+                FundingSource = "Customer Contract",
+                StatusRemarks = "Build and UAT are running in parallel for the first wave.",
+                ExternalPortalAccessEnabled = true,
+                ExternalCollaborationEnabled = true,
+                CreatedAt = now.AddDays(-60),
+                CreatedBy = "System"
+            };
+
+            _context.Projects.Add(project);
+            _context.ProjectInitiationVersions.Add(new ProjectInitiationVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                SnapshotJson = JsonSerializer.Serialize(new
+                {
+                    project.ProjectCode,
+                    project.Title,
+                    project.Status,
+                    project.EstimatedBudget,
+                    project.StartDate,
+                    project.TargetEndDate
+                }),
+                ChangeType = "Approved",
+                Notes = "Initial approved initiation pack.",
+                CreatedAt = now.AddDays(-52),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectMembers.AddRange(
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = sponsor.Id,
+                    Role = "Sponsor",
+                    JoinedAt = now.AddDays(-60),
+                    CreatedAt = now.AddDays(-60),
+                    CreatedBy = "System"
+                },
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = projectManager.Id,
+                    Role = "ProjectManager",
+                    JoinedAt = now.AddDays(-58),
+                    CreatedAt = now.AddDays(-58),
+                    CreatedBy = "System"
+                },
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = financeOwner.Id,
+                    Role = "FinanceLead",
+                    JoinedAt = now.AddDays(-57),
+                    CreatedAt = now.AddDays(-57),
+                    CreatedBy = "System"
+                },
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = teamMember.Id,
+                    Role = "FunctionalConsultant",
+                    JoinedAt = now.AddDays(-57),
+                    CreatedAt = now.AddDays(-57),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectWorkItems.AddRange(
+                new ProjectWorkItem
+                {
+                    Id = phaseId,
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    NodeType = ProjectWorkItemNodeTypes.Phase,
+                    Title = "Solution Design and Build",
+                    Description = "Approved design, configuration, integration, and test preparation.",
+                    Status = "InProgress",
+                    Priority = "High",
+                    SortOrder = 10,
+                    AssignedToUserId = projectManager.Id,
+                    PlannedStartDate = now.Date.AddDays(-40),
+                    PlannedEndDate = now.Date.AddDays(30),
+                    ActualStartDate = now.Date.AddDays(-38),
+                    PercentComplete = 65m,
+                    IsRollupEnabled = true,
+                    CreatedAt = now.AddDays(-50),
+                    CreatedBy = "System"
+                },
+                new ProjectWorkItem
+                {
+                    Id = designTaskId,
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ParentId = phaseId,
+                    NodeType = ProjectWorkItemNodeTypes.Task,
+                    Title = "Finalize finance and procurement design",
+                    Description = "Complete workshops, confirm controls, and sign off data mappings.",
+                    Status = "Completed",
+                    Priority = "High",
+                    SortOrder = 20,
+                    AssignedToUserId = projectManager.Id,
+                    PlannedStartDate = now.Date.AddDays(-35),
+                    PlannedEndDate = now.Date.AddDays(-12),
+                    ActualStartDate = now.Date.AddDays(-34),
+                    ActualEndDate = now.Date.AddDays(-10),
+                    PercentComplete = 100m,
+                    EffortEstimateHours = 72m,
+                    ActualEffortHours = 76m,
+                    CreatedAt = now.AddDays(-48),
+                    CreatedBy = "System"
+                },
+                new ProjectWorkItem
+                {
+                    Id = buildTaskId,
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ParentId = phaseId,
+                    NodeType = ProjectWorkItemNodeTypes.Task,
+                    Title = "Configure integrations and prepare UAT",
+                    Description = "Configure workflows, finance handoff, and customer-facing deliverables.",
+                    Status = "InProgress",
+                    Priority = "High",
+                    SortOrder = 30,
+                    AssignedToUserId = teamMember.Id,
+                    PlannedStartDate = now.Date.AddDays(-9),
+                    PlannedEndDate = now.Date.AddDays(20),
+                    ActualStartDate = now.Date.AddDays(-8),
+                    PercentComplete = 55m,
+                    EffortEstimateHours = 140m,
+                    ActualEffortHours = 82m,
+                    CreatedAt = now.AddDays(-20),
+                    CreatedBy = "System"
+                },
+                new ProjectWorkItem
+                {
+                    Id = checklistId,
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ParentId = buildTaskId,
+                    NodeType = ProjectWorkItemNodeTypes.ChecklistItem,
+                    Title = "Approve UAT script pack",
+                    Status = "Assigned",
+                    Priority = "Normal",
+                    SortOrder = 40,
+                    AssignedToUserId = financeOwner.Id,
+                    PlannedStartDate = now.Date.AddDays(2),
+                    PlannedEndDate = now.Date.AddDays(6),
+                    PercentComplete = 0m,
+                    CreatedAt = now.AddDays(-5),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectTaskDependencies.Add(new ProjectTaskDependency
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                PredecessorWorkItemId = designTaskId,
+                SuccessorWorkItemId = buildTaskId,
+                DependencyType = "FS",
+                LagDays = 1,
+                IsEnforced = true,
+                CreatedAt = now.AddDays(-15),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectMilestones.Add(new ProjectMilestone
+            {
+                Id = milestoneId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = buildTaskId,
+                Title = "Wave 1 UAT readiness",
+                Description = "Configuration, integrations, scripts, and access are ready for customer validation.",
+                TargetDate = now.Date.AddDays(12),
+                Status = "InReview",
+                RequiresApproval = true,
+                CreatedAt = now.AddDays(-10),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectDeliverables.Add(new ProjectDeliverable
+            {
+                Id = deliverableId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = buildTaskId,
+                MilestoneId = milestoneId,
+                Title = "Wave 1 solution configuration pack",
+                Description = "Approved configuration workbook and evidence package for customer review.",
+                Status = "InReview",
+                TargetDate = now.Date.AddDays(10),
+                ExternalSubmissionAllowed = true,
+                ExternalSignOffRequired = true,
+                IsExternalVisible = true,
+                CreatedAt = now.AddDays(-8),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectResourceAllocations.AddRange(
+                new ProjectResourceAllocation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    WorkItemId = buildTaskId,
+                    UserId = projectManager.Id,
+                    AllocationRole = "Project Manager",
+                    AllocationType = "Hours",
+                    AllocationValue = 120m,
+                    PlannedHours = 120m,
+                    StartDate = now.Date.AddDays(-40),
+                    EndDate = now.Date.AddDays(20),
+                    BookingType = "Hard",
+                    Status = "Approved",
+                    ApprovedById = sponsor.Id,
+                    ApprovedAt = now.AddDays(-40),
+                    CreatedAt = now.AddDays(-40),
+                    CreatedBy = "System"
+                },
+                new ProjectResourceAllocation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    WorkItemId = buildTaskId,
+                    UserId = teamMember.Id,
+                    AllocationRole = "Functional Lead",
+                    AllocationType = "Hours",
+                    AllocationValue = 160m,
+                    PlannedHours = 160m,
+                    StartDate = now.Date.AddDays(-20),
+                    EndDate = now.Date.AddDays(25),
+                    BookingType = "Hard",
+                    Status = "Approved",
+                    ApprovedById = sponsor.Id,
+                    ApprovedAt = now.AddDays(-20),
+                    CreatedAt = now.AddDays(-20),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectRisks.Add(new ProjectRisk
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Customer test data not signed off on schedule",
+                Description = "Delayed data confirmation may push UAT and billing milestones.",
+                OwnerId = projectManager.Id,
+                Status = "Monitoring",
+                Category = "Schedule",
+                Probability = 3,
+                Impact = 4,
+                Exposure = 12,
+                ResponseStrategy = "Mitigate",
+                MitigationPlan = "Run daily sign-off stand-up and pre-approve fallback data sets.",
+                DueDate = now.Date.AddDays(7),
+                CreatedAt = now.AddDays(-7),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectIssues.Add(new ProjectIssue
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Procurement approval for barcode devices is pending",
+                Description = "Receiving and device testing depend on the approved purchase order.",
+                OwnerId = financeOwner.Id,
+                Status = "Open",
+                Severity = "High",
+                TargetResolutionDate = now.Date.AddDays(5),
+                RootCause = "Late vendor quotation alignment.",
+                CorrectiveAction = "Escalate commercial approval and maintain substitute loaner stock.",
+                CreatedAt = now.AddDays(-3),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectQualityCheckpoints.Add(new ProjectQualityCheckpoint
+            {
+                Id = qualityCheckpointId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = buildTaskId,
+                DeliverableId = deliverableId,
+                QaOwnerId = financeOwner.Id,
+                Title = "Wave 1 readiness quality review",
+                Description = "Confirm configuration evidence, issue disposition, and UAT pack completeness before customer review.",
+                Status = "InReview",
+                DueDate = now.Date.AddDays(6),
+                RequiresQaSignOff = true,
+                CreatedAt = now.AddDays(-4),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectNonConformances.Add(new ProjectNonConformance
+            {
+                Id = nonConformanceId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                QualityCheckpointId = qualityCheckpointId,
+                DeliverableId = deliverableId,
+                OwnerId = teamMember.Id,
+                Title = "Inventory evidence screenshots use obsolete warehouse labels",
+                Description = "The current evidence pack still shows superseded warehouse names in two UAT scenarios.",
+                Severity = "Medium",
+                Status = "Open",
+                TargetResolutionDate = now.Date.AddDays(4),
+                CorrectiveAction = "Refresh screenshots from the approved warehouse master and rerun the affected scripts.",
+                PreventiveAction = "Include evidence-pack validation in the pre-review checklist.",
+                CreatedAt = now.AddDays(-2),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectChangeRequests.Add(new ProjectChangeRequest
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Add supplier scorecard dashboard to wave 1",
+                Description = "Customer requested a lightweight reporting addition before cutover.",
+                ChangeType = "Scope",
+                Status = "PendingApproval",
+                BusinessImpact = "Improves stakeholder adoption and executive reporting.",
+                RiskImpact = "Requires additional test effort but limited implementation risk.",
+                CostImpact = 8500m,
+                ScheduleImpactDays = 4,
+                CreatedAt = now.AddDays(-2),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectBillingSchedules.Add(new ProjectBillingSchedule
+            {
+                Id = scheduleId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                MilestoneId = milestoneId,
+                Name = "Wave 1 readiness billing",
+                BillingType = "Milestone",
+                Amount = 45000m,
+                BillingPercentage = 25m,
+                BillingDate = now.Date.AddDays(14),
+                Status = "Ready",
+                Description = "Invoice on confirmed UAT readiness and customer review pack.",
+                IsBillable = true,
+                CreatedAt = now.AddDays(-1),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectInvoiceRequests.Add(new ProjectInvoiceRequest
+            {
+                Id = invoiceRequestId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                BillingScheduleId = scheduleId,
+                RequestNumber = "INVREQ-PRJ-DEMO-1001-01",
+                RequestedAmount = 45000m,
+                Currency = baseCurrencyCode,
+                Status = "SentToFinance",
+                RequestedAt = now.AddDays(-1),
+                SubmittedAt = now.AddDays(-1),
+                ExternalReference = "AR-WAVE1-QUEUE",
+                Notes = "Submitted to finance for milestone billing review.",
+                CreatedAt = now.AddDays(-1),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectTimesheetEntries.AddRange(
+                new ProjectTimesheetEntry
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    WorkItemId = buildTaskId,
+                    UserId = projectManager.Id,
+                    EntryDate = now.Date.AddDays(-2),
+                    Hours = 8m,
+                    IsBillable = true,
+                    HourlyRate = 125m,
+                    CostAmount = 1000m,
+                    WorkType = "Project Management",
+                    Notes = "Wave planning, issue coordination, and milestone review.",
+                    Status = "Approved",
+                    ApprovedById = sponsor.Id,
+                    ApprovedAt = now.AddDays(-1),
+                    CreatedAt = now.AddDays(-2),
+                    CreatedBy = "System"
+                },
+                new ProjectTimesheetEntry
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    WorkItemId = buildTaskId,
+                    UserId = teamMember.Id,
+                    EntryDate = now.Date.AddDays(-2),
+                    Hours = 14m,
+                    IsBillable = true,
+                    HourlyRate = 95m,
+                    CostAmount = 1330m,
+                    WorkType = "Configuration",
+                    Notes = "Configuration and test pack completion.",
+                    Status = "Approved",
+                    ApprovedById = projectManager.Id,
+                    ApprovedAt = now.AddDays(-1),
+                    CreatedAt = now.AddDays(-2),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectExpenses.Add(new ProjectExpense
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = buildTaskId,
+                UserId = financeOwner.Id,
+                ExpenseDate = now.Date.AddDays(-4),
+                Category = "Travel",
+                Currency = baseCurrencyCode,
+                Amount = 1420m,
+                TaxAmount = 80m,
+                IsBillable = true,
+                Status = "Approved",
+                Notes = "Customer design workshop travel and accommodation.",
+                ApprovedById = sponsor.Id,
+                ApprovedAt = now.AddDays(-3),
+                CreatedAt = now.AddDays(-4),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectRevenueRecognitions.Add(new ProjectRevenueRecognition
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                InvoiceRequestId = invoiceRequestId,
+                RecognitionPeriod = $"{now:yyyy-MM}",
+                RecognizedRevenue = 45000m,
+                RecognizedCost = 28750m,
+                GrossMargin = 16250m,
+                CashCollected = 0m,
+                Status = "Submitted",
+                Notes = "Current period recognition for wave 1 billing request.",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+
+            _context.ProjectBudgetRevisions.Add(new ProjectBudgetRevision
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                RevisionName = "Approved Delivery Baseline",
+                RevisionType = "Baseline",
+                EstimatedBudget = 180000m,
+                ApprovedBudget = 195000m,
+                CommittedCost = 84500m,
+                ForecastCost = 186500m,
+                ThresholdWarningPercent = 75m,
+                ThresholdCriticalPercent = 90m,
+                Status = "Approved",
+                EffectiveDate = now.Date.AddDays(-52),
+                SubmittedAt = now.AddDays(-53),
+                ApprovedAt = now.AddDays(-52),
+                ApprovedById = sponsor.Id,
+                ChangeReason = "Approved commercial baseline after design sign-off.",
+                Notes = "Use as the cost control baseline for wave 1 delivery.",
+                CreatedAt = now.AddDays(-53),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectForecastVersions.Add(new ProjectForecastVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                VersionName = "Current working forecast",
+                AsOfDate = now.Date,
+                ForecastCost = 186500m,
+                EstimateAtCompletion = 186500m,
+                ForecastRevenue = 240000m,
+                ForecastMargin = 53500m,
+                IsActive = true,
+                Notes = "Reflects current milestone billing and pending scope addition.",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+
+            _context.ProjectBaselines.Add(new ProjectBaseline
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Name = "Approved baseline",
+                Notes = "Baseline after commercial approval and initial plan sign-off.",
+                SnapshotJson = JsonSerializer.Serialize(new
+                {
+                    project.ProjectCode,
+                    ApprovedBudget = 195000m,
+                    FinishDate = now.Date.AddDays(75),
+                    ProgressPercent = 0m
+                }),
+                IsLocked = true,
+                CreatedOn = now.AddDays(-52),
+                CreatedAt = now.AddDays(-52),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectDocuments.Add(new ProjectDocument
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                DocumentName = "Wave 1 design sign-off",
+                Category = "Plan",
+                DocumentType = "PDF",
+                FilePath = "/seed/projects/PRJ-DEMO-1001/design-signoff.pdf",
+                FileType = "application/pdf",
+                FileSize = 124000,
+                VersionLabel = "1.0",
+                Status = "Approved",
+                EffectiveDate = now.Date.AddDays(-12),
+                IsExternalVisible = true,
+                CreatedAt = now.AddDays(-12),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectComments.Add(new ProjectComment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = buildTaskId,
+                CommentType = "Status",
+                Body = "Wave 1 build is on track. UAT content is ready for customer review after finance and inventory validation.",
+                CreatedAt = now.AddDays(-1),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectDecisions.Add(new ProjectDecision
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Approve hybrid rollout approach for customer UAT",
+                DecisionDate = now.AddDays(-16),
+                ApproverId = sponsor.Id,
+                Rationale = "Allows early validation of finance processes while inventory hardware procurement completes.",
+                AlternativesConsidered = "Wait for full device readiness before UAT start.",
+                ImpactSummary = "Protects delivery date while limiting scope risk.",
+                Status = "Approved",
+                ApprovedAt = now.AddDays(-16),
+                CreatedAt = now.AddDays(-16),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectMeetingMinutes.Add(new ProjectMeetingMinute
+            {
+                Id = meetingId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Weekly customer delivery review",
+                MeetingDate = now.AddDays(-3),
+                FacilitatorId = projectManager.Id,
+                MeetingType = "Status",
+                Minutes = "Reviewed milestone progress, open procurement blocker, and billing readiness.",
+                AttendeesJson = JsonSerializer.Serialize(new[] { sponsor.Email, projectManager.Email, financeOwner.Email, teamMember.Email }),
+                CreatedAt = now.AddDays(-3),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectActionItems.Add(new ProjectActionItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                MeetingMinuteId = meetingId,
+                WorkItemId = buildTaskId,
+                Title = "Close barcode device procurement blocker",
+                Description = "Confirm approved PO and update deployment readiness.",
+                OwnerId = financeOwner.Id,
+                DueDate = now.Date.AddDays(4),
+                Status = "Open",
+                Priority = "High",
+                CreatedAt = now.AddDays(-3),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectExternalAccessPolicies.Add(new ProjectExternalAccessPolicy
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                BusinessPartnerId = customer.Id,
+                ArtifactType = "Project",
+                AccessLevel = "Contribute",
+                CanComment = true,
+                CanUpload = true,
+                CanApprove = true,
+                Notes = "Customer PMO can review deliverables and approve sign-off artifacts.",
+                CreatedAt = now.AddDays(-30),
+                CreatedBy = "System"
+            });
+        }
+
+        private void CreateInternalPlanningProject(
+            Guid tenantId,
+            ProjectType internalType,
+            ProjectPriority mediumPriority,
+            ProjectTemplate template,
+            ProjectPortfolio portfolio,
+            ProjectProgram program,
+            ApplicationUser sponsor,
+            ApplicationUser projectManager,
+            ApplicationUser financeOwner,
+            Department? department,
+            Location? location,
+            string baseCurrencyCode,
+            DateTime now)
+        {
+            var projectId = Guid.NewGuid();
+            var phaseId = Guid.NewGuid();
+            var planningTaskId = Guid.NewGuid();
+
+            var project = new Project
+            {
+                Id = projectId,
+                TenantId = tenantId,
+                ProjectCode = "PRJ-DEMO-1002",
+                Title = "Internal Planning and PMO Rollout",
+                Summary = "Internal project to operationalize project governance, templates, and reporting cadence.",
+                BusinessCase = "Standardize delivery controls across departments before portfolio expansion.",
+                Objectives = "Establish templates, approval cadence, dashboards, and PMO reporting routines.",
+                StrategicAlignment = "Operational control and reporting",
+                ProjectTypeId = internalType.Id,
+                ProjectPriorityId = mediumPriority.Id,
+                TemplateId = template.Id,
+                PortfolioId = portfolio.Id,
+                ProgramId = program.Id,
+                Status = ProjectStatuses.Planned,
+                Methodology = "Waterfall",
+                SponsorId = sponsor.Id,
+                ProjectManagerId = projectManager.Id,
+                DepartmentId = department?.Id,
+                LocationId = location?.Id,
+                StartDate = now.Date.AddDays(14),
+                TargetEndDate = now.Date.AddDays(120),
+                EstimatedBudget = 60000m,
+                ApprovedBudget = 60000m,
+                ActualCost = 0m,
+                BudgetStatus = "Approved",
+                ProgressPercent = 12m,
+                ApprovalRequired = true,
+                SubmittedAt = now.AddDays(-10),
+                ApprovedAt = now.AddDays(-8),
+                ScopeStatement = "Setup, training, governance, and reporting enablement for internal project control.",
+                Assumptions = "PMO and delivery leads will allocate time for operating model workshops.",
+                Constraints = "Implementation must avoid quarter-end reporting freeze periods.",
+                ExpectedBenefits = "Consistent setup, faster approvals, and clearer portfolio visibility.",
+                FundingSource = "Internal Budget",
+                StatusRemarks = "Planning baseline ready for kickoff.",
+                CreatedAt = now.AddDays(-12),
+                CreatedBy = "System"
+            };
+
+            _context.Projects.Add(project);
+            _context.ProjectInitiationVersions.Add(new ProjectInitiationVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                SnapshotJson = JsonSerializer.Serialize(new
+                {
+                    project.ProjectCode,
+                    project.Title,
+                    project.Status,
+                    project.ApprovedBudget
+                }),
+                ChangeType = "Approved",
+                Notes = "Initial approved operating model setup plan.",
+                CreatedAt = now.AddDays(-8),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectMembers.AddRange(
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = sponsor.Id,
+                    Role = "Sponsor",
+                    JoinedAt = now.AddDays(-12),
+                    CreatedAt = now.AddDays(-12),
+                    CreatedBy = "System"
+                },
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = projectManager.Id,
+                    Role = "ProjectManager",
+                    JoinedAt = now.AddDays(-11),
+                    CreatedAt = now.AddDays(-11),
+                    CreatedBy = "System"
+                },
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = financeOwner.Id,
+                    Role = "PMOAnalyst",
+                    JoinedAt = now.AddDays(-11),
+                    CreatedAt = now.AddDays(-11),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectWorkItems.AddRange(
+                new ProjectWorkItem
+                {
+                    Id = phaseId,
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    NodeType = ProjectWorkItemNodeTypes.Phase,
+                    Title = "PMO Operating Model Setup",
+                    Status = "Planned",
+                    Priority = "Medium",
+                    SortOrder = 10,
+                    AssignedToUserId = projectManager.Id,
+                    PlannedStartDate = now.Date.AddDays(14),
+                    PlannedEndDate = now.Date.AddDays(70),
+                    PercentComplete = 0m,
+                    CreatedAt = now.AddDays(-9),
+                    CreatedBy = "System"
+                },
+                new ProjectWorkItem
+                {
+                    Id = planningTaskId,
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    ParentId = phaseId,
+                    NodeType = ProjectWorkItemNodeTypes.Task,
+                    Title = "Finalize portfolio reporting templates",
+                    Status = "Assigned",
+                    Priority = "Medium",
+                    SortOrder = 20,
+                    AssignedToUserId = financeOwner.Id,
+                    PlannedStartDate = now.Date.AddDays(16),
+                    PlannedEndDate = now.Date.AddDays(28),
+                    PercentComplete = 20m,
+                    EffortEstimateHours = 40m,
+                    ActualEffortHours = 8m,
+                    CreatedAt = now.AddDays(-8),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectMilestones.Add(new ProjectMilestone
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = planningTaskId,
+                Title = "Planning baseline approved",
+                TargetDate = now.Date.AddDays(21),
+                Status = "Planned",
+                RequiresApproval = true,
+                CreatedAt = now.AddDays(-7),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectResourceAllocations.Add(new ProjectResourceAllocation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = planningTaskId,
+                UserId = financeOwner.Id,
+                AllocationRole = "PMO Analyst",
+                AllocationType = "Hours",
+                AllocationValue = 40m,
+                PlannedHours = 40m,
+                StartDate = now.Date.AddDays(15),
+                EndDate = now.Date.AddDays(29),
+                BookingType = "Soft",
+                Status = "Approved",
+                ApprovedById = sponsor.Id,
+                ApprovedAt = now.AddDays(-7),
+                CreatedAt = now.AddDays(-7),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectBudgetRevisions.Add(new ProjectBudgetRevision
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                RevisionName = "Initial approved budget",
+                RevisionType = "Baseline",
+                EstimatedBudget = 60000m,
+                ApprovedBudget = 60000m,
+                CommittedCost = 12000m,
+                ForecastCost = 57500m,
+                Status = "Approved",
+                EffectiveDate = now.Date.AddDays(-8),
+                SubmittedAt = now.AddDays(-9),
+                ApprovedAt = now.AddDays(-8),
+                ApprovedById = sponsor.Id,
+                ChangeReason = "Initial PMO planning baseline.",
+                CreatedAt = now.AddDays(-9),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectForecastVersions.Add(new ProjectForecastVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                VersionName = "Planning forecast",
+                AsOfDate = now.Date,
+                ForecastCost = 57500m,
+                EstimateAtCompletion = 57500m,
+                ForecastRevenue = 0m,
+                ForecastMargin = -57500m,
+                IsActive = true,
+                Notes = "Internal initiative with no external billing.",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+
+            _context.ProjectBaselines.Add(new ProjectBaseline
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Name = "Planning baseline",
+                Notes = "Initial planning and staffing baseline.",
+                SnapshotJson = JsonSerializer.Serialize(new
+                {
+                    project.ProjectCode,
+                    ApprovedBudget = 60000m,
+                    FinishDate = now.Date.AddDays(120),
+                    ProgressPercent = 0m
+                }),
+                IsLocked = true,
+                CreatedOn = now.AddDays(-8),
+                CreatedAt = now.AddDays(-8),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectComments.Add(new ProjectComment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                WorkItemId = planningTaskId,
+                CommentType = "Status",
+                Body = "Kickoff package approved. Waiting for workshop dates before baseline lock.",
+                CreatedAt = now.AddDays(-2),
+                CreatedBy = "System"
+            });
+        }
+
+        private void CreateClosedCapexProject(
+            Guid tenantId,
+            ProjectType capexType,
+            ProjectPriority lowPriority,
+            ProjectPortfolio portfolio,
+            ApplicationUser sponsor,
+            ApplicationUser projectManager,
+            ApplicationUser financeOwner,
+            ApplicationUser teamMember,
+            Department? department,
+            Location? location,
+            BusinessPartner customer,
+            string baseCurrencyCode,
+            DateTime now)
+        {
+            var projectId = Guid.NewGuid();
+            var milestoneId = Guid.NewGuid();
+            var invoiceRequestId = Guid.NewGuid();
+            var meetingId = Guid.NewGuid();
+
+            var project = new Project
+            {
+                Id = projectId,
+                TenantId = tenantId,
+                ProjectCode = "PRJ-DEMO-1003",
+                Title = "Warehouse Upgrade and Asset Refresh",
+                Summary = "Capital project completed and closed after warehouse infrastructure refresh.",
+                BusinessCase = "Improve warehouse handling capacity and reduce equipment downtime.",
+                Objectives = "Install replacement equipment, complete acceptance, and close all open items.",
+                StrategicAlignment = "Operational efficiency",
+                ProjectTypeId = capexType.Id,
+                ProjectPriorityId = lowPriority.Id,
+                PortfolioId = portfolio.Id,
+                Status = ProjectStatuses.Closed,
+                Methodology = "Waterfall",
+                SponsorId = sponsor.Id,
+                ProjectManagerId = projectManager.Id,
+                DepartmentId = department?.Id,
+                LocationId = location?.Id,
+                CustomerId = customer.Id,
+                BusinessPartnerId = customer.Id,
+                StartDate = now.Date.AddMonths(-8),
+                TargetEndDate = now.Date.AddMonths(-2),
+                ActualStartDate = now.Date.AddMonths(-8).AddDays(4),
+                ActualEndDate = now.Date.AddMonths(-2).AddDays(-3),
+                EstimatedBudget = 95000m,
+                ApprovedBudget = 98000m,
+                ActualCost = 94200m,
+                BudgetStatus = "Approved",
+                ProgressPercent = 100m,
+                ApprovalRequired = true,
+                SubmittedAt = now.AddMonths(-8).AddDays(-2),
+                ApprovedAt = now.AddMonths(-8),
+                ScopeStatement = "Replace staging equipment, improve storage layout, and complete training and handover.",
+                Assumptions = "Approved asset budget and site access were available in line with plan.",
+                Constraints = "Work had to avoid peak receiving windows.",
+                ExpectedBenefits = "Higher throughput and lower equipment failure rate.",
+                FundingSource = "Capex Allocation",
+                StatusRemarks = "Project closed after acceptance and reconciliation.",
+                ExternalPortalAccessEnabled = true,
+                ExternalCollaborationEnabled = false,
+                CreatedAt = now.AddMonths(-8).AddDays(-5),
+                CreatedBy = "System"
+            };
+
+            _context.Projects.Add(project);
+            _context.ProjectMembers.AddRange(
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = sponsor.Id,
+                    Role = "Sponsor",
+                    JoinedAt = now.AddMonths(-8).AddDays(-5),
+                    CreatedAt = now.AddMonths(-8).AddDays(-5),
+                    CreatedBy = "System"
+                },
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = projectManager.Id,
+                    Role = "ProjectManager",
+                    JoinedAt = now.AddMonths(-8).AddDays(-4),
+                    CreatedAt = now.AddMonths(-8).AddDays(-4),
+                    CreatedBy = "System"
+                },
+                new ProjectMember
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    ProjectId = projectId,
+                    UserId = teamMember.Id,
+                    Role = "SiteLead",
+                    JoinedAt = now.AddMonths(-8).AddDays(-4),
+                    CreatedAt = now.AddMonths(-8).AddDays(-4),
+                    CreatedBy = "System"
+                });
+
+            _context.ProjectMilestones.Add(new ProjectMilestone
+            {
+                Id = milestoneId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Final acceptance complete",
+                Description = "Customer accepted the warehouse refresh and final inspection passed.",
+                TargetDate = now.Date.AddMonths(-2).AddDays(-5),
+                ActualDate = now.Date.AddMonths(-2).AddDays(-6),
+                Status = "Approved",
+                RequiresApproval = true,
+                ApprovedById = sponsor.Id,
+                ApprovedAt = now.AddMonths(-2).AddDays(-6),
+                CreatedAt = now.AddMonths(-2).AddDays(-15),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectDeliverables.Add(new ProjectDeliverable
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                MilestoneId = milestoneId,
+                Title = "Warehouse acceptance certificate",
+                Description = "Signed acceptance and handover certificate for the completed works.",
+                Status = "Approved",
+                TargetDate = now.Date.AddMonths(-2).AddDays(-5),
+                SubmittedAt = now.AddMonths(-2).AddDays(-7),
+                SubmittedById = teamMember.Id,
+                ExternalApprovedAt = now.AddMonths(-2).AddDays(-6),
+                ExternalApprovedById = sponsor.Id,
+                ApprovedAt = now.AddMonths(-2).AddDays(-6),
+                ApprovedById = sponsor.Id,
+                ExternalSubmissionAllowed = false,
+                ExternalSignOffRequired = true,
+                IsExternalVisible = true,
+                AcceptanceNotes = "Accepted with no outstanding corrective actions.",
+                CreatedAt = now.AddMonths(-2).AddDays(-8),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectBudgetRevisions.Add(new ProjectBudgetRevision
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                RevisionName = "Final approved budget",
+                RevisionType = "Baseline",
+                EstimatedBudget = 95000m,
+                ApprovedBudget = 98000m,
+                CommittedCost = 94200m,
+                ForecastCost = 94200m,
+                Status = "Approved",
+                EffectiveDate = now.Date.AddMonths(-8),
+                SubmittedAt = now.AddMonths(-8).AddDays(-1),
+                ApprovedAt = now.AddMonths(-8),
+                ApprovedById = sponsor.Id,
+                ChangeReason = "Approved capex baseline.",
+                CreatedAt = now.AddMonths(-8).AddDays(-1),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectForecastVersions.Add(new ProjectForecastVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                VersionNumber = 1,
+                VersionName = "Final forecast",
+                AsOfDate = now.Date.AddMonths(-2),
+                ForecastCost = 94200m,
+                EstimateAtCompletion = 94200m,
+                ForecastRevenue = 128000m,
+                ForecastMargin = 33800m,
+                IsActive = true,
+                Notes = "Final forecast aligned to closed actuals.",
+                CreatedAt = now.AddMonths(-2),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectBillingSchedules.Add(new ProjectBillingSchedule
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                MilestoneId = milestoneId,
+                Name = "Final completion billing",
+                BillingType = "Milestone",
+                Amount = 128000m,
+                BillingPercentage = 100m,
+                BillingDate = now.Date.AddMonths(-2).AddDays(-6),
+                Status = "Invoiced",
+                Description = "Final commercial billing after acceptance.",
+                IsBillable = true,
+                CreatedAt = now.AddMonths(-2).AddDays(-10),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectInvoiceRequests.Add(new ProjectInvoiceRequest
+            {
+                Id = invoiceRequestId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                RequestNumber = "INVREQ-PRJ-DEMO-1003-01",
+                RequestedAmount = 128000m,
+                Currency = baseCurrencyCode,
+                Status = "Paid",
+                RequestedAt = now.AddMonths(-2).AddDays(-10),
+                SubmittedAt = now.AddMonths(-2).AddDays(-9),
+                ExternalReference = "AR-CLOSED-1003",
+                Notes = "Invoice settled in full after completion sign-off.",
+                CreatedAt = now.AddMonths(-2).AddDays(-10),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectRevenueRecognitions.Add(new ProjectRevenueRecognition
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                InvoiceRequestId = invoiceRequestId,
+                RecognitionPeriod = $"{now.AddMonths(-2):yyyy-MM}",
+                RecognizedRevenue = 128000m,
+                RecognizedCost = 94200m,
+                GrossMargin = 33800m,
+                CashCollected = 128000m,
+                Status = "Paid",
+                Notes = "Recognition aligned to final invoice and cash receipt.",
+                CreatedAt = now.AddMonths(-2).AddDays(-8),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectTimesheetEntries.Add(new ProjectTimesheetEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                UserId = projectManager.Id,
+                EntryDate = now.Date.AddMonths(-3),
+                Hours = 16m,
+                IsBillable = false,
+                HourlyRate = 110m,
+                CostAmount = 1760m,
+                WorkType = "Closure",
+                Notes = "Final completion walkthrough and closeout documentation.",
+                Status = "Approved",
+                ApprovedById = sponsor.Id,
+                ApprovedAt = now.AddMonths(-3).AddDays(1),
+                CreatedAt = now.AddMonths(-3),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectExpenses.Add(new ProjectExpense
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                UserId = financeOwner.Id,
+                ExpenseDate = now.Date.AddMonths(-4),
+                Category = "Materials",
+                Currency = baseCurrencyCode,
+                Amount = 22400m,
+                TaxAmount = 0m,
+                IsBillable = false,
+                Status = "Approved",
+                Notes = "Final warehouse fit-out material issue.",
+                ApprovedById = sponsor.Id,
+                ApprovedAt = now.AddMonths(-4).AddDays(1),
+                CreatedAt = now.AddMonths(-4),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectDecisions.Add(new ProjectDecision
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Approve final asset refresh scope reduction",
+                DecisionDate = now.AddMonths(-5),
+                ApproverId = sponsor.Id,
+                Rationale = "Defer non-critical shelving enhancement to stay under approved capex ceiling.",
+                AlternativesConsidered = "Extend timeline and seek additional budget.",
+                ImpactSummary = "Maintained delivery date and protected overall budget.",
+                Status = "Approved",
+                ApprovedAt = now.AddMonths(-5),
+                CreatedAt = now.AddMonths(-5),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectMeetingMinutes.Add(new ProjectMeetingMinute
+            {
+                Id = meetingId,
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Project closure review",
+                MeetingDate = now.AddMonths(-2).AddDays(-4),
+                FacilitatorId = projectManager.Id,
+                MeetingType = "Closure",
+                Minutes = "Confirmed deliverable acceptance, open item disposition, and finance handoff.",
+                AttendeesJson = JsonSerializer.Serialize(new[] { sponsor.Email, projectManager.Email, financeOwner.Email }),
+                CreatedAt = now.AddMonths(-2).AddDays(-4),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectActionItems.Add(new ProjectActionItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                MeetingMinuteId = meetingId,
+                Title = "Archive final asset handover pack",
+                Description = "Move closure evidence to long-term archive and mark archive complete.",
+                OwnerId = financeOwner.Id,
+                DueDate = now.Date.AddMonths(-1),
+                CompletedAt = now.AddMonths(-1).AddDays(-2),
+                Status = "Closed",
+                Priority = "Normal",
+                CreatedAt = now.AddMonths(-2).AddDays(-4),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectLessonsLearned.Add(new ProjectLessonLearned
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Title = "Lock vendor lead times earlier in capex planning",
+                Category = "Procurement",
+                Description = "Long-lead equipment should be confirmed before final baseline approval.",
+                Recommendation = "Move vendor commitment review into initiation and baseline gates.",
+                AppliedPhase = "Planning",
+                Visibility = "Internal",
+                CreatedAt = now.AddMonths(-2).AddDays(-2),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectClosures.Add(new ProjectClosure
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Status = ProjectStatuses.Closed,
+                SubmittedAt = now.AddMonths(-2).AddDays(-5),
+                ApprovedAt = now.AddMonths(-2).AddDays(-3),
+                ApprovedById = sponsor.Id,
+                FinalBudget = 98000m,
+                FinalCost = 94200m,
+                DeliverablesAccepted = true,
+                TasksCompletedOrWaived = true,
+                AssetsReconciled = true,
+                OpenItemsDisposed = true,
+                ClosureChecklistJson = JsonSerializer.Serialize(new
+                {
+                    finalReview = true,
+                    deliverablesAccepted = true,
+                    financeClosed = true,
+                    documentsArchived = true
+                }),
+                OpenItemsDisposition = "All remaining minor punch items were resolved before archive.",
+                AssetReconciliationNotes = "Warehouse equipment transfers were reconciled against the asset register.",
+                LessonsLearnedSummary = "Earlier vendor commitment reviews reduced late delivery risk.",
+                PostImplementationReview = "Operational throughput improved and downtime fell within the first month.",
+                CreatedAt = now.AddMonths(-2).AddDays(-5),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectDocuments.Add(new ProjectDocument
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                DocumentName = "Final completion certificate",
+                Category = "Closure",
+                DocumentType = "PDF",
+                FilePath = "/seed/projects/PRJ-DEMO-1003/final-completion-certificate.pdf",
+                FileType = "application/pdf",
+                FileSize = 86000,
+                VersionLabel = "1.0",
+                Status = "Approved",
+                EffectiveDate = now.Date.AddMonths(-2).AddDays(-6),
+                IsExternalVisible = true,
+                CreatedAt = now.AddMonths(-2).AddDays(-6),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectComments.Add(new ProjectComment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                CommentType = "Closure",
+                Body = "Project closed after final acceptance, revenue recognition, and reconciliation.",
+                CreatedAt = now.AddMonths(-2).AddDays(-3),
+                CreatedBy = "System"
+            });
+
+            _context.ProjectExternalAccessPolicies.Add(new ProjectExternalAccessPolicy
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ProjectId = projectId,
+                BusinessPartnerId = customer.Id,
+                ArtifactType = "Deliverable",
+                AccessLevel = "Read",
+                CanComment = false,
+                CanUpload = false,
+                CanApprove = true,
+                Notes = "Customer can review archived completion and acceptance artifacts.",
+                CreatedAt = now.AddMonths(-3),
+                CreatedBy = "System"
+            });
+        }
+
+        private async Task<string> ResolveBaseCurrencyCodeAsync(Guid tenantId)
+        {
+            var currency = await _context.Currencies
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.IsBaseCurrency && !item.IsDeleted)
+                .OrderByDescending(item => item.IsActive)
+                .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .Select(item => item.CurrencyCode)
+                .FirstOrDefaultAsync();
+
+            if (!string.IsNullOrWhiteSpace(currency))
+            {
+                return currency.Trim().ToUpperInvariant();
+            }
+
+            var tenantCurrency = await _context.Tenants
+                .AsNoTracking()
+                .Where(item => item.Id == tenantId)
+                .Select(item => item.BaseCurrency)
+                .FirstOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(tenantCurrency) ? "GHS" : tenantCurrency.Trim().ToUpperInvariant();
+        }
+
+        private async Task EnsureWorkflowDefinitionSeededAsync(
+            Guid tenantId,
+            string entityCode,
+            string entityName,
+            string? entityClassName,
+            string definitionName,
+            string description,
+            IReadOnlyCollection<string> approvalRoleNames)
+        {
+            var entityType = await _context.WorkflowEntityTypes
+                .FirstOrDefaultAsync(et => !et.IsDeleted && et.TenantId == tenantId && et.Code == entityCode);
+
+            if (entityType == null)
+            {
+                entityType = new WorkflowEntityType
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = entityCode,
+                    Name = entityName,
+                    Description = description,
+                    EntityClassName = entityClassName,
+                    IsActive = true,
+                    DisplayOrder = 60,
+                    Icon = "workflow",
+                    ColorCode = "#0F766E",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.WorkflowEntityTypes.Add(entityType);
+                await _context.SaveChangesAsync();
+            }
+
+            var hasDefinition = await _context.WorkflowDefinitions
+                .AnyAsync(d => !d.IsDeleted && d.TenantId == tenantId && d.EntityTypeId == entityType.Id);
+
+            if (hasDefinition)
+            {
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            var definitionId = Guid.NewGuid();
+            var draftStep = new WorkflowStep
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                WorkflowDefinitionId = definitionId,
+                Name = "Draft",
+                StepType = WorkflowStepType.Manual,
+                Order = 1,
+                IsStartStep = true,
+                IsRequired = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            };
+            var approvalStep = new WorkflowStep
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                WorkflowDefinitionId = definitionId,
+                Name = "PendingApproval",
+                StepType = WorkflowStepType.Approval,
+                Order = 2,
+                IsRequired = true,
+                Configuration = BuildApprovalConfigurationJson(approvalRoleNames),
+                CreatedAt = now,
+                CreatedBy = "System"
+            };
+            var approvedStep = new WorkflowStep
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                WorkflowDefinitionId = definitionId,
+                Name = entityCode.Equals("ProjectClosure", StringComparison.OrdinalIgnoreCase) ? ProjectStatuses.Closed : "Approved",
+                StepType = WorkflowStepType.Manual,
+                Order = 3,
+                IsEndStep = true,
+                IsRequired = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            };
+
+            _context.WorkflowDefinitions.Add(new WorkflowDefinition
+            {
+                Id = definitionId,
+                TenantId = tenantId,
+                Name = definitionName,
+                Description = description,
+                EntityTypeId = entityType.Id,
+                Version = 1,
+                IsActive = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+
+            _context.WorkflowSteps.AddRange(draftStep, approvalStep, approvedStep);
+            _context.WorkflowTransitions.AddRange(
+                new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    WorkflowDefinitionId = definitionId,
+                    FromStepId = draftStep.Id,
+                    ToStepId = approvalStep.Id,
+                    Name = "Submit",
+                    IsDefault = true,
+                    Priority = 0,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                },
+                new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    WorkflowDefinitionId = definitionId,
+                    FromStepId = approvalStep.Id,
+                    ToStepId = approvedStep.Id,
+                    Name = "Approve",
+                    IsDefault = true,
+                    Priority = 0,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                });
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static string BuildApprovalConfigurationJson(IReadOnlyCollection<string> approvalRoleNames)
+        {
+            var configuration = new WorkflowStepConfigurationDto
+            {
+                ApprovalConfig = new WorkflowApprovalConfigDto
+                {
+                    ApprovalType = WorkflowApprovalType.Single,
+                    MinApprovalsRequired = 1,
+                    RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
+                    ApproverRules = approvalRoleNames
+                        .Where(role => !string.IsNullOrWhiteSpace(role))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Select(role => new WorkflowAssignmentRuleDto
+                        {
+                            AssignmentType = WorkflowAssignmentType.Role,
+                            Role = role
+                        })
+                        .ToList()
+                }
+            };
+
+            return JsonSerializer.Serialize(configuration);
         }
 
         private async Task EnsureEhcWorkflowSeededAsync()
@@ -1266,6 +5136,10 @@ namespace ErpSystem.Web.Services
         {
             _logger.LogInformation("Seeding test users...");
 
+            await SeedRolesAsync();
+            await SeedRolePermissionAssignmentsAsync();
+            await SeedDefaultTenantAsync();
+
             var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
             if (defaultTenant == null)
             {
@@ -1277,22 +5151,22 @@ namespace ErpSystem.Web.Services
             // Ensure these accounts exist and remain usable on every Development seed run.
             // (CreateTestUserAsync is idempotent and will update existing users as needed.)
             await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
-                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.LDAP);
+                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
-                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager, AuthenticationProvider.LDAP);
+                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
-                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee, AuthenticationProvider.LDAP);
+                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("helpdesk.agent", "helpdesk.agent@default.com", "Helpdesk123!",
-                "Helpdesk", "Agent", defaultTenant.Id, Constants.Roles.HelpdeskAgent, AuthenticationProvider.LDAP);
+                "Helpdesk", "Agent", defaultTenant.Id, Constants.Roles.HelpdeskAgent, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("helpdesk.supervisor", "helpdesk.supervisor@default.com", "Helpdesk123!",
-                "Helpdesk", "Supervisor", defaultTenant.Id, Constants.Roles.HelpdeskSupervisor, AuthenticationProvider.LDAP);
+                "Helpdesk", "Supervisor", defaultTenant.Id, Constants.Roles.HelpdeskSupervisor, AuthenticationProvider.Local);
 
             await CreateTestUserAsync("helpdesk.manager", "helpdesk.manager@default.com", "Helpdesk123!",
-                "Helpdesk", "Manager", defaultTenant.Id, Constants.Roles.HelpdeskManager, AuthenticationProvider.LDAP);
+                "Helpdesk", "Manager", defaultTenant.Id, Constants.Roles.HelpdeskManager, AuthenticationProvider.Local);
 
             // External portal user (Local auth) for testing support portal flows
             await CreateTestUserAsync("external", "external@default.com", "External123!",
@@ -1300,17 +5174,17 @@ namespace ErpSystem.Web.Services
 
             _logger.LogInformation("Test users seeding completed");
         }
-
+        
         public async Task SeedMaintenanceE2ETestDataAsync()
         {
             _logger.LogInformation("Seeding Maintenance E2E test data...");
-
+            
             try
             {
                 // Create a logger factory to get the properly typed logger
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<MaintenanceE2ETestSeeder>();
-
+                
                 var seeder = new MaintenanceE2ETestSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("Maintenance E2E test data seeding completed");
@@ -1325,12 +5199,12 @@ namespace ErpSystem.Web.Services
         private async Task SeedHRDataAsync()
         {
             _logger.LogInformation("Seeding HR data...");
-
+            
             try
             {
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<HRDataSeeder>();
-
+                
                 var seeder = new HRDataSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("HR data seeding completed");
@@ -1345,12 +5219,12 @@ namespace ErpSystem.Web.Services
         private async Task SeedMaintenanceConfigurationAsync()
         {
             _logger.LogInformation("Seeding maintenance configuration...");
-
+            
             try
             {
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<MaintenanceConfigurationSeeder>();
-
+                
                 var seeder = new MaintenanceConfigurationSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("Maintenance configuration seeding completed");
@@ -1361,16 +5235,16 @@ namespace ErpSystem.Web.Services
                 throw;
             }
         }
-
+        
         private async Task SeedMaintenanceComprehensiveDataAsync()
         {
             _logger.LogInformation("Seeding comprehensive maintenance data...");
-
+            
             try
             {
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<MaintenanceComprehensiveDataSeeder>();
-
+                
                 var seeder = new MaintenanceComprehensiveDataSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("Comprehensive maintenance data seeding completed");
@@ -1381,11 +5255,11 @@ namespace ErpSystem.Web.Services
                 throw;
             }
         }
-
+        
         private async Task SeedQualityControlChecklistsAsync()
         {
             _logger.LogInformation("Seeding quality control checklists...");
-
+            
             try
             {
                 var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
@@ -1394,10 +5268,10 @@ namespace ErpSystem.Web.Services
                     _logger.LogWarning("Default tenant not found, skipping QC checklist seeding");
                     return;
                 }
-
+                
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<QualityControlChecklistSeeder>();
-
+                
                 var seeder = new QualityControlChecklistSeeder(_context, seederLogger);
                 await seeder.SeedAsync(defaultTenant.Id);
                 _logger.LogInformation("Quality control checklists seeding completed");
@@ -1405,6 +5279,26 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error seeding quality control checklists");
+                throw;
+            }
+        }
+
+        private async Task SeedFinanceDataAsync()
+        {
+            _logger.LogInformation("Seeding finance data...");
+            
+            try
+            {
+                var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+                var seederLogger = loggerFactory.CreateLogger<FinanceDataSeeder>();
+                
+                var seeder = new FinanceDataSeeder(_context, seederLogger);
+                await seeder.SeedAsync();
+                _logger.LogInformation("Finance data seeding completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error seeding finance data");
                 throw;
             }
         }
@@ -1456,7 +5350,7 @@ namespace ErpSystem.Web.Services
                     }
                     else
                     {
-                        _logger.LogError("Failed to create role {RoleName}: {Errors}",
+                        _logger.LogError("Failed to create role {RoleName}: {Errors}", 
                             roleInfo.Name, string.Join(", ", result.Errors.Select(e => e.Description)));
                     }
                 }
@@ -1466,6 +5360,7 @@ namespace ErpSystem.Web.Services
         private async Task SeedDefaultTenantAsync()
         {
             var existingTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
+
             if (existingTenant == null)
             {
                 var tenant = new Tenant
@@ -1486,7 +5381,7 @@ namespace ErpSystem.Web.Services
 
                 _context.Tenants.Add(tenant);
                 await _context.SaveChangesAsync();
-                _logger.LogDebug("Created default tenant: {TenantName}", tenant.Name);
+                _logger.LogDebug("Created default tenant: {TenantName} with ID {TenantId}", tenant.Name, tenant.Id);
             }
         }
 
@@ -1599,6 +5494,117 @@ namespace ErpSystem.Web.Services
             {
                 _logger.LogInformation("Default tenant modules already up to date for {TenantName}.", defaultTenant.Name);
             }
+        }
+
+        private async Task SeedRolePermissionAssignmentsAsync()
+        {
+            var helpdeskPermissions = new[]
+            {
+                new
+                {
+                    Name = "enquiry.internal.access",
+                    DisplayName = "Access Internal Enquiry",
+                    Description = "Access the internal enquiry backoffice branch",
+                    Category = "Helpdesk Branch Access"
+                },
+                new
+                {
+                    Name = "enquiry.external.access",
+                    DisplayName = "Access External Enquiry",
+                    Description = "Access the external enquiry backoffice branch",
+                    Category = "Helpdesk Branch Access"
+                },
+                new
+                {
+                    Name = "support.internal.access",
+                    DisplayName = "Access Internal Helpdesk & Complaints",
+                    Description = "Access the internal helpdesk and complaints backoffice branch",
+                    Category = "Helpdesk Branch Access"
+                },
+                new
+                {
+                    Name = "support.external.access",
+                    DisplayName = "Access External Helpdesk & Complaints",
+                    Description = "Access the external helpdesk and complaints backoffice branch",
+                    Category = "Helpdesk Branch Access"
+                }
+            };
+
+            foreach (var permissionInfo in helpdeskPermissions)
+            {
+                var existingPermission = await _context.Permissions
+                    .FirstOrDefaultAsync(p => p.Name == permissionInfo.Name);
+
+                if (existingPermission != null)
+                {
+                    continue;
+                }
+
+                _context.Permissions.Add(new Permission
+                {
+                    Id = Guid.NewGuid(),
+                    Name = permissionInfo.Name,
+                    DisplayName = permissionInfo.DisplayName,
+                    Description = permissionInfo.Description,
+                    Category = permissionInfo.Category,
+                    IsSystemPermission = true,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                });
+            }
+
+            await _context.SaveChangesAsync();
+
+            var helpdeskRoles = new[]
+            {
+                Constants.Roles.HelpdeskAgent,
+                Constants.Roles.HelpdeskSupervisor,
+                Constants.Roles.HelpdeskManager
+            };
+
+            var permissions = await _context.Permissions
+                .Where(p => helpdeskPermissions.Select(info => info.Name).Contains(p.Name))
+                .ToListAsync();
+
+            if (!permissions.Any())
+            {
+                _logger.LogWarning("Helpdesk branch permissions not found yet; skipping role-permission seed.");
+                return;
+            }
+
+            foreach (var roleName in helpdeskRoles)
+            {
+                var role = await _roleManager.FindByNameAsync(roleName);
+                if (role == null)
+                {
+                    continue;
+                }
+
+                var existingPermissionIds = await _context.RolePermissions
+                    .Where(rp => rp.RoleId == role.Id)
+                    .Select(rp => rp.PermissionId)
+                    .ToListAsync();
+
+                var missingPermissions = permissions
+                    .Where(permission => !existingPermissionIds.Contains(permission.Id))
+                    .Select(permission => new RolePermission
+                    {
+                        RoleId = role.Id,
+                        PermissionId = permission.Id,
+                        GrantedAt = DateTime.UtcNow,
+                        GrantedBy = "System"
+                    })
+                    .ToList();
+
+                if (missingPermissions.Count == 0)
+                {
+                    continue;
+                }
+
+                _context.RolePermissions.AddRange(missingPermissions);
+            }
+
+            await _context.SaveChangesAsync();
         }
 
         private async Task EnsureEhcKnowledgeBaseSeededAsync()
@@ -1718,6 +5724,8 @@ namespace ErpSystem.Web.Services
                     await _userManager.UpdateAsync(existingUser);
                 }
 
+                await EnsureTestUserTenantAccessAsync(existingUser.Id, tenantId, roleName);
+
                 // Ensure role assignment
                 var inRole = await _userManager.IsInRoleAsync(existingUser, roleName);
                 if (!inRole)
@@ -1767,6 +5775,8 @@ namespace ErpSystem.Web.Services
             var result = await _userManager.CreateAsync(user, password);
             if (result.Succeeded)
             {
+                await EnsureTestUserTenantAccessAsync(user.Id, tenantId, roleName);
+
                 // Add user to role
                 var roleResult = await _userManager.AddToRoleAsync(user, roleName);
                 if (roleResult.Succeeded)
@@ -1784,6 +5794,59 @@ namespace ErpSystem.Web.Services
                 _logger.LogError("Failed to create test user {Username}: {Errors}",
                     username, string.Join(", ", result.Errors.Select(e => e.Description)));
             }
+        }
+
+        private async Task EnsureTestUserTenantAccessAsync(Guid userId, Guid tenantId, string roleName)
+        {
+            var accessLevel = string.Equals(roleName, Constants.Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase)
+                ? UserTenantAccessLevel.Admin
+                : UserTenantAccessLevel.Standard;
+
+            var relationships = await _context.UserTenants
+                .Where(ut => ut.UserId == userId && !ut.IsDeleted)
+                .ToListAsync();
+
+            var targetRelationship = relationships.FirstOrDefault(ut => ut.TenantId == tenantId);
+            if (targetRelationship == null)
+            {
+                targetRelationship = new UserTenant
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    TenantId = tenantId,
+                    AccessLevel = accessLevel,
+                    Status = UserTenantStatus.Active,
+                    IsDefault = true,
+                    GrantedAt = DateTime.UtcNow,
+                    GrantedBy = "System",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.UserTenants.Add(targetRelationship);
+            }
+            else
+            {
+                targetRelationship.AccessLevel = accessLevel;
+                targetRelationship.Status = UserTenantStatus.Active;
+                targetRelationship.IsDefault = true;
+                targetRelationship.ExpiresAt = null;
+                targetRelationship.SuspendedAt = null;
+                targetRelationship.ReactivatedAt ??= DateTime.UtcNow;
+                targetRelationship.GrantedAt = targetRelationship.GrantedAt == default ? DateTime.UtcNow : targetRelationship.GrantedAt;
+                targetRelationship.GrantedBy ??= "System";
+                targetRelationship.UpdatedAt = DateTime.UtcNow;
+                targetRelationship.UpdatedBy = "System";
+            }
+
+            foreach (var relationship in relationships.Where(ut => ut.TenantId != tenantId && ut.IsDefault))
+            {
+                relationship.IsDefault = false;
+                relationship.UpdatedAt = DateTime.UtcNow;
+                relationship.UpdatedBy = "System";
+            }
+
+            await _context.SaveChangesAsync();
         }
     }
 

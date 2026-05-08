@@ -2508,7 +2508,7 @@ public enum CompanyAssetStatus
     Reserved = 7
 }
 
-public enum AssetCondition
+public enum HRAssetCondition
 {
     [Description("Excellent")]
     Excellent = 1,
@@ -2667,7 +2667,7 @@ public enum AssetRequisitionStatus
     Cancelled = 6
 }
 
-public enum AssetTransferType
+public enum HRAssetTransferType
 {
     [Description("Employee to Employee")]
     EmployeeToEmployee = 1,
@@ -3507,7 +3507,7 @@ public enum FiscalYearStatus
     Archived = 3
 }
 
-public enum PeriodType
+public enum HRSchedulePeriodType
 {
     [Description("Quarter")]
     Quarter = 1,

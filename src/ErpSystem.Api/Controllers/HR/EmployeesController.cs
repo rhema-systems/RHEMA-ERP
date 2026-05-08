@@ -3097,7 +3097,7 @@ public class EmployeesController : ControllerBase
         }
     }
 
-[HttpGet("{employeeId:guid}/bank-details")]
+    [HttpGet("{employeeId:guid}/bank-details")]
     public async Task<ActionResult<IEnumerable<EmployeeBankDetailDto>>> GetBankDetails(Guid employeeId, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");

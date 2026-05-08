@@ -13,6 +13,10 @@ import { tenantService } from '../../services/tenant';
 import { authService } from '../../services/auth';
 import { apiService, type UserTenantInfo } from '../../services/api.service';
 import type { Tenant } from '../../types';
+import {
+  getRedirectTargetFromCurrentLocation,
+  resolveRedirectTarget,
+} from '../../lib/auth-redirect';
 
 export default function TenantSelectPage() {
   const router = useRouter();
@@ -45,11 +49,15 @@ export default function TenantSelectPage() {
     onSuccess: (response, tenant) => {
       setCurrentTenantCode(tenant.tenantCode);
 
-      const authProvider = userInfo?.authenticationProvider || authService.getStoredUser()?.authenticationProvider || null;
+      const roles = userInfo?.roles || authService.getStoredUser()?.roles || [];
+      const isExternalUser = roles.includes('ExternalUser');
       const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
+      const redirectTarget = getRedirectTargetFromCurrentLocation();
+      const fallbackPath = isExternalUser
+        ? (isSupportHost ? '/' : '/external-portal')
+        : '/dashboard';
 
-      // Local-auth users are external-portal users; internal users go to the ERP dashboard.
-      router.push(authProvider === 'Local' ? (isSupportHost ? '/' : '/external-portal') : '/dashboard');
+      router.push(resolveRedirectTarget(redirectTarget, fallbackPath));
     },
     onError: (error) => {
       console.error('Error selecting tenant:', error);

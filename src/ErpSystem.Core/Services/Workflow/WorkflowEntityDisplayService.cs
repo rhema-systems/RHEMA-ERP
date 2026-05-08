@@ -1,4 +1,5 @@
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Workflow;
@@ -16,6 +17,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
     private readonly IPurchaseRequisitionRepository _purchaseRequisitionRepository;
     private readonly IPurchaseOrderRepository _purchaseOrderRepository;
     private readonly ITenderRepository _tenderRepository;
+    private readonly IProjectRepository _projectRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IJobCardRepository _jobCardRepository;
     private readonly ErpSystem.Core.Interfaces.Inventory.IInventoryTransferRepository _inventoryTransferRepository;
@@ -27,6 +29,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
         IPurchaseRequisitionRepository purchaseRequisitionRepository,
         IPurchaseOrderRepository purchaseOrderRepository,
         ITenderRepository tenderRepository,
+        IProjectRepository projectRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         IJobCardRepository jobCardRepository,
         ErpSystem.Core.Interfaces.Inventory.IInventoryTransferRepository inventoryTransferRepository,
@@ -37,6 +40,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
         _purchaseRequisitionRepository = purchaseRequisitionRepository;
         _purchaseOrderRepository = purchaseOrderRepository;
         _tenderRepository = tenderRepository;
+        _projectRepository = projectRepository;
         _businessPartnerRepository = businessPartnerRepository;
         _jobCardRepository = jobCardRepository;
         _inventoryTransferRepository = inventoryTransferRepository;
@@ -131,6 +135,42 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityNumber = tender?.TenderNumber;
                 info.EntityName = tender?.Title;
                 info.ActionUrl = $"/procurement/tenders/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("Project") || key == Normalize("PROJECT"))
+            {
+                var project = await _projectRepository.GetByIdAsync(entityId);
+                info.EntityType = "Project";
+                info.EntityNumber = project?.ProjectCode;
+                info.EntityName = project?.Title;
+                info.ActionUrl = $"/development/projects/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("ProjectDeliverable") || key == Normalize("PROJECT_DELIVERABLE") || key == Normalize("Project Deliverable"))
+            {
+                var deliverable = await _unitOfWork.Repository<ErpSystem.Core.Entities.Projects.ProjectDeliverable>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project);
+                info.EntityType = "ProjectDeliverable";
+                info.EntityNumber = deliverable?.Project?.ProjectCode;
+                info.EntityName = deliverable == null
+                    ? null
+                    : $"{deliverable.Project?.Title ?? "Project"} / {deliverable.Title}";
+                info.ActionUrl = deliverable == null ? null : $"/development/projects/{deliverable.ProjectId}";
+                return info;
+            }
+
+            if (key == Normalize("ProjectClosure") || key == Normalize("PROJECT_CLOSURE") || key == Normalize("Project Closure"))
+            {
+                var closure = await _unitOfWork.Repository<ErpSystem.Core.Entities.Projects.ProjectClosure>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project);
+                info.EntityType = "ProjectClosure";
+                info.EntityNumber = closure?.Project?.ProjectCode;
+                info.EntityName = closure == null
+                    ? null
+                    : $"{closure.Project?.Title ?? "Project"} / Closure";
+                info.ActionUrl = closure == null ? null : $"/development/projects/{closure.ProjectId}";
                 return info;
             }
 

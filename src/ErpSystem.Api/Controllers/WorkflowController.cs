@@ -1276,6 +1276,8 @@ public class WorkflowController : ControllerBase
             new("InventoryRequisition", "Inventory requisitions", "ClipboardList", "#0EA5E9", 68),
             new("Employee", "Human resources employees", "Users", "#6366F1", 70),
             new("Project", "Project management items", "CheckCircle", "#22C55E", 80),
+            new("ProjectDeliverable", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
+            new("ProjectClosure", "Project closure approval and close-out governance", "Flag", "#15803D", 84),
             new("Customer", "Sales customers", "User", "#0EA5E9", 90),
             new("BusinessPartner", "Business partner onboarding/approvals (suppliers/contractors/customers)", "Building", "#64748B", 95),
             new("Vendor", "Business partners and vendors", "Building", "#64748B", 100),
@@ -1780,7 +1782,7 @@ public class WorkflowController : ControllerBase
     /// </summary>
     [HttpGet("administration/summary")]
     [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager")]
-    public async Task<ActionResult<WorkflowSummaryDto>> GetWorkflowSummary()
+    public ActionResult<WorkflowSummaryDto> GetWorkflowSummary()
     {
         try
         {

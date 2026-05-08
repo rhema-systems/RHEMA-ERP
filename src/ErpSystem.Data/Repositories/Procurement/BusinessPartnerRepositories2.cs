@@ -13,7 +13,7 @@ public class LicenseTypeRepository : GenericRepository<LicenseType>, ILicenseTyp
 {
     public LicenseTypeRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<LicenseType?> GetByIdAsync(Guid id)
+    public override async Task<LicenseType?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(lt => lt.Id == id && !lt.IsDeleted)
@@ -32,13 +32,13 @@ public class LicenseTypeRepository : GenericRepository<LicenseType>, ILicenseTyp
         return await AddAsync(licenseType);
     }
 
-    public async Task<LicenseType> UpdateAsync(LicenseType licenseType)
+    public new async Task<LicenseType> UpdateAsync(LicenseType licenseType)
     {
         await base.UpdateAsync(licenseType);
         return licenseType;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var licenseType = await GetByIdAsync(id);
         if (licenseType != null)
@@ -100,7 +100,7 @@ public class BusinessPartnerLicenseRepository : GenericRepository<BusinessPartne
 {
     public BusinessPartnerLicenseRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<BusinessPartnerLicense?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartnerLicense?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(l => l.Id == id && !l.IsDeleted)
@@ -113,13 +113,13 @@ public class BusinessPartnerLicenseRepository : GenericRepository<BusinessPartne
         return await AddAsync(license);
     }
 
-    public async Task<BusinessPartnerLicense> UpdateAsync(BusinessPartnerLicense license)
+    public new async Task<BusinessPartnerLicense> UpdateAsync(BusinessPartnerLicense license)
     {
         await base.UpdateAsync(license);
         return license;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var license = await GetByIdAsync(id);
         if (license != null)
@@ -216,7 +216,7 @@ public class BusinessPartnerContactRepository : GenericRepository<BusinessPartne
 {
     public BusinessPartnerContactRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<BusinessPartnerContact?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartnerContact?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(c => c.Id == id && !c.IsDeleted)
@@ -228,13 +228,13 @@ public class BusinessPartnerContactRepository : GenericRepository<BusinessPartne
         return await AddAsync(contact);
     }
 
-    public async Task<BusinessPartnerContact> UpdateAsync(BusinessPartnerContact contact)
+    public new async Task<BusinessPartnerContact> UpdateAsync(BusinessPartnerContact contact)
     {
         await base.UpdateAsync(contact);
         return contact;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var contact = await GetByIdAsync(id);
         if (contact != null)

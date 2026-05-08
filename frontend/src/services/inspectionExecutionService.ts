@@ -291,7 +291,7 @@ class InspectionExecutionService {
   async completeInspection(request: CompleteInspectionRequest): Promise<InspectionExecution> {
     try {
       if (this.useBackend) {
-        const response = await api.post('/api/inspections/complete', request);
+        const response = await apiService.post('/api/inspections/complete', request);
         return response.data;
       }
     } catch (error) {
@@ -329,7 +329,7 @@ class InspectionExecutionService {
   async getInspectionsByWorkOrder(workOrderId: string): Promise<InspectionExecution[]> {
     try {
       if (this.useBackend) {
-        const response = await api.get(`/api/inspections/work-order/${workOrderId}`);
+        const response = await apiService.get(`/api/inspections/work-order/${workOrderId}`);
         return response.data;
       }
     } catch (error) {

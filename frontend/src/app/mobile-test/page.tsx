@@ -49,7 +49,7 @@ const tableActions = [
 
 export default function MobileTestPage() {
   const isTouchDevice = useTouch()
-  const isMobileDevice = useMobile()
+  const { isMobile: isMobileDevice } = useMobile()
   const [refreshing, setRefreshing] = useState(false)
   const [formData, setFormData] = useState({
     name: '',

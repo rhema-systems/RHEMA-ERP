@@ -24,24 +24,6 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
-// DTO for warehouse inventory items returned by the by-warehouse endpoint
-interface WarehouseInventoryItemDto {
-  inventoryItemId: string;
-  itemCode: string;
-  itemName: string;
-  itemType: number;
-  description?: string;
-  unitOfMeasure?: string;
-  currentStock: number;
-  availableStock: number;
-  allocatedStock: number;
-  unitCost: number;
-  dailyRentalRate: number;
-  categoryName?: string;
-  isSerialTracked?: boolean;
-  isLotTracked?: boolean;
-}
-
 interface TransferDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -85,7 +67,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [transferDetail, setTransferDetail] = useState<InventoryTransferDetailDto | null>(null);
-  const [warehouseInventoryItems, setWarehouseInventoryItems] = useState<WarehouseInventoryItemDto[]>([]);
+  const [warehouseInventoryItems, setWarehouseInventoryItems] = useState<InventoryItemDto[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [sourceLocations, setSourceLocations] = useState<WarehouseLocationDto[]>([]);
   const [destinationLocations, setDestinationLocations] = useState<WarehouseLocationDto[]>([]);
@@ -170,7 +152,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
       // Load items from the source warehouse - endpoint returns items WITH stock
       const items = await inventoryManagementService.getInventoryByWarehouse(warehouseId);
       // Filter to only show items with available stock > 0
-      const itemsWithStock = items.filter((item: WarehouseInventoryItemDto) => item.availableStock > 0);
+      const itemsWithStock = items.filter((item) => item.availableStock > 0);
       setWarehouseInventoryItems(itemsWithStock);
     } catch (err) {
       console.error('Error loading warehouse inventory items:', err);
@@ -241,12 +223,11 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
   const transferAdditionalCost = transferDetail?.totalAdditionalCost ?? (transferShippingCost + transferMiscCost);
   const transferGrandTotal = transferSubtotal + transferAdditionalCost;
 
-  // Use inventoryItemId field for warehouse inventory items
-  const selectedItem = warehouseInventoryItems.find(i => i.inventoryItemId === itemFormData.inventoryItemId);
+  const selectedItem = warehouseInventoryItems.find(i => i.id === itemFormData.inventoryItemId);
 
   // Filter warehouse inventory items by search term
   const filteredInventoryItems = warehouseInventoryItems.filter(item =>
-    item.itemName.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+    item.name.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
     item.itemCode.toLowerCase().includes(itemSearchTerm.toLowerCase())
   );
 
@@ -742,10 +723,10 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
                     </SelectTrigger>
                     <SelectContent className="max-h-60">
                       {filteredInventoryItems.slice(0, 50).map(item => (
-                        <SelectItem key={item.inventoryItemId} value={item.inventoryItemId}>
+                        <SelectItem key={item.id} value={item.id}>
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-xs">{item.itemCode}</span>
-                            <span>{item.itemName}</span>
+                            <span>{item.name}</span>
                             <span className="text-muted-foreground text-xs">({item.availableStock} avail)</span>
                             {item.isSerialTracked && <Barcode className="h-3 w-3 text-blue-500" />}
                             {item.isLotTracked && <Layers className="h-3 w-3 text-purple-500" />}
@@ -767,7 +748,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
                         </div>
                         <div>
                           <span className="text-muted-foreground">Unit Cost:</span>
-                          <span className="ml-2 font-medium">${selectedItem.unitCost?.toFixed(2)}</span>
+                          <span className="ml-2 font-medium">${selectedItem.currentCost.toFixed(2)}</span>
                         </div>
                         <div className="flex items-center gap-1">
                           {selectedItem.isSerialTracked && (

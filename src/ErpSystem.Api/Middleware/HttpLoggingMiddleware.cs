@@ -8,8 +8,9 @@ public class HttpLoggingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<HttpLoggingMiddleware> _logger;
-    private readonly IWebHostEnvironment _environment;
+    private readonly bool _logBodies;
     private readonly string _httpLogsDirectory;
+    private readonly int _maxBodyLength;
     private static readonly SemaphoreSlim _fileLock = new(1, 1);
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -27,11 +28,16 @@ public class HttpLoggingMiddleware
         "/health", "/swagger", "/api/health"
     };
 
-    public HttpLoggingMiddleware(RequestDelegate next, ILogger<HttpLoggingMiddleware> logger, IWebHostEnvironment environment)
+    public HttpLoggingMiddleware(
+        RequestDelegate next,
+        ILogger<HttpLoggingMiddleware> logger,
+        IWebHostEnvironment environment,
+        IConfiguration configuration)
     {
         _next = next;
         _logger = logger;
-        _environment = environment;
+        _logBodies = configuration.GetValue("HttpRequestResponseLogging:LogBodies", false);
+        _maxBodyLength = Math.Max(256, configuration.GetValue("HttpRequestResponseLogging:MaxBodyLength", 4000));
         _httpLogsDirectory = Path.Combine(Directory.GetCurrentDirectory(), "http-logs");
         if (!Directory.Exists(_httpLogsDirectory))
         {
@@ -78,7 +84,7 @@ public class HttpLoggingMiddleware
         {
             var request = context.Request;
             request.EnableBuffering();
-            var requestBody = await ReadRequestBodyAsync(request);
+            var requestBody = _logBodies ? await ReadRequestBodyAsync(request) : null;
 
             return new
             {
@@ -108,7 +114,7 @@ public class HttpLoggingMiddleware
         try
         {
             var response = context.Response;
-            var responseBody = await ReadResponseBodyAsync(response);
+            var responseBody = _logBodies ? await ReadResponseBodyAsync(response) : null;
 
             return new
             {
@@ -175,7 +181,7 @@ public class HttpLoggingMiddleware
         var body = await reader.ReadToEndAsync();
         request.Body.Seek(0, SeekOrigin.Begin);
 
-        return TruncateIfNeeded(body, 10000);
+        return TruncateIfNeeded(body, _maxBodyLength);
     }
 
     private async Task<string?> ReadResponseBodyAsync(HttpResponse response)
@@ -191,7 +197,7 @@ public class HttpLoggingMiddleware
         var body = await reader.ReadToEndAsync();
         response.Body.Seek(0, SeekOrigin.Begin);
 
-        return TruncateIfNeeded(body, 10000);
+        return TruncateIfNeeded(body, _maxBodyLength);
     }
 
     private Dictionary<string, string> GetSafeHeaders(IHeaderDictionary headers)

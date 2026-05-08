@@ -47,6 +47,7 @@ public class SecurityService : ISecurityService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
     private readonly IUserService _userService;
+    private readonly ILdapAuthenticationService _ldapAuthenticationService;
     private readonly IUserSessionService _userSessionService;
     private readonly ITwoFactorAuthService _twoFactorAuthService;
     private readonly IDeviceSessionService _deviceSessionService;
@@ -56,6 +57,7 @@ public class SecurityService : ISecurityService
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
         IUserService userService,
+        ILdapAuthenticationService ldapAuthenticationService,
         IUserSessionService userSessionService,
         ITwoFactorAuthService twoFactorAuthService,
         IDeviceSessionService deviceSessionService,
@@ -64,6 +66,7 @@ public class SecurityService : ISecurityService
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
         _userService = userService;
+        _ldapAuthenticationService = ldapAuthenticationService;
         _userSessionService = userSessionService;
         _twoFactorAuthService = twoFactorAuthService;
         _deviceSessionService = deviceSessionService;
@@ -1085,14 +1088,7 @@ public class SecurityService : ISecurityService
                 userId.Value, !string.IsNullOrEmpty(user.AuthenticatorKey), request.VerificationCode);
 
             // ALWAYS verify the password first before doing anything
-            var passwordHasher = new PasswordHasher<ApplicationUser>();
-            var passwordVerificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
-
-            if (passwordVerificationResult == PasswordVerificationResult.Failed)
-            {
-                _logger.LogWarning("Password verification failed for user {UserId} during 2FA setup", userId.Value);
-                throw new ArgumentException("Incorrect password. Please check your password and try again.");
-            }
+            await VerifyTwoFactorConfirmationPasswordAsync(user, request.Password, "2FA setup");
 
             _logger.LogInformation("Password verified successfully for user {UserId}", userId.Value);
 
@@ -1162,14 +1158,7 @@ public class SecurityService : ISecurityService
             var user = await _userService.GetUserByIdAsync(userId.Value) ?? throw new InvalidOperationException("User not found");
 
             // Verify current password before disabling 2FA
-            var passwordHasher = new PasswordHasher<ApplicationUser>();
-            var passwordVerificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
-
-            if (passwordVerificationResult == PasswordVerificationResult.Failed)
-            {
-                _logger.LogWarning("Password verification failed for user {UserId} during 2FA disable", userId.Value);
-                throw new ArgumentException("Incorrect password. Please check your password and try again.");
-            }
+            await VerifyTwoFactorConfirmationPasswordAsync(user, request.Password, "2FA disable");
 
             _logger.LogInformation("Password verified successfully for user {UserId} - disabling 2FA", userId.Value);
 
@@ -1184,6 +1173,62 @@ public class SecurityService : ISecurityService
         {
             _logger.LogError(ex, "Error disabling two-factor authentication");
             throw;
+        }
+    }
+
+    private async Task VerifyTwoFactorConfirmationPasswordAsync(ApplicationUser user, string password, string operationName)
+    {
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            throw new ArgumentException("Password is required.");
+        }
+
+        if (user.AuthenticationProvider == AuthenticationProvider.LDAP)
+        {
+            var tenantId = _currentUserService.TenantId ?? user.TenantId;
+            var tenant = await _unitOfWork.Repository<Tenant>().GetByIdAsync(tenantId);
+            if (tenant == null)
+            {
+                _logger.LogWarning(
+                    "Tenant {TenantId} could not be resolved for LDAP password verification during {Operation} for user {UserId}",
+                    tenantId,
+                    operationName,
+                    user.Id);
+                throw new InvalidOperationException("Unable to validate your password in the current tenant context.");
+            }
+
+            var username = user.UserName ?? user.Email;
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                _logger.LogWarning(
+                    "Username/email missing for LDAP password verification during {Operation} for user {UserId}",
+                    operationName,
+                    user.Id);
+                throw new InvalidOperationException("Unable to validate your password for this account.");
+            }
+
+            var ldapResult = await _ldapAuthenticationService.AuthenticateAsync(username, password, tenant);
+            if (!ldapResult.Success)
+            {
+                _logger.LogWarning(
+                    "LDAP password verification failed for user {UserId} during {Operation}",
+                    user.Id,
+                    operationName);
+                throw new ArgumentException("Incorrect password. Please check your password and try again.");
+            }
+
+            return;
+        }
+
+        var passwordHasher = new PasswordHasher<ApplicationUser>();
+        var passwordVerificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash ?? string.Empty, password);
+        if (passwordVerificationResult == PasswordVerificationResult.Failed)
+        {
+            _logger.LogWarning(
+                "Password verification failed for user {UserId} during {Operation}",
+                user.Id,
+                operationName);
+            throw new ArgumentException("Incorrect password. Please check your password and try again.");
         }
     }
 

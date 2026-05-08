@@ -12,7 +12,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
 {
     public TenderRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<Tender?> GetByIdAsync(Guid id)
+    public override async Task<Tender?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(t => t.Id == id && !t.IsDeleted)
@@ -135,13 +135,13 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
         return tender;
     }
 
-    public async Task<Tender> UpdateAsync(Tender tender)
+    public new async Task<Tender> UpdateAsync(Tender tender)
     {
         _dbSet.Update(tender);
         return await Task.FromResult(tender);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var tender = await _dbSet.FindAsync(id);
         if (tender != null)
@@ -193,7 +193,7 @@ public class TenderItemRepository : GenericRepository<TenderItem>, ITenderItemRe
 {
     public TenderItemRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderItem?> GetByIdAsync(Guid id)
+    public override async Task<TenderItem?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(i => i.Id == id && !i.IsDeleted)
@@ -214,13 +214,13 @@ public class TenderItemRepository : GenericRepository<TenderItem>, ITenderItemRe
         return item;
     }
 
-    public async Task<TenderItem> UpdateAsync(TenderItem item)
+    public new async Task<TenderItem> UpdateAsync(TenderItem item)
     {
         _dbSet.Update(item);
         return await Task.FromResult(item);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var item = await _dbSet.FindAsync(id);
         if (item != null)
@@ -249,7 +249,7 @@ public class TenderDocumentRepository : GenericRepository<TenderDocument>, ITend
 {
     public TenderDocumentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderDocument?> GetByIdAsync(Guid id)
+    public override async Task<TenderDocument?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(d => d.Id == id && !d.IsDeleted)
@@ -280,13 +280,13 @@ public class TenderDocumentRepository : GenericRepository<TenderDocument>, ITend
         return document;
     }
 
-    public async Task<TenderDocument> UpdateAsync(TenderDocument document)
+    public new async Task<TenderDocument> UpdateAsync(TenderDocument document)
     {
         _dbSet.Update(document);
         return await Task.FromResult(document);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var document = await _dbSet.FindAsync(id);
         if (document != null)
@@ -305,7 +305,7 @@ public class TenderInvitationRepository : GenericRepository<TenderInvitation>, I
 {
     public TenderInvitationRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderInvitation?> GetByIdAsync(Guid id)
+    public override async Task<TenderInvitation?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(i => i.Id == id && !i.IsDeleted)
@@ -345,13 +345,13 @@ public class TenderInvitationRepository : GenericRepository<TenderInvitation>, I
         return invitation;
     }
 
-    public async Task<TenderInvitation> UpdateAsync(TenderInvitation invitation)
+    public new async Task<TenderInvitation> UpdateAsync(TenderInvitation invitation)
     {
         _dbSet.Update(invitation);
         return await Task.FromResult(invitation);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var invitation = await _dbSet.FindAsync(id);
         if (invitation != null)
@@ -382,7 +382,7 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         _currentUserProvider = currentUserProvider;
     }
 
-    public async Task<TenderBid?> GetByIdAsync(Guid id)
+    public override async Task<TenderBid?> GetByIdAsync(Guid id)
     {
         var query = _dbSet.Where(b => b.Id == id && !b.IsDeleted);
 
@@ -506,13 +506,13 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         return bid;
     }
 
-    public async Task<TenderBid> UpdateAsync(TenderBid bid)
+    public new async Task<TenderBid> UpdateAsync(TenderBid bid)
     {
         _dbSet.Update(bid);
         return await Task.FromResult(bid);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var bid = await _dbSet.FindAsync(id);
         if (bid != null)
@@ -572,7 +572,7 @@ public class TenderBidItemRepository : GenericRepository<TenderBidItem>, ITender
 {
     public TenderBidItemRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderBidItem?> GetByIdAsync(Guid id)
+    public override async Task<TenderBidItem?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(i => i.Id == id && !i.IsDeleted)
@@ -594,13 +594,13 @@ public class TenderBidItemRepository : GenericRepository<TenderBidItem>, ITender
         return item;
     }
 
-    public async Task<TenderBidItem> UpdateAsync(TenderBidItem item)
+    public new async Task<TenderBidItem> UpdateAsync(TenderBidItem item)
     {
         _dbSet.Update(item);
         return await Task.FromResult(item);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var item = await _dbSet.FindAsync(id);
         if (item != null)
@@ -629,7 +629,7 @@ public class TenderBidDocumentRepository : GenericRepository<TenderBidDocument>,
 {
     public TenderBidDocumentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderBidDocument?> GetByIdAsync(Guid id)
+    public override async Task<TenderBidDocument?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(d => d.Id == id && !d.IsDeleted)
@@ -651,13 +651,13 @@ public class TenderBidDocumentRepository : GenericRepository<TenderBidDocument>,
         return document;
     }
 
-    public async Task<TenderBidDocument> UpdateAsync(TenderBidDocument document)
+    public new async Task<TenderBidDocument> UpdateAsync(TenderBidDocument document)
     {
         _dbSet.Update(document);
         return await Task.FromResult(document);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var document = await _dbSet.FindAsync(id);
         if (document != null)
@@ -676,7 +676,7 @@ public class TenderFeeRepository : GenericRepository<TenderFee>, ITenderFeeRepos
 {
     public TenderFeeRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderFee?> GetByIdAsync(Guid id)
+    public override async Task<TenderFee?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(f => f.Id == id && !f.IsDeleted)
@@ -697,13 +697,13 @@ public class TenderFeeRepository : GenericRepository<TenderFee>, ITenderFeeRepos
         return fee;
     }
 
-    public async Task<TenderFee> UpdateAsync(TenderFee fee)
+    public new async Task<TenderFee> UpdateAsync(TenderFee fee)
     {
         _dbSet.Update(fee);
         return await Task.FromResult(fee);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var fee = await _dbSet.FindAsync(id);
         if (fee != null)
@@ -722,7 +722,7 @@ public class TenderPaymentRepository : GenericRepository<TenderPayment>, ITender
 {
     public TenderPaymentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderPayment?> GetByIdAsync(Guid id)
+    public override async Task<TenderPayment?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(p => p.Id == id && !p.IsDeleted)
@@ -763,13 +763,13 @@ public class TenderPaymentRepository : GenericRepository<TenderPayment>, ITender
         return payment;
     }
 
-    public async Task<TenderPayment> UpdateAsync(TenderPayment payment)
+    public new async Task<TenderPayment> UpdateAsync(TenderPayment payment)
     {
         _dbSet.Update(payment);
         return await Task.FromResult(payment);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var payment = await _dbSet.FindAsync(id);
         if (payment != null)
@@ -807,7 +807,7 @@ public class TenderEvaluatorRepository : GenericRepository<TenderEvaluator>, ITe
 {
     public TenderEvaluatorRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderEvaluator?> GetByIdAsync(Guid id)
+    public override async Task<TenderEvaluator?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(e => e.Id == id && !e.IsDeleted)
@@ -844,13 +844,13 @@ public class TenderEvaluatorRepository : GenericRepository<TenderEvaluator>, ITe
         return evaluator;
     }
 
-    public async Task<TenderEvaluator> UpdateAsync(TenderEvaluator evaluator)
+    public new async Task<TenderEvaluator> UpdateAsync(TenderEvaluator evaluator)
     {
         _dbSet.Update(evaluator);
         return await Task.FromResult(evaluator);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var evaluator = await _dbSet.FindAsync(id);
         if (evaluator != null)
@@ -869,7 +869,7 @@ public class TenderEvaluationRepository : GenericRepository<TenderEvaluation>, I
 {
     public TenderEvaluationRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderEvaluation?> GetByIdAsync(Guid id)
+    public override async Task<TenderEvaluation?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(e => e.Id == id && !e.IsDeleted)
@@ -917,13 +917,13 @@ public class TenderEvaluationRepository : GenericRepository<TenderEvaluation>, I
         return evaluation;
     }
 
-    public async Task<TenderEvaluation> UpdateAsync(TenderEvaluation evaluation)
+    public new async Task<TenderEvaluation> UpdateAsync(TenderEvaluation evaluation)
     {
         _dbSet.Update(evaluation);
         return await Task.FromResult(evaluation);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var evaluation = await _dbSet.FindAsync(id);
         if (evaluation != null)
@@ -963,7 +963,7 @@ public class TenderInterviewRepository : GenericRepository<TenderInterview>, ITe
 {
     public TenderInterviewRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderInterview?> GetByIdAsync(Guid id)
+    public override async Task<TenderInterview?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(i => i.Id == id && !i.IsDeleted)
@@ -1009,13 +1009,13 @@ public class TenderInterviewRepository : GenericRepository<TenderInterview>, ITe
         return interview;
     }
 
-    public async Task<TenderInterview> UpdateAsync(TenderInterview interview)
+    public new async Task<TenderInterview> UpdateAsync(TenderInterview interview)
     {
         _dbSet.Update(interview);
         return await Task.FromResult(interview);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var interview = await _dbSet.FindAsync(id);
         if (interview != null)
@@ -1034,7 +1034,7 @@ public class TenderClarificationRepository : GenericRepository<TenderClarificati
 {
     public TenderClarificationRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderClarification?> GetByIdAsync(Guid id)
+    public override async Task<TenderClarification?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(c => c.Id == id && !c.IsDeleted)
@@ -1078,13 +1078,13 @@ public class TenderClarificationRepository : GenericRepository<TenderClarificati
         return clarification;
     }
 
-    public async Task<TenderClarification> UpdateAsync(TenderClarification clarification)
+    public new async Task<TenderClarification> UpdateAsync(TenderClarification clarification)
     {
         _dbSet.Update(clarification);
         return await Task.FromResult(clarification);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var clarification = await _dbSet.FindAsync(id);
         if (clarification != null)
@@ -1103,7 +1103,7 @@ public class TenderRevisionRepository : GenericRepository<TenderRevision>, ITend
 {
     public TenderRevisionRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderRevision?> GetByIdAsync(Guid id)
+    public override async Task<TenderRevision?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(r => r.Id == id && !r.IsDeleted)
@@ -1124,13 +1124,13 @@ public class TenderRevisionRepository : GenericRepository<TenderRevision>, ITend
         return revision;
     }
 
-    public async Task<TenderRevision> UpdateAsync(TenderRevision revision)
+    public new async Task<TenderRevision> UpdateAsync(TenderRevision revision)
     {
         _dbSet.Update(revision);
         return await Task.FromResult(revision);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var revision = await _dbSet.FindAsync(id);
         if (revision != null)
@@ -1158,7 +1158,7 @@ public class TenderAwardRepository : GenericRepository<TenderAward>, ITenderAwar
 {
     public TenderAwardRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderAward?> GetByIdAsync(Guid id)
+    public override async Task<TenderAward?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(a => a.Id == id && !a.IsDeleted)
@@ -1243,13 +1243,13 @@ public class TenderAwardRepository : GenericRepository<TenderAward>, ITenderAwar
         return award;
     }
 
-    public async Task<TenderAward> UpdateAsync(TenderAward award)
+    public new async Task<TenderAward> UpdateAsync(TenderAward award)
     {
         _dbSet.Update(award);
         return await Task.FromResult(award);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var award = await _dbSet.FindAsync(id);
         if (award != null)
@@ -1268,7 +1268,7 @@ public class TenderTemplateRepository : GenericRepository<TenderTemplate>, ITend
 {
     public TenderTemplateRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderTemplate?> GetByIdAsync(Guid id)
+    public override async Task<TenderTemplate?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(t => t.Id == id && !t.IsDeleted)
@@ -1306,13 +1306,13 @@ public class TenderTemplateRepository : GenericRepository<TenderTemplate>, ITend
         return template;
     }
 
-    public async Task<TenderTemplate> UpdateAsync(TenderTemplate template)
+    public new async Task<TenderTemplate> UpdateAsync(TenderTemplate template)
     {
         _dbSet.Update(template);
         return await Task.FromResult(template);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var template = await _dbSet.FindAsync(id);
         if (template != null)
@@ -1377,7 +1377,7 @@ public class EvaluationCriterionRepository : GenericRepository<EvaluationCriteri
 {
     public EvaluationCriterionRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<EvaluationCriterion?> GetByIdAsync(Guid id)
+    public override async Task<EvaluationCriterion?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(c => c.Id == id && !c.IsDeleted)
@@ -1392,7 +1392,7 @@ public class EvaluationCriterionRepository : GenericRepository<EvaluationCriteri
             .FirstOrDefaultAsync();
     }
 
-    public async Task<IEnumerable<EvaluationCriterion>> GetAllAsync()
+    public override async Task<IEnumerable<EvaluationCriterion>> GetAllAsync()
     {
         return await _dbSet
             .Where(c => !c.IsDeleted)
@@ -1433,13 +1433,13 @@ public class EvaluationCriterionRepository : GenericRepository<EvaluationCriteri
         return criterion;
     }
 
-    public async Task<EvaluationCriterion> UpdateAsync(EvaluationCriterion criterion)
+    public new async Task<EvaluationCriterion> UpdateAsync(EvaluationCriterion criterion)
     {
         _dbSet.Update(criterion);
         return await Task.FromResult(criterion);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var criterion = await _dbSet.FindAsync(id);
         if (criterion != null)
@@ -1458,7 +1458,7 @@ public class TenderDocumentTypeRepository : GenericRepository<TenderDocumentType
 {
     public TenderDocumentTypeRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderDocumentType?> GetByIdAsync(Guid id)
+    public override async Task<TenderDocumentType?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(d => d.Id == id && !d.IsDeleted)
@@ -1473,7 +1473,7 @@ public class TenderDocumentTypeRepository : GenericRepository<TenderDocumentType
             .FirstOrDefaultAsync();
     }
 
-    public async Task<IEnumerable<TenderDocumentType>> GetAllAsync()
+    public override async Task<IEnumerable<TenderDocumentType>> GetAllAsync()
     {
         return await _dbSet
             .Where(d => !d.IsDeleted)
@@ -1506,13 +1506,13 @@ public class TenderDocumentTypeRepository : GenericRepository<TenderDocumentType
         return documentType;
     }
 
-    public async Task<TenderDocumentType> UpdateAsync(TenderDocumentType documentType)
+    public new async Task<TenderDocumentType> UpdateAsync(TenderDocumentType documentType)
     {
         _dbSet.Update(documentType);
         return await Task.FromResult(documentType);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var documentType = await _dbSet.FindAsync(id);
         if (documentType != null)
@@ -1527,7 +1527,7 @@ public class EvaluationTemplateRepository : GenericRepository<EvaluationTemplate
 {
     public EvaluationTemplateRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<EvaluationTemplate?> GetByIdAsync(Guid id)
+    public override async Task<EvaluationTemplate?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(t => t.Id == id && !t.IsDeleted)
@@ -1552,7 +1552,7 @@ public class EvaluationTemplateRepository : GenericRepository<EvaluationTemplate
             .FirstOrDefaultAsync();
     }
 
-    public async Task<IEnumerable<EvaluationTemplate>> GetAllAsync()
+    public override async Task<IEnumerable<EvaluationTemplate>> GetAllAsync()
     {
         return await _dbSet
             .Where(t => !t.IsDeleted)
@@ -1611,13 +1611,13 @@ public class EvaluationTemplateRepository : GenericRepository<EvaluationTemplate
         return template;
     }
 
-    public async Task<EvaluationTemplate> UpdateAsync(EvaluationTemplate template)
+    public new async Task<EvaluationTemplate> UpdateAsync(EvaluationTemplate template)
     {
         _dbSet.Update(template);
         return await Task.FromResult(template);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var template = await _dbSet.FindAsync(id);
         if (template != null)
@@ -1632,7 +1632,7 @@ public class EvaluationTemplateCriterionRepository : GenericRepository<Evaluatio
 {
     public EvaluationTemplateCriterionRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<EvaluationTemplateCriterion?> GetByIdAsync(Guid id)
+    public override async Task<EvaluationTemplateCriterion?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(c => c.Id == id && !c.IsDeleted)
@@ -1655,13 +1655,13 @@ public class EvaluationTemplateCriterionRepository : GenericRepository<Evaluatio
         return criterion;
     }
 
-    public async Task<EvaluationTemplateCriterion> UpdateAsync(EvaluationTemplateCriterion criterion)
+    public new async Task<EvaluationTemplateCriterion> UpdateAsync(EvaluationTemplateCriterion criterion)
     {
         _dbSet.Update(criterion);
         return await Task.FromResult(criterion);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var criterion = await _dbSet.FindAsync(id);
         if (criterion != null)
@@ -1692,7 +1692,7 @@ public class TenderLotRepository : GenericRepository<TenderLot>, ITenderLotRepos
 {
     public TenderLotRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderLot?> GetByIdAsync(Guid id)
+    public override async Task<TenderLot?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(l => l.Id == id && !l.IsDeleted)
@@ -1730,13 +1730,13 @@ public class TenderLotRepository : GenericRepository<TenderLot>, ITenderLotRepos
         return lot;
     }
 
-    public async Task<TenderLot> UpdateAsync(TenderLot lot)
+    public new async Task<TenderLot> UpdateAsync(TenderLot lot)
     {
         _dbSet.Update(lot);
         return await Task.FromResult(lot);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var lot = await _dbSet.FindAsync(id);
         if (lot != null)
@@ -1777,7 +1777,7 @@ public class TenderBidLotRepository : GenericRepository<TenderBidLot>, ITenderBi
 {
     public TenderBidLotRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderBidLot?> GetByIdAsync(Guid id)
+    public override async Task<TenderBidLot?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(bl => bl.Id == id && !bl.IsDeleted)
@@ -1827,13 +1827,13 @@ public class TenderBidLotRepository : GenericRepository<TenderBidLot>, ITenderBi
         return bidLot;
     }
 
-    public async Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot)
+    public new async Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot)
     {
         _dbSet.Update(bidLot);
         return await Task.FromResult(bidLot);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var bidLot = await _dbSet.FindAsync(id);
         if (bidLot != null)
@@ -1865,7 +1865,7 @@ public class PerformanceBondRequestRepository : GenericRepository<PerformanceBon
 {
     public PerformanceBondRequestRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<PerformanceBondRequest?> GetByIdAsync(Guid id)
+    public override async Task<PerformanceBondRequest?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(p => p.Id == id && !p.IsDeleted)
@@ -1952,13 +1952,13 @@ public class PerformanceBondRequestRepository : GenericRepository<PerformanceBon
         return request;
     }
 
-    public Task<PerformanceBondRequest> UpdateAsync(PerformanceBondRequest request)
+    public new Task<PerformanceBondRequest> UpdateAsync(PerformanceBondRequest request)
     {
         _dbSet.Update(request);
         return Task.FromResult(request);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var request = await _dbSet.FindAsync(id);
         if (request != null)
@@ -1977,7 +1977,7 @@ public class TenderNegotiationRepository : GenericRepository<TenderNegotiation>,
 {
     public TenderNegotiationRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderNegotiation?> GetByIdAsync(Guid id)
+    public override async Task<TenderNegotiation?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Include(n => n.Tender)
@@ -2060,7 +2060,7 @@ public class TenderNegotiationRepository : GenericRepository<TenderNegotiation>,
         return negotiation;
     }
 
-    public Task<TenderNegotiation> UpdateAsync(TenderNegotiation negotiation)
+    public new Task<TenderNegotiation> UpdateAsync(TenderNegotiation negotiation)
     {
         _dbSet.Update(negotiation);
         return Task.FromResult(negotiation);
@@ -2080,7 +2080,7 @@ public class TenderNegotiationRepository : GenericRepository<TenderNegotiation>,
         return Task.FromResult(item);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var negotiation = await _dbSet.FindAsync(id);
         if (negotiation != null)

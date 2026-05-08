@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -36,7 +37,7 @@ import * as tenderBidService from '@/services/tenderBidService';
 export default function InitiateBidPage() {
   const router = useRouter();
   const params = useParams();
-  const tenderId = params.id as string;
+  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -149,8 +150,8 @@ export default function InitiateBidPage() {
         // If it's SelectedUsers, load the assigned user IDs
         if (assignType === 'SelectedUsers') {
           const assignedUserIds = myAssignments
-            .filter(a => a.assignedToUserId)
-            .map(a => a.assignedToUserId!);
+            .map((assignment) => assignment.assignedToUserId)
+            .filter((assignedUserId): assignedUserId is string => Boolean(assignedUserId));
           setSelectedUsers(assignedUserIds);
         }
       }
@@ -278,6 +279,7 @@ export default function InitiateBidPage() {
           const existingDraft = await tenderBidService.getMyDraftBidByTenderId(tenderId);
 
           if (existingDraft) {
+            const draftItems = existingDraft.items ?? [];
             // Update existing draft with acceptance
             await tenderBidService.updateBid(existingDraft.id, {
               deliveryDays: existingDraft.deliveryDays,
@@ -286,7 +288,7 @@ export default function InitiateBidPage() {
               technicalProposal: existingDraft.technicalProposal || '',
               commercialProposal: existingDraft.commercialProposal || '',
               acceptedDeclaration: true,
-              items: existingDraft.items.map(item => ({
+              items: draftItems.map(item => ({
                 tenderItemId: item.tenderItemId,
                 offeredQuantity: item.offeredQuantity,
                 unitPrice: item.unitPrice,
@@ -811,4 +813,3 @@ export default function InitiateBidPage() {
     </div>
   );
 }
-

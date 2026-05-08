@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, Pencil, Plus, Save, Trash2 } from 'lucide-react';
 
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService, type EhcAdminCategory, type EhcTicketLookupTicket } from '@/services/ehcInternalTicketService';
 import { ehcProblemService, type EhcCapaTask, type EhcCapaTaskStatus, type EhcProblemDetail, type EhcProblemStatus, type UpdateEhcProblemRequest } from '@/services/ehcProblemService';
 import type { EhcTicketPriority, EhcTicketStatus } from '@/services/ehcTicketService';
@@ -25,7 +26,8 @@ const buildCategoryOptions = (flat: EhcAdminCategory[]) => {
   for (const c of flat) byId.set(c.id, { ...c, children: [] });
   const roots: CategoryNode[] = [];
   for (const c of byId.values()) {
-    if (c.parentCategoryId && byId.has(c.parentCategoryId)) byId.get(c.parentCategoryId)!.children!.push(c);
+    const parent = c.parentCategoryId ? byId.get(c.parentCategoryId) : undefined;
+    if (parent?.children) parent.children.push(c);
     else roots.push(c);
   }
   const sortRec = (nodes: CategoryNode[]) => {
@@ -97,10 +99,13 @@ const capaStatusBadgeClassName = (s: EhcCapaTaskStatus) => {
 
 export default function HelpdeskProblemDetailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
-  const problemId = params?.id;
+  const problemId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const qc = useQueryClient();
   const { toast } = useToast();
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const formatDateTime = (iso: string | null | undefined) => {
     if (!iso) return '—';
@@ -196,7 +201,7 @@ export default function HelpdeskProblemDetailPage() {
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'problems'] });
       toast({ title: 'Deleted', description: 'Problem deleted.', variant: 'success' });
-      router.push('/helpdesk/problems');
+      router.push(scopeParam ? `/helpdesk/problems?scope=${scopeParam}` : '/helpdesk/problems');
     },
     onError: (err: any) => {
       toast({ title: 'Error', description: err?.message || 'Failed to delete problem.', variant: 'destructive' });
@@ -332,7 +337,12 @@ export default function HelpdeskProblemDetailPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
-          <Button variant="outline" size="icon" onClick={() => router.push('/helpdesk/problems')} title="Back">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => router.push(scopeParam ? `/helpdesk/problems?scope=${scopeParam}` : '/helpdesk/problems')}
+            title="Back"
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
@@ -341,7 +351,10 @@ export default function HelpdeskProblemDetailPage() {
               <Badge className={problemStatusBadgeClassName(p.status)}>{p.status}</Badge>
               <Badge className={priorityBadgeClassName(p.priority)}>{p.priority}</Badge>
             </div>
-            <div className="text-sm text-slate-600">{p.title}</div>
+            <div className="text-sm text-slate-600">
+              {p.title}
+              {scopeParam ? ` • ${scopeConfig.listTitle}` : ''}
+            </div>
           </div>
         </div>
 

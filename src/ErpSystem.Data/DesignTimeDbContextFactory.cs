@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 
 namespace ErpSystem.Data;
@@ -33,12 +34,18 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
         }
 
         // Fallback connection string if none found
-        connectionString ??= "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True";
+        connectionString ??= "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem;Trusted_Connection=True;TrustServerCertificate=True";
 
         optionsBuilder.UseSqlServer(connectionString, sql =>
         {
             sql.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName);
         });
+
+        optionsBuilder.ConfigureWarnings(warnings =>
+            warnings
+                .Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning)
+                .Ignore(CoreEventId.MappedEntityTypeIgnoredWarning)
+                .Ignore(CoreEventId.MappedNavigationIgnoredWarning));
 
         // Create context without tenant filter for migrations
         return new ApplicationDbContext(optionsBuilder.Options);

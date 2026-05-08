@@ -9,7 +9,7 @@ public class TenderAssignmentRepository : GenericRepository<TenderAssignment>, I
 {
     public TenderAssignmentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TenderAssignment?> GetByIdAsync(Guid id)
+    public override async Task<TenderAssignment?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Include(ta => ta.Tender)
@@ -65,7 +65,7 @@ public class TenderAssignmentRepository : GenericRepository<TenderAssignment>, I
         return entity;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var entity = await _dbSet.FindAsync(id);
         if (entity != null)
@@ -87,4 +87,3 @@ public class TenderAssignmentRepository : GenericRepository<TenderAssignment>, I
         return await query.AnyAsync();
     }
 }
-

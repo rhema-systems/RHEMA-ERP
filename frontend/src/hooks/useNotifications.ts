@@ -39,6 +39,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         entityType: notification.entityType || 'General',
         actionUrl: notification.actionUrl,
         isRead: notification.isRead || false,
+        timestamp: notification.timestamp || notification.createdAt || new Date().toISOString(),
         readAt: notification.readAt,
         dismissedAt: notification.dismissedAt,
         createdAt: notification.createdAt || new Date().toISOString(),

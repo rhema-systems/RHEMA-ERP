@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import type { DateRange } from 'react-day-picker';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar, DateRange } from '@/components/ui/calendar';
+import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -15,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { maintenanceDataService, Employee, Asset, MaintenanceType, PriorityLevel } from '@/services/maintenanceDataService';
 import maintenanceScheduleService, { MaintenanceSchedule, CreateMaintenanceScheduleDto, MaintenanceScheduleHistory } from '@/services/maintenanceScheduleService';
-import { 
+import {
   Calendar as CalendarIcon,
   Clock,
   Plus,
@@ -32,13 +33,14 @@ import {
   Loader2,
   History
 } from 'lucide-react';
-import { format, addDays } from 'date-fns';
+import { format as dateFormat, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { ClientOnly } from '@/components/ClientOnly';
 
 interface ScheduledMaintenanceItem {
   id: string;
+  code?: string;
   title: string;
   assetId: string;
   assetName: string;
@@ -85,14 +87,14 @@ export default function ScheduledMaintenancePage() {
   const [activeTab, setActiveTab] = useState('details');
   const [scheduleToGenerate, setScheduleToGenerate] = useState<ScheduledMaintenanceItem | null>(null);
   const [filteredData, setFilteredData] = useState<ScheduledMaintenanceItem[]>([]);
-  
+
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [maintenanceTypes, setMaintenanceTypes] = useState<MaintenanceType[]>([]);
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [loadingData, setLoadingData] = useState(true);
-  
+
   // Form state for creating new scheduled maintenance
   const [formData, setFormData] = useState({
     title: '',
@@ -136,36 +138,36 @@ export default function ScheduledMaintenancePage() {
         console.log('=== TECHNICIANS DEBUG ===');
         console.log('Technicians loaded:', techniciansList.length, techniciansList);
         console.log('Technicians type:', typeof techniciansList, Array.isArray(techniciansList));
-        
+
         console.log('=== OTHER DATA DEBUG ===');
         console.log('Assets loaded:', assetsList.length, assetsList);
         console.log('Maintenance types loaded:', maintenanceTypesList.length, maintenanceTypesList);
         console.log('Priority levels loaded:', priorityLevelsList.length, priorityLevelsList);
-        
+
         if (techniciansList.length === 0) {
           console.warn('⚠️ No technicians loaded - this may indicate an API endpoint issue');
           toast({
             title: "Employee API Not Available",
             description: "Unable to load employee data. The technician dropdown will be empty. Please check the console for endpoint details and contact your system administrator.",
-            variant: "destructive",
-            duration: 8000
+            variant: "destructive"
           });
         }
-        
+
         setTechnicians(techniciansList);
         setAssets(assetsList);
         setMaintenanceTypes(maintenanceTypesList);
         setPriorityLevels(priorityLevelsList);
-        
+
         console.log('Raw scheduled data response:', scheduledDataResponse);
-        
+
         // The service returns PagedResult<MaintenanceSchedule>
         const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
         console.log('Extracted schedules:', schedules);
-        
+
         // Map MaintenanceSchedule to ScheduledMaintenanceItem interface
         const mappedSchedules = schedules.map((schedule: any) => ({
           id: schedule.id,
+          code: schedule.code || '',
           title: schedule.name || schedule.title,
           assetId: schedule.assetId,
           assetName: schedule.assetName || 'Unknown Asset',
@@ -191,7 +193,7 @@ export default function ScheduledMaintenancePage() {
           notificationRecipients: schedule.notificationRecipients,
           autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
         }));
-        
+
         console.log('Mapped scheduled maintenance items:', mappedSchedules);
         setScheduledMaintenanceData(mappedSchedules);
       } catch (error) {
@@ -202,7 +204,7 @@ export default function ScheduledMaintenancePage() {
         setLoading(false);
       }
     };
-    
+
     loadData();
   }, []);
 
@@ -210,7 +212,7 @@ export default function ScheduledMaintenancePage() {
     console.log('🔍 Filtering data...');
     console.log('scheduledMaintenanceData:', scheduledMaintenanceData.length, scheduledMaintenanceData);
     console.log('Filters:', { searchTerm, statusFilter, priorityFilter, typeFilter });
-    
+
     let filtered = scheduledMaintenanceData;
 
     if (searchTerm) {
@@ -276,7 +278,7 @@ export default function ScheduledMaintenancePage() {
       console.log('Form data:', formData);
       console.log('Available maintenance types:', maintenanceTypes.length, maintenanceTypes);
       console.log('Available assets:', assets.length);
-      
+
       // Validate required fields before sending
       if (!formData.title) {
         console.log('❌ Validation failed: No title');
@@ -288,7 +290,7 @@ export default function ScheduledMaintenancePage() {
         return;
       }
       console.log('✅ Title validation passed:', formData.title);
-      
+
       if (!formData.assetId) {
         console.log('❌ Validation failed: No assetId');
         toast({
@@ -299,7 +301,7 @@ export default function ScheduledMaintenancePage() {
         return;
       }
       console.log('✅ AssetId validation passed:', formData.assetId);
-      
+
       if (!formData.type) {
         console.log('❌ Validation failed: No type');
         toast({
@@ -310,7 +312,7 @@ export default function ScheduledMaintenancePage() {
         return;
       }
       console.log('✅ Type validation passed:', formData.type);
-      
+
       if (!formData.frequency) {
         console.log('❌ Validation failed: No frequency');
         toast({
@@ -321,7 +323,7 @@ export default function ScheduledMaintenancePage() {
         return;
       }
       console.log('✅ Frequency validation passed:', formData.frequency);
-      
+
       if (maintenanceTypes.length === 0) {
         console.log('❌ Validation failed: No maintenance types available');
         toast({
@@ -332,11 +334,11 @@ export default function ScheduledMaintenancePage() {
         return;
       }
       console.log('✅ Maintenance types available:', maintenanceTypes.length);
-      
+
       console.log('=== ALL VALIDATIONS PASSED, PROCEEDING WITH API CALL ===');
-      
+
       const token = localStorage.getItem('authToken');
-      
+
       // Transform frontend data to match CreateMaintenanceScheduleDto
       const createDto = {
         name: formData.title,
@@ -346,31 +348,31 @@ export default function ScheduledMaintenancePage() {
         maintenanceTypeId: (() => {
           // First try exact match
           let foundType = maintenanceTypes.find(type => type.name === formData.type);
-          
+
           // If not found, try case-insensitive match
           if (!foundType) {
             foundType = maintenanceTypes.find(type => type.name.toLowerCase() === formData.type.toLowerCase());
           }
-          
+
           // If still not found, try partial match
           if (!foundType) {
             foundType = maintenanceTypes.find(type => type.name.toLowerCase().includes(formData.type.toLowerCase()) || formData.type.toLowerCase().includes(type.name.toLowerCase()));
           }
-          
+
           if (foundType) {
             console.log('Found maintenance type:', foundType);
             return foundType.id;
           }
-          
+
           console.warn('No maintenance type found for:', formData.type);
           console.warn('Available maintenance types:', maintenanceTypes.map(t => ({ id: t.id, name: t.name })));
-          
+
           // Use first available type as fallback, but only if one exists
           if (maintenanceTypes.length > 0) {
             console.warn('Using first available maintenance type as fallback:', maintenanceTypes[0]);
             return maintenanceTypes[0].id;
           }
-          
+
           // If no maintenance types available, this will cause validation error - which is correct
           console.error('NO MAINTENANCE TYPES AVAILABLE - This will cause a validation error');
           return '00000000-0000-0000-0000-000000000000'; // Return empty GUID instead of null
@@ -380,21 +382,21 @@ export default function ScheduledMaintenancePage() {
         frequency: formData.frequency,
         frequencyValue: 1, // Default value
         frequencyUnit: 'Days', // Default unit
-        frequencyInterval: formData.frequency === 'Daily' ? 1 : 
-                          formData.frequency === 'Weekly' ? 7 : 
-                          formData.frequency === 'Monthly' ? 30 : 
-                          formData.frequency === 'Quarterly' ? 90 : 
-                          formData.frequency === 'Semi-Annual' ? 180 : 
-                          formData.frequency === 'Annual' ? 365 : 30,
+        frequencyInterval: formData.frequency === 'Daily' ? 1 :
+          formData.frequency === 'Weekly' ? 7 :
+            formData.frequency === 'Monthly' ? 30 :
+              formData.frequency === 'Quarterly' ? 90 :
+                formData.frequency === 'Semi-Annual' ? 180 :
+                  formData.frequency === 'Annual' ? 365 : 30,
         startDate: new Date().toISOString(),
         nextDueDate: formData.nextDue ? new Date(formData.nextDue).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         estimatedDuration: 60, // Default to 60 minutes
         estimatedHours: parseFloat(formData.estimatedHours) || 1,
         estimatedCost: 0,
-        assignedTechnicianId: formData.assignedTechnician && formData.assignedTechnician.trim() !== '' && formData.assignedTechnician !== '__UNASSIGNED__' ? formData.assignedTechnician : null,
-        assignedTeamId: null,
+        assignedTechnicianId: formData.assignedTechnician && formData.assignedTechnician.trim() !== '' && formData.assignedTechnician !== '__UNASSIGNED__' ? formData.assignedTechnician : undefined,
+        assignedTeamId: undefined,
         assignedTeam: '',
-        assetCategory: assets.find(asset => asset.id === formData.assetId)?.categoryName || '',
+        assetCategory: assets.find(asset => asset.id === formData.assetId)?.category || '',
         instructions: formData.description,
         safetyNotes: '',
         requiredSkills: [],
@@ -405,31 +407,31 @@ export default function ScheduledMaintenancePage() {
         autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
         advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
-        notificationRecipients: formData.notificationRecipients || null,
+        notificationRecipients: formData.notificationRecipients || undefined,
         maxDelayDays: 3,
         notes: formData.description,
         // Trigger fields
         primaryTriggerType: formData.primaryTriggerType,
-        secondaryTriggerType: formData.secondaryTriggerType || null,
+        secondaryTriggerType: formData.secondaryTriggerType || undefined,
         triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
-        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
-        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
-        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
-        conditionCriteria: formData.conditionCriteria || null
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : undefined,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : undefined,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : undefined,
+        conditionCriteria: formData.conditionCriteria || undefined
       };
-      
+
       console.log('Sending createDto:', createDto);
-      
+
       // Use service instead of fetch
       const responseData = await maintenanceScheduleService.createSchedule(createDto as CreateMaintenanceScheduleDto);
       console.log('Response data:', responseData);
-      
+
       toast({
         title: "Success!",
         description: "Scheduled maintenance created successfully.",
         variant: "success"
       });
-      
+
       // Refresh the data using service
       const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
       const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
@@ -459,9 +461,9 @@ export default function ScheduledMaintenancePage() {
         notificationRecipients: schedule.notificationRecipients,
         autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
       }));
-      
+
       setScheduledMaintenanceData(mappedSchedules);
-      
+
       setIsCreateDialogOpen(false);
       // Reset form
       setFormData({
@@ -499,7 +501,7 @@ export default function ScheduledMaintenancePage() {
   const handleAssetSelection = async (value: string) => {
     console.log('=== Asset selected:', value);
     setFormData({ ...formData, assetId: value });
-    
+
     try {
       const [assetType, categorySchedule] = await Promise.all([
         maintenanceDataService.getMaintenanceTypeForAsset(value),
@@ -629,25 +631,25 @@ export default function ScheduledMaintenancePage() {
 
   const handleConfirmGenerateWorkOrder = async () => {
     if (!scheduleToGenerate) return;
-    
+
     setIsGeneratingWorkOrder(true);
     try {
       console.log('Generating work order for schedule:', scheduleToGenerate.id);
-      
+
       // Generate a work order using the service
       const workOrder = await maintenanceScheduleService.generateWorkOrder(scheduleToGenerate.id);
       console.log('Work order generated:', workOrder);
-      
+
       // Close confirmation dialog and reset state
       setIsConfirmDialogOpen(false);
       setScheduleToGenerate(null);
-      
+
       toast({
         title: "Success!",
         description: "Work order generated successfully!",
         variant: "success"
       });
-      
+
       // Refresh the data using service
       const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
       const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
@@ -718,10 +720,10 @@ export default function ScheduledMaintenancePage() {
       notificationRecipients: schedule.notificationRecipients || '',
       autoGenerateWorkOrders: schedule.autoGenerateWorkOrders !== undefined ? schedule.autoGenerateWorkOrders : true
     });
-    
+
     // Load history for this schedule
     loadScheduleHistory(schedule.id);
-    
+
     setIsEditDialogOpen(true);
   };
 
@@ -745,24 +747,24 @@ export default function ScheduledMaintenancePage() {
 
   const handleUpdateSchedule = async () => {
     if (!editingSchedule) return;
-    
+
     try {
       console.log('=== UPDATING SCHEDULE ===');
       console.log('Editing schedule:', editingSchedule);
       console.log('Form data:', formData);
-      
+
       const token = localStorage.getItem('authToken');
-      
+
       // Validate assignedTechnician value and convert empty string or placeholder to null
-      const assignedTechnicianId = formData.assignedTechnician && 
-                                   formData.assignedTechnician.trim() !== '' && 
-                                   formData.assignedTechnician !== '__UNASSIGNED__'
-        ? formData.assignedTechnician 
+      const assignedTechnicianId = formData.assignedTechnician &&
+        formData.assignedTechnician.trim() !== '' &&
+        formData.assignedTechnician !== '__UNASSIGNED__'
+        ? formData.assignedTechnician
         : null;
-      
+
       console.log('assignedTechnician form value:', formData.assignedTechnician);
       console.log('processed assignedTechnicianId:', assignedTechnicianId);
-      
+
       // Transform form data to match UpdateMaintenanceScheduleDto
       const updateDto = {
         // Required fields from CreateMaintenanceScheduleDto
@@ -771,8 +773,8 @@ export default function ScheduledMaintenancePage() {
         description: formData.description,
         assetId: formData.assetId || '00000000-0000-0000-0000-000000000000',
         maintenanceTypeId: (() => {
-          const foundType = maintenanceTypes.find(type => 
-            type.name === formData.type || 
+          const foundType = maintenanceTypes.find(type =>
+            type.name === formData.type ||
             type.name.toLowerCase() === formData.type.toLowerCase()
           );
           return foundType?.id || maintenanceTypes[0]?.id || '00000000-0000-0000-0000-000000000000';
@@ -782,21 +784,21 @@ export default function ScheduledMaintenancePage() {
         frequency: formData.frequency, // Maps to Frequency field
         frequencyValue: 1,
         frequencyUnit: 'Days', // Maps to FrequencyUnit field (required)
-        frequencyInterval: formData.frequency === 'Daily' ? 1 : 
-                          formData.frequency === 'Weekly' ? 7 : 
-                          formData.frequency === 'Monthly' ? 30 : 
-                          formData.frequency === 'Quarterly' ? 90 : 
-                          formData.frequency === 'Bi-Annual' ? 180 : 
-                          formData.frequency === 'Annual' ? 365 : 30,
+        frequencyInterval: formData.frequency === 'Daily' ? 1 :
+          formData.frequency === 'Weekly' ? 7 :
+            formData.frequency === 'Monthly' ? 30 :
+              formData.frequency === 'Quarterly' ? 90 :
+                formData.frequency === 'Bi-Annual' ? 180 :
+                  formData.frequency === 'Annual' ? 365 : 30,
         startDate: new Date().toISOString(),
         nextDueDate: formData.nextDue ? new Date(formData.nextDue).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         estimatedDuration: 60,
         estimatedHours: parseFloat(formData.estimatedHours) || 1,
         estimatedCost: 0,
-        assignedTechnicianId: assignedTechnicianId,
-        assignedTeamId: null,
+        assignedTechnicianId: assignedTechnicianId || undefined,
+        assignedTeamId: undefined,
         assignedTeam: '',
-        assetCategory: assets.find(asset => asset.id === formData.assetId)?.categoryName || '',
+        assetCategory: assets.find(asset => asset.id === formData.assetId)?.category || '',
         instructions: formData.description,
         safetyNotes: '',
         requiredSkills: [],
@@ -807,35 +809,36 @@ export default function ScheduledMaintenancePage() {
         autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
         advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
-        notificationRecipients: formData.notificationRecipients || null,
+        notificationRecipients: formData.notificationRecipients || undefined,
         maxDelayDays: 3,
         notes: formData.description,
         // Trigger fields
         primaryTriggerType: formData.primaryTriggerType,
-        secondaryTriggerType: formData.secondaryTriggerType || null,
+        secondaryTriggerType: formData.secondaryTriggerType || undefined,
         triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
-        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
-        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
-        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
-        conditionCriteria: formData.conditionCriteria || null
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : undefined,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : undefined,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : undefined,
+        conditionCriteria: formData.conditionCriteria || undefined
       };
-      
+
       console.log('Final request payload:', JSON.stringify(updateDto, null, 2));
-      
+
       // Use service instead of fetch
       await maintenanceScheduleService.updateSchedule(editingSchedule.id, updateDto);
-      
+
       toast({
         title: "Success!",
         description: "Scheduled maintenance updated successfully.",
         variant: "success"
       });
-      
+
       // Refresh the data using service
       const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
       const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
       const mappedSchedules = schedules.map((schedule: any) => ({
         id: schedule.id,
+        code: schedule.code || '',
         title: schedule.name || schedule.title,
         assetId: schedule.assetId,
         assetName: schedule.assetName || 'Unknown Asset',
@@ -861,7 +864,7 @@ export default function ScheduledMaintenancePage() {
         autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
       }));
       setScheduledMaintenanceData(mappedSchedules);
-      
+
       setIsEditDialogOpen(false);
       setEditingSchedule(null);
       resetForm();
@@ -921,296 +924,296 @@ export default function ScheduledMaintenancePage() {
                 Schedule Maintenance
               </Button>
             </DialogTrigger>
-          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Schedule New Maintenance</DialogTitle>
-              <DialogDescription>
-                Create a new scheduled maintenance task for an asset.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="title">Title</Label>
-                  <Input
-                    id="title"
-                    value={formData.title}
-                    onChange={(e) => setFormData({...formData, title: e.target.value})}
-                    placeholder="Maintenance task title"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="assetId">Asset</Label>
-                  <Select value={formData.assetId} onValueChange={handleAssetSelection} disabled={loadingData}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={loadingData ? "Loading assets..." : "Select asset"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {assets.map((asset) => (
-                        <SelectItem key={asset.id} value={asset.id}>
-                          {asset.assetName} ({asset.assetCode})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="type">Maintenance Type</Label>
-                  {formData.type ? (
-                    <div className="flex space-x-2">
-                      <Input
-                        id="type"
-                        value={formData.type}
-                        readOnly
-                        className="bg-muted"
-                        placeholder="Maintenance type will be auto-populated"
-                      />
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        type="button"
-                        onClick={() => setFormData({...formData, type: ''})}
-                        title="Clear to select manually"
-                      >
-                        ✕
-                      </Button>
-                    </div>
-                  ) : (
-                    <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})} disabled={loadingData}>
+            <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Schedule New Maintenance</DialogTitle>
+                <DialogDescription>
+                  Create a new scheduled maintenance task for an asset.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Title</Label>
+                    <Input
+                      id="title"
+                      value={formData.title}
+                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                      placeholder="Maintenance task title"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="assetId">Asset</Label>
+                    <Select value={formData.assetId} onValueChange={handleAssetSelection} disabled={loadingData}>
                       <SelectTrigger>
-                        <SelectValue placeholder={loadingData ? "Loading types..." : "Select maintenance type"} />
+                        <SelectValue placeholder={loadingData ? "Loading assets..." : "Select asset"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {maintenanceTypes.map((type) => (
-                          <SelectItem key={type.id} value={type.name}>
-                            {type.name}
+                        {assets.map((asset) => (
+                          <SelectItem key={asset.id} value={asset.id}>
+                            {asset.assetName} ({asset.assetCode})
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  )}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="frequency">Frequency</Label>
-                  <Select value={formData.frequency} onValueChange={(value) => setFormData({...formData, frequency: value})}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select frequency" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Daily">Daily</SelectItem>
-                      <SelectItem value="Weekly">Weekly</SelectItem>
-                      <SelectItem value="Monthly">Monthly</SelectItem>
-                      <SelectItem value="Quarterly">Quarterly</SelectItem>
-                      <SelectItem value="Bi-Annual">Bi-Annual</SelectItem>
-                      <SelectItem value="Annual">Annual</SelectItem>
-                    </SelectContent>
-                  </Select>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="type">Maintenance Type</Label>
+                    {formData.type ? (
+                      <div className="flex space-x-2">
+                        <Input
+                          id="type"
+                          value={formData.type}
+                          readOnly
+                          className="bg-muted"
+                          placeholder="Maintenance type will be auto-populated"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          onClick={() => setFormData({ ...formData, type: '' })}
+                          title="Clear to select manually"
+                        >
+                          ✕
+                        </Button>
+                      </div>
+                    ) : (
+                      <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })} disabled={loadingData}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={loadingData ? "Loading types..." : "Select maintenance type"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {maintenanceTypes.map((type) => (
+                            <SelectItem key={type.id} value={type.name}>
+                              {type.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="frequency">Frequency</Label>
+                    <Select value={formData.frequency} onValueChange={(value) => setFormData({ ...formData, frequency: value })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select frequency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Daily">Daily</SelectItem>
+                        <SelectItem value="Weekly">Weekly</SelectItem>
+                        <SelectItem value="Monthly">Monthly</SelectItem>
+                        <SelectItem value="Quarterly">Quarterly</SelectItem>
+                        <SelectItem value="Bi-Annual">Bi-Annual</SelectItem>
+                        <SelectItem value="Annual">Annual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="priority">Priority</Label>
+                    <Select
+                      value={formData.priority}
+                      onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {priorityLevels.map((priority) => (
+                          <SelectItem key={priority.id} value={priority.name}>
+                            {priority.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="priority">Priority</Label>
-                  <Select
-                    value={formData.priority}
-                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select priority" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {priorityLevels.map((priority) => (
-                        <SelectItem key={priority.id} value={priority.name}>
-                          {priority.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="nextDue">Next Due Date</Label>
+                    <Input
+                      id="nextDue"
+                      type="date"
+                      value={formData.nextDue}
+                      onChange={(e) => setFormData({ ...formData, nextDue: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="technician">Assigned Technician</Label>
+                    <Select value={formData.assignedTechnician} onValueChange={(value) => setFormData({ ...formData, assignedTechnician: value })} disabled={loadingData}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={loadingData ? "Loading technicians..." : "Select technician"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__UNASSIGNED__">None (Unassigned)</SelectItem>
+                        {technicians.map((technician) => (
+                          <SelectItem key={technician.id} value={technician.id}>
+                            {technician.firstName} {technician.lastName} - {technician.position}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="estimatedHours">Estimated Hours</Label>
+                    <Input
+                      id="estimatedHours"
+                      type="number"
+                      value={formData.estimatedHours}
+                      onChange={(e) => setFormData({ ...formData, estimatedHours: e.target.value })}
+                      placeholder="Hours"
+                    />
+                  </div>
                 </div>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
+
                 <div className="space-y-2">
-                  <Label htmlFor="nextDue">Next Due Date</Label>
-                  <Input
-                    id="nextDue"
-                    type="date"
-                    value={formData.nextDue}
-                    onChange={(e) => setFormData({...formData, nextDue: e.target.value})}
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Detailed description of the maintenance task..."
+                    rows={3}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="technician">Assigned Technician</Label>
-                  <Select value={formData.assignedTechnician} onValueChange={(value) => setFormData({...formData, assignedTechnician: value})} disabled={loadingData}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={loadingData ? "Loading technicians..." : "Select technician"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__UNASSIGNED__">None (Unassigned)</SelectItem>
-                      {technicians.map((technician) => (
-                        <SelectItem key={technician.id} value={technician.id}>
-                          {technician.firstName} {technician.lastName} - {technician.position}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="estimatedHours">Estimated Hours</Label>
-                  <Input
-                    id="estimatedHours"
-                    type="number"
-                    value={formData.estimatedHours}
-                    onChange={(e) => setFormData({...formData, estimatedHours: e.target.value})}
-                    placeholder="Hours"
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                  placeholder="Detailed description of the maintenance task..."
-                  rows={3}
-                />
-              </div>
 
-              {/* Trigger Configuration Section */}
-              <div className="space-y-4 border-t pt-4">
-                <Label className="text-base font-semibold">Trigger Configuration</Label>
-                <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({...formData, primaryTriggerType: value})}>
-                  <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="Time">Time-Based</TabsTrigger>
-                    <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
-                    <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
-                    <TabsTrigger value="Combined">Combined</TabsTrigger>
-                  </TabsList>
-                </Tabs>
+                {/* Trigger Configuration Section */}
+                <div className="space-y-4 border-t pt-4">
+                  <Label className="text-base font-semibold">Trigger Configuration</Label>
+                  <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({ ...formData, primaryTriggerType: value })}>
+                    <TabsList className="grid w-full grid-cols-4">
+                      <TabsTrigger value="Time">Time-Based</TabsTrigger>
+                      <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
+                      <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
+                      <TabsTrigger value="Combined">Combined</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
 
-                {/* Usage Trigger Fields */}
-                {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
-                  <div className="space-y-3 bg-muted/50 p-4 rounded-md">
-                    <Label className="text-sm font-semibold">Usage Thresholds</Label>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="mileageTrigger" className="text-xs">Mileage (km)</Label>
-                        <Input
-                          id="mileageTrigger"
-                          type="number"
-                          value={formData.mileageTrigger}
-                          onChange={(e) => setFormData({...formData, mileageTrigger: e.target.value})}
-                          placeholder="e.g., 5000"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="operatingHoursTrigger" className="text-xs">Operating Hours</Label>
-                        <Input
-                          id="operatingHoursTrigger"
-                          type="number"
-                          value={formData.operatingHoursTrigger}
-                          onChange={(e) => setFormData({...formData, operatingHoursTrigger: e.target.value})}
-                          placeholder="e.g., 200"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="cycleTrigger" className="text-xs">Cycle Count</Label>
-                        <Input
-                          id="cycleTrigger"
-                          type="number"
-                          value={formData.cycleTrigger}
-                          onChange={(e) => setFormData({...formData, cycleTrigger: e.target.value})}
-                          placeholder="e.g., 1000"
-                        />
+                  {/* Usage Trigger Fields */}
+                  {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
+                    <div className="space-y-3 bg-muted/50 p-4 rounded-md">
+                      <Label className="text-sm font-semibold">Usage Thresholds</Label>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="mileageTrigger" className="text-xs">Mileage (km)</Label>
+                          <Input
+                            id="mileageTrigger"
+                            type="number"
+                            value={formData.mileageTrigger}
+                            onChange={(e) => setFormData({ ...formData, mileageTrigger: e.target.value })}
+                            placeholder="e.g., 5000"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="operatingHoursTrigger" className="text-xs">Operating Hours</Label>
+                          <Input
+                            id="operatingHoursTrigger"
+                            type="number"
+                            value={formData.operatingHoursTrigger}
+                            onChange={(e) => setFormData({ ...formData, operatingHoursTrigger: e.target.value })}
+                            placeholder="e.g., 200"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="cycleTrigger" className="text-xs">Cycle Count</Label>
+                          <Input
+                            id="cycleTrigger"
+                            type="number"
+                            value={formData.cycleTrigger}
+                            onChange={(e) => setFormData({ ...formData, cycleTrigger: e.target.value })}
+                            placeholder="e.g., 1000"
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Condition Trigger Fields */}
-                {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
-                  <div className="space-y-2 bg-muted/50 p-4 rounded-md">
-                    <Label htmlFor="conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
-                    <Textarea
-                      id="conditionCriteria"
-                      value={formData.conditionCriteria}
-                      onChange={(e) => setFormData({...formData, conditionCriteria: e.target.value})}
-                      placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
-                      rows={3}
-                      className="font-mono text-xs"
-                    />
-                    <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
-                  </div>
-                )}
+                  {/* Condition Trigger Fields */}
+                  {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
+                    <div className="space-y-2 bg-muted/50 p-4 rounded-md">
+                      <Label htmlFor="conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
+                      <Textarea
+                        id="conditionCriteria"
+                        value={formData.conditionCriteria}
+                        onChange={(e) => setFormData({ ...formData, conditionCriteria: e.target.value })}
+                        placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
+                        rows={3}
+                        className="font-mono text-xs"
+                      />
+                      <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
+                    </div>
+                  )}
 
-                {/* Combined Trigger Logic */}
-                {formData.primaryTriggerType === 'Combined' && (
+                  {/* Combined Trigger Logic */}
+                  {formData.primaryTriggerType === 'Combined' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="triggerLogic">Trigger Logic</Label>
+                      <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({ ...formData, triggerLogic: value })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select logic" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
+                          <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Notification Settings Section */}
+                <div className="space-y-3 border-t pt-4">
+                  <Label className="text-base font-semibold">Notification Settings</Label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="advanceNotificationDays">Advance Notification (days)</Label>
+                      <Input
+                        id="advanceNotificationDays"
+                        type="number"
+                        value={formData.advanceNotificationDays}
+                        onChange={(e) => setFormData({ ...formData, advanceNotificationDays: e.target.value })}
+                        placeholder="e.g., 7"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
+                      <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({ ...formData, autoGenerateWorkOrders: value === 'true' })}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">Yes</SelectItem>
+                          <SelectItem value="false">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
                   <div className="space-y-2">
-                    <Label htmlFor="triggerLogic">Trigger Logic</Label>
-                    <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({...formData, triggerLogic: value})}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select logic" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
-                        <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-
-              {/* Notification Settings Section */}
-              <div className="space-y-3 border-t pt-4">
-                <Label className="text-base font-semibold">Notification Settings</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="advanceNotificationDays">Advance Notification (days)</Label>
+                    <Label htmlFor="notificationRecipients">Notification Recipients</Label>
                     <Input
-                      id="advanceNotificationDays"
-                      type="number"
-                      value={formData.advanceNotificationDays}
-                      onChange={(e) => setFormData({...formData, advanceNotificationDays: e.target.value})}
-                      placeholder="e.g., 7"
+                      id="notificationRecipients"
+                      value={formData.notificationRecipients}
+                      onChange={(e) => setFormData({ ...formData, notificationRecipients: e.target.value })}
+                      placeholder="email1@example.com, email2@example.com"
                     />
+                    <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
-                    <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({...formData, autoGenerateWorkOrders: value === 'true'})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="true">Yes</SelectItem>
-                        <SelectItem value="false">No</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="notificationRecipients">Notification Recipients</Label>
-                  <Input
-                    id="notificationRecipients"
-                    value={formData.notificationRecipients}
-                    onChange={(e) => setFormData({...formData, notificationRecipients: e.target.value})}
-                    placeholder="email1@example.com, email2@example.com"
-                  />
-                  <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
                 </div>
               </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateSchedule}>Schedule Maintenance</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleCreateSchedule}>Schedule Maintenance</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </ClientOnly>
-        
+
         {/* Edit Scheduled Maintenance Dialog */}
         <ClientOnly>
           <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
@@ -1222,404 +1225,404 @@ export default function ScheduledMaintenancePage() {
               resetForm();
             }
           }}>
-          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit Scheduled Maintenance</DialogTitle>
-              <DialogDescription>
-                Update the scheduled maintenance task details.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="details">Details</TabsTrigger>
-                <TabsTrigger value="history">
-                  <History className="mr-2 h-4 w-4" />
-                  History
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="details" className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-title">Title</Label>
-                  <Input
-                    id="edit-title"
-                    value={formData.title}
-                    onChange={(e) => setFormData({...formData, title: e.target.value})}
-                    placeholder="Maintenance task title"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-assetId">Asset</Label>
-                  <Select value={formData.assetId} onValueChange={handleAssetSelection} disabled={loadingData}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={loadingData ? "Loading assets..." : "Select asset"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {assets.map((asset) => (
-                        <SelectItem key={asset.id} value={asset.id}>
-                          {asset.assetName} ({asset.assetCode})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-type">Maintenance Type</Label>
-                  {formData.type ? (
-                    <div className="flex space-x-2">
+            <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Edit Scheduled Maintenance</DialogTitle>
+                <DialogDescription>
+                  Update the scheduled maintenance task details.
+                </DialogDescription>
+              </DialogHeader>
+
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="details">Details</TabsTrigger>
+                  <TabsTrigger value="history">
+                    <History className="mr-2 h-4 w-4" />
+                    History
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="details" className="space-y-4 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-title">Title</Label>
                       <Input
-                        id="edit-type"
-                        value={formData.type}
-                        readOnly
-                        className="bg-muted"
-                        placeholder="Maintenance type will be auto-populated"
+                        id="edit-title"
+                        value={formData.title}
+                        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                        placeholder="Maintenance task title"
                       />
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        type="button"
-                        onClick={() => setFormData({...formData, type: ''})}
-                        title="Clear to select manually"
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-assetId">Asset</Label>
+                      <Select value={formData.assetId} onValueChange={handleAssetSelection} disabled={loadingData}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={loadingData ? "Loading assets..." : "Select asset"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {assets.map((asset) => (
+                            <SelectItem key={asset.id} value={asset.id}>
+                              {asset.assetName} ({asset.assetCode})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-type">Maintenance Type</Label>
+                      {formData.type ? (
+                        <div className="flex space-x-2">
+                          <Input
+                            id="edit-type"
+                            value={formData.type}
+                            readOnly
+                            className="bg-muted"
+                            placeholder="Maintenance type will be auto-populated"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            onClick={() => setFormData({ ...formData, type: '' })}
+                            title="Clear to select manually"
+                          >
+                            ✕
+                          </Button>
+                        </div>
+                      ) : (
+                        <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })} disabled={loadingData}>
+                          <SelectTrigger>
+                            <SelectValue placeholder={loadingData ? "Loading types..." : "Select maintenance type"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {maintenanceTypes.map((type) => (
+                              <SelectItem key={type.id} value={type.name}>
+                                {type.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-frequency">Frequency</Label>
+                      <Select value={formData.frequency} onValueChange={(value) => setFormData({ ...formData, frequency: value })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select frequency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Daily">Daily</SelectItem>
+                          <SelectItem value="Weekly">Weekly</SelectItem>
+                          <SelectItem value="Monthly">Monthly</SelectItem>
+                          <SelectItem value="Quarterly">Quarterly</SelectItem>
+                          <SelectItem value="Bi-Annual">Bi-Annual</SelectItem>
+                          <SelectItem value="Annual">Annual</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-priority">Priority</Label>
+                      <Select
+                        value={formData.priority}
+                        onValueChange={(value) => setFormData({ ...formData, priority: value })}
                       >
-                        ✕
-                      </Button>
-                    </div>
-                  ) : (
-                    <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})} disabled={loadingData}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={loadingData ? "Loading types..." : "Select maintenance type"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {maintenanceTypes.map((type) => (
-                          <SelectItem key={type.id} value={type.name}>
-                            {type.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-frequency">Frequency</Label>
-                  <Select value={formData.frequency} onValueChange={(value) => setFormData({...formData, frequency: value})}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select frequency" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Daily">Daily</SelectItem>
-                      <SelectItem value="Weekly">Weekly</SelectItem>
-                      <SelectItem value="Monthly">Monthly</SelectItem>
-                      <SelectItem value="Quarterly">Quarterly</SelectItem>
-                      <SelectItem value="Bi-Annual">Bi-Annual</SelectItem>
-                      <SelectItem value="Annual">Annual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-priority">Priority</Label>
-                  <Select
-                    value={formData.priority}
-                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select priority" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {priorityLevels.map((priority) => (
-                        <SelectItem key={priority.id} value={priority.name}>
-                          {priority.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-nextDue">Next Due Date</Label>
-                  <Input
-                    id="edit-nextDue"
-                    type="date"
-                    value={formData.nextDue}
-                    onChange={(e) => setFormData({...formData, nextDue: e.target.value})}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-technician">Assigned Technician</Label>
-                  <Select value={formData.assignedTechnician} onValueChange={(value) => setFormData({...formData, assignedTechnician: value})} disabled={loadingData}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={loadingData ? "Loading technicians..." : "Select technician"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__UNASSIGNED__">None (Unassigned)</SelectItem>
-                      {technicians.map((technician) => (
-                        <SelectItem key={technician.id} value={technician.id}>
-                          {technician.firstName} {technician.lastName} - {technician.position}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-estimatedHours">Estimated Hours</Label>
-                  <Input
-                    id="edit-estimatedHours"
-                    type="number"
-                    value={formData.estimatedHours}
-                    onChange={(e) => setFormData({...formData, estimatedHours: e.target.value})}
-                    placeholder="Hours"
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="edit-description">Description</Label>
-                <Textarea
-                  id="edit-description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                  placeholder="Detailed description of the maintenance task..."
-                  rows={3}
-                />
-              </div>
-
-              {/* Trigger Configuration Section */}
-              <div className="space-y-4 border-t pt-4">
-                <Label className="text-base font-semibold">Trigger Configuration</Label>
-                <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({...formData, primaryTriggerType: value})}>
-                  <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="Time">Time-Based</TabsTrigger>
-                    <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
-                    <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
-                    <TabsTrigger value="Combined">Combined</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-
-                {/* Usage Trigger Fields */}
-                {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
-                  <div className="space-y-3 bg-muted/50 p-4 rounded-md">
-                    <Label className="text-sm font-semibold">Usage Thresholds</Label>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="edit-mileageTrigger" className="text-xs">Mileage (km)</Label>
-                        <Input
-                          id="edit-mileageTrigger"
-                          type="number"
-                          value={formData.mileageTrigger}
-                          onChange={(e) => setFormData({...formData, mileageTrigger: e.target.value})}
-                          placeholder="e.g., 5000"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="edit-operatingHoursTrigger" className="text-xs">Operating Hours</Label>
-                        <Input
-                          id="edit-operatingHoursTrigger"
-                          type="number"
-                          value={formData.operatingHoursTrigger}
-                          onChange={(e) => setFormData({...formData, operatingHoursTrigger: e.target.value})}
-                          placeholder="e.g., 200"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="edit-cycleTrigger" className="text-xs">Cycle Count</Label>
-                        <Input
-                          id="edit-cycleTrigger"
-                          type="number"
-                          value={formData.cycleTrigger}
-                          onChange={(e) => setFormData({...formData, cycleTrigger: e.target.value})}
-                          placeholder="e.g., 1000"
-                        />
-                      </div>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select priority" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {priorityLevels.map((priority) => (
+                            <SelectItem key={priority.id} value={priority.name}>
+                              {priority.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                )}
 
-                {/* Condition Trigger Fields */}
-                {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
-                  <div className="space-y-2 bg-muted/50 p-4 rounded-md">
-                    <Label htmlFor="edit-conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-nextDue">Next Due Date</Label>
+                      <Input
+                        id="edit-nextDue"
+                        type="date"
+                        value={formData.nextDue}
+                        onChange={(e) => setFormData({ ...formData, nextDue: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-technician">Assigned Technician</Label>
+                      <Select value={formData.assignedTechnician} onValueChange={(value) => setFormData({ ...formData, assignedTechnician: value })} disabled={loadingData}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={loadingData ? "Loading technicians..." : "Select technician"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__UNASSIGNED__">None (Unassigned)</SelectItem>
+                          {technicians.map((technician) => (
+                            <SelectItem key={technician.id} value={technician.id}>
+                              {technician.firstName} {technician.lastName} - {technician.position}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-estimatedHours">Estimated Hours</Label>
+                      <Input
+                        id="edit-estimatedHours"
+                        type="number"
+                        value={formData.estimatedHours}
+                        onChange={(e) => setFormData({ ...formData, estimatedHours: e.target.value })}
+                        placeholder="Hours"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-description">Description</Label>
                     <Textarea
-                      id="edit-conditionCriteria"
-                      value={formData.conditionCriteria}
-                      onChange={(e) => setFormData({...formData, conditionCriteria: e.target.value})}
-                      placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
+                      id="edit-description"
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      placeholder="Detailed description of the maintenance task..."
                       rows={3}
-                      className="font-mono text-xs"
-                    />
-                    <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
-                  </div>
-                )}
-
-                {/* Combined Trigger Logic */}
-                {formData.primaryTriggerType === 'Combined' && (
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-triggerLogic">Trigger Logic</Label>
-                    <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({...formData, triggerLogic: value})}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select logic" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
-                        <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-
-              {/* Notification Settings Section */}
-              <div className="space-y-3 border-t pt-4">
-                <Label className="text-base font-semibold">Notification Settings</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-advanceNotificationDays">Advance Notification (days)</Label>
-                    <Input
-                      id="edit-advanceNotificationDays"
-                      type="number"
-                      value={formData.advanceNotificationDays}
-                      onChange={(e) => setFormData({...formData, advanceNotificationDays: e.target.value})}
-                      placeholder="e.g., 7"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
-                    <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({...formData, autoGenerateWorkOrders: value === 'true'})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="true">Yes</SelectItem>
-                        <SelectItem value="false">No</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-notificationRecipients">Notification Recipients</Label>
-                  <Input
-                    id="edit-notificationRecipients"
-                    value={formData.notificationRecipients}
-                    onChange={(e) => setFormData({...formData, notificationRecipients: e.target.value})}
-                    placeholder="email1@example.com, email2@example.com"
-                  />
-                  <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
-                </div>
-              </div>
-              </TabsContent>
-              
-              <TabsContent value="history" className="py-4">
-                <div className="space-y-4">
-                  {loadingHistory ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      <span className="ml-2 text-muted-foreground">Loading history...</span>
-                    </div>
-                  ) : scheduleHistory.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <History className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                      <p>No history records found for this schedule.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {scheduleHistory.map((historyItem) => {
-                        // Parse newValues to extract WorkOrderId if present
-                        let workOrderId = null;
-                        let workOrderTitle = null;
-                        try {
-                          if (historyItem.newValues && historyItem.changeType === 'WorkOrderGenerated') {
-                            const newValues = JSON.parse(historyItem.newValues);
-                            workOrderId = newValues.WorkOrderId;
-                            workOrderTitle = newValues.WorkOrderTitle;
-                          }
-                        } catch (e) {
-                          // Ignore parse errors
-                        }
 
-                        return (
-                          <div key={historyItem.id} className="border rounded-lg p-4 space-y-3">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="outline">{historyItem.changeType}</Badge>
-                                <span className="text-sm text-muted-foreground">
-                                  {format(new Date(historyItem.createdAt), 'MMM dd, yyyy HH:mm')}
-                                </span>
-                              </div>
-                              <span className="text-sm font-medium">{historyItem.changedByName}</span>
-                            </div>
-                            
-                            {historyItem.changeReason && (
-                              <div>
-                                <span className="text-sm font-medium">Reason: </span>
-                                <span className="text-sm text-muted-foreground">{historyItem.changeReason}</span>
-                              </div>
-                            )}
-                            
-                            {workOrderId && (
-                              <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
-                                <div className="flex items-center space-x-2">
-                                  <CheckCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Work Order Created:</span>
-                                </div>
-                                <div className="mt-2 ml-6">
-                                  <button
-                                    onClick={() => window.open(`/maintenance/work-orders?id=${workOrderId}`, '_blank')}
-                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1 cursor-pointer"
-                                    title="Open work order in new tab"
-                                  >
-                                    {workOrderTitle || `Work Order ${workOrderId.substring(0, 8)}...`}
-                                    <CheckCircle className="h-3 w-3" />
-                                  </button>
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    ID: {workOrderId}
-                                  </p>
-                                </div>
-                              </div>
-                            )}
-                            
-                            {historyItem.previousValues && (
-                              <details className="group">
-                                <summary className="text-sm font-medium cursor-pointer hover:text-primary">
-                                  Previous Values
-                                </summary>
-                                <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.previousValues}</pre>
-                              </details>
-                            )}
-                            
-                            {historyItem.newValues && !workOrderId && (
-                              <details className="group">
-                                <summary className="text-sm font-medium cursor-pointer hover:text-primary">
-                                  New Values
-                                </summary>
-                                <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.newValues}</pre>
-                              </details>
-                            )}
+                  {/* Trigger Configuration Section */}
+                  <div className="space-y-4 border-t pt-4">
+                    <Label className="text-base font-semibold">Trigger Configuration</Label>
+                    <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({ ...formData, primaryTriggerType: value })}>
+                      <TabsList className="grid w-full grid-cols-4">
+                        <TabsTrigger value="Time">Time-Based</TabsTrigger>
+                        <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
+                        <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
+                        <TabsTrigger value="Combined">Combined</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+
+                    {/* Usage Trigger Fields */}
+                    {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
+                      <div className="space-y-3 bg-muted/50 p-4 rounded-md">
+                        <Label className="text-sm font-semibold">Usage Thresholds</Label>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-mileageTrigger" className="text-xs">Mileage (km)</Label>
+                            <Input
+                              id="edit-mileageTrigger"
+                              type="number"
+                              value={formData.mileageTrigger}
+                              onChange={(e) => setFormData({ ...formData, mileageTrigger: e.target.value })}
+                              placeholder="e.g., 5000"
+                            />
                           </div>
-                        );
-                      })}
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-operatingHoursTrigger" className="text-xs">Operating Hours</Label>
+                            <Input
+                              id="edit-operatingHoursTrigger"
+                              type="number"
+                              value={formData.operatingHoursTrigger}
+                              onChange={(e) => setFormData({ ...formData, operatingHoursTrigger: e.target.value })}
+                              placeholder="e.g., 200"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-cycleTrigger" className="text-xs">Cycle Count</Label>
+                            <Input
+                              id="edit-cycleTrigger"
+                              type="number"
+                              value={formData.cycleTrigger}
+                              onChange={(e) => setFormData({ ...formData, cycleTrigger: e.target.value })}
+                              placeholder="e.g., 1000"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Condition Trigger Fields */}
+                    {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
+                      <div className="space-y-2 bg-muted/50 p-4 rounded-md">
+                        <Label htmlFor="edit-conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
+                        <Textarea
+                          id="edit-conditionCriteria"
+                          value={formData.conditionCriteria}
+                          onChange={(e) => setFormData({ ...formData, conditionCriteria: e.target.value })}
+                          placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
+                          rows={3}
+                          className="font-mono text-xs"
+                        />
+                        <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
+                      </div>
+                    )}
+
+                    {/* Combined Trigger Logic */}
+                    {formData.primaryTriggerType === 'Combined' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-triggerLogic">Trigger Logic</Label>
+                        <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({ ...formData, triggerLogic: value })}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select logic" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
+                            <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Notification Settings Section */}
+                  <div className="space-y-3 border-t pt-4">
+                    <Label className="text-base font-semibold">Notification Settings</Label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-advanceNotificationDays">Advance Notification (days)</Label>
+                        <Input
+                          id="edit-advanceNotificationDays"
+                          type="number"
+                          value={formData.advanceNotificationDays}
+                          onChange={(e) => setFormData({ ...formData, advanceNotificationDays: e.target.value })}
+                          placeholder="e.g., 7"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
+                        <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({ ...formData, autoGenerateWorkOrders: value === 'true' })}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="true">Yes</SelectItem>
+                            <SelectItem value="false">No</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                  )}
-                </div>
-              </TabsContent>
-            </Tabs>
-            
-            <DialogFooter>
-              <Button variant="outline" onClick={() => {
-                setIsEditDialogOpen(false);
-                setEditingSchedule(null);
-                resetForm();
-              }}>
-                Cancel
-              </Button>
-              <Button onClick={handleUpdateSchedule}>Update Schedule</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-notificationRecipients">Notification Recipients</Label>
+                      <Input
+                        id="edit-notificationRecipients"
+                        value={formData.notificationRecipients}
+                        onChange={(e) => setFormData({ ...formData, notificationRecipients: e.target.value })}
+                        placeholder="email1@example.com, email2@example.com"
+                      />
+                      <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="history" className="py-4">
+                  <div className="space-y-4">
+                    {loadingHistory ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        <span className="ml-2 text-muted-foreground">Loading history...</span>
+                      </div>
+                    ) : scheduleHistory.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <History className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                        <p>No history records found for this schedule.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {scheduleHistory.map((historyItem) => {
+                          // Parse newValues to extract WorkOrderId if present
+                          let workOrderId = null;
+                          let workOrderTitle = null;
+                          try {
+                            if (historyItem.newValues && historyItem.changeType === 'WorkOrderGenerated') {
+                              const newValues = JSON.parse(historyItem.newValues);
+                              workOrderId = newValues.WorkOrderId;
+                              workOrderTitle = newValues.WorkOrderTitle;
+                            }
+                          } catch (e) {
+                            // Ignore parse errors
+                          }
+
+                          return (
+                            <div key={historyItem.id} className="border rounded-lg p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2">
+                                  <Badge variant="outline">{historyItem.changeType}</Badge>
+                                  <span className="text-sm text-muted-foreground">
+                                    {dateFormat(new Date(historyItem.createdAt), 'MMM dd, yyyy HH:mm')}
+                                  </span>
+                                </div>
+                                <span className="text-sm font-medium">{historyItem.changedByName}</span>
+                              </div>
+
+                              {historyItem.changeReason && (
+                                <div>
+                                  <span className="text-sm font-medium">Reason: </span>
+                                  <span className="text-sm text-muted-foreground">{historyItem.changeReason}</span>
+                                </div>
+                              )}
+
+                              {workOrderId && (
+                                <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
+                                  <div className="flex items-center space-x-2">
+                                    <CheckCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                    <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Work Order Created:</span>
+                                  </div>
+                                  <div className="mt-2 ml-6">
+                                    <button
+                                      onClick={() => window.open(`/maintenance/work-orders?id=${workOrderId}`, '_blank')}
+                                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                                      title="Open work order in new tab"
+                                    >
+                                      {workOrderTitle || `Work Order ${workOrderId.substring(0, 8)}...`}
+                                      <CheckCircle className="h-3 w-3" />
+                                    </button>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      ID: {workOrderId}
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+
+                              {historyItem.previousValues && (
+                                <details className="group">
+                                  <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                    Previous Values
+                                  </summary>
+                                  <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.previousValues}</pre>
+                                </details>
+                              )}
+
+                              {historyItem.newValues && !workOrderId && (
+                                <details className="group">
+                                  <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                    New Values
+                                  </summary>
+                                  <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.newValues}</pre>
+                                </details>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  setIsEditDialogOpen(false);
+                  setEditingSchedule(null);
+                  resetForm();
+                }}>
+                  Cancel
+                </Button>
+                <Button onClick={handleUpdateSchedule}>Update Schedule</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </ClientOnly>
       </div>
 
@@ -1648,85 +1651,85 @@ export default function ScheduledMaintenancePage() {
         <CardContent>
           <ClientOnly>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search..."
-                className="pl-8"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="scheduled">Scheduled</SelectItem>
-                <SelectItem value="in progress">In Progress</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Priority" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Priorities</SelectItem>
-                {priorityLevels.map((priority) => (
-                  <SelectItem key={priority.id} value={priority.name.toLowerCase()}>
-                    {priority.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="preventive">Preventive</SelectItem>
-                <SelectItem value="safety">Safety</SelectItem>
-                <SelectItem value="inspection">Inspection</SelectItem>
-                <SelectItem value="calibration">Calibration</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="justify-start text-left font-normal">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateRange?.from ? (
-                    dateRange.to ? (
-                      <>
-                        {format(dateRange.from, "LLL dd, y")} -{" "}
-                        {format(dateRange.to, "LLL dd, y")}
-                      </>
-                    ) : (
-                      format(dateRange.from, "LLL dd, y")
-                    )
-                  ) : (
-                    <span>Pick a date range</span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange?.from}
-                  selected={dateRange}
-                  onSelect={setDateRange}
-                  numberOfMonths={2}
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search..."
+                  className="pl-8"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
                 />
-              </PopoverContent>
-            </Popover>
+              </div>
+
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                  <SelectItem value="in progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="overdue">Overdue</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Priorities</SelectItem>
+                  {priorityLevels.map((priority) => (
+                    <SelectItem key={priority.id} value={priority.name.toLowerCase()}>
+                      {priority.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="preventive">Preventive</SelectItem>
+                  <SelectItem value="safety">Safety</SelectItem>
+                  <SelectItem value="inspection">Inspection</SelectItem>
+                  <SelectItem value="calibration">Calibration</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="justify-start text-left font-normal">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateRange?.from ? (
+                      dateRange.to ? (
+                        <>
+                          {dateFormat(dateRange.from, "LLL dd, y")} -{" "}
+                          {dateFormat(dateRange.to, "LLL dd, y")}
+                        </>
+                      ) : (
+                        dateFormat(dateRange.from, "LLL dd, y")
+                      )
+                    ) : (
+                      <span>Pick a date range</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    initialFocus
+                    mode="range"
+                    defaultMonth={dateRange?.from}
+                    selected={dateRange}
+                    onSelect={setDateRange}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </ClientOnly>
         </CardContent>
@@ -1742,8 +1745,6 @@ export default function ScheduledMaintenancePage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {console.log('📊 RENDERING GRID - filteredData length:', filteredData.length)}
-            {console.log('📊 RENDERING GRID - filteredData:', filteredData)}
             {filteredData.length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 No scheduled maintenance tasks found.
@@ -1763,7 +1764,7 @@ export default function ScheduledMaintenancePage() {
                       {getPriorityBadge(item.priority)}
                       {getStatusBadge(item.status)}
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
                       <div className="flex items-center space-x-2">
                         <Package className="h-4 w-4" />
@@ -1775,23 +1776,23 @@ export default function ScheduledMaintenancePage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <CalendarIcon className="h-4 w-4" />
-                        <span>Due: {item.nextDue ? format(new Date(item.nextDue), 'MMM dd, yyyy') : 'Not set'}</span>
+                        <span>Due: {item.nextDue ? dateFormat(new Date(item.nextDue), 'MMM dd, yyyy') : 'Not set'}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Clock className="h-4 w-4" />
                         <span>{item.estimatedHours} hours</span>
                       </div>
                     </div>
-                    
+
                     <div className="text-sm">
-                      <span className="font-medium">Type:</span> {item.type} | 
+                      <span className="font-medium">Type:</span> {item.type} |
                       <span className="font-medium"> Frequency:</span> {item.frequency} |
-                      <span className="font-medium"> Last Done:</span> {item.lastCompleted ? format(new Date(item.lastCompleted), 'MMM dd, yyyy') : 'Never'}
+                      <span className="font-medium"> Last Done:</span> {item.lastCompleted ? dateFormat(new Date(item.lastCompleted), 'MMM dd, yyyy') : 'Never'}
                     </div>
-                    
+
                     <p className="text-sm text-muted-foreground">{item.description}</p>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2">
                     {item.status === 'Scheduled' && (
                       <Button size="sm" onClick={() => handleCompleteSchedule(item.id)}>
@@ -1822,7 +1823,7 @@ export default function ScheduledMaintenancePage() {
               Are you sure you want to generate a work order for this scheduled maintenance task?
             </DialogDescription>
           </DialogHeader>
-          
+
           {scheduleToGenerate && (
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -1830,7 +1831,7 @@ export default function ScheduledMaintenancePage() {
                 <p><strong>Asset:</strong> {scheduleToGenerate.assetName}</p>
                 <p><strong>Type:</strong> {scheduleToGenerate.type}</p>
                 <p><strong>Priority:</strong> {scheduleToGenerate.priority}</p>
-                <p><strong>Due Date:</strong> {format(new Date(scheduleToGenerate.nextDue), 'MMM dd, yyyy')}</p>
+                <p><strong>Due Date:</strong> {dateFormat(new Date(scheduleToGenerate.nextDue), 'MMM dd, yyyy')}</p>
                 {scheduleToGenerate.assignedTechnician && scheduleToGenerate.assignedTechnician !== 'Unassigned' ? (
                   <p><strong>Assigned to:</strong> {scheduleToGenerate.assignedTechnician}</p>
                 ) : (
@@ -1839,10 +1840,10 @@ export default function ScheduledMaintenancePage() {
               </div>
             </div>
           )}
-          
+
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setIsConfirmDialogOpen(false);
                 setScheduleToGenerate(null);

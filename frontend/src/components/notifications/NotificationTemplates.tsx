@@ -72,7 +72,7 @@ const NotificationTemplates: React.FC = () => {
 
   useEffect(() => {
     loadTemplates()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   const onCreate = async () => {

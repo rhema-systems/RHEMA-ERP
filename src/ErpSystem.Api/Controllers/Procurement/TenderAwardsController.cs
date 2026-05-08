@@ -164,7 +164,7 @@ public class TenderAwardsController : ControllerBase
     /// </summary>
     [HttpPost("{id}/approve")]
     [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public async Task<ActionResult<TenderAwardDto>> ApproveAward(Guid id, [FromBody] ApproveAwardDto dto)
+    public ActionResult<TenderAwardDto> ApproveAward(Guid id, [FromBody] ApproveAwardDto dto)
     {
         try
         {
@@ -190,7 +190,7 @@ public class TenderAwardsController : ControllerBase
     /// </summary>
     [HttpPost("{id}/reject")]
     [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public async Task<ActionResult<TenderAwardDto>> RejectAward(Guid id, [FromBody] RejectAwardDto dto)
+    public ActionResult<TenderAwardDto> RejectAward(Guid id, [FromBody] RejectAwardDto dto)
     {
         try
         {
@@ -240,7 +240,7 @@ public class TenderAwardsController : ControllerBase
     /// </summary>
     [HttpGet("{id}/notification")]
     [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public async Task<ActionResult<AwardNotificationDto>> GenerateAwardNotification(Guid id)
+    public ActionResult<AwardNotificationDto> GenerateAwardNotification(Guid id)
     {
         try
         {

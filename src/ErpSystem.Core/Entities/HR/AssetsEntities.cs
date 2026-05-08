@@ -119,7 +119,7 @@ public class CompanyAsset : TenantEntity
     // Status
     public AssetStatus Status { get; set; }
 
-    public AssetCondition Condition { get; set; }
+    public HRAssetCondition Condition { get; set; }
 
     // Location
     public Guid? StationId { get; set; }
@@ -220,7 +220,7 @@ public class AssetAssignment : TenantEntity
     public bool IsPrimaryUser { get; set; }
 
     // Condition at Assignment
-    public AssetCondition ConditionAtAssignment { get; set; }
+    public HRAssetCondition ConditionAtAssignment { get; set; }
     
     [MaxLength(1000)]
     public string? ConditionNotes { get; set; }
@@ -248,7 +248,7 @@ public class AssetAssignment : TenantEntity
     
     public DateTime? ReturnDate { get; set; }
     
-    public AssetCondition? ConditionAtReturn { get; set; }
+    public HRAssetCondition? ConditionAtReturn { get; set; }
     
     [MaxLength(1000)]
     public string? ReturnNotes { get; set; }
@@ -435,7 +435,7 @@ public class AssetTransfer : TenantEntity
 
     public DateTime TransferDate { get; set; }
     
-    public AssetTransferType Type { get; set; } // Employee-to-Employee, Location-to-Location
+    public HRAssetTransferType Type { get; set; } // Employee-to-Employee, Location-to-Location
 
     // From
     public Guid? FromEmployeeId { get; set; }

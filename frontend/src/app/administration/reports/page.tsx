@@ -205,7 +205,7 @@ export default function AdministrationReportsPage() {
     isLoading: reportsLoading,
     error: reportsError,
     refetch: refetchReports
-  } = useQuery({
+  } = useQuery<ReportDefinition[], Error>({
     queryKey: ['admin-reports', selectedType !== 'all' ? selectedType : undefined, selectedStatus !== 'all' ? selectedStatus : undefined],
     queryFn: () => {
       console.log('Fetching reports...');
@@ -215,23 +215,29 @@ export default function AdministrationReportsPage() {
       );
     },
     refetchOnWindowFocus: false,
-    onSuccess: (data) => {
-      console.log('Reports fetched successfully:', data.length, 'reports');
-    },
-    onError: (error) => {
-      console.error('Failed to fetch reports:', error);
-    }
   });
 
   // Fetch analytics
   const {
     data: analytics,
     isLoading: analyticsLoading
-  } = useQuery({
+  } = useQuery<ReportAnalytics, Error>({
     queryKey: ['reportAnalytics'],
     queryFn: () => reportsService.getReportAnalytics(),
     refetchOnWindowFocus: false,
   });
+
+  React.useEffect(() => {
+    if (reports.length > 0) {
+      console.log('Reports fetched successfully:', reports.length, 'reports');
+    }
+  }, [reports]);
+
+  React.useEffect(() => {
+    if (reportsError) {
+      console.error('Failed to fetch reports:', reportsError);
+    }
+  }, [reportsError]);
 
   // Enhanced mutations for admin functionality
   const executeReportMutation = useMutation({
@@ -370,8 +376,8 @@ export default function AdministrationReportsPage() {
   };
 
   const getModuleIcon = (moduleId: string) => {
-    const module = modules.find(m => m.id === moduleId);
-    switch (module?.icon) {
+    const matchedModule = modules.find(m => m.id === moduleId);
+    switch (matchedModule?.icon) {
       case 'DollarSign':
         return <DollarSign className="h-3 w-3" />;
       case 'TrendingUp':
@@ -1105,25 +1111,25 @@ export default function AdministrationReportsPage() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {modules.map((module) => (
-                    <Card key={module.id}>
+                  {modules.map((tenantModule) => (
+                    <Card key={tenantModule.id}>
                       <CardHeader className="pb-3">
                         <div className="flex items-center space-x-2">
                           <div className="p-2 rounded-lg bg-blue-100 text-blue-700">
-                            {getModuleIcon(module.id)}
+                            {getModuleIcon(tenantModule.id)}
                           </div>
                           <div>
-                            <CardTitle className="text-lg">{module.name}</CardTitle>
+                            <CardTitle className="text-lg">{tenantModule.name}</CardTitle>
                           </div>
                         </div>
                       </CardHeader>
                       <CardContent>
                         <p className="text-sm text-muted-foreground mb-4">
-                          {module.description}
+                          {tenantModule.description}
                         </p>
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">
-                            {filteredReports.filter(r => (r as EnhancedReportDefinition).moduleId === module.id).length} reports
+                            {filteredReports.filter(r => (r as EnhancedReportDefinition).moduleId === tenantModule.id).length} reports
                           </span>
                           <Button size="sm" variant="outline">
                             <Settings className="h-4 w-4 mr-2" />
@@ -1203,28 +1209,28 @@ export default function AdministrationReportsPage() {
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-3 max-h-96 overflow-y-auto">
-                {modules.map((module) => (
+                {modules.map((tenantModule) => (
                   <Card 
-                    key={module.id} 
+                    key={tenantModule.id} 
                     className={`cursor-pointer hover:bg-muted/50 transition-colors ${
-                      selectedModuleForAssignment === module.id ? 'ring-2 ring-primary bg-muted/50' : ''
+                      selectedModuleForAssignment === tenantModule.id ? 'ring-2 ring-primary bg-muted/50' : ''
                     }`} 
-                    onClick={() => setSelectedModuleForAssignment(module.id)}
+                    onClick={() => setSelectedModuleForAssignment(tenantModule.id)}
                   >
                     <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           <div className="p-2 rounded-lg bg-blue-100 text-blue-700">
-                            {getModuleIcon(module.id)}
+                            {getModuleIcon(tenantModule.id)}
                           </div>
                           <div>
-                            <CardTitle className="text-base">{module.name}</CardTitle>
+                            <CardTitle className="text-base">{tenantModule.name}</CardTitle>
                             <CardDescription className="text-sm">
-                              {module.description}
+                              {tenantModule.description}
                             </CardDescription>
                           </div>
                         </div>
-                        {selectedModuleForAssignment === module.id && (
+                        {selectedModuleForAssignment === tenantModule.id && (
                           <CheckCircle className="h-5 w-5 text-primary" />
                         )}
                       </div>

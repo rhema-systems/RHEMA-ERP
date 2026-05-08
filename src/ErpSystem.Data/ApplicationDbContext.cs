@@ -1,11 +1,14 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
@@ -14,6 +17,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Data.Configuration.Maintenance;
 using ErpSystem.Data.Configuration.Pricing;
 using ErpSystem.Data.Configuration.Procurement;
+using ErpSystem.Data.Configuration.Projects;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +33,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     private readonly Guid? _tenantId;
 
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+    {
+    }
+
+    /// <summary>
+    /// Protected constructor for derived contexts (e.g. ReportingDbContext) that use their own typed options.
+    /// </summary>
+    protected ApplicationDbContext(DbContextOptions options) : base(options)
     {
     }
 
@@ -65,6 +76,91 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     // Core entities
     public DbSet<Tenant> Tenants { get; set; }
+
+    // Finance entities
+    public DbSet<ExchangeRate> ExchangeRates { get; set; }
+    public DbSet<FiscalYear> FiscalYears { get; set; }
+    public DbSet<FiscalPeriod> FiscalPeriods { get; set; }
+    public DbSet<AccountSegmentStructure> AccountSegmentStructures { get; set; }
+    public DbSet<SegmentLookupValue> SegmentLookupValues { get; set; }
+    public DbSet<Account> Accounts { get; set; }
+    public DbSet<AccountSegmentValue> AccountSegmentValues { get; set; }
+    public DbSet<FinanceSettings> FinanceSettings { get; set; }
+    public DbSet<Tax> Taxes { get; set; }
+    public DbSet<TaxGroup> TaxGroups { get; set; }
+    public DbSet<TaxGroupComponent> TaxGroupComponents { get; set; }
+    public DbSet<ModuleDefinition> ModuleDefinitions { get; set; }
+    public DbSet<TransactionDocumentModuleMapping> TransactionDocumentModuleMappings { get; set; }
+    public DbSet<FixedAssetCategory> FixedAssetCategories { get; set; }
+    public DbSet<FixedAsset> FixedAssets { get; set; }
+    public DbSet<AssetDisposal> AssetDisposals { get; set; }
+    public DbSet<AssetTransfer> AssetTransfers { get; set; }
+    public DbSet<AssetTransaction> AssetTransactions { get; set; }
+    public DbSet<AssetValuation> AssetValuations { get; set; }
+    public DbSet<AssetDepreciationSchedule> AssetDepreciationSchedules { get; set; }
+    public DbSet<AssetVerificationSession> AssetVerificationSessions { get; set; }
+    public DbSet<AssetVerificationItem> AssetVerificationItems { get; set; }
+
+    // Capital Projects (AUC) entities
+    public DbSet<CapitalProject> CapitalProjects { get; set; }
+    public DbSet<ProjectCostLine> ProjectCostLines { get; set; }
+    public DbSet<ProjectSettlementRule> ProjectSettlementRules { get; set; }
+
+    // Lease Accounting (IFRS 16) entities
+    public DbSet<LeaseContract> LeaseContracts { get; set; }
+    public DbSet<LeaseScheduleLine> LeaseScheduleLines { get; set; }
+    public DbSet<JournalEntry> JournalEntries { get; set; }
+    public DbSet<AccountTransaction> AccountTransactions { get; set; }
+    public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
+    public DbSet<BudgetScenario> BudgetScenarios { get; set; }
+    public DbSet<BudgetEntry> BudgetEntries { get; set; }
+    public DbSet<BudgetReturn> BudgetReturns { get; set; }
+    public DbSet<BankAccount> BankAccounts { get; set; }
+    public DbSet<TaxRule> TaxRules { get; set; }
+    public DbSet<Invoice> Invoices { get; set; }
+    public DbSet<VendorInvoice> VendorInvoices { get; set; }
+    public DbSet<Customer> Customers { get; set; }
+
+    // Sales Order Management entities
+    public DbSet<SalesOrder> SalesOrders { get; set; }
+    public DbSet<SalesOrderLine> SalesOrderLines { get; set; }
+    public DbSet<SalesOrderStatusHistory> SalesOrderStatusHistories { get; set; }
+    public DbSet<DeliveryNote> DeliveryNotes { get; set; }
+    public DbSet<DeliveryNoteLine> DeliveryNoteLines { get; set; }
+
+    // Sales Agreement Management entities
+    public DbSet<SalesAgreement> SalesAgreements { get; set; }
+    public DbSet<SalesAgreementLine> SalesAgreementLines { get; set; }
+    public DbSet<SalesAgreementMilestone> SalesAgreementMilestones { get; set; }
+    public DbSet<SalesAgreementRenewal> SalesAgreementRenewals { get; set; }
+    public DbSet<SalesAgreementDocument> SalesAgreementDocuments { get; set; }
+
+    // CRM entities
+    public DbSet<Lead> Leads { get; set; }
+    public DbSet<Opportunity> Opportunities { get; set; }
+    public DbSet<Quote> Quotes { get; set; }
+    public DbSet<QuoteLineItem> QuoteLineItems { get; set; }
+    public DbSet<Activity> CrmActivities { get; set; }
+    public DbSet<Campaign> Campaigns { get; set; }
+    public DbSet<CampaignMember> CampaignMembers { get; set; }
+    public DbSet<Product> SalesProducts { get; set; }
+
+    // Competitor Intelligence entities
+    public DbSet<Competitor> Competitors { get; set; }
+    public DbSet<CompetitorDeal> CompetitorDeals { get; set; }
+
+    // Return Order / Credit Note / Refund entities
+    public DbSet<ReturnOrder> ReturnOrders { get; set; }
+    public DbSet<ReturnOrderLine> ReturnOrderLines { get; set; }
+    public DbSet<CreditNote> CreditNotes { get; set; }
+    public DbSet<CreditNoteLine> CreditNoteLines { get; set; }
+    public DbSet<Refund> Refunds { get; set; }
+
+    // Collections & Debt Management entities
+    public DbSet<CollectionActivity> CollectionActivities { get; set; }
+    public DbSet<PaymentPlan> PaymentPlans { get; set; }
+    public DbSet<PaymentPlanInstallment> PaymentPlanInstallments { get; set; }
+
     public DbSet<TenantModule> TenantModules { get; set; }
     public DbSet<UserTenant> UserTenants { get; set; }
 
@@ -360,12 +456,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<InventoryLayer> InventoryLayers { get; set; }
     public DbSet<InventoryBalance> InventoryBalances { get; set; }
 
-    // GP-Style Inventory entities
-    public DbSet<ItemClass> ItemClasses { get; set; }
-    public DbSet<PriceGroup> PriceGroups { get; set; }
+    // GP-Style Inventory entities (TODO: Create entity classes when implementing GP-style inventory)
+    // public DbSet<ItemClass> ItemClasses { get; set; }
+    // public DbSet<PriceGroup> PriceGroups { get; set; }
     public DbSet<UnitOfMeasureSchedule> UnitOfMeasureSchedules { get; set; }
     public DbSet<UnitOfMeasureScheduleDetail> UnitOfMeasureScheduleDetails { get; set; }
-    public DbSet<SuggestedSalesItem> SuggestedSalesItems { get; set; }
+    // public DbSet<SuggestedSalesItem> SuggestedSalesItems { get; set; }
 
     // Price List entities
     public DbSet<PriceList> PriceLists { get; set; }
@@ -567,6 +663,79 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PaymentTerm> PaymentTerms { get; set; }
     public DbSet<Currency> Currencies { get; set; }
 
+    // Project management entities
+    public DbSet<Project> Projects { get; set; }
+    public DbSet<ProjectType> ProjectTypes { get; set; }
+    public DbSet<ProjectPriority> ProjectPriorities { get; set; }
+    public DbSet<ProjectTemplate> ProjectTemplates { get; set; }
+    public DbSet<ProjectPhaseTemplate> ProjectPhaseTemplates { get; set; }
+    public DbSet<ProjectStageGateRule> ProjectStageGateRules { get; set; }
+    public DbSet<ProjectPortfolio> ProjectPortfolios { get; set; }
+    public DbSet<ProjectProgram> ProjectPrograms { get; set; }
+    public DbSet<ProjectManagementSettings> ProjectManagementSettings { get; set; }
+    public DbSet<ProjectCatalogEntry> ProjectCatalogEntries { get; set; }
+    public DbSet<ProjectDevelopmentProfile> ProjectDevelopmentProfiles { get; set; }
+    public DbSet<ProjectPhase> ProjectPhases { get; set; }
+    public DbSet<ProjectPackage> ProjectPackages { get; set; }
+    public DbSet<ProjectBoqItem> ProjectBoqItems { get; set; }
+    public DbSet<ProjectApprovalRegisterItem> ProjectApprovalRegisterItems { get; set; }
+    public DbSet<ProjectDrawing> ProjectDrawings { get; set; }
+    public DbSet<ProjectSubmittal> ProjectSubmittals { get; set; }
+    public DbSet<ProjectRfi> ProjectRfis { get; set; }
+    public DbSet<ProjectSiteInstruction> ProjectSiteInstructions { get; set; }
+    public DbSet<ProjectVariationOrder> ProjectVariationOrders { get; set; }
+    public DbSet<ProjectInterimValuation> ProjectInterimValuations { get; set; }
+    public DbSet<ProjectInterimValuationPackageCompletion> ProjectInterimValuationPackageCompletions { get; set; }
+    public DbSet<ProjectPaymentCertificate> ProjectPaymentCertificates { get; set; }
+    public DbSet<ProjectExtensionOfTime> ProjectExtensionOfTimeRequests { get; set; }
+    public DbSet<ProjectFinalAccount> ProjectFinalAccounts { get; set; }
+    public DbSet<ProjectBuilding> ProjectBuildings { get; set; }
+    public DbSet<ProjectFloor> ProjectFloors { get; set; }
+    public DbSet<ProjectUnitReleaseBatch> ProjectUnitReleaseBatches { get; set; }
+    public DbSet<ProjectUnitHandoverBatch> ProjectUnitHandoverBatches { get; set; }
+    public DbSet<ProjectUnitTypeTemplate> ProjectUnitTypeTemplates { get; set; }
+    public DbSet<ProjectUnitTypeTemplateAmenity> ProjectUnitTypeTemplateAmenities { get; set; }
+    public DbSet<ProjectUnit> ProjectUnits { get; set; }
+    public DbSet<ProjectUnitAmenity> ProjectUnitAmenities { get; set; }
+    public DbSet<ProjectCustomerVariation> ProjectCustomerVariations { get; set; }
+    public DbSet<ProjectCommissioningItem> ProjectCommissioningItems { get; set; }
+    public DbSet<ProjectHandoverItem> ProjectHandoverItems { get; set; }
+    public DbSet<ProjectSnagItem> ProjectSnagItems { get; set; }
+    public DbSet<ProjectDefectLiabilityCase> ProjectDefectLiabilityCases { get; set; }
+    public DbSet<ProjectInitiationVersion> ProjectInitiationVersions { get; set; }
+    public DbSet<ProjectMember> ProjectMembers { get; set; }
+    public DbSet<ProjectWorkItem> ProjectWorkItems { get; set; }
+    public DbSet<ProjectMilestone> ProjectMilestones { get; set; }
+    public DbSet<ProjectMilestonePhase> ProjectMilestonePhases { get; set; }
+    public DbSet<ProjectResourceAllocation> ProjectResourceAllocations { get; set; }
+    public DbSet<ProjectRisk> ProjectRisks { get; set; }
+    public DbSet<ProjectIssue> ProjectIssues { get; set; }
+    public DbSet<ProjectQualityCheckpoint> ProjectQualityCheckpoints { get; set; }
+    public DbSet<ProjectNonConformance> ProjectNonConformances { get; set; }
+    public DbSet<ProjectChangeRequest> ProjectChangeRequests { get; set; }
+    public DbSet<ProjectBillingSchedule> ProjectBillingSchedules { get; set; }
+    public DbSet<ProjectInvoiceRequest> ProjectInvoiceRequests { get; set; }
+    public DbSet<ProjectDeliverable> ProjectDeliverables { get; set; }
+    public DbSet<ProjectDeliverableExternalReview> ProjectDeliverableExternalReviews { get; set; }
+    public DbSet<ProjectTaskDependency> ProjectTaskDependencies { get; set; }
+    public DbSet<ProjectInterdependency> ProjectInterdependencies { get; set; }
+    public DbSet<ProjectBaseline> ProjectBaselines { get; set; }
+    public DbSet<ProjectTimesheetEntry> ProjectTimesheetEntries { get; set; }
+    public DbSet<ProjectExpense> ProjectExpenses { get; set; }
+    public DbSet<ProjectMaterialCostEntry> ProjectMaterialCostEntries { get; set; }
+    public DbSet<ProjectRevenueRecognition> ProjectRevenueRecognitions { get; set; }
+    public DbSet<ProjectBudgetRevision> ProjectBudgetRevisions { get; set; }
+    public DbSet<ProjectForecastVersion> ProjectForecastVersions { get; set; }
+    public DbSet<ProjectAssetLink> ProjectAssetLinks { get; set; }
+    public DbSet<ProjectExternalAccessPolicy> ProjectExternalAccessPolicies { get; set; }
+    public DbSet<ProjectDecision> ProjectDecisions { get; set; }
+    public DbSet<ProjectMeetingMinute> ProjectMeetingMinutes { get; set; }
+    public DbSet<ProjectActionItem> ProjectActionItems { get; set; }
+    public DbSet<ProjectLessonLearned> ProjectLessonsLearned { get; set; }
+    public DbSet<ProjectDocument> ProjectDocuments { get; set; }
+    public DbSet<ProjectComment> ProjectComments { get; set; }
+    public DbSet<ProjectClosure> ProjectClosures { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -607,6 +776,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new TenderLotConfiguration());
         builder.ApplyConfiguration(new TenderBidConfiguration());
         builder.ApplyConfiguration(new TenderBidLotConfiguration());
+        builder.ApplyConfiguration(new TenderBidItemConfiguration());
+        builder.ApplyConfiguration(new TenderNegotiationConfiguration());
+        builder.ApplyConfiguration(new TenderNegotiationItemConfiguration());
         builder.ApplyConfiguration(new TenderAwardConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
@@ -624,6 +796,666 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new DistributedLockConfiguration());
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
+
+        // ─── CRM Entity FK Configurations (prevent cascade cycles) ───
+
+        builder.Entity<Lead>(entity =>
+        {
+            entity.ToTable("Leads");
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ConvertedCustomer)
+                .WithMany()
+                .HasForeignKey(e => e.ConvertedCustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Opportunity>(entity =>
+        {
+            entity.ToTable("Opportunities");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Lead)
+                .WithMany(l => l.Opportunities)
+                .HasForeignKey(e => e.LeadId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Quote>(entity =>
+        {
+            entity.ToTable("Quotes");
+            entity.HasOne(e => e.Opportunity)
+                .WithMany(o => o.Quotes)
+                .HasForeignKey(e => e.OpportunityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ConvertedInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.ConvertedInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<QuoteLineItem>(entity =>
+        {
+            entity.ToTable("QuoteLineItems");
+            entity.HasOne(e => e.Quote)
+                .WithMany(q => q.LineItems)
+                .HasForeignKey(e => e.QuoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Ignore computed property
+            entity.Ignore(e => e.LineTotal);
+        });
+
+        builder.Entity<Activity>(entity =>
+        {
+            entity.ToTable("CrmActivities");
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Lead)
+                .WithMany(l => l.Activities)
+                .HasForeignKey(e => e.LeadId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Opportunity)
+                .WithMany(o => o.Activities)
+                .HasForeignKey(e => e.OpportunityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Campaign>(entity =>
+        {
+            entity.ToTable("Campaigns");
+            entity.Ignore(e => e.ResponseRate);
+            entity.HasOne(e => e.Manager)
+                .WithMany()
+                .HasForeignKey(e => e.ManagerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CampaignMember>(entity =>
+        {
+            entity.ToTable("CampaignMembers");
+            entity.HasOne(e => e.Campaign)
+                .WithMany(c => c.CampaignMembers)
+                .HasForeignKey(e => e.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Lead)
+                .WithMany()
+                .HasForeignKey(e => e.LeadId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Product>(entity =>
+        {
+            entity.ToTable("SalesProducts");
+            entity.Ignore(e => e.Margin);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SalesOrder>(entity =>
+        {
+            entity.ToTable("SalesOrders");
+            entity.HasOne(e => e.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Quote)
+                .WithMany()
+                .HasForeignKey(e => e.QuoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Opportunity)
+                .WithMany()
+                .HasForeignKey(e => e.OpportunityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SalesRep)
+                .WithMany()
+                .HasForeignKey(e => e.SalesRepId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Invoice)
+                .WithMany()
+                .HasForeignKey(e => e.InvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SalesOrderLine>(entity =>
+        {
+            entity.ToTable("SalesOrderLines");
+            entity.HasOne(e => e.SalesOrder)
+                .WithMany(e => e.Lines)
+                .HasForeignKey(e => e.SalesOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Product)
+                .WithMany()
+                .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Location)
+                .WithMany()
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.GLAccount)
+                .WithMany()
+                .HasForeignKey(e => e.GLAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<DeliveryNote>(entity =>
+        {
+            entity.ToTable("DeliveryNotes");
+            entity.HasOne(e => e.SalesOrder)
+                .WithMany(e => e.DeliveryNotes)
+                .HasForeignKey(e => e.SalesOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PackedBy)
+                .WithMany()
+                .HasForeignKey(e => e.PackedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ShippedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ShippedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReceivedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ReceivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<DeliveryNoteLine>(entity =>
+        {
+            entity.ToTable("DeliveryNoteLines");
+            entity.HasOne(e => e.DeliveryNote)
+                .WithMany(e => e.Lines)
+                .HasForeignKey(e => e.DeliveryNoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.SalesOrderLine)
+                .WithMany()
+                .HasForeignKey(e => e.SalesOrderLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Location)
+                .WithMany()
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── Return Order / Credit Note / Refund FK Configurations ───
+
+        builder.Entity<ReturnOrder>(entity =>
+        {
+            entity.ToTable("ReturnOrders");
+            entity.HasOne(e => e.SalesOrder)
+                .WithMany()
+                .HasForeignKey(e => e.SalesOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.DeliveryNote)
+                .WithMany()
+                .HasForeignKey(e => e.DeliveryNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InspectedBy)
+                .WithMany()
+                .HasForeignKey(e => e.InspectedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CreditNote)
+                .WithMany()
+                .HasForeignKey(e => e.CreditNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Refund)
+                .WithMany()
+                .HasForeignKey(e => e.RefundId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ReturnOrderLine>(entity =>
+        {
+            entity.ToTable("ReturnOrderLines");
+            entity.HasOne(e => e.ReturnOrder)
+                .WithMany(r => r.Lines)
+                .HasForeignKey(e => e.ReturnOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.SalesOrderLine)
+                .WithMany()
+                .HasForeignKey(e => e.SalesOrderLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Ignore(e => e.LineTotal);
+        });
+
+        builder.Entity<CreditNote>(entity =>
+        {
+            entity.ToTable("CreditNotes");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReturnOrder)
+                .WithMany()
+                .HasForeignKey(e => e.ReturnOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CreditNoteLine>(entity =>
+        {
+            entity.ToTable("CreditNoteLines");
+            entity.HasOne(e => e.CreditNote)
+                .WithMany(c => c.Lines)
+                .HasForeignKey(e => e.CreditNoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Ignore(e => e.LineTotal);
+        });
+
+        builder.Entity<Refund>(entity =>
+        {
+            entity.ToTable("Refunds");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CreditNote)
+                .WithMany()
+                .HasForeignKey(e => e.CreditNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReturnOrder)
+                .WithMany()
+                .HasForeignKey(e => e.ReturnOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ProcessedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ProcessedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── Collections & Debt Management FK Configurations ───
+
+        builder.Entity<CollectionActivity>(entity =>
+        {
+            entity.ToTable("CollectionActivities");
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Invoice)
+                .WithMany()
+                .HasForeignKey(e => e.InvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AssignedTo)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentPlan>(entity =>
+        {
+            entity.ToTable("PaymentPlans");
+            entity.Ignore(e => e.RemainingBalance);
+            entity.HasOne(e => e.Customer)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ApprovedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentPlanInstallment>(entity =>
+        {
+            entity.ToTable("PaymentPlanInstallments");
+            entity.Ignore(e => e.Balance);
+            entity.HasOne(e => e.PaymentPlan)
+                .WithMany(p => p.Installments)
+                .HasForeignKey(e => e.PaymentPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── Accounts Payable FK Configurations ───
+
+        builder.Entity<VendorInvoice>(entity =>
+        {
+            entity.ToTable("VendorInvoice");
+            entity.HasOne(e => e.Supplier)
+                .WithMany()
+                .HasForeignKey(e => e.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(e => e.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ExpenseAccount)
+                .WithMany()
+                .HasForeignKey(e => e.ExpenseAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ApAccount)
+                .WithMany()
+                .HasForeignKey(e => e.ApAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<VendorInvoiceLineItem>(entity =>
+        {
+            entity.ToTable("VendorInvoiceLineItem");
+            entity.HasOne(e => e.VendorInvoice)
+                .WithMany(i => i.LineItems)
+                .HasForeignKey(e => e.VendorInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.GLAccount)
+                .WithMany()
+                .HasForeignKey(e => e.GLAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PurchaseOrderItem)
+                .WithMany()
+                .HasForeignKey(e => e.PurchaseOrderItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Location)
+                .WithMany()
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<VendorPayment>(entity =>
+        {
+            entity.ToTable("VendorPayment");
+            entity.HasOne(e => e.Supplier)
+                .WithMany()
+                .HasForeignKey(e => e.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BankAccount)
+                .WithMany()
+                .HasForeignKey(e => e.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PaymentBatch)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<VendorPaymentAllocation>(entity =>
+        {
+            entity.ToTable("VendorPaymentAllocation");
+            entity.HasOne(e => e.VendorPayment)
+                .WithMany(p => p.Allocations)
+                .HasForeignKey(e => e.VendorPaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.VendorInvoice)
+                .WithMany(i => i.PaymentAllocations)
+                .HasForeignKey(e => e.VendorInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentBatch>(entity =>
+        {
+            entity.ToTable("PaymentBatch");
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PaymentBatchItem>(entity =>
+        {
+            entity.ToTable("PaymentBatchItem");
+            entity.HasOne(e => e.PaymentBatch)
+                .WithMany(b => b.Items)
+                .HasForeignKey(e => e.PaymentBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.VendorPayment)
+                .WithMany()
+                .HasForeignKey(e => e.VendorPaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ─── General Ledger FK Configurations ───
+
+        builder.Entity<FiscalYear>(entity =>
+        {
+            entity.ToTable("FiscalYears");
+            entity.HasOne(e => e.NextFiscalYear)
+                .WithOne(e => e.PreviousFiscalYear)
+                .HasForeignKey<FiscalYear>(e => e.NextFiscalYearId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ClosingJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ClosingJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OpeningBalanceJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OpeningBalanceJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FiscalPeriod>(entity =>
+        {
+            entity.ToTable("FiscalPeriods");
+            entity.HasOne(e => e.FiscalYear)
+                .WithMany(y => y.FiscalPeriods)
+                .HasForeignKey(e => e.FiscalYearId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<JournalEntry>(entity =>
+        {
+            entity.ToTable("JournalEntries");
+            entity.HasOne(e => e.FiscalPeriod)
+                .WithMany(p => p.JournalEntries)
+                .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountTransaction>(entity =>
+        {
+            entity.ToTable("AccountTransactions");
+            entity.HasOne(e => e.Account)
+                .WithMany(a => a.Transactions)
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.JournalEntry)
+                .WithMany(j => j.Transactions)
+                .HasForeignKey(e => e.JournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FiscalPeriod)
+                .WithMany(p => p.Transactions)
+                .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalTransaction)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalTransaction)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         builder.Entity<MaintenanceAttachmentAccess>(entity =>
         {
@@ -649,6 +1481,80 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // Configure FixedAssetCategory → Account relationships (prevent cascade cycles with multiple FKs)
+        builder.Entity<FixedAssetCategory>(entity =>
+        {
+            entity.HasOne(c => c.AssetAccount)
+                .WithMany()
+                .HasForeignKey(c => c.AssetAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.AccumulatedDepreciationAccount)
+                .WithMany()
+                .HasForeignKey(c => c.AccumulatedDepreciationAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.DepreciationExpenseAccount)
+                .WithMany()
+                .HasForeignKey(c => c.DepreciationExpenseAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.GainOnDisposalAccount)
+                .WithMany()
+                .HasForeignKey(c => c.GainOnDisposalAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.LossOnDisposalAccount)
+                .WithMany()
+                .HasForeignKey(c => c.LossOnDisposalAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.RevaluationSurplusAccount)
+                .WithMany()
+                .HasForeignKey(c => c.RevaluationSurplusAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.AucAccount)
+                .WithMany()
+                .HasForeignKey(c => c.AucAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure CashTransaction → BankAccount relationships (disambiguate two FKs)
+        builder.Entity<CashTransaction>(entity =>
+        {
+            entity.HasOne(ct => ct.BankAccount)
+                .WithMany(ba => ba.Transactions)
+                .HasForeignKey(ct => ct.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(ct => ct.ToBankAccount)
+                .WithMany()
+                .HasForeignKey(ct => ct.ToBankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // 1:1 with Cheque — Cheque is the dependent (has CashTransactionId FK)
+            entity.HasOne(ct => ct.Cheque)
+                .WithOne(c => c.CashTransaction)
+                .HasForeignKey<Cheque>(c => c.CashTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Reconciliation link
+            entity.HasOne(ct => ct.Reconciliation)
+                .WithMany(r => r.ReconciledTransactions)
+                .HasForeignKey(ct => ct.ReconciliationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure ReconciliationMatch → BankStatementLine 1:1 (ReconciliationMatch is dependent)
+        builder.Entity<ReconciliationMatch>(entity =>
+        {
+            entity.HasOne(rm => rm.BankStatementLine)
+                .WithOne(bsl => bsl.ReconciliationMatch)
+                .HasForeignKey<ReconciliationMatch>(rm => rm.BankStatementLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // Award Verification configurations
         builder.ApplyConfiguration(new AwardVerificationChecklistTemplateConfiguration());
         builder.ApplyConfiguration(new AwardVerificationChecklistItemConfiguration());
@@ -663,12 +1569,188 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ContractAmendmentConfiguration());
         builder.ApplyConfiguration(new ContractDocumentConfiguration());
 
+        // Project management configurations
+        builder.ApplyConfiguration(new ProjectTypeConfiguration());
+        builder.ApplyConfiguration(new ProjectPriorityConfiguration());
+        builder.ApplyConfiguration(new ProjectTemplateConfiguration());
+        builder.ApplyConfiguration(new ProjectPhaseTemplateConfiguration());
+        builder.ApplyConfiguration(new ProjectStageGateRuleConfiguration());
+        builder.ApplyConfiguration(new ProjectPortfolioConfiguration());
+        builder.ApplyConfiguration(new ProjectProgramConfiguration());
+        builder.ApplyConfiguration(new ProjectManagementSettingsConfiguration());
+        builder.ApplyConfiguration(new ProjectCatalogEntryConfiguration());
+        builder.ApplyConfiguration(new ProjectConfiguration());
+        builder.ApplyConfiguration(new ProjectDevelopmentProfileConfiguration());
+        builder.ApplyConfiguration(new ProjectPhaseConfiguration());
+        builder.ApplyConfiguration(new ProjectPackageConfiguration());
+        builder.ApplyConfiguration(new ProjectBoqItemConfiguration());
+        builder.ApplyConfiguration(new ProjectApprovalRegisterItemConfiguration());
+        builder.ApplyConfiguration(new ProjectDrawingConfiguration());
+        builder.ApplyConfiguration(new ProjectSubmittalConfiguration());
+        builder.ApplyConfiguration(new ProjectRfiConfiguration());
+        builder.ApplyConfiguration(new ProjectSiteInstructionConfiguration());
+        builder.ApplyConfiguration(new ProjectVariationOrderConfiguration());
+        builder.ApplyConfiguration(new ProjectInterimValuationConfiguration());
+        builder.ApplyConfiguration(new ProjectInterimValuationPackageCompletionConfiguration());
+        builder.ApplyConfiguration(new ProjectPaymentCertificateConfiguration());
+        builder.ApplyConfiguration(new ProjectExtensionOfTimeConfiguration());
+        builder.ApplyConfiguration(new ProjectFinalAccountConfiguration());
+        builder.ApplyConfiguration(new ProjectBuildingConfiguration());
+        builder.ApplyConfiguration(new ProjectFloorConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitReleaseBatchConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitHandoverBatchConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitTypeTemplateConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitTypeTemplateAmenityConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitConfiguration());
+        builder.ApplyConfiguration(new ProjectUnitAmenityConfiguration());
+        builder.ApplyConfiguration(new ProjectCustomerVariationConfiguration());
+        builder.ApplyConfiguration(new ProjectCommissioningItemConfiguration());
+        builder.ApplyConfiguration(new ProjectHandoverItemConfiguration());
+        builder.ApplyConfiguration(new ProjectSnagItemConfiguration());
+        builder.ApplyConfiguration(new ProjectDefectLiabilityCaseConfiguration());
+        builder.ApplyConfiguration(new ProjectInitiationVersionConfiguration());
+        builder.ApplyConfiguration(new ProjectMemberConfiguration());
+        builder.ApplyConfiguration(new ProjectWorkItemConfiguration());
+        builder.ApplyConfiguration(new ProjectMilestoneConfiguration());
+        builder.ApplyConfiguration(new ProjectMilestonePhaseConfiguration());
+        builder.ApplyConfiguration(new ProjectResourceAllocationConfiguration());
+        builder.ApplyConfiguration(new ProjectRiskConfiguration());
+        builder.ApplyConfiguration(new ProjectIssueConfiguration());
+        builder.ApplyConfiguration(new ProjectChangeRequestConfiguration());
+        builder.ApplyConfiguration(new ProjectBillingScheduleConfiguration());
+        builder.ApplyConfiguration(new ProjectInvoiceRequestConfiguration());
+        builder.ApplyConfiguration(new ProjectDeliverableConfiguration());
+        builder.ApplyConfiguration(new ProjectDeliverableExternalReviewConfiguration());
+        builder.ApplyConfiguration(new ProjectTaskDependencyConfiguration());
+        builder.ApplyConfiguration(new ProjectInterdependencyConfiguration());
+        builder.ApplyConfiguration(new ProjectBaselineConfiguration());
+        builder.ApplyConfiguration(new ProjectTimesheetEntryConfiguration());
+        builder.ApplyConfiguration(new ProjectExpenseConfiguration());
+        builder.ApplyConfiguration(new ProjectMaterialCostEntryConfiguration());
+        builder.ApplyConfiguration(new ProjectRevenueRecognitionConfiguration());
+        builder.ApplyConfiguration(new ProjectBudgetRevisionConfiguration());
+        builder.ApplyConfiguration(new ProjectForecastVersionConfiguration());
+        builder.ApplyConfiguration(new ProjectAssetLinkConfiguration());
+        builder.ApplyConfiguration(new ProjectExternalAccessPolicyConfiguration());
+        builder.ApplyConfiguration(new ProjectDecisionConfiguration());
+        builder.ApplyConfiguration(new ProjectMeetingMinuteConfiguration());
+        builder.ApplyConfiguration(new ProjectActionItemConfiguration());
+        builder.ApplyConfiguration(new ProjectLessonLearnedConfiguration());
+        builder.ApplyConfiguration(new ProjectDocumentConfiguration());
+        builder.ApplyConfiguration(new ProjectCommentConfiguration());
+        builder.ApplyConfiguration(new ProjectClosureConfiguration());
+
         // Price List configurations
         builder.ApplyConfiguration(new PriceListConfiguration());
         builder.ApplyConfiguration(new PriceListLineConfiguration());
         builder.ApplyConfiguration(new CustomerGroupConfiguration());
         builder.ApplyConfiguration(new SupplierGroupConfiguration());
         builder.ApplyConfiguration(new PriceListChangeHistoryConfiguration());
+
+        builder.Ignore<Customer>();
+        builder.Ignore<Invoice>();
+        builder.Ignore<InvoiceLineItem>();
+        builder.Ignore<Payment>();
+
+        // CRM uses BusinessPartner as the account backbone, so we keep the sales entities
+        // in the model but opt out of the legacy duplicate customer/invoice navigations.
+        builder.Entity<Campaign>(entity =>
+        {
+            entity.HasOne(x => x.Manager)
+                .WithMany()
+                .HasForeignKey(x => x.ManagerId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.TenantId, x.CampaignStatus });
+            entity.HasIndex(x => new { x.TenantId, x.CampaignType });
+        });
+
+        builder.Entity<CampaignMember>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.HasOne(x => x.Campaign)
+                .WithMany(x => x.CampaignMembers)
+                .HasForeignKey(x => x.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Lead)
+                .WithMany()
+                .HasForeignKey(x => x.LeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.CampaignId, x.LeadId });
+            entity.HasIndex(x => new { x.TenantId, x.MemberStatus });
+        });
+
+        builder.Entity<Lead>(entity =>
+        {
+            entity.Ignore(x => x.ConvertedCustomer);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Opportunity>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.HasOne(x => x.Lead)
+                .WithMany(x => x.Opportunities)
+                .HasForeignKey(x => x.LeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Activity>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.HasOne(x => x.Lead)
+                .WithMany(x => x.Activities)
+                .HasForeignKey(x => x.LeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Opportunity)
+                .WithMany(x => x.Activities)
+                .HasForeignKey(x => x.OpportunityId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Quote>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.Ignore(x => x.ConvertedInvoice);
+            entity.HasOne(x => x.Opportunity)
+                .WithMany(x => x.Quotes)
+                .HasForeignKey(x => x.OpportunityId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<QuoteLineItem>(entity =>
+        {
+            entity.HasOne(x => x.Quote)
+                .WithMany(x => x.LineItems)
+                .HasForeignKey(x => x.QuoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Configure Identity tables with custom names
         builder.Entity<ApplicationUser>(entity =>
@@ -4244,7 +5326,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         });
     }
 
-    private void ApplyGlobalFilters(ModelBuilder builder)
+    protected virtual void ApplyGlobalFilters(ModelBuilder builder)
     {
         // Apply soft delete filter to all entities that inherit from BaseEntity
         foreach (var entityType in builder.Model.GetEntityTypes())
@@ -4872,6 +5954,52 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             permissionId++;
         }
 
+        var moduleAccessPermissions = new[]
+        {
+            ("project.access", "Access Project Management", "Access the project management module"),
+            ("maintenance.access", "Access Maintenance Management", "Access the maintenance management module"),
+            ("fleet.access", "Access Fleet Management", "Access the fleet management module")
+        };
+
+        foreach (var (name, displayName, description) in moduleAccessPermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "Module Access",
+                IsSystemPermission = true,
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
+            });
+            permissionId++;
+        }
+
+        var adminModulePermissions = new[]
+        {
+            ("admin.project-management", "Admin Project Management", "Manage project administration settings"),
+            ("admin.maintenance", "Admin Maintenance Management", "Manage maintenance administration settings"),
+            ("admin.fleet-management", "Admin Fleet Management", "Manage fleet administration settings")
+        };
+
+        foreach (var (name, displayName, description) in adminModulePermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "Administration Modules",
+                IsSystemPermission = true,
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
+            });
+            permissionId++;
+        }
+
         builder.Entity<Permission>().HasData(permissions.ToArray());
 
         // Seed role-permission relationships
@@ -4917,7 +6045,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         var managerPermissions = permissions.Where(p =>
             p.Name.EndsWith(".read") ||
             p.Name == "users.update" ||
-            p.Name == "reports.create").ToList();
+            p.Name == "reports.create" ||
+            p.Name == "project.access" ||
+            p.Name == "maintenance.access" ||
+            p.Name == "fleet.access").ToList();
 
         foreach (var permission in managerPermissions)
         {
@@ -4935,7 +6066,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         var employeePermissions = permissions.Where(p =>
             p.Name == "dashboard.read" ||
             p.Name == "reports.read" ||
-            p.Name == "users.read").ToList();
+            p.Name == "users.read" ||
+            p.Name == "project.access" ||
+            p.Name == "maintenance.access" ||
+            p.Name == "fleet.access").ToList();
 
         foreach (var permission in employeePermissions)
         {
@@ -5237,49 +6371,50 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(i => i.ABCClass);
             entity.HasIndex(i => i.IsSerialTracked);
             entity.HasIndex(i => i.IsLotTracked);
-            entity.HasIndex(i => i.ItemClassId);
-            entity.HasIndex(i => i.PriceGroupId);
-            entity.HasIndex(i => i.SubstituteItem1Id);
-            entity.HasIndex(i => i.SubstituteItem2Id);
-            entity.HasIndex(i => i.SubstituteItem3Id).IsUnique(false);
-            entity.HasIndex(i => i.SubstituteItem4Id).IsUnique(false);
-            entity.HasIndex(i => i.IsKit);
-            entity.HasIndex(i => i.IsFinishedGood);
+            // TODO: Uncomment when GP-style inventory entities are implemented
+            // entity.HasIndex(i => i.ItemClassId);
+            // entity.HasIndex(i => i.PriceGroupId);
+            // entity.HasIndex(i => i.SubstituteItem1Id);
+            // entity.HasIndex(i => i.SubstituteItem2Id);
+            // entity.HasIndex(i => i.SubstituteItem3Id).IsUnique(false);
+            // entity.HasIndex(i => i.SubstituteItem4Id).IsUnique(false);
+            // entity.HasIndex(i => i.IsKit);
+            // entity.HasIndex(i => i.IsFinishedGood);
 
             entity.HasOne(i => i.Category)
                 .WithMany(c => c.Items)
                 .HasForeignKey(i => i.CategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            entity.HasOne(i => i.ItemClass)
-                .WithMany(ic => ic.Items)
-                .HasForeignKey(i => i.ItemClassId)
-                .OnDelete(DeleteBehavior.SetNull);
+            // entity.HasOne(i => i.ItemClass)
+            //     .WithMany(ic => ic.Items)
+            //     .HasForeignKey(i => i.ItemClassId)
+            //     .OnDelete(DeleteBehavior.SetNull);
 
-            entity.HasOne(i => i.PriceGroup)
-                .WithMany(pg => pg.Items)
-                .HasForeignKey(i => i.PriceGroupId)
-                .OnDelete(DeleteBehavior.SetNull);
+            // entity.HasOne(i => i.PriceGroup)
+            //     .WithMany(pg => pg.Items)
+            //     .HasForeignKey(i => i.PriceGroupId)
+            //     .OnDelete(DeleteBehavior.SetNull);
 
-            entity.HasOne(i => i.SubstituteItem1)
-                .WithMany()
-                .HasForeignKey(i => i.SubstituteItem1Id)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(i => i.SubstituteItem1)
+            //     .WithMany()
+            //     .HasForeignKey(i => i.SubstituteItem1Id)
+            //     .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(i => i.SubstituteItem2)
-                .WithMany()
-                .HasForeignKey(i => i.SubstituteItem2Id)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(i => i.SubstituteItem2)
+            //     .WithMany()
+            //     .HasForeignKey(i => i.SubstituteItem2Id)
+            //     .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(i => i.SubstituteItem3)
-                .WithMany()
-                .HasForeignKey(i => i.SubstituteItem3Id)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(i => i.SubstituteItem3)
+            //     .WithMany()
+            //     .HasForeignKey(i => i.SubstituteItem3Id)
+            //     .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(i => i.SubstituteItem4)
-                .WithMany()
-                .HasForeignKey(i => i.SubstituteItem4Id)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(i => i.SubstituteItem4)
+            //     .WithMany()
+            //     .HasForeignKey(i => i.SubstituteItem4Id)
+            //     .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasOne(i => i.UnitOfMeasureSchedule)
                 .WithMany(s => s.Items)
@@ -5287,19 +6422,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
-        // ItemClass entity (GP: Class ID)
-        builder.Entity<ItemClass>(entity =>
-        {
-            entity.HasIndex(ic => ic.ClassId).IsUnique();
-            entity.HasIndex(ic => ic.IsActive);
-        });
+        // TODO: Uncomment when GP-style inventory entities are implemented
+        // builder.Entity<ItemClass>(entity =>
+        // {
+        //     entity.HasIndex(ic => ic.ClassId).IsUnique();
+        //     entity.HasIndex(ic => ic.IsActive);
+        // });
 
-        // PriceGroup entity (GP: Price ID)
-        builder.Entity<PriceGroup>(entity =>
-        {
-            entity.HasIndex(pg => pg.PriceGroupCode).IsUnique();
-            entity.HasIndex(pg => pg.IsActive);
-        });
+        // builder.Entity<PriceGroup>(entity =>
+        // {
+        //     entity.HasIndex(pg => pg.PriceGroupCode).IsUnique();
+        //     entity.HasIndex(pg => pg.IsActive);
+        // });
 
         // UnitOfMeasureSchedule entity (GP: U of M Schedule)
         builder.Entity<UnitOfMeasureSchedule>(entity =>
@@ -5330,23 +6464,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // SuggestedSalesItem entity (GP: Suggest Sales Item Maintenance)
-        builder.Entity<SuggestedSalesItem>(entity =>
-        {
-            entity.HasIndex(s => s.InventoryItemId);
-            entity.HasIndex(s => s.SuggestedItemId);
-            entity.HasIndex(s => s.IsActive);
-
-            entity.HasOne(s => s.InventoryItem)
-                .WithMany(i => i.SuggestedItems)
-                .HasForeignKey(s => s.InventoryItemId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(s => s.SuggestedItem)
-                .WithMany()
-                .HasForeignKey(s => s.SuggestedItemId)
-                .OnDelete(DeleteBehavior.NoAction);
-        });
+        // TODO: Uncomment when GP-style inventory entities are implemented
+        // builder.Entity<SuggestedSalesItem>(entity =>
+        // {
+        //     entity.HasIndex(s => s.InventoryItemId);
+        //     entity.HasIndex(s => s.SuggestedItemId);
+        //     entity.HasIndex(s => s.IsActive);
+        //
+        //     entity.HasOne(s => s.InventoryItem)
+        //         .WithMany(i => i.SuggestedItems)
+        //         .HasForeignKey(s => s.InventoryItemId)
+        //         .OnDelete(DeleteBehavior.Cascade);
+        //
+        //     entity.HasOne(s => s.SuggestedItem)
+        //         .WithMany()
+        //         .HasForeignKey(s => s.SuggestedItemId)
+        //         .OnDelete(DeleteBehavior.NoAction);
+        // });
 
         // InventoryCategory entity
         builder.Entity<InventoryCategory>(entity =>
@@ -5368,33 +6502,31 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(w => w.IsActive);
             entity.HasIndex(w => w.WarehouseType);
 
-            // Manager relationship
-            entity.HasOne(w => w.Manager)
-                .WithMany()
-                .HasForeignKey(w => w.ManagerId)
-                .OnDelete(DeleteBehavior.SetNull);
+            // TODO: Uncomment when GP-style warehouse properties are implemented
+            // entity.HasOne(w => w.Manager)
+            //     .WithMany()
+            //     .HasForeignKey(w => w.ManagerId)
+            //     .OnDelete(DeleteBehavior.SetNull);
 
-            // Explicit relationships for default locations to avoid shadow properties
-            // Use NoAction to avoid multiple cascade paths with WarehouseLocation
-            entity.HasOne(w => w.DefaultQuarantineLocation)
-                .WithMany()
-                .HasForeignKey(w => w.DefaultQuarantineLocationId)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(w => w.DefaultQuarantineLocation)
+            //     .WithMany()
+            //     .HasForeignKey(w => w.DefaultQuarantineLocationId)
+            //     .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(w => w.DefaultReceivingLocation)
-                .WithMany()
-                .HasForeignKey(w => w.DefaultReceivingLocationId)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(w => w.DefaultReceivingLocation)
+            //     .WithMany()
+            //     .HasForeignKey(w => w.DefaultReceivingLocationId)
+            //     .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(w => w.DefaultShippingLocation)
-                .WithMany()
-                .HasForeignKey(w => w.DefaultShippingLocationId)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(w => w.DefaultShippingLocation)
+            //     .WithMany()
+            //     .HasForeignKey(w => w.DefaultShippingLocationId)
+            //     .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(w => w.DefaultInTransitLocation)
-                .WithMany()
-                .HasForeignKey(w => w.DefaultInTransitLocationId)
-                .OnDelete(DeleteBehavior.NoAction);
+            // entity.HasOne(w => w.DefaultInTransitLocation)
+            //     .WithMany()
+            //     .HasForeignKey(w => w.DefaultInTransitLocationId)
+            //     .OnDelete(DeleteBehavior.NoAction);
         });
 
         // WarehouseLocation entity
@@ -5462,10 +6594,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(po => po.Status);
             entity.HasIndex(po => po.OrderDate);
             entity.HasIndex(po => po.RequestedById);
+            entity.HasIndex(po => po.TenderAwardId);
 
             entity.HasOne(po => po.RequestedBy)
                 .WithMany()
                 .HasForeignKey(po => po.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(po => po.TenderAward)
+                .WithMany()
+                .HasForeignKey(po => po.TenderAwardId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -5636,7 +6774,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(iu => iu.IsActive);
 
             entity.HasOne(iu => iu.InventoryItem)
-                .WithMany(i => i.ItemUnitsOfMeasure)
+                .WithMany() // TODO: restore .WithMany(i => i.ItemUnitsOfMeasure) when property exists
                 .HasForeignKey(iu => iu.InventoryItemId)
                 .OnDelete(DeleteBehavior.Cascade);
 
@@ -6855,5 +7993,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
+
+        // ── Global: default all FKs to Restrict to prevent cascade-cycle errors on SQL Server ──
+        foreach (var relationship in builder.Model.GetEntityTypes()
+            .SelectMany(e => e.GetForeignKeys()))
+        {
+            if (relationship.DeleteBehavior == DeleteBehavior.Cascade)
+                relationship.DeleteBehavior = DeleteBehavior.Restrict;
+        }
     }
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, RefreshCw, XCircle } from 'lucide-react';
 
@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { fileUploadService } from '@/services/file-upload.service';
 import { ehcServiceCatalogService, type EhcServiceRequestStatus } from '@/services/ehcServiceCatalogService';
 
@@ -39,8 +40,11 @@ function safeJsonParse(s: string): any {
 
 export default function HelpdeskServiceRequestDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const id = String(params?.id || '');
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const [notes, setNotes] = useState('');
   const [rejectReason, setRejectReason] = useState('');
@@ -120,10 +124,10 @@ export default function HelpdeskServiceRequestDetailPage() {
             <h1 className="text-3xl font-bold">{data ? data.requestNumber : 'Service Request'}</h1>
             {data ? <Badge className={statusBadgeClassName(data.status)}>{data.status}</Badge> : null}
           </div>
-          {data ? <p className="text-slate-600 mt-1">{data.requestTypeName}</p> : null}
+          {data ? <p className="text-slate-600 mt-1">{data.requestTypeName}{scopeParam ? ` • ${scopeConfig.listTitle}` : ''}</p> : null}
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/helpdesk/requests">
+          <Link href={scopeParam ? `/helpdesk/requests?scope=${scopeParam}` : '/helpdesk/requests'}>
             <Button variant="outline">
               <ArrowLeft className="w-4 h-4 mr-2" /> Back
             </Button>

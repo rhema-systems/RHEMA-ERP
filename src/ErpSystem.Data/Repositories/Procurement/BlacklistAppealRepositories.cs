@@ -9,7 +9,7 @@ public class BlacklistAppealRepository : GenericRepository<BlacklistAppeal>, IBl
 {
     public BlacklistAppealRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<BlacklistAppeal?> GetByIdAsync(Guid id)
+    public override async Task<BlacklistAppeal?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(a => a.Id == id && !a.IsDeleted)
@@ -84,13 +84,13 @@ public class BlacklistAppealRepository : GenericRepository<BlacklistAppeal>, IBl
         return await AddAsync(appeal);
     }
 
-    public async Task<BlacklistAppeal> UpdateAsync(BlacklistAppeal appeal)
+    public new async Task<BlacklistAppeal> UpdateAsync(BlacklistAppeal appeal)
     {
         await base.UpdateAsync(appeal);
         return appeal;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var appeal = await GetByIdAsync(id);
         if (appeal != null)

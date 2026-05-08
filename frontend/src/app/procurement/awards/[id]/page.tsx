@@ -51,7 +51,7 @@ import NegotiationInviteDialog from '@/components/procurement/awards/Negotiation
 export default function AwardDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const awardId = params.id as string;
+  const awardId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const performanceBondFileRef = useRef<HTMLInputElement>(null);
 
   const [award, setAward] = useState<TenderAwardDto | null>(null);

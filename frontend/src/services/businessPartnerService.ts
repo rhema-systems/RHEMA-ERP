@@ -143,6 +143,16 @@ export interface BusinessPartnerContactDto {
   isPrimary: boolean;
 }
 
+export interface CreateBusinessPartnerContactDto {
+  contactName: string;
+  title?: string;
+  department?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  isPrimary: boolean;
+}
+
 export interface BusinessPartnerDocumentDto {
   id: string;
   businessPartnerId?: string;
@@ -302,6 +312,38 @@ export interface PagedResult<T> {
   totalPages: number;
 }
 
+const BUSINESS_PARTNER_DROPDOWN_PAGE_SIZE = 100;
+
+const getBusinessPartnerDropdownItems = (result: unknown): BusinessPartnerDto[] => {
+  if (Array.isArray(result)) {
+    return result as BusinessPartnerDto[];
+  }
+
+  if (result && typeof result === 'object') {
+    const pagedResult = result as {
+      items?: BusinessPartnerDto[];
+      Items?: BusinessPartnerDto[];
+    };
+
+    return pagedResult.items ?? pagedResult.Items ?? [];
+  }
+
+  return [];
+};
+
+const getBusinessPartnerDropdownTotalPages = (result: unknown): number => {
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    const pagedResult = result as {
+      totalPages?: number;
+      TotalPages?: number;
+    };
+
+    return Math.max(1, pagedResult.totalPages ?? pagedResult.TotalPages ?? 1);
+  }
+
+  return 1;
+};
+
 // ============================================================================
 // BUSINESS PARTNER API METHODS
 // ============================================================================
@@ -372,13 +414,44 @@ export const businessPartnerService = {
 
   // Get all partners for dropdown (simple list)
   async getAllPartnersForDropdown(): Promise<BusinessPartnerDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners?pageSize=1000`, {
+    const buildUrl = (page: number) =>
+      `${API_BASE_URL}/procurement/business-partners?page=${page}&pageSize=${BUSINESS_PARTNER_DROPDOWN_PAGE_SIZE}`;
+
+    const response = await fetch(buildUrl(1), {
       headers: getAuthHeaders()
     });
 
     if (!response.ok) throw new Error('Failed to fetch partners for dropdown');
-    const result = await response.json();
-    return result.items || result;
+    const firstPageResult = await response.json();
+    const firstPageItems = getBusinessPartnerDropdownItems(firstPageResult);
+    const totalPages = getBusinessPartnerDropdownTotalPages(firstPageResult);
+
+    if (totalPages <= 1) {
+      return firstPageItems;
+    }
+
+    const remainingPages = await Promise.all(
+      Array.from({ length: totalPages - 1 }, async (_, index) => {
+        const pageResponse = await fetch(buildUrl(index + 2), {
+          headers: getAuthHeaders()
+        });
+
+        if (!pageResponse.ok) {
+          throw new Error('Failed to fetch partners for dropdown');
+        }
+
+        return pageResponse.json();
+      })
+    );
+
+    const allPartners = [
+      ...firstPageItems,
+      ...remainingPages.flatMap((pageResult) => getBusinessPartnerDropdownItems(pageResult)),
+    ];
+
+    return Array.from(
+      new Map(allPartners.map((partner) => [partner.id, partner])).values()
+    );
   },
 
   // Get preferred partners
@@ -532,6 +605,46 @@ export const businessPartnerService = {
 
     if (!response.ok) throw new Error('Failed to fetch partner contacts');
     return response.json();
+  },
+
+  async createPartnerContact(partnerId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) throw new Error('Failed to create partner contact');
+    return response.json();
+  },
+
+  async updatePartnerContact(partnerId: string, contactId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) throw new Error('Failed to update partner contact');
+    return response.json();
+  },
+
+  async deletePartnerContact(partnerId: string, contactId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to delete partner contact');
+  },
+
+  async setPrimaryPartnerContact(partnerId: string, contactId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}/set-primary`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to set primary partner contact');
   },
 
   // Get partner licenses

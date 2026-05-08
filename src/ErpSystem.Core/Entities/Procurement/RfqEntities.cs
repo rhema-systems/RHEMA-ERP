@@ -43,7 +43,7 @@ public class RequestForQuotation : TenantEntity
     public DateTime? SentAt { get; set; }
 
     // Metadata
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
 
     // Award info (simple RFQ flow)
     public Guid? AwardedBusinessPartnerId { get; set; }

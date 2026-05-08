@@ -14,6 +14,10 @@ import { Plus, Search, Edit, Trash2, FileCheck, Shield } from 'lucide-react';
 import { licenseTypeService, LicenseTypeDto, CreateLicenseTypeDto, UpdateLicenseTypeDto } from '@/services/partnerConfigService';
 import { useToast } from '@/components/ui/use-toast';
 
+interface LicenseTypeCreateFormData extends CreateLicenseTypeDto {
+  isActive: boolean;
+}
+
 export default function LicenseTypesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -28,13 +32,14 @@ export default function LicenseTypesPage() {
   const { toast } = useToast();
   
   // Form state for create
-  const [formData, setFormData] = useState<CreateLicenseTypeDto>({
+  const [formData, setFormData] = useState<LicenseTypeCreateFormData>({
     licenseName: '',
     licenseCode: '',
     description: '',
     applicableTo: 'Both',
     isMandatory: false,
-    validityPeriodMonths: undefined
+    validityPeriodMonths: undefined,
+    isActive: true
   });
 
   // Form state for edit
@@ -181,7 +186,8 @@ export default function LicenseTypesPage() {
       description: '',
       applicableTo: 'Both',
       isMandatory: false,
-      validityPeriodMonths: undefined
+      validityPeriodMonths: undefined,
+      isActive: true
     });
     setEditFormData({
       licenseName: '',

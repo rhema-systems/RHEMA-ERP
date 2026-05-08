@@ -17,15 +17,15 @@ export default function Home() {
 
     // Check if user is authenticated (only on client side)
     if (authService.isAuthenticated()) {
-      // Route based on authentication provider
       const user = authService.getStoredUser();
       const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
+      const isExternalUser = user?.roles?.includes('ExternalUser') ?? false;
 
-      if (user?.authenticationProvider === 'Local') {
+      if (isExternalUser) {
         // External users go to External Portal. On support.* host, middleware rewrites / to the support area.
         router.push(isSupportHost ? '/' : '/external-portal');
       } else {
-        // Internal users (LDAP) go to dashboard
+        // Internal users go to dashboard
         router.push('/dashboard');
       }
     } else {

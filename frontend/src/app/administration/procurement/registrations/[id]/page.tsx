@@ -35,7 +35,7 @@ import { licenseTypeService, type LicenseTypeDto } from '@/services/partnerConfi
 export default function RegistrationDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [registration, setRegistration] = useState<RegistrationDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,11 +60,17 @@ export default function RegistrationDetailPage() {
   const [moreInfoNotes, setMoreInfoNotes] = useState('');
 
   useEffect(() => {
+    if (!id) {
+      return;
+    }
     loadRegistration();
     loadLicenseTypes();
   }, [id]);
 
   const loadRegistration = async () => {
+    if (!id) {
+      return;
+    }
     try {
       setLoading(true);
       const data = await registrationReviewService.getById(id);

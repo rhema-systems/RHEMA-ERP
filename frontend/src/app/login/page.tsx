@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -19,6 +20,11 @@ import { settingsService } from '../../services/settings';
 import { apiService } from '../../services/api.service';
 import { tenantService } from '../../services/tenant';
 import type { LoginRequest, LoginResponse, OtpChannel } from '../../types';
+import {
+  buildTenantSelectRedirectUrl,
+  getRedirectTargetFromSearchParams,
+  resolveRedirectTarget,
+} from '../../lib/auth-redirect';
 
 const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
@@ -50,18 +56,21 @@ function LoginFormWithSearchParams() {
   const [otpErrorMessage, setOtpErrorMessage] = useState('');
   const [otpRequiresTwoFactor, setOtpRequiresTwoFactor] = useState(false);
   const [otpTwoFactorCode, setOtpTwoFactorCode] = useState('');
+  const lastAutoSubmittedTwoFactorCodeRef = useRef<string | null>(null);
+  const lastAutoSubmittedOtpTwoFactorKeyRef = useRef<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const redirectTarget = getRedirectTargetFromSearchParams(searchParams);
 
   // Check for success message from URL parameters
   useEffect(() => {
-    const message = searchParams.get('message');
+    const message = searchParams?.get('message');
     if (message) {
       setSuccessMessage(decodeURIComponent(message));
       // Message will stay until user submits the form - no auto-clear
     }
   }, [searchParams]);
-  
+
 
   // Fetch public security settings to determine if reCAPTCHA should be shown
   const { data: securitySettings } = useQuery({
@@ -82,28 +91,28 @@ function LoginFormWithSearchParams() {
   });
 
   // Debug: Log tenant data
-  console.log('🏢 Tenants query state:', { 
-    tenants, 
-    tenantsLoading, 
+  console.log('🏢 Tenants query state:', {
+    tenants,
+    tenantsLoading,
     tenantsError: tenantsError?.message,
     hasData: !!tenants,
     tenantCount: tenants?.length || 0
   });
-  
+
   if (tenants) {
-    console.log('🔍 Tenant self-registration status:', 
-      tenants.map(t => ({ 
-        name: t.name, 
-        code: t.code, 
-        allowSelfRegistration: t.allowSelfRegistration, 
-        isActive: t.isActive 
+    console.log('🔍 Tenant self-registration status:',
+      tenants.map(t => ({
+        name: t.name,
+        code: t.code,
+        allowSelfRegistration: t.allowSelfRegistration,
+        isActive: t.isActive
       }))
     );
   }
 
   // Check if any tenant allows self-registration
   const allowSelfRegistration = tenants?.some(tenant => tenant.allowSelfRegistration && tenant.isActive) ?? false;
-  
+
   console.log('✨ Create Account button will be shown:', allowSelfRegistration);
   console.log('📋 Button visibility logic:', {
     hasTenants: !!tenants,
@@ -126,18 +135,18 @@ function LoginFormWithSearchParams() {
     // Only show CAPTCHA after failed attempts or suspicious activity, not always
     // Show after 2 or more failed attempts if configured (and we have a valid site key)
     if (securitySettings.captchaEnabled &&
-        failedAttempts >= 2 &&
-        (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
+      failedAttempts >= 2 &&
+      (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
       return true;
     }
-    
+
     // Show after X failed attempts based on maxFailedLoginAttempts setting
-    if (securitySettings.maxFailedLoginAttempts && 
-        failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2)) &&
-        (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
+    if (securitySettings.maxFailedLoginAttempts &&
+      failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2)) &&
+      (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
       return true;
     }
-    
+
     return false;
   };
 
@@ -160,11 +169,13 @@ function LoginFormWithSearchParams() {
     },
   });
 
-  const redirectAfterLogin = async (response: LoginResponse) => {
+  const redirectAfterLogin = useCallback(async (response: LoginResponse) => {
     // After successful login, check authentication provider
     if (response.token) {
-      // If user is an external user (Local authentication), redirect to external portal
-      if (response.user?.authenticationProvider === 'Local') {
+      const isExternalUser = response.user?.roles?.includes('ExternalUser') ?? false;
+
+      // External portal users should land in the portal, while internal users continue to tenant selection.
+      if (isExternalUser) {
         // Try to auto-select the best tenant (host-driven or single-tenant) to avoid an extra tenant-select step.
         try {
           const tenants = response.user?.accessibleTenants || [];
@@ -178,12 +189,12 @@ function LoginFormWithSearchParams() {
           if (!preferredTenantCode) {
             const publicSettings = await settingsService.getPublicSecuritySettings();
             const hostTenantCode = (publicSettings as any)?.tenantCode as string | null | undefined;
-            const match = hostTenantCode ? tenants.find((t) => t.tenantCode === hostTenantCode) : null;
+            const match = hostTenantCode ? tenants.find((tenant) => tenant.tenantCode === hostTenantCode) : null;
             preferredTenantCode = match?.tenantCode ?? null;
           }
 
           if (!preferredTenantCode) {
-            const def = tenants.find((t) => t.isDefault) ?? null;
+            const def = tenants.find((tenant) => tenant.isDefault) ?? null;
             preferredTenantCode = def?.tenantCode ?? null;
           }
 
@@ -192,7 +203,7 @@ function LoginFormWithSearchParams() {
 
             const host = typeof window !== 'undefined' ? window.location.hostname : '';
             const isSupportHost = host.toLowerCase().startsWith('support.');
-            router.push(isSupportHost ? '/' : '/external-portal');
+            router.push(resolveRedirectTarget(redirectTarget, isSupportHost ? '/' : '/external-portal'));
             return;
           }
         } catch {
@@ -200,13 +211,27 @@ function LoginFormWithSearchParams() {
         }
 
         // Fallback: tenant selection page auto-selects when possible.
-        router.push('/tenant-select');
+        router.push(buildTenantSelectRedirectUrl(redirectTarget));
       } else {
-        // Internal users (LDAP or other) go to tenant selection
-        router.push('/tenant-select');
+        // Internal users go to tenant selection
+        router.push(buildTenantSelectRedirectUrl(redirectTarget));
       }
     }
-  };
+  }, [redirectTarget, router]);
+
+  useEffect(() => {
+    const storedToken = authService.getStoredToken();
+    const storedUser = authService.getStoredUser();
+
+    if (!storedToken || showTwoFactor) {
+      return;
+    }
+
+    void redirectAfterLogin({
+      token: storedToken,
+      user: storedUser as LoginResponse['user'],
+    });
+  }, [redirectAfterLogin, showTwoFactor]);
 
   const loginMutation = useMutation({
     mutationFn: (data: LoginRequest) => authService.login(data),
@@ -231,11 +256,11 @@ function LoginFormWithSearchParams() {
         statusText: error.statusText,
         response: error.response
       });
-      
+
       const message = error.message || 'Login failed. Please try again.';
       setError('root', { message });
       setFailedAttempts(prev => prev + 1);
-      
+
       // If this was a 2FA error, clear the code for retry
       if (showTwoFactor) {
         setTwoFactorCode('');
@@ -314,7 +339,7 @@ function LoginFormWithSearchParams() {
     const cleaned2fa = showTwoFactor ? twoFactorCode.replace(/\D/g, '') : undefined;
 
     // During 2FA step, only proceed if we have exactly 6 digits
-    if (showTwoFactor && cleaned2fa!.length !== 6) {
+    if (showTwoFactor && cleaned2fa?.length !== 6) {
       console.warn('🚫 2FA submission blocked: code not 6 digits', cleaned2fa);
       return; // Don't submit if 2FA code is not exactly 6 digits
     }
@@ -347,7 +372,7 @@ function LoginFormWithSearchParams() {
     const cleanedValue = value.replace(/\D/g, '').slice(0, 6);
     setTwoFactorCode(cleanedValue);
   };
-  
+
   // Handle keyboard events for 2FA input
   const handleTwoFactorKeyDown = (e: React.KeyboardEvent) => {
     // Allow manual submission with Enter key when code is complete
@@ -357,14 +382,74 @@ function LoginFormWithSearchParams() {
     }
   };
 
+  useEffect(() => {
+    const cleanedTwoFactorCode = twoFactorCode.replace(/\D/g, '');
+
+    if (!showTwoFactor || cleanedTwoFactorCode.length !== 6) {
+      lastAutoSubmittedTwoFactorCodeRef.current = null;
+      return;
+    }
+
+    if (loginMutation.isPending || !storedLoginData) {
+      return;
+    }
+
+    if (lastAutoSubmittedTwoFactorCodeRef.current === cleanedTwoFactorCode) {
+      return;
+    }
+
+    lastAutoSubmittedTwoFactorCodeRef.current = cleanedTwoFactorCode;
+    console.log('⚡ Auto-submitting password login 2FA code');
+    void handleSubmit(onSubmit)();
+  }, [handleSubmit, loginMutation.isPending, onSubmit, showTwoFactor, storedLoginData, twoFactorCode]);
+
+  useEffect(() => {
+    const cleanedOtpCode = otpCode.replace(/\D/g, '');
+    const cleanedOtpTwoFactorCode = otpTwoFactorCode.replace(/\D/g, '');
+
+    if (otpStage !== 'verify' || !otpRequiresTwoFactor || cleanedOtpCode.length !== 6 || cleanedOtpTwoFactorCode.length !== 6) {
+      lastAutoSubmittedOtpTwoFactorKeyRef.current = null;
+      return;
+    }
+
+    if (verifyOtpMutation.isPending) {
+      return;
+    }
+
+    const submissionKey = `${otpIdentifier}:${otpChannel}:${cleanedOtpCode}:${cleanedOtpTwoFactorCode}`;
+    if (lastAutoSubmittedOtpTwoFactorKeyRef.current === submissionKey) {
+      return;
+    }
+
+    lastAutoSubmittedOtpTwoFactorKeyRef.current = submissionKey;
+    setOtpErrorMessage('');
+    console.log('⚡ Auto-submitting OTP 2FA code');
+    verifyOtpMutation.mutate({
+      identifier: otpIdentifier,
+      channel: otpChannel,
+      otpCode: cleanedOtpCode,
+      twoFactorCode: cleanedOtpTwoFactorCode,
+      recaptchaToken: otpRecaptchaToken || undefined,
+    });
+  }, [
+    otpChannel,
+    otpCode,
+    otpIdentifier,
+    otpRecaptchaToken,
+    otpRequiresTwoFactor,
+    otpStage,
+    otpTwoFactorCode,
+    verifyOtpMutation,
+  ]);
+
   return (
     <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
       {/* Background Image */}
-      <div 
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat" 
-        style={{backgroundImage: 'url(/login.svg)'}}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/login.svg)' }}
       ></div>
-      
+
       <div className="relative w-full max-w-md space-y-8">
         {/* Logo and Header */}
         <div className="text-center">
@@ -398,7 +483,7 @@ function LoginFormWithSearchParams() {
                   : 'Enter your credentials to access your account'
               }
             </CardDescription>
-            
+
             {/* Step Indicator */}
             {showTwoFactor && (
               <div className="flex items-center justify-center space-x-2 mt-4">
@@ -460,61 +545,61 @@ function LoginFormWithSearchParams() {
               {/* Username Field - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="space-y-2">
-                <Label htmlFor="username" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  USER NAME OR EMAIL ADDRESS
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="username"
-                    type="text"
-                    placeholder="admin"
-                    className={errors.username ? 'border-red-500' : ''}
-                    {...register('username')}
-                  />
-                </div>
-                {errors.username && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
-                    <Shield className="h-3 w-3" />
-                    {errors.username.message}
-                  </p>
-                )}
+                  <Label htmlFor="username" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    USER NAME OR EMAIL ADDRESS
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="username"
+                      type="text"
+                      placeholder="admin"
+                      className={errors.username ? 'border-red-500' : ''}
+                      {...register('username')}
+                    />
+                  </div>
+                  {errors.username && (
+                    <p className="text-sm text-red-500 flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      {errors.username.message}
+                    </p>
+                  )}
                 </div>
               )}
 
               {/* Password Field - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="space-y-2">
-                <Label htmlFor="password" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  PASSWORD
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Admin123!"
-                    className={`pr-12 ${errors.password ? 'border-red-500' : ''}`}
-                    {...register('password')}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-transparent"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4 text-slate-500" />
-                    ) : (
-                      <Eye className="h-4 w-4 text-slate-500" />
-                    )}
-                  </Button>
-                </div>
-                {errors.password && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
-                    <Shield className="h-3 w-3" />
-                    {errors.password.message}
-                  </p>
-                )}
+                  <Label htmlFor="password" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    PASSWORD
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Admin123!"
+                      className={`pr-12 ${errors.password ? 'border-red-500' : ''}`}
+                      {...register('password')}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-slate-500" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-slate-500" />
+                      )}
+                    </Button>
+                  </div>
+                  {errors.password && (
+                    <p className="text-sm text-red-500 flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      {errors.password.message}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -543,9 +628,13 @@ function LoginFormWithSearchParams() {
                     </div>
                   </div>
                   <p className="text-xs text-center">
-                    {twoFactorCode.replace(/\D/g, '').length === 6 ? (
+                    {loginMutation.isPending ? (
+                      <span className="text-blue-600 font-medium">
+                        Verifying your code...
+                      </span>
+                    ) : twoFactorCode.replace(/\D/g, '').length === 6 ? (
                       <span className="text-green-600 font-medium">
-                        ✓ Code complete - click "Verify Code" or press Enter to submit
+                        ✓ Code complete - verifying automatically. If needed, you can still click "Verify Code".
                       </span>
                     ) : (
                       <span className="text-slate-500">
@@ -575,23 +664,23 @@ function LoginFormWithSearchParams() {
               {/* Remember Me & Forgot Password - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <input
-                    id="rememberMe"
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    {...register('rememberMe')}
-                  />
-                  <Label htmlFor="rememberMe" className="text-sm font-normal">
-                    Remember me for 30 days
-                  </Label>
-                </div>
-                <a
-                  href="/forgot-password"
-                  className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                >
-                  Forgot password?
-                </a>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      id="rememberMe"
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      {...register('rememberMe')}
+                    />
+                    <Label htmlFor="rememberMe" className="text-sm font-normal">
+                      Remember me for 30 days
+                    </Label>
+                  </div>
+                  <a
+                    href="/forgot-password"
+                    className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                  >
+                    Forgot password?
+                  </a>
                 </div>
               )}
 
@@ -620,8 +709,8 @@ function LoginFormWithSearchParams() {
                 <div className="space-y-4">
                   <div className="flex justify-center">
                     <ReCAPTCHA
-                      sitekey={securitySettings.captchaProvider === 'recaptcha' 
-                        ? securitySettings.recaptchaSiteKey || '' 
+                      sitekey={securitySettings.captchaProvider === 'recaptcha'
+                        ? securitySettings.recaptchaSiteKey || ''
                         : securitySettings.hCaptchaSiteKey || ''}
                       onChange={(token) => setValue('recaptchaToken', token || '')}
                     />
@@ -770,6 +859,21 @@ function LoginFormWithSearchParams() {
                       value={otpTwoFactorCode}
                       onChange={(e) => setOtpTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     />
+                    <p className="text-xs text-center">
+                      {verifyOtpMutation.isPending ? (
+                        <span className="text-blue-600 font-medium">
+                          Verifying your codes...
+                        </span>
+                      ) : otpCode.replace(/\D/g, '').length === 6 && otpTwoFactorCode.replace(/\D/g, '').length === 6 ? (
+                        <span className="text-green-600 font-medium">
+                          ✓ Codes complete - signing you in automatically.
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">
+                          Enter the 6-digit code from your authenticator app
+                        </span>
+                      )}
+                    </p>
                   </div>
                 )}
 
@@ -891,11 +995,11 @@ function LoginPageLoading() {
   return (
     <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
       {/* Background Image */}
-      <div 
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat" 
-        style={{backgroundImage: 'url(/login.svg)'}}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/login.svg)' }}
       ></div>
-      
+
       <div className="relative flex items-center space-x-3 backdrop-blur-sm bg-white/95 dark:bg-slate-900/95 p-8 rounded-2xl shadow-2xl border border-white/30">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
         <span className="text-slate-900 dark:text-slate-100 font-medium text-lg">Loading login page...</span>

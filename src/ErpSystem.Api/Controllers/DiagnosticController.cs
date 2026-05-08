@@ -190,7 +190,7 @@ namespace ErpSystem.Api.Controllers
         /// Test SignalR negotiation endpoint to debug connection issues
         /// </summary>
         [HttpGet("signalr-test")]
-        public async Task<ActionResult> TestSignalRNegotiation()
+        public ActionResult TestSignalRNegotiation()
         {
             try
             {

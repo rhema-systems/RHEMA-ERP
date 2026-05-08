@@ -217,6 +217,21 @@ public interface IInventoryValuationService
         string? lotNumber = null,
         string? serialNumber = null,
         DateTime? expirationDate = null);
+
+    /// <summary>
+    /// Processes an inventory issue based on the item's valuation method
+    /// </summary>
+    Task<decimal> ProcessIssueAsync(
+        Guid inventoryItemId,
+        Guid warehouseId,
+        Guid? locationId,
+        decimal quantity,
+        ErpSystem.Core.Entities.Inventory.InventoryMovementType movementType,
+        ErpSystem.Core.Enums.ReferenceType referenceType,
+        string? referenceNumber,
+        Guid? referenceId,
+        string? lotNumber = null,
+        string? serialNumber = null);
 }
 
 /// <summary>
@@ -276,6 +291,7 @@ public interface IItemSupplierService
 public interface IInventoryRequisitionService
 {
     Task<IEnumerable<InventoryRequisitionDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null);
+    Task<IEnumerable<InventoryRequisitionDto>> GetByProjectAsync(Guid projectId);
     Task<IEnumerable<InventoryRequisitionDto>> GetByWarehouseAsync(Guid warehouseId);
     Task<IEnumerable<InventoryRequisitionDto>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<InventoryRequisitionDto>> GetPendingApprovalAsync();
@@ -288,6 +304,7 @@ public interface IInventoryRequisitionService
     Task<bool> ApproveAsync(Guid id, string? notes = null);
     Task<bool> RejectAsync(Guid id, string reason);
     Task<bool> IssueAsync(Guid id, IssueRequisitionDto dto);
+    Task<bool> ReturnAsync(Guid id, ReturnRequisitionDto dto);
     Task<bool> CompleteAsync(Guid id);
     Task<bool> CancelAsync(Guid id, string reason);
     Task<InventoryRequisitionItemDto> AddItemAsync(Guid requisitionId, AddRequisitionItemDto dto);

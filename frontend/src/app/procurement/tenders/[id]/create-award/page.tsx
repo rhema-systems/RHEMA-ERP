@@ -22,7 +22,7 @@ import { awardVerificationService, TenderAwardVerification } from '@/services/aw
 export default function CreateAwardPage() {
   const params = useParams();
   const router = useRouter();
-  const tenderId = params.id as string;
+  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [recommendation, setRecommendation] = useState<AwardRecommendationDto | null>(null);
@@ -471,4 +471,3 @@ export default function CreateAwardPage() {
     </div>
   );
 }
-

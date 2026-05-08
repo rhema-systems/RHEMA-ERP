@@ -46,6 +46,8 @@ export default function EmergencyPlansPage() {
   const handleViewDetails = (id: string) => router.push(`/procurement/planning/emergency-plans/${id}`);
   const handleEdit = (id: string) => router.push(`/procurement/planning/emergency-plans/${id}/edit`);
   const handleCreateNew = () => router.push('/procurement/planning/emergency-plans/new');
+  const getPlanValidFrom = (plan: EmergencyProcurementPlanDto) => plan.validFrom || plan.effectiveDate;
+  const getPlanValidTo = (plan: EmergencyProcurementPlanDto) => plan.validTo || plan.expiryDate;
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this emergency plan?')) return;
@@ -65,9 +67,9 @@ export default function EmergencyPlansPage() {
       const exportData = plans.map(p => ({
         'Plan #': p.planNumber, 'Title': p.title, 'Department': p.departmentName || '',
         'Status': p.status, 'Emergency Type': p.emergencyType, 'Critical Items': p.criticalItemCount,
-        'Emergency Suppliers': p.emergencySupplierCount, 'Budget Reserve': p.emergencyBudgetReserve,
-        'Currency': p.currency, 'Valid From': format(new Date(p.validFrom), 'yyyy-MM-dd'),
-        'Valid To': format(new Date(p.validTo), 'yyyy-MM-dd'),
+        'Emergency Suppliers': p.emergencySupplierCount, 'Budget Reserve': p.emergencyBudgetReserve ?? p.budgetReserve,
+        'Currency': p.currency, 'Valid From': getPlanValidFrom(p) ? format(new Date(getPlanValidFrom(p) || ''), 'yyyy-MM-dd') : '',
+        'Valid To': getPlanValidTo(p) ? format(new Date(getPlanValidTo(p) || ''), 'yyyy-MM-dd') : '',
       }));
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
@@ -152,12 +154,12 @@ export default function EmergencyPlansPage() {
                   {plans.map((p) => (
                     <TableRow key={p.id}>
                       <TableCell className="font-medium">{p.planNumber}</TableCell>
-                      <TableCell><div><div className="font-medium">{p.title}</div><div className="text-sm text-gray-500">{format(new Date(p.validFrom), 'MMM dd, yyyy')} - {format(new Date(p.validTo), 'MMM dd, yyyy')}</div></div></TableCell>
+                      <TableCell><div><div className="font-medium">{p.title}</div><div className="text-sm text-gray-500">{getPlanValidFrom(p) ? format(new Date(getPlanValidFrom(p) || ''), 'MMM dd, yyyy') : 'N/A'} - {getPlanValidTo(p) ? format(new Date(getPlanValidTo(p) || ''), 'MMM dd, yyyy') : 'N/A'}</div></div></TableCell>
                       <TableCell>{p.departmentName || 'N/A'}</TableCell>
                       <TableCell>{getStatusBadge(p.status)}</TableCell>
                       <TableCell>{getEmergencyTypeBadge(p.emergencyType)}</TableCell>
                       <TableCell><div className="flex items-center gap-4"><div className="flex items-center gap-1"><AlertTriangle className="h-4 w-4 text-orange-500" /><span>{p.criticalItemCount}</span></div><div className="flex items-center gap-1"><Shield className="h-4 w-4 text-blue-500" /><span>{p.emergencySupplierCount}</span></div></div></TableCell>
-                      <TableCell>{formatCurrency(p.emergencyBudgetReserve, p.currency)}</TableCell>
+                      <TableCell>{formatCurrency(p.emergencyBudgetReserve ?? p.budgetReserve, p.currency)}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
                           <Button variant="ghost" size="sm" onClick={() => handleViewDetails(p.id)} title="View"><Eye className="h-4 w-4" /></Button>
@@ -176,4 +178,3 @@ export default function EmergencyPlansPage() {
     </div>
   );
 }
-

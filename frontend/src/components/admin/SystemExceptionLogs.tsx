@@ -109,7 +109,7 @@ export default function SystemExceptionLogs() {
 
   useEffect(() => {
     load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [queryString])
 
   const openDetails = async (id: string) => {

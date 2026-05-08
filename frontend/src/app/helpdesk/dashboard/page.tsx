@@ -1,9 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BarChart3, Clock, Download, RefreshCcw, Star, TrendingUp } from 'lucide-react';
+import { AlertTriangle, BarChart3, Clock, Download, Plus, RefreshCcw, Star, TrendingUp } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  buildScopedHelpdeskNewPath,
+  buildScopedHelpdeskQueuePath,
+  buildScopedHelpdeskTicketsPath,
+  getHelpdeskScopeConfig,
+  isExternalTicketSource,
+  isTicketInHelpdeskScope,
+} from '@/lib/helpdesk-scope';
 import {
   ehcInternalTicketService,
   type EhcHelpdeskSummary,
@@ -25,9 +33,15 @@ import {
   type EhcProblemLinkTrendPoint,
   type EhcTopRecurringProblem,
 } from '@/services/ehcInternalTicketService';
-import type { EhcTicketPriority } from '@/services/ehcTicketService';
+import type { EhcTicketListItem, EhcTicketPriority } from '@/services/ehcTicketService';
 
 type CountRow = { key: string; count: number };
+
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
 
 const priorityBadgeClassName = (p: EhcTicketPriority) => {
   switch (p) {
@@ -57,8 +71,14 @@ const problemStatusBadgeClassName = (s: string) => {
 
 export default function HelpdeskDashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const [rangeDays, setRangeDays] = useState(30);
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
+  const isScopedDashboard = Boolean(scopeParam);
+  const scopedTicketTypeFilter = scopeConfig.allowedTicketTypes.length === 1 ? scopeConfig.defaultTicketType : null;
+  const scopedSourceFilter = scopeConfig.internalOnly ? 'Internal' : null;
 
   const dateStamp = new Date().toISOString().slice(0, 10);
 
@@ -88,80 +108,184 @@ export default function HelpdeskDashboardPage() {
   const { data: summary, isLoading: summaryLoading, error: summaryError } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'summary'],
     queryFn: () => ehcInternalTicketService.getSummary(),
+    enabled: !isScopedDashboard,
+  });
+
+  const { data: scopedTickets, isLoading: scopedTicketsLoading, error: scopedTicketsError } = useQuery({
+    queryKey: ['ehc', 'internal', 'reports', 'summary', 'scoped', scopeConfig.scope],
+    queryFn: async () => {
+      const items = await ehcInternalTicketService.listTickets(1, 1000, {
+        ticketType: scopedTicketTypeFilter,
+        source: scopedSourceFilter,
+      });
+      return items.filter(
+        (ticket) =>
+          isTicketInHelpdeskScope(ticket, scopeConfig.scope) &&
+          (scopeConfig.internalOnly || isExternalTicketSource(ticket.source)),
+      );
+    },
+    enabled: isScopedDashboard,
   });
 
   const { data: sla, isLoading: slaLoading } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'sla', rangeDays],
     queryFn: () => ehcInternalTicketService.getSlaCompliance(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   const { data: agentPerf, isLoading: agentLoading, error: agentError } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'agents', rangeDays],
     queryFn: () => ehcInternalTicketService.getAgentPerformance(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   const { data: escalations, isLoading: escLoading, error: escError } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'escalations', rangeDays],
     queryFn: () => ehcInternalTicketService.getEscalations(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   const { data: feedbackSummary } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'feedback', 'summary', rangeDays],
     queryFn: () => ehcInternalTicketService.getFeedbackSummary(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   const { data: feedbackByAgent } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'feedback', 'by-agent', rangeDays],
     queryFn: () => ehcInternalTicketService.getFeedbackByAgent(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   const { data: feedbackByDepartment } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'feedback', 'by-department', rangeDays],
     queryFn: () => ehcInternalTicketService.getFeedbackByDepartment(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   const { data: feedbackTrend } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'feedback', 'trend', rangeDays],
     queryFn: () => ehcInternalTicketService.getFeedbackTrend(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   const { data: problemsSummary, isLoading: problemsLoading } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'problems', 'summary', rangeDays, 15],
     queryFn: () => ehcInternalTicketService.getProblemsSummary(rangeDays, 15),
+    enabled: !isScopedDashboard,
   });
 
   const { data: problemLinkTrend, isLoading: problemsTrendLoading } = useQuery({
     queryKey: ['ehc', 'internal', 'reports', 'problems', 'link-trend', rangeDays],
     queryFn: () => ehcInternalTicketService.getProblemLinkTrend(rangeDays),
+    enabled: !isScopedDashboard,
   });
 
   // --- derived view models ---
-  const totals = summary?.totals ?? null;
+  const totals = useMemo(() => {
+    if (!isScopedDashboard) return summary?.totals ?? null;
+
+    const tickets = (scopedTickets ?? []) as EhcTicketListItem[];
+    const terminalStatuses = new Set(['Resolved', 'Closed']);
+    const now = Date.now();
+    let firstResponseBreaches = 0;
+    let resolutionBreaches = 0;
+
+    for (const ticket of tickets) {
+      const firstResponseDue = ticket.firstResponseDueAt ? Date.parse(ticket.firstResponseDueAt) : Number.NaN;
+      const resolutionDue = ticket.resolutionDueAt ? Date.parse(ticket.resolutionDueAt) : Number.NaN;
+      const firstRespondedAt = ticket.firstRespondedAt ? Date.parse(ticket.firstRespondedAt) : Number.NaN;
+      const resolvedAt = ticket.resolvedAt ? Date.parse(ticket.resolvedAt) : Number.NaN;
+      const closedAt = ticket.closedAt ? Date.parse(ticket.closedAt) : Number.NaN;
+      const isTerminal = terminalStatuses.has(ticket.status);
+
+      if (!isTerminal && !Number.isNaN(firstResponseDue) && now > firstResponseDue && Number.isNaN(firstRespondedAt)) {
+        firstResponseBreaches += 1;
+      }
+
+      if (!isTerminal && !Number.isNaN(resolutionDue) && now > resolutionDue && Number.isNaN(resolvedAt) && Number.isNaN(closedAt)) {
+        resolutionBreaches += 1;
+      }
+    }
+
+    return {
+      total: tickets.length,
+      open: tickets.filter((ticket) => !terminalStatuses.has(ticket.status)).length,
+      firstResponseBreaches,
+      resolutionBreaches,
+      avgFirstResponseMinutes: null,
+      avgResolutionMinutes: null,
+    };
+  }, [isScopedDashboard, scopedTickets, summary]);
 
   const byStatus = useMemo<CountRow[]>(() => {
+    if (isScopedDashboard) {
+      const counts = new Map<string, number>();
+      for (const ticket of scopedTickets ?? []) counts.set(ticket.status, (counts.get(ticket.status) ?? 0) + 1);
+      return Array.from(counts.entries()).map(([key, count]) => ({ key, count }));
+    }
     const items = (summary?.byStatus ?? []) as EhcHelpdeskSummary['byStatus'];
     return items.map((x) => ({ key: x.status, count: x.count }));
-  }, [summary]);
+  }, [isScopedDashboard, scopedTickets, summary]);
 
   const byPriority = useMemo<CountRow[]>(() => {
+    if (isScopedDashboard) {
+      const counts = new Map<string, number>();
+      for (const ticket of scopedTickets ?? []) counts.set(ticket.priority, (counts.get(ticket.priority) ?? 0) + 1);
+      return Array.from(counts.entries()).map(([key, count]) => ({ key, count }));
+    }
     const items = (summary?.byPriority ?? []) as EhcHelpdeskSummary['byPriority'];
     return items.map((x) => ({ key: x.priority, count: x.count }));
-  }, [summary]);
+  }, [isScopedDashboard, scopedTickets, summary]);
 
   const byDepartment = useMemo<CountRow[]>(() => {
+    if (isScopedDashboard) {
+      const counts = new Map<string, number>();
+      for (const ticket of scopedTickets ?? []) {
+        const key = ticket.assignedDepartmentName || 'Unassigned';
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      return Array.from(counts.entries()).map(([key, count]) => ({ key, count }));
+    }
     const items = (summary?.byDepartment ?? []) as EhcHelpdeskSummary['byDepartment'];
     return items.map((x) => ({ key: x.departmentName || 'Unassigned', count: x.count }));
-  }, [summary]);
+  }, [isScopedDashboard, scopedTickets, summary]);
 
   const byCategory = useMemo<CountRow[]>(() => {
+    if (isScopedDashboard) {
+      const counts = new Map<string, number>();
+      for (const ticket of scopedTickets ?? []) {
+        const key = ticket.categoryName || 'Uncategorized';
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      return Array.from(counts.entries()).map(([key, count]) => ({ key, count }));
+    }
     const items = (summary?.byCategory ?? []) as EhcHelpdeskSummary['byCategory'];
     return items.map((x) => ({ key: x.categoryName || 'Uncategorized', count: x.count }));
-  }, [summary]);
+  }, [isScopedDashboard, scopedTickets, summary]);
 
   const byRootCause = useMemo<CountRow[]>(() => {
+    if (isScopedDashboard) return [];
     const items = (summary?.byRootCause ?? []) as NonNullable<EhcHelpdeskSummary['byRootCause']>;
     return items.map((x) => ({ key: x.rootCauseName || 'Unspecified', count: x.count }));
-  }, [summary]);
+  }, [isScopedDashboard, summary]);
+
+  const byChannel = useMemo<CountRow[]>(() => {
+    if (!isScopedDashboard) return [];
+    const counts = new Map<string, number>();
+    for (const ticket of scopedTickets ?? []) {
+      const key =
+        ticket.source === 'Web'
+          ? 'Website'
+          : ticket.source === 'PhoneCall'
+            ? 'Phone Call'
+            : ticket.source === 'Sms'
+              ? 'SMS'
+              : ticket.source;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([key, count]) => ({ key, count }));
+  }, [isScopedDashboard, scopedTickets]);
 
   const countColumns = useMemo<Array<DataTableColumn<CountRow>>>(() => {
     return [
@@ -170,10 +294,13 @@ export default function HelpdeskDashboardPage() {
         id: 'count',
         header: 'Count',
         accessorKey: 'count',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<CountRow>) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
       },
     ];
   }, []);
+
+  const overviewLoading = isScopedDashboard ? scopedTicketsLoading : summaryLoading;
+  const overviewError = isScopedDashboard ? (scopedTicketsError ? 'Failed to load dashboard.' : null) : (summaryError ? 'Failed to load summary.' : null);
 
   const slaChartData = useMemo(() => {
     const points = (sla ?? []) as EhcSlaCompliancePoint[];
@@ -191,43 +318,43 @@ export default function HelpdeskDashboardPage() {
         id: 'totalAssigned',
         header: 'Assigned',
         accessorKey: 'totalAssigned',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.totalAssigned.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <Badge variant="secondary">{row.original.totalAssigned.toLocaleString()}</Badge>,
       },
       {
         id: 'openAssigned',
         header: 'Open',
         accessorKey: 'openAssigned',
-        cell: ({ row }) => <span className="text-sm">{row.original.openAssigned.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.openAssigned.toLocaleString()}</span>,
       },
       {
         id: 'resolvedAssigned',
         header: 'Resolved',
         accessorKey: 'resolvedAssigned',
-        cell: ({ row }) => <span className="text-sm">{row.original.resolvedAssigned.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.resolvedAssigned.toLocaleString()}</span>,
       },
       {
         id: 'firstResponseBreaches',
         header: 'FR Breaches',
         accessorKey: 'firstResponseBreaches',
-        cell: ({ row }) => <span className="text-sm">{row.original.firstResponseBreaches.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.firstResponseBreaches.toLocaleString()}</span>,
       },
       {
         id: 'resolutionBreaches',
         header: 'Res Breaches',
         accessorKey: 'resolutionBreaches',
-        cell: ({ row }) => <span className="text-sm">{row.original.resolutionBreaches.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.resolutionBreaches.toLocaleString()}</span>,
       },
       {
         id: 'avgFirstResponseMinutes',
         header: 'Avg FR (min)',
         accessorKey: 'avgFirstResponseMinutes',
-        cell: ({ row }) => <span className="text-sm">{row.original.avgFirstResponseMinutes ?? '—'}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.avgFirstResponseMinutes ?? '—'}</span>,
       },
       {
         id: 'avgResolutionMinutes',
         header: 'Avg Res (min)',
         accessorKey: 'avgResolutionMinutes',
-        cell: ({ row }) => <span className="text-sm">{row.original.avgResolutionMinutes ?? '—'}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.avgResolutionMinutes ?? '—'}</span>,
       },
     ];
   }, []);
@@ -241,7 +368,7 @@ export default function HelpdeskDashboardPage() {
         id: 'count',
         header: 'Count',
         accessorKey: 'count',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<EhcEscalationReportRow>) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
       },
     ];
   }, []);
@@ -267,13 +394,13 @@ export default function HelpdeskDashboardPage() {
         id: 'avgRating',
         header: 'Avg Rating',
         accessorKey: 'avgRating',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByAgentRow>) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
       },
       {
         id: 'feedbackCount',
         header: 'Responses',
         accessorKey: 'feedbackCount',
-        cell: ({ row }) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByAgentRow>) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
       },
     ];
   }, []);
@@ -285,13 +412,13 @@ export default function HelpdeskDashboardPage() {
         id: 'avgRating',
         header: 'Avg Rating',
         accessorKey: 'avgRating',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByDepartmentRow>) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
       },
       {
         id: 'feedbackCount',
         header: 'Responses',
         accessorKey: 'feedbackCount',
-        cell: ({ row }) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByDepartmentRow>) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
       },
     ];
   }, []);
@@ -311,7 +438,7 @@ export default function HelpdeskDashboardPage() {
         id: 'problemNumber',
         header: 'Problem #',
         accessorKey: 'problemNumber',
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => (
           <button className="text-blue-700 hover:underline" onClick={() => router.push(`/helpdesk/problems/${row.original.problemId}`)} title="Open problem">
             {row.original.problemNumber}
           </button>
@@ -322,19 +449,19 @@ export default function HelpdeskDashboardPage() {
         id: 'status',
         header: 'Status',
         accessorKey: 'status',
-        cell: ({ row }) => <Badge className={problemStatusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => <Badge className={problemStatusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
       },
       {
         id: 'priority',
         header: 'Priority',
         accessorKey: 'priority',
-        cell: ({ row }) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
       },
       {
         id: 'linkedTicketsCount',
         header: 'Incidents',
         accessorKey: 'linkedTicketsCount',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.linkedTicketsCount.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => <Badge variant="secondary">{row.original.linkedTicketsCount.toLocaleString()}</Badge>,
       },
       { id: 'departmentName', header: 'Department', accessorKey: 'departmentName' },
       { id: 'ownerName', header: 'Owner', accessorKey: 'ownerName' },
@@ -360,18 +487,46 @@ export default function HelpdeskDashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-3xl font-bold text-slate-900">Helpdesk Dashboard</h1>
-          <p className="text-slate-600">Operational overview, SLA compliance, CSAT, and recurring issues.</p>
+          <h1 className="text-3xl font-bold text-slate-900">
+            {isScopedDashboard ? `${scopeConfig.listTitle} Dashboard` : 'Helpdesk Dashboard'}
+          </h1>
+          <p className="text-slate-600">
+            {isScopedDashboard
+              ? `Backoffice overview for ${scopeConfig.listTitle.toLowerCase()}.`
+              : 'Operational overview, SLA compliance, CSAT, and recurring issues.'}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <label className="text-sm text-slate-600">Range</label>
-          <select className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={String(rangeDays)} onChange={(e) => setRangeDays(Number(e.target.value) || 30)}>
-            <option value="7">Last 7 days</option>
-            <option value="30">Last 30 days</option>
-            <option value="90">Last 90 days</option>
-          </select>
-          <Button type="button" variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'reports'] })} title="Refresh reports">
+          {isScopedDashboard ? (
+            <>
+              <Button type="button" variant="outline" onClick={() => router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))}>
+                Open Worklist
+              </Button>
+              <Button type="button" variant="outline" onClick={() => router.push(buildScopedHelpdeskQueuePath(scopeConfig.scope))}>
+                Queue
+              </Button>
+              <Button type="button" onClick={() => router.push(buildScopedHelpdeskNewPath(scopeConfig.scope))}>
+                <Plus className="h-4 w-4 mr-2" />
+                {scopeConfig.createButtonLabel}
+              </Button>
+            </>
+          ) : (
+            <>
+              <label className="text-sm text-slate-600">Range</label>
+              <select className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={String(rangeDays)} onChange={(e) => setRangeDays(Number(e.target.value) || 30)}>
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+              </select>
+            </>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => qc.invalidateQueries({ queryKey: isScopedDashboard ? ['ehc', 'internal', 'reports', 'summary', 'scoped', scopeConfig.scope] : ['ehc', 'internal', 'reports'] })}
+            title="Refresh reports"
+          >
             <RefreshCcw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
@@ -381,25 +536,29 @@ export default function HelpdeskDashboardPage() {
       <Tabs defaultValue="overview">
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="sla">SLA</TabsTrigger>
-          <TabsTrigger value="ops">Operations</TabsTrigger>
-          <TabsTrigger value="csat">CSAT</TabsTrigger>
-          <TabsTrigger value="recurring">Recurring issues</TabsTrigger>
+          {!isScopedDashboard ? <TabsTrigger value="sla">SLA</TabsTrigger> : null}
+          {!isScopedDashboard ? <TabsTrigger value="ops">Operations</TabsTrigger> : null}
+          {!isScopedDashboard ? <TabsTrigger value="csat">CSAT</TabsTrigger> : null}
+          {!isScopedDashboard ? <TabsTrigger value="recurring">Recurring issues</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm text-slate-600">All-time totals & breakdowns.</div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => downloadReport('/ehc/internal/reports/export/summary.xlsx', `ehc-summary-${dateStamp}.xlsx`)}>
-                <Download className="h-4 w-4 mr-2" />
-                Export Excel
-              </Button>
-              <Button type="button" variant="outline" onClick={() => downloadReport('/ehc/internal/reports/export/summary.pdf', `ehc-summary-${dateStamp}.pdf`)}>
-                <Download className="h-4 w-4 mr-2" />
-                Export PDF
-              </Button>
+            <div className="text-sm text-slate-600">
+              {isScopedDashboard ? 'Current backoffice branch totals and breakdowns.' : 'All-time totals & breakdowns.'}
             </div>
+            {!isScopedDashboard ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" variant="outline" onClick={() => downloadReport('/ehc/internal/reports/export/summary.xlsx', `ehc-summary-${dateStamp}.xlsx`)}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Excel
+                </Button>
+                <Button type="button" variant="outline" onClick={() => downloadReport('/ehc/internal/reports/export/summary.pdf', `ehc-summary-${dateStamp}.pdf`)}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export PDF
+                </Button>
+              </div>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -466,8 +625,8 @@ export default function HelpdeskDashboardPage() {
               title="By Status"
               data={byStatus}
               columns={countColumns}
-              loading={summaryLoading}
-              error={summaryError ? 'Failed to load summary.' : null}
+              loading={overviewLoading}
+              error={overviewError}
               enablePagination={false}
               enableSearch={false}
               enableColumnFilters={false}
@@ -480,8 +639,8 @@ export default function HelpdeskDashboardPage() {
               title="By Priority"
               data={byPriority}
               columns={countColumns}
-              loading={summaryLoading}
-              error={summaryError ? 'Failed to load summary.' : null}
+              loading={overviewLoading}
+              error={overviewError}
               enablePagination={false}
               enableSearch={false}
               enableColumnFilters={false}
@@ -490,14 +649,14 @@ export default function HelpdeskDashboardPage() {
             />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className={`grid grid-cols-1 ${isScopedDashboard ? 'lg:grid-cols-3' : 'lg:grid-cols-3'} gap-4`}>
             <DataTable
               compact
               title="Top Categories"
               data={byCategory}
               columns={countColumns}
-              loading={summaryLoading}
-              error={summaryError ? 'Failed to load summary.' : null}
+              loading={overviewLoading}
+              error={overviewError}
               enablePagination={false}
               enableSearch={false}
               enableColumnFilters={false}
@@ -505,27 +664,43 @@ export default function HelpdeskDashboardPage() {
               exportFormats={['csv', 'excel']}
             />
 
-            <DataTable
-              compact
-              title="Top Root Causes"
-              data={byRootCause}
-              columns={countColumns}
-              loading={summaryLoading}
-              error={summaryError ? 'Failed to load summary.' : null}
-              enablePagination={false}
-              enableSearch={false}
-              enableColumnFilters={false}
-              exportFileName={`helpdesk-by-root-cause-${dateStamp}`}
-              exportFormats={['csv', 'excel']}
-            />
+            {isScopedDashboard ? (
+              <DataTable
+                compact
+                title="By Channel"
+                data={byChannel}
+                columns={countColumns}
+                loading={overviewLoading}
+                error={overviewError}
+                enablePagination={false}
+                enableSearch={false}
+                enableColumnFilters={false}
+                exportFileName={`helpdesk-by-channel-${dateStamp}`}
+                exportFormats={['csv', 'excel']}
+              />
+            ) : (
+              <DataTable
+                compact
+                title="Top Root Causes"
+                data={byRootCause}
+                columns={countColumns}
+                loading={overviewLoading}
+                error={overviewError}
+                enablePagination={false}
+                enableSearch={false}
+                enableColumnFilters={false}
+                exportFileName={`helpdesk-by-root-cause-${dateStamp}`}
+                exportFormats={['csv', 'excel']}
+              />
+            )}
 
             <DataTable
               compact
               title="By Department"
               data={byDepartment}
               columns={countColumns}
-              loading={summaryLoading}
-              error={summaryError ? 'Failed to load summary.' : null}
+              loading={overviewLoading}
+              error={overviewError}
               enablePagination={false}
               enableSearch={false}
               enableColumnFilters={false}

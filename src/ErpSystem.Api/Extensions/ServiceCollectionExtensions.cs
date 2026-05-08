@@ -8,6 +8,7 @@ using ErpSystem.Core.Models;
 using ErpSystem.Core.Services;
 using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
+using ErpSystem.Shared;
 using ErpSystem.Web.Configuration;
 using ErpSystem.Web.HealthChecks;
 using ErpSystem.Web.Middleware;
@@ -115,6 +116,23 @@ namespace ErpSystem.Api.Extensions
                     ValidAudience = jwtSettings["Audience"],
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.Zero
+                };
+                x.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        var requestPath = context.HttpContext.Request.Path;
+
+                        if (string.IsNullOrWhiteSpace(context.Token)
+                            && !string.IsNullOrWhiteSpace(accessToken)
+                            && requestPath.StartsWithSegments("/api/hubs"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    }
                 };
             });
 
@@ -327,6 +345,16 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceStaffScheduleRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceStaffScheduleRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceExpenseRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceExpenseRepository>();
 
+            // Project management repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectRepository, ErpSystem.Data.Repositories.Projects.ProjectRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectTypeRepository, ErpSystem.Data.Repositories.Projects.ProjectTypeRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectPriorityRepository, ErpSystem.Data.Repositories.Projects.ProjectPriorityRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectTemplateRepository, ErpSystem.Data.Repositories.Projects.ProjectTemplateRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectPortfolioRepository, ErpSystem.Data.Repositories.Projects.ProjectPortfolioRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectProgramRepository, ErpSystem.Data.Repositories.Projects.ProjectProgramRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectManagementSettingsRepository, ErpSystem.Data.Repositories.Projects.ProjectManagementSettingsRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository, ErpSystem.Data.Repositories.Projects.ProjectCatalogRepository>();
+
             // Task template repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTaskTemplateRepository, ErpSystem.Data.Repositories.Maintenance.AssetTaskTemplateRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTypeTaskTemplateRepository, ErpSystem.Data.Repositories.Maintenance.AssetTypeTaskTemplateRepository>();
@@ -405,6 +433,10 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryTransferWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryRequisitionWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.TenderWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectDeliverableWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectClosureWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectBudgetRevisionWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.BusinessPartnerWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ServiceRequestWorkflowStatusAdapter>();
             services.AddScoped<ITenantService, TenantService>();
@@ -584,7 +616,11 @@ namespace ErpSystem.Api.Extensions
 
             // Finance - Common services (Payment Terms, Currency)
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IPaymentTermService, ErpSystem.Core.Services.Finance.PaymentTermService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyService, ErpSystem.Core.Services.Finance.CurrencyService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyService, ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICapitalProjectService, ErpSystem.Api.Services.Finance.FixedAssets.CapitalProjectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ILeaseAccountingService, ErpSystem.Api.Services.Finance.FixedAssets.LeaseAccountingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.ITenantSettingsService, ErpSystem.Api.Services.TenantSettingsService>();
 
             // Phase 1: Core Maintenance Services - workflow-ready implementation - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderService, ErpSystem.Core.Services.Maintenance.WorkOrderService>();
@@ -760,7 +796,15 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPerformanceBondService, ErpSystem.Core.Services.Procurement.PerformanceBondService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderNegotiationService, ErpSystem.Core.Services.Procurement.TenderNegotiationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSettingsService, ErpSystem.Core.Services.Procurement.ProcurementSettingsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IQuoteService, ErpSystem.Core.Services.Sales.QuoteService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICommissionService, ErpSystem.Core.Services.Sales.CommissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceSettingsService, ErpSystem.Core.Services.Maintenance.MaintenanceSettingsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectService, ErpSystem.Core.Services.Projects.ProjectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectSetupService, ErpSystem.Core.Services.Projects.ProjectSetupService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectManagementSettingsService, ErpSystem.Core.Services.Projects.ProjectManagementSettingsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAttachmentService, ErpSystem.Core.Services.Maintenance.MaintenanceAttachmentService>();
 
             // Fleet (Maintenance)
@@ -783,6 +827,7 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetHealthService, ErpSystem.Core.Services.Maintenance.Fleet.FleetHealthService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
+            services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardService>();
 
             // RFQ (Request For Quotation) - separate from Tender
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IRfqService, ErpSystem.Core.Services.Procurement.RfqService>();
@@ -831,7 +876,11 @@ namespace ErpSystem.Api.Extensions
                 ErpSystem.Core.Services.Maintenance.DeadLetterNotificationService>();
 
             // Add AutoMapper - using assembly scanning approach
-            services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);
+            services.AddAutoMapper(
+                _ => { },
+                typeof(Program).Assembly,
+                typeof(ErpSystem.Core.Services.TenantService).Assembly,
+                typeof(ErpSystem.Data.ApplicationDbContext).Assembly);
 
             return services;
         }
@@ -850,11 +899,11 @@ namespace ErpSystem.Api.Extensions
                 .AddPolicy("ExternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
-                        string.Equals(ctx.User.FindFirst("auth_provider")?.Value, "Local", StringComparison.OrdinalIgnoreCase)))
+                        ctx.User.IsInRole(Constants.Roles.ExternalUser)))
                 .AddPolicy("InternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
-                        !string.Equals(ctx.User.FindFirst("auth_provider")?.Value, "Local", StringComparison.OrdinalIgnoreCase)))
+                        !ctx.User.IsInRole(Constants.Roles.ExternalUser)))
                 .AddPolicy("Finance", policy =>
                     policy.RequireClaim("module", "Finance"))
                 .AddPolicy("HR", policy =>
@@ -968,19 +1017,23 @@ namespace ErpSystem.Api.Extensions
                     c.IncludeXmlComments(xmlPath);
                 }
 
-                // Group controllers by modules/tags for better organization
-                c.TagActionsBy(api =>
-                {
-                    var controllerName = api.ActionDescriptor.RouteValues["controller"];
+                 // Group controllers by modules/tags for better organization
+                 c.TagActionsBy(api =>
+                 {
+                     var controllerName = api.ActionDescriptor.RouteValues["controller"];
 
-                    // Categorize by module
-                    return controllerName switch
-                    {
-                        // Authentication & Authorization
-                        "Auth" or "Security" or "Users" or "Roles" or "Permissions" => stringArray,
+                     // Categorize by module
+                     return controllerName switch
+                     {
+                         // Enquiry, Helpdesk & Complaints (EHC) Module
+                         string name when !string.IsNullOrWhiteSpace(name) && name.StartsWith("Ehc", StringComparison.OrdinalIgnoreCase)
+                             => new[] { "🎫 Enquiry, Helpdesk & Complaints" },
 
-                        // Administration
-                        "Tenants" or "Settings" or "AuditLogs" or "SecurityLogs" => new[] { "⚙️ Administration" },
+                         // Authentication & Authorization
+                         "Auth" or "Security" or "Users" or "Roles" or "Permissions" => stringArray,
+
+                         // Administration
+                         "Tenants" or "Settings" or "AuditLogs" or "SecurityLogs" => new[] { "⚙️ Administration" },
 
                         // HR Module
                         "Employees" or "Departments" or "Sections" or "EmployeeSkills" => new[] { "👥 Human Resources" },
@@ -1095,14 +1148,16 @@ namespace ErpSystem.Api.Extensions
             var redisConnectionString = configuration.GetConnectionString("Redis");
             if (!string.IsNullOrEmpty(redisConnectionString))
             {
+                var redisConfigurationOptions = BuildRedisConfigurationOptions(redisConnectionString, configuration);
+
                 // Add Redis connection multiplexer for advanced operations
                 services.AddSingleton<IConnectionMultiplexer>(sp =>
-                    ConnectionMultiplexer.Connect(redisConnectionString));
+                    ConnectionMultiplexer.Connect(redisConfigurationOptions));
 
                 // Add StackExchange Redis cache
                 services.AddStackExchangeRedisCache(options =>
                 {
-                    options.Configuration = redisConnectionString;
+                    options.ConfigurationOptions = redisConfigurationOptions;
                     options.InstanceName = "ErpSystem";
                 });
 
@@ -1132,6 +1187,29 @@ namespace ErpSystem.Api.Extensions
             });
 
             return services;
+        }
+
+        private static ConfigurationOptions BuildRedisConfigurationOptions(string connectionString, IConfiguration configuration)
+        {
+            var options = ConfigurationOptions.Parse(connectionString, ignoreUnknown: true);
+            var environmentName =
+                Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ??
+                configuration["Application:EnvironmentName"] ??
+                configuration["Application:Environment"] ??
+                Environments.Production;
+
+            var isDevelopment = string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase);
+
+            if (isDevelopment)
+            {
+                // Let local startup continue even if Redis is not installed or not running yet.
+                options.AbortOnConnectFail = false;
+                options.ConnectRetry = Math.Max(options.ConnectRetry, 3);
+                options.ReconnectRetryPolicy ??= new ExponentialRetry(5000);
+            }
+
+            return options;
         }
 
         public static IServiceCollection AddErpSystemWebFarm(this IServiceCollection services, IConfiguration configuration)
@@ -1343,7 +1421,7 @@ namespace ErpSystem.Api.Extensions
                     var user = context.User;
 
                     var isAuthenticated = user?.Identity?.IsAuthenticated == true;
-                    var authProvider = isAuthenticated ? user.FindFirst("auth_provider")?.Value : null;
+                    var authProvider = isAuthenticated ? user?.FindFirst("auth_provider")?.Value : null;
                     var isExternal = isAuthenticated && string.Equals(authProvider, "Local", StringComparison.OrdinalIgnoreCase);
 
                     // Anonymous traffic (public portal endpoints)

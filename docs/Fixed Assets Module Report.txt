@@ -1,0 +1,85 @@
+Fixed Assets Module Report
+1. Module Overview
+The Fixed Assets module is a comprehensive system designed to track, manage, and report on the lifecycle of fixed assets within the EzFMC ERP. It adheres to international accounting standards (IAS 16, IAS 36) and integrates with the General Ledger and Station Operations modules.
+
+2. Domain Model
+2.1 Core Entities (src/EzFMC.Core/Entities/FixedAssets/)
+FixedAsset: The master entity.
+Identification: AssetCode (unique), Barcode, AssetCategoryId.
+Financials: PurchasePrice, Detailed Cost Breakdown (Duties, Freight, Installation), TotalAcquisitionCost, NetBookValue.
+Depreciation: DepreciationMethod, UsefulLifeMonths, SalvageValue, PlacedInServiceDate.
+Status: AssetStatus (Draft, Active, Disposed, OnHold), Condition.
+Integration: LinkedPumpId (Fuel Dispensers), LinkedTankId (USTs).
+AssetDepreciationSchedule: Tracks calculated depreciation per fiscal period per asset.
+AssetTransfer: Records movement of assets between stations or custodians.
+AssetDisposal: Manages the retirement/sale of assets, calculating Gain/Loss.
+AssetValuation: Handles Revaluations (Fair Value model) and Impairments.
+VerificationSchedule & VerificationItem: Manages physical audit cycles.
+2.2 Key Enums (src/EzFMC.Core/Enums/FixedAssetEnums.cs)
+DepreciationMethod: StraightLine, DecliningBalance, DoubleDecliningBalance, UnitsOfProduction, SumOfYearsDigits.
+AssetStatus: Draft, Active, FullyDepreciated, Disposed, UnderConstruction, OnHold, HeldForSale.
+DepreciationConvention: FullMonth, HalfMonth, MidQuarter, HalfYear.
+DisposalMethod: Sale, Scrap, TradeIn, Donation, WriteOff.
+3. Backend Architecture
+3.1 Services (src/EzFMC.Infrastructure/Services/FixedAssets/)
+FixedAssetService (IFixedAssetService):
+CRUD operations for Assets and Categories.
+Asset Activation (starts depreciation).
+Asset Hold/Resume logic.
+Dashboard statistics generation.
+Document management.
+DepreciationService (IDepreciationService):
+Calculates depreciation based on selected method and convention.
+Runs batch depreciation for fiscal periods.
+Posts depreciation entries to the General Ledger.
+Handles forecasting/projection of future depreciation.
+AssetLifecycleService (IAssetLifecycleService):
+Transfers: Request -> Approve -> Complete workflow. Updates Location/Custodian.
+Disposals: Calculation of Book Value at disposal date vs. Proceeds = Gain/Loss.
+Valuations: Adjusts Net Book Value and/or Remaining Life.
+Verification: Generates audit lists, accepts mobile scan results, reconciles variances.
+FixedAssetReportService (IFixedAssetReportService):
+Generates data for Asset Register, Depreciation Schedules, and Activity Logs.
+Uses Template Pattern (AssetDetailTemplate, AssetRegisterTemplate) for PDF generation.
+3.2 Controllers (src/EzFMC.API/Controllers/)
+FixedAssetsController: RESTful API for all asset operations.
+FixedAssetsReportsController: Endpoints for PDF/Excel report generation.
+4. Business Logic Highlights
+4.1 Depreciation
+Support for Partial Periods via DepreciationConvention.
+Units of Production: Requires manual input of "Units Produced" per period.
+Integration: Automatically posts Journals to GL (Debit Depreciation Expense, Credit Accumulated Depreciation).
+4.2 Equipment Integration
+Assets can be linked to Pumps or Tanks from the Station Operations module.
+This enables tracking maintenance costs and efficiency against specific revenue-generating equipment.
+5. Frontend Architecture (frontend/)
+5.1 Directory Structure (app/(dashboard)/fixed-assets/)
+register/: Master list (page.tsx) and Create/Edit forms ([id]/page.tsx, new/page.tsx).
+depreciation/: Run Depreciation (page.tsx) and History/Schedule views.
+transfers/: Transfer workflows (Request, Approval, History).
+disposals/: Disposal workflows.
+verification/: Audit schedule management and reconciliation.
+reports/: Report parameter inputs and viewers.
+categories/: Configuration for asset categories (GL mappings, default methods).
+5.2 Key Types & Services
+Types: Defined in types/fixed-assets.ts, strictly typed to match Backend DTOs.
+Service: FixedAssetsService (services/fixed-assets.service.ts) creates a unified abstraction over the API.
+6. Implementation Status
+Feature	Status	Notes
+Asset Registry	✅ Completed	Full CRUD, Search, Filtering, Details View
+Asset Categories	✅ Completed	Hierarchical, GL Mapping Config
+Depreciation Engine	✅ Completed	All methods implemented, GL Posting integrated
+Transfers	✅ Completed	Workflow with Approval steps
+Disposals	✅ Completed	Gain/Loss calc, GL integration
+Physical Verification	✅ Completed	Schedule creation, Mobile scan support, Reconciliation
+Reporting	✅ Completed	PDF Templates, Excel Exports
+Dashboard	✅ Completed	KPI Cards, Charts (Status, Category)
+Document Mgmt	✅ Completed	Upload/View attachments per asset
+Pump/Tank Link	✅ Completed	One-to-one mapping for station equipment
+7. Interfaces for External Agents
+To interact with this module, an agent should primarily use:
+
+IFixedAssetServices: For all state changes and data retrieval.
+DTOs: Ensure strict adherence to CreateFixedAssetDto, RunDepreciationDto, etc.
+Core Enums: Do not use magic strings; map to FixedAssetEnums.
+This architectural snapshot represents the state of the codebase as of January 2026.

@@ -78,6 +78,7 @@ public class FleetVehicleService : IFleetVehicleService
                 AssetType = a.AssetCategory != null ? a.AssetCategory.AssetType : null,
                 LicensePlate = a.LicensePlate,
                 Vin = a.VIN,
+                FuelType = a.FuelType,
                 Status = a.Status.ToString(),
                 CategoryName = a.AssetCategory != null ? a.AssetCategory.Name : string.Empty,
                 Manufacturer = a.Manufacturer,
@@ -146,6 +147,7 @@ public class FleetVehicleService : IFleetVehicleService
             OperatingHours = dto.OperatingHours,
             LicensePlate = dto.LicensePlate,
             VIN = dto.Vin,
+            FuelType = dto.FuelType,
             IsFleetAsset = true
         };
 
@@ -197,7 +199,8 @@ public class FleetVehicleService : IFleetVehicleService
             DocumentLinks = existingEntity.DocumentLinks,
             Images = existingEntity.Images,
             LicensePlate = dto.LicensePlate,
-            VIN = dto.Vin
+            VIN = dto.Vin,
+            FuelType = dto.FuelType
         };
 
         var updated = await _maintenanceAssetService.UpdateAssetAsync(vehicleAssetId, updateAssetDto);

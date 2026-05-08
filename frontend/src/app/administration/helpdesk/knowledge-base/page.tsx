@@ -23,6 +23,11 @@ import {
 } from '@/services/ehcAdminService';
 
 type Mode = 'categories' | 'articles';
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
 
 export default function AdminHelpdeskKnowledgeBasePage() {
   const qc = useQueryClient();
@@ -160,13 +165,13 @@ export default function AdminHelpdeskKnowledgeBasePage() {
     return [
       { id: 'code', header: 'Code', accessorKey: 'code' },
       { id: 'name', header: 'Name', accessorKey: 'name' },
-      { id: 'isActive', header: 'Active', accessorKey: 'isActive', cell: ({ row }) => (row.original.isActive ? 'Yes' : 'No') },
+      { id: 'isActive', header: 'Active', accessorKey: 'isActive', cell: ({ row }: TableCellProps<EhcKnowledgeBaseCategoryAdmin>) => (row.original.isActive ? 'Yes' : 'No') },
       {
         id: 'actions',
         header: '',
         accessorKey: 'id',
         enableHiding: false,
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcKnowledgeBaseCategoryAdmin>) => (
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
@@ -201,16 +206,16 @@ export default function AdminHelpdeskKnowledgeBasePage() {
       {
         id: 'categoryName',
         header: 'Category',
-        accessorFn: (r) => r.categoryName || (r.categoryId ? categoryNameById.get(r.categoryId) : '') || '—',
+        accessorFn: (r: EhcKnowledgeBaseArticleAdmin) => r.categoryName || (r.categoryId ? categoryNameById.get(r.categoryId) : '') || '—',
       },
-      { id: 'isPublished', header: 'Published', accessorKey: 'isPublished', cell: ({ row }) => (row.original.isPublished ? 'Yes' : 'No') },
+      { id: 'isPublished', header: 'Published', accessorKey: 'isPublished', cell: ({ row }: TableCellProps<EhcKnowledgeBaseArticleAdmin>) => (row.original.isPublished ? 'Yes' : 'No') },
       { id: 'views', header: 'Views', accessorKey: 'viewCount' },
       {
         id: 'actions',
         header: '',
         accessorKey: 'id',
         enableHiding: false,
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcKnowledgeBaseArticleAdmin>) => (
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
@@ -414,4 +419,3 @@ export default function AdminHelpdeskKnowledgeBasePage() {
     </div>
   );
 }
-

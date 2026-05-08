@@ -121,8 +121,8 @@ public class InventoryItemDetailDto : InventoryItemDto
     public decimal ShippingWeight { get; set; }
 
     // U of M Schedule
-    public Guid? UnitOfMeasureScheduleId { get; set; }
-    public string? UnitOfMeasureScheduleName { get; set; }
+    public new Guid? UnitOfMeasureScheduleId { get; set; }
+    public new string? UnitOfMeasureScheduleName { get; set; }
 
     // Collections
     public List<InventoryLocationDto> Locations { get; set; } = new();
@@ -1058,7 +1058,8 @@ public class CreateStockAdjustmentDto
     /// <summary>
     /// The warehouse where the adjustment is being made
     /// </summary>
-    public Guid? WarehouseId { get; set; }
+    [Required]
+    public Guid WarehouseId { get; set; }
 
     [Required]
     [MaxLength(50)]

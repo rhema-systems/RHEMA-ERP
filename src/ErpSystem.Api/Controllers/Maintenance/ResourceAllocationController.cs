@@ -406,15 +406,16 @@ public class ResourceAllocationController : ControllerBase
             }
 
             var allPartsAvailable = inventoryChecks.All(check => check.IsAvailable);
-            var technicianRecommendationDto = (TechnicianRecommendationDto)technicianRecommendation;
-            var technicianAvailable = technicianRecommendationDto?.IsAvailable ?? false;
+            var technicianRecommendationDto = technicianRecommendation as TechnicianRecommendationDto;
+            var resolvedTechnicianRecommendation = technicianRecommendationDto ?? new TechnicianRecommendationDto();
+            var technicianAvailable = resolvedTechnicianRecommendation.IsAvailable;
 
             return Ok(new WorkOrderResourcePlanDto
             {
                 WorkOrderId = request.WorkOrderId,
                 WorkOrderNumber = workOrder.WorkOrderNumber,
                 CanProceed = technicianAvailable && allPartsAvailable,
-                TechnicianRecommendation = technicianRecommendationDto,
+                TechnicianRecommendation = resolvedTechnicianRecommendation,
                 InventoryAvailability = inventoryChecks.ToList(),
                 RecommendedStartTime = request.PreferredStartTime,
                 EstimatedCompletionTime = request.PreferredStartTime.AddHours(request.EstimatedHours),

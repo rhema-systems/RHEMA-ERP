@@ -52,6 +52,24 @@ interface Skill {
   averageRating?: number;
 }
 
+interface TechnicalSkillFormData {
+  name: string;
+  code: string;
+  description: string;
+  category: string;
+  skillLevel: string;
+  isActive: boolean;
+  prerequisites: string[];
+  certifications: string[];
+  estimatedLearningHours: number;
+  complexity: string;
+  riskLevel: string;
+  toolsRequired: string[];
+  safetyRequirements: string;
+  competencyAreas: string[];
+  relatedMaintenanceTypes: string[];
+}
+
 export default function TechnicalSkillsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -99,7 +117,7 @@ export default function TechnicalSkillsPage() {
   }, []);
   
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<TechnicalSkillFormData>({
     name: '',
     code: '',
     description: '',
@@ -222,7 +240,7 @@ export default function TechnicalSkillsPage() {
     }
   };
 
-  const handleView = (skill: any) => {
+  const handleView = (skill: Skill) => {
     setSelectedSkill(skill);
     setIsViewDialogOpen(true);
   };
@@ -510,7 +528,7 @@ export default function TechnicalSkillsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold">
-                  {filteredData.reduce((sum, s) => sum + s.techniciansCount, 0)}
+                  {filteredData.reduce((sum, s) => sum + (s.techniciansCount ?? 0), 0)}
                 </p>
                 <p className="text-sm text-muted-foreground">Skilled Technicians</p>
               </div>
@@ -524,7 +542,7 @@ export default function TechnicalSkillsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold">
-                  {Math.round((filteredData.reduce((sum, s) => sum + s.averageRating, 0) / filteredData.length) * 10) / 10 || 0}
+                  {Math.round((filteredData.reduce((sum, s) => sum + (s.averageRating ?? 0), 0) / filteredData.length) * 10) / 10 || 0}
                 </p>
                 <p className="text-sm text-muted-foreground">Avg Rating</p>
               </div>
@@ -620,11 +638,11 @@ export default function TechnicalSkillsPage() {
                       <Badge className={getSkillLevelColor(skill.skillLevel)}>
                         {skill.skillLevel}
                       </Badge>
-                      <Badge className={getComplexityColor(skill.complexity)}>
-                        {skill.complexity} Complexity
+                      <Badge className={getComplexityColor(skill.complexity ?? 'Low')}>
+                        {(skill.complexity ?? 'Low')} Complexity
                       </Badge>
-                      <Badge className={getRiskColor(skill.riskLevel)}>
-                        {skill.riskLevel} Risk
+                      <Badge className={getRiskColor(skill.riskLevel ?? 'Low')}>
+                        {(skill.riskLevel ?? 'Low')} Risk
                       </Badge>
                       <Badge className={skill.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                         {skill.isActive ? 'Active' : 'Inactive'}
@@ -639,22 +657,22 @@ export default function TechnicalSkillsPage() {
                         <span className="font-medium">Learning Hours:</span> {skill.estimatedLearningHours}h
                       </div>
                       <div>
-                        <span className="font-medium">Technicians:</span> {skill.techniciansCount}
+                        <span className="font-medium">Technicians:</span> {skill.techniciansCount ?? 0}
                       </div>
                       <div>
-                        <span className="font-medium">Rating:</span> {skill.averageRating}/5.0 ⭐
+                        <span className="font-medium">Rating:</span> {skill.averageRating ?? 0}/5.0 ⭐
                       </div>
                       <div>
-                        <span className="font-medium">Prerequisites:</span> {skill.prerequisites.length}
+                        <span className="font-medium">Prerequisites:</span> {skill.prerequisites?.length ?? 0}
                       </div>
                       <div>
-                        <span className="font-medium">Certifications:</span> {skill.certifications.length}
+                        <span className="font-medium">Certifications:</span> {skill.certifications?.length ?? 0}
                       </div>
                       <div>
-                        <span className="font-medium">Tools:</span> {skill.toolsRequired.length}
+                        <span className="font-medium">Tools:</span> {skill.toolsRequired?.length ?? 0}
                       </div>
                       <div>
-                        <span className="font-medium">Competencies:</span> {skill.competencyAreas.length}
+                        <span className="font-medium">Competencies:</span> {skill.competencyAreas?.length ?? 0}
                       </div>
                     </div>
                     
@@ -833,9 +851,9 @@ export default function TechnicalSkillsPage() {
               </div>
 
               <div>
-                <Label>Prerequisites ({selectedSkill.prerequisites.length})</Label>
+                <Label>Prerequisites ({selectedSkill.prerequisites?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.prerequisites.map((prereq, index) => (
+                  {(selectedSkill.prerequisites ?? []).map((prereq, index) => (
                     <Badge key={index} variant="outline" className="text-xs">
                       {prereq}
                     </Badge>
@@ -844,9 +862,9 @@ export default function TechnicalSkillsPage() {
               </div>
 
               <div>
-                <Label>Certifications ({selectedSkill.certifications.length})</Label>
+                <Label>Certifications ({selectedSkill.certifications?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.certifications.map((cert, index) => (
+                  {(selectedSkill.certifications ?? []).map((cert, index) => (
                     <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700">
                       {cert}
                     </Badge>
@@ -855,9 +873,9 @@ export default function TechnicalSkillsPage() {
               </div>
 
               <div>
-                <Label>Tools Required ({selectedSkill.toolsRequired.length})</Label>
+                <Label>Tools Required ({selectedSkill.toolsRequired?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.toolsRequired.map((tool, index) => (
+                  {(selectedSkill.toolsRequired ?? []).map((tool, index) => (
                     <Badge key={index} variant="secondary" className="text-xs">
                       {tool}
                     </Badge>
@@ -866,9 +884,9 @@ export default function TechnicalSkillsPage() {
               </div>
 
               <div>
-                <Label>Competency Areas ({selectedSkill.competencyAreas.length})</Label>
+                <Label>Competency Areas ({selectedSkill.competencyAreas?.length ?? 0})</Label>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedSkill.competencyAreas.map((area, index) => (
+                  {(selectedSkill.competencyAreas ?? []).map((area, index) => (
                     <Badge key={index} variant="outline" className="text-xs bg-green-50 text-green-700">
                       {area}
                     </Badge>

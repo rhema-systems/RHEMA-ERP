@@ -30,6 +30,7 @@ export function PerformanceReviewDetailDialog({
   const [supplierComments, setSupplierComments] = useState('');
 
   if (!review) return null;
+  const reviewYear = review.reviewYear ?? new Date(review.reviewDate).getFullYear();
 
   const handleSubmit = async () => {
     try {
@@ -143,8 +144,8 @@ export function PerformanceReviewDetailDialog({
             {getStatusBadge(review.status)}
           </div>
           <DialogDescription>
-            Review #{review.reviewNumber} • {review.reviewPeriod} {review.reviewYear}
-            {review.reviewMonth && ` - ${new Date(review.reviewYear, review.reviewMonth - 1).toLocaleString('default', { month: 'long' })}`}
+            Review #{review.reviewNumber} • {review.reviewPeriod} {reviewYear}
+            {review.reviewMonth && ` - ${new Date(reviewYear, review.reviewMonth - 1).toLocaleString('default', { month: 'long' })}`}
             {review.reviewQuarter && ` - Q${review.reviewQuarter}`}
           </DialogDescription>
         </DialogHeader>
@@ -193,10 +194,10 @@ export function PerformanceReviewDetailDialog({
             </div>
           )}
 
-          {review.weaknesses && (
+          {(review.weaknesses || review.areasForImprovement) && (
             <div>
               <Label className="font-semibold">Areas for Improvement</Label>
-              <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{review.weaknesses}</p>
+              <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{review.weaknesses || review.areasForImprovement}</p>
             </div>
           )}
 
@@ -224,9 +225,9 @@ export function PerformanceReviewDetailDialog({
                 <strong>Reviewed By:</strong> {review.reviewedByName}
               </div>
             )}
-            {review.acknowledgedAt && (
+            {(review.acknowledgedAt || review.acknowledgedDate) && (
               <div>
-                <strong>Acknowledged:</strong> {format(new Date(review.acknowledgedAt), 'MMM dd, yyyy')}
+                <strong>Acknowledged:</strong> {format(new Date(review.acknowledgedAt || review.acknowledgedDate || ''), 'MMM dd, yyyy')}
               </div>
             )}
             {review.finalizedAt && (
@@ -279,4 +280,3 @@ export function PerformanceReviewDetailDialog({
     </Dialog>
   );
 }
-

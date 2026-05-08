@@ -26,7 +26,6 @@ export default function MyBidsPage() {
 
   useEffect(() => {
     loadBids();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, statusFilter, searchTerm]);
 
   const loadBids = async () => {
@@ -259,7 +258,7 @@ export default function MyBidsPage() {
                       <TableCell>{formatDate(bid.submittedDate)}</TableCell>
                       <TableCell>
                         <span className="font-bold text-green-600">
-                          {bid.currency} {bid.totalBidAmount.toLocaleString()}
+                          {bid.currency} {(bid.totalBidAmount ?? 0).toLocaleString()}
                         </span>
                       </TableCell>
                       <TableCell>{getStatusBadge(bid.status)}</TableCell>
@@ -311,4 +310,3 @@ export default function MyBidsPage() {
     </div>
   );
 }
-

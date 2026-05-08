@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BookOpen, Paperclip, Ticket } from 'lucide-react';
 
@@ -12,19 +12,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import {
+  buildScopedHelpdeskDetailPath,
+  buildScopedHelpdeskTicketsPath,
+  EXTERNAL_TICKET_SOURCES,
+  getHelpdeskScopeConfig,
+} from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService, type EhcAdminCategory, type EhcRelatedEntityLookupItem, type EhcKbArticleDetail, type EhcKbArticleListItem } from '@/services/ehcInternalTicketService';
 import type { CreateEhcTicketRequest, EhcTicketPriority, EhcTicketSource, EhcTicketType } from '@/services/ehcTicketService';
 import { fileUploadService } from '@/services/fileUploadService';
-
-const channelOptions: Array<{ label: string; value: EhcTicketSource }> = [
-  { label: 'Internal', value: 'Internal' },
-  { label: 'Website', value: 'Web' },
-  { label: 'Mobile App', value: 'Mobile' },
-  { label: 'Email', value: 'Email' },
-  { label: 'Phone Call', value: 'PhoneCall' },
-  { label: 'SMS', value: 'Sms' },
-  { label: 'WhatsApp', value: 'WhatsApp' },
-];
 
 const relatedEntityTypeOptions = [
   { label: 'None', value: '' },
@@ -79,8 +75,26 @@ const buildTree = (flat: EhcAdminCategory[]): CategoryNode[] => {
 
 export default function NewInternalHelpdeskTicketPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const scopeParam = searchParams?.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
+  const typeLocked = scopeConfig.allowedTicketTypes.length === 1;
+  const channelOptions = useMemo<Array<{ label: string; value: EhcTicketSource }>>(
+    () =>
+      scopeConfig.internalOnly
+        ? [{ label: 'Internal', value: 'Internal' }]
+        : [
+            { label: 'Website', value: 'Web' },
+            { label: 'Mobile App', value: 'Mobile' },
+            { label: 'Email', value: 'Email' },
+            { label: 'Phone Call', value: 'PhoneCall' },
+            { label: 'SMS', value: 'Sms' },
+            { label: 'WhatsApp', value: 'WhatsApp' },
+          ],
+    [scopeConfig.internalOnly],
+  );
 
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentInternalOnly, setAttachmentInternalOnly] = useState(true);
@@ -93,9 +107,9 @@ export default function NewInternalHelpdeskTicketPage() {
   const [kbArticleId, setKbArticleId] = useState<string | null>(null);
 
   const [form, setForm] = useState<CreateEhcTicketRequest>({
-    ticketType: 'Helpdesk',
+    ticketType: scopeConfig.defaultTicketType,
     priority: 'Medium',
-    source: 'Internal',
+    source: scopeConfig.internalOnly ? 'Internal' : EXTERNAL_TICKET_SOURCES[0],
     subject: '',
     description: '',
     categoryId: undefined,
@@ -158,6 +172,22 @@ export default function NewInternalHelpdeskTicketPage() {
         .map((o) => ({ ...o, label: `${'— '.repeat(o.depth)}${o.label}` })),
     [allCategoryOptions, form.ticketType]
   );
+
+  useEffect(() => {
+    setForm((f) => ({
+      ...f,
+      ticketType: scopeConfig.defaultTicketType,
+      source:
+        scopeConfig.internalOnly
+          ? 'Internal'
+          : (() => {
+              const currentSource = (f.source as EhcTicketSource | undefined) ?? 'Web';
+              return EXTERNAL_TICKET_SOURCES.includes(currentSource) ? currentSource : 'Web';
+            })(),
+      categoryId: undefined,
+      subcategoryId: undefined,
+    }));
+  }, [scopeConfig.defaultTicketType, scopeConfig.internalOnly, scopeConfig.scope]);
 
   useEffect(() => {
     if (!myDepartment?.id) return;
@@ -224,7 +254,7 @@ export default function NewInternalHelpdeskTicketPage() {
     onSuccess: async (ticket) => {
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'tickets'] });
       toast({ title: 'Created', description: `Ticket ${ticket.ticketNumber} created.`, variant: 'success' });
-      router.push(`/helpdesk/tickets/${ticket.id}`);
+      router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, ticket.id));
     },
     onError: (err) => {
       toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create ticket', variant: 'destructive' });
@@ -253,15 +283,15 @@ export default function NewInternalHelpdeskTicketPage() {
     <div className="max-w-7xl mx-auto space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Button variant="outline" onClick={() => router.push('/helpdesk/tickets')}>
+          <Button variant="outline" onClick={() => router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
           <h1 className="text-3xl font-bold flex items-center gap-2 mt-4">
             <Ticket className="h-7 w-7" />
-            Create Helpdesk Ticket
+            {scopeConfig.newTitle}
           </h1>
-          <p className="text-slate-600 mt-1">Log an enquiry/complaint/helpdesk request for tracking and SLA monitoring.</p>
+          <p className="text-slate-600 mt-1">{scopeConfig.newDescription}</p>
         </div>
       </div>
 
@@ -287,22 +317,30 @@ export default function NewInternalHelpdeskTicketPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label>Type</Label>
-                  <select
-                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={form.ticketType}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        ticketType: e.target.value as any,
-                        categoryId: undefined,
-                        subcategoryId: undefined,
-                      }))
-                    }
-                  >
-                    <option value="Enquiry">Enquiry</option>
-                    <option value="Complaint">Complaint</option>
-                    <option value="Helpdesk">Helpdesk</option>
-                  </select>
+                  {typeLocked ? (
+                    <div className="flex h-10 items-center rounded-md border border-input bg-slate-50 px-3 text-sm text-slate-700">
+                      {scopeConfig.ticketTypeLabel}
+                    </div>
+                  ) : (
+                    <select
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      value={form.ticketType}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          ticketType: e.target.value as any,
+                          categoryId: undefined,
+                          subcategoryId: undefined,
+                        }))
+                      }
+                    >
+                      {scopeConfig.allowedTicketTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -331,17 +369,23 @@ export default function NewInternalHelpdeskTicketPage() {
 
                 <div className="space-y-2">
                   <Label>Channel</Label>
-                  <select
-                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={form.source || 'Internal'}
-                    onChange={(e) => setForm((f) => ({ ...f, source: e.target.value as any }))}
-                  >
-                    {channelOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
+                  {scopeConfig.internalOnly ? (
+                    <div className="flex h-10 items-center rounded-md border border-input bg-slate-50 px-3 text-sm text-slate-700">
+                      Internal
+                    </div>
+                  ) : (
+                    <select
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      value={form.source || 'Web'}
+                      onChange={(e) => setForm((f) => ({ ...f, source: e.target.value as any }))}
+                    >
+                      {channelOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -473,9 +517,9 @@ export default function NewInternalHelpdeskTicketPage() {
 
               <div className="flex items-center gap-2 pt-1">
                 <Button onClick={() => create.mutate()} disabled={!canSubmit || create.isPending} className="flex-1">
-                  {create.isPending ? 'Creating...' : 'Create ticket'}
+                  {create.isPending ? 'Creating...' : scopeConfig.createButtonLabel}
                 </Button>
-                <Button variant="outline" onClick={() => router.push('/helpdesk/tickets')}>
+                <Button variant="outline" onClick={() => router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))}>
                   Cancel
                 </Button>
               </div>
