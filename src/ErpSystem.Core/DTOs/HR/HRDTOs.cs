@@ -34,7 +34,7 @@ public class EmployeeDto
     public string? LocationLevelName { get; set; }
     public string? LocationName { get; set; }
     public StaffStatus StaffStatus { get; set; }
-    public ContractType ContractType { get; set; }
+    public EmploymentType EmploymentType { get; set; }
     public bool IsActive { get; set; }
     public bool IsFullTime { get; set; }
     public bool IsExpatriate { get; set; }
@@ -95,6 +95,7 @@ public class EmployeeDetailDto : EmployeeDto
     public bool IsOnProbation { get; set; }
 
     // Related collections
+    public List<EmployeeContactDto> Contacts { get; set; } = new();
     public List<EmployeeEmergencyContactDto> EmergencyContacts { get; set; } = new();
     public List<EmployeeDependentDto> Dependents { get; set; } = new();
     public List<EmployeeQualificationDto> Qualifications { get; set; } = new();
@@ -115,6 +116,7 @@ public class EmployeeFullProfileDto : EmployeeDetailDto
     public List<EmployeeRefereeListDto> Referees { get; set; } = new();
     public List<EmployeeGuarantorListDto> Guarantors { get; set; } = new();
     public List<EmployeeDependentBenefitDto> DependentBenefits { get; set; } = new();
+    public List<EmployeeBankDetailDto> BankDetails { get; set; } = new();
 }
 
 /// <summary>
@@ -166,7 +168,7 @@ public class CreateEmployeeDto
     public string? Extension { get; set; }
 
     // Employment Details
-    public ContractType ContractType { get; set; } = ContractType.Permanent;
+    public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
     public int ProbationPeriodDays { get; set; } = 90;
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
@@ -237,7 +239,7 @@ public class UpdateEmployeeDto
     public string? Extension { get; set; }
 
     // Employment Details
-    public ContractType? ContractType { get; set; }
+    public EmploymentType? EmploymentType { get; set; }
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
@@ -289,7 +291,7 @@ public class EmployeeSearchDto
     public Guid? PositionId { get; set; }
     public Guid? UnitId { get; set; }
     public StaffStatus? StaffStatus { get; set; }
-    public ContractType? ContractType { get; set; }
+    public EmploymentType? EmploymentType { get; set; }
     public bool? IsActive { get; set; }
     public bool? IsFullTime { get; set; }
     public bool? MaintenanceTechniciansOnly { get; set; }
@@ -309,6 +311,83 @@ public class TerminateEmployeeDto
 #endregion
 
 #region Employee Related DTOs
+
+/// <summary>
+/// A residential or postal address record for an employee.
+/// </summary>
+public class EmployeeContactDto
+{
+    public Guid Id { get; set; }
+    public Guid EmployeeId { get; set; }
+    public EmployeeContactType ContactType { get; set; }
+    public string? AddressLine1 { get; set; }
+    public string? AddressLine2 { get; set; }
+    public string? City { get; set; }
+    public string? Region { get; set; }
+    public string? DigitalAddress { get; set; }
+    public Guid? CountryId { get; set; }
+    public bool IsPrimary { get; set; }
+}
+
+/// <summary>
+/// DTO for creating an employee address/contact record.
+/// </summary>
+public class CreateEmployeeContactDto
+{
+    [Required]
+    public Guid EmployeeId { get; set; }
+
+    public EmployeeContactType ContactType { get; set; }
+
+    [MaxLength(200)]
+    public string? AddressLine1 { get; set; }
+
+    [MaxLength(200)]
+    public string? AddressLine2 { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    [MaxLength(30)]
+    public string? DigitalAddress { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    public bool IsPrimary { get; set; }
+}
+
+/// <summary>
+/// DTO for updating an employee address/contact record (patch-style).
+/// </summary>
+public class UpdateEmployeeContactDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    public EmployeeContactType? ContactType { get; set; }
+
+    [MaxLength(200)]
+    public string? AddressLine1 { get; set; }
+
+    [MaxLength(200)]
+    public string? AddressLine2 { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    [MaxLength(30)]
+    public string? DigitalAddress { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    public bool? IsPrimary { get; set; }
+}
 
 /// <summary>
 /// Employee emergency contact information
@@ -747,7 +826,7 @@ public class EmployeeContractDetailDto
     public Guid Id { get; set; }
     public Guid EmployeeId { get; set; }
     public string ContractNumber { get; set; } = string.Empty;
-    public ContractType ContractType { get; set; }
+    public EmploymentType EmploymentType { get; set; }
     public DateOnly StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public decimal Salary { get; set; }
@@ -783,7 +862,7 @@ public class CreateEmployeeContractDetailDto
     [MaxLength(50)]
     public string ContractNumber { get; set; } = string.Empty;
 
-    public ContractType ContractType { get; set; } = ContractType.Permanent;
+    public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
 
     public DateOnly StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
@@ -830,7 +909,7 @@ public class UpdateEmployeeContractDetailDto
     [Required]
     public Guid Id { get; set; }
 
-    public ContractType? ContractType { get; set; }
+    public EmploymentType? EmploymentType { get; set; }
     public DateOnly? StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public decimal? Salary { get; set; }
@@ -1533,6 +1612,228 @@ public class UpdateEmployeeGuarantorDto
     public Guid? VerifiedByEmployeeId { get; set; }
     public string? Notes { get; set; }
     public DateTime? LastContactDate { get; set; }
+    public bool? IsActive { get; set; }
+}
+
+// ─── Bank + Branch Reference DTOs ────────────────────────────────────────────
+
+public class EmployeeBankDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string? SwiftCode { get; set; }
+    public Guid? CountryId { get; set; }
+    public string? CountryName { get; set; }
+    public bool IsActive { get; set; }
+    public int BranchCount { get; set; }
+}
+
+public class CreateEmployeeBankDto
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(20)]
+    public string Code { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string? SwiftCode { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    public bool IsActive { get; set; } = true;
+}
+
+public class UpdateEmployeeBankDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    [MaxLength(200)]
+    public string? Name { get; set; }
+
+    [MaxLength(20)]
+    public string? Code { get; set; }
+
+    [MaxLength(20)]
+    public string? SwiftCode { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    public bool? IsActive { get; set; }
+}
+
+public class EmployeeBankBranchDto
+{
+    public Guid Id { get; set; }
+    public Guid BankId { get; set; }
+    public string BankName { get; set; } = string.Empty;
+    public string BankCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Code { get; set; }
+    public string? Address { get; set; }
+    public string? City { get; set; }
+    public Guid? CountryId { get; set; }
+    public string? CountryName { get; set; }
+    public string? PhoneNumber { get; set; }
+    public string? Email { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class CreateEmployeeBankBranchDto
+{
+    [Required]
+    public Guid BankId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string? Code { get; set; }
+
+    [MaxLength(500)]
+    public string? Address { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    [MaxLength(50)]
+    public string? PhoneNumber { get; set; }
+
+    [MaxLength(200)]
+    [EmailAddress]
+    public string? Email { get; set; }
+
+    public bool IsActive { get; set; } = true;
+}
+
+public class UpdateEmployeeBankBranchDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    [MaxLength(200)]
+    public string? Name { get; set; }
+
+    [MaxLength(20)]
+    public string? Code { get; set; }
+
+    [MaxLength(500)]
+    public string? Address { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    [MaxLength(50)]
+    public string? PhoneNumber { get; set; }
+
+    [MaxLength(200)]
+    [EmailAddress]
+    public string? Email { get; set; }
+
+    public bool? IsActive { get; set; }
+}
+
+// ─── Bank Details ────────────────────────────────────────────────────────────
+
+public class EmployeeBankDetailDto
+{
+    public Guid Id { get; set; }
+    public Guid EmployeeId { get; set; }
+    // Structured references (populated when Bank/Branch entities are linked)
+    public Guid? BankId { get; set; }
+    public string? BankCode { get; set; }
+    public Guid? BranchId { get; set; }
+    public string? BranchCode { get; set; }
+    // Free-text display values (from entity nav props when structured, or fallback strings otherwise)
+    public string BankName { get; set; } = string.Empty;
+    public string BranchName { get; set; } = string.Empty;
+    public string AccountNumber { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string? MobileMoneyNumber { get; set; }
+    public EmployeeBankAccountType AccountType { get; set; }
+    public decimal AllocationPercentage { get; set; }
+    public bool IsPrimary { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsVerified { get; set; }
+    public DateTime? VerifiedDate { get; set; }
+    public Guid? VerifiedById { get; set; }
+}
+
+public class CreateEmployeeBankDetailDto
+{
+    [Required]
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>Optional link to a Bank catalogue entry. When provided, BankName is derived from the entity.</summary>
+    public Guid? BankId { get; set; }
+
+    /// <summary>Optional link to a BankBranch catalogue entry. When provided, BranchName is derived from the entity.</summary>
+    public Guid? BranchId { get; set; }
+
+    [MaxLength(200)]
+    public string BankName { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string BranchName { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(50)]
+    public string AccountNumber { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string AccountName { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string? MobileMoneyNumber { get; set; }
+
+    public EmployeeBankAccountType AccountType { get; set; }
+
+    [Range(0.01, 100)]
+    public decimal AllocationPercentage { get; set; } = 100;
+
+    public bool IsPrimary { get; set; }
+}
+
+public class UpdateEmployeeBankDetailDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    public Guid? BankId { get; set; }
+
+    public Guid? BranchId { get; set; }
+
+    [MaxLength(200)]
+    public string? BankName { get; set; }
+
+    [MaxLength(100)]
+    public string? BranchName { get; set; }
+
+    [MaxLength(50)]
+    public string? AccountNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? AccountName { get; set; }
+
+    [MaxLength(50)]
+    public string? MobileMoneyNumber { get; set; }
+
+    public EmployeeBankAccountType? AccountType { get; set; }
+
+    [Range(0.01, 100)]
+    public decimal? AllocationPercentage { get; set; }
+
+    public bool? IsPrimary { get; set; }
     public bool? IsActive { get; set; }
 }
 

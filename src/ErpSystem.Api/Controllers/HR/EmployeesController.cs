@@ -806,6 +806,114 @@ public class EmployeesController : ControllerBase
         }
     }
 
+    // Address contacts
+    [HttpGet("{employeeId:guid}/contacts")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeContactDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<EmployeeContactDto>>> GetContacts(Guid employeeId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+
+        try
+        {
+            return Ok(await _service.GetContactsAsync(employeeId, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPost("{employeeId:guid}/contacts")]
+    [ProducesResponseType(typeof(EmployeeContactDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeContactDto>> AddContact(Guid employeeId, [FromBody] CreateEmployeeContactDto dto, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        dto.EmployeeId = employeeId;
+
+        try
+        {
+            var created = await _service.AddContactAsync(dto, cancellationToken);
+            return CreatedAtAction(nameof(GetContacts), new { employeeId }, created);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPut("{employeeId:guid}/contacts/{contactId:guid}")]
+    [ProducesResponseType(typeof(EmployeeContactDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeContactDto>> UpdateContact(Guid employeeId, Guid contactId, [FromBody] UpdateEmployeeContactDto dto, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (contactId == Guid.Empty) return BadRequest("Invalid contact id.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        dto.Id = contactId;
+
+        try
+        {
+            var existing = await _service.GetContactByIdAsync(contactId, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.UpdateContactAsync(dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpDelete("{employeeId:guid}/contacts/{contactId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveContact(Guid employeeId, Guid contactId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (contactId == Guid.Empty) return BadRequest("Invalid contact id.");
+
+        try
+        {
+            var contact = await _service.GetContactByIdAsync(contactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
+            var ok = await _service.RemoveContactAsync(contactId, cancellationToken);
+            return ok ? NoContent() : NotFound();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPost("{employeeId:guid}/contacts/{contactId:guid}/set-primary")]
+    [ProducesResponseType(typeof(EmployeeContactDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeContactDto>> SetPrimaryContact(Guid employeeId, Guid contactId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (contactId == Guid.Empty) return BadRequest("Invalid contact id.");
+
+        try
+        {
+            var contact = await _service.GetContactByIdAsync(contactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.SetPrimaryContactAsync(contactId, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     /// <summary>
     /// Retrieves all dependents for a specific employee.
     /// </summary>
@@ -2991,6 +3099,167 @@ public class EmployeesController : ControllerBase
             if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
 
             return Ok(await _service.DeactivateGuarantorAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpGet("{employeeId:guid}/bank-details")]
+    public async Task<ActionResult<IEnumerable<EmployeeBankDetailDto>>> GetBankDetails(Guid employeeId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        return Ok(await _service.GetBankDetailsAsync(employeeId, cancellationToken));
+    }
+
+    [HttpGet("{employeeId:guid}/bank-details/{id:guid}")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> GetBankDetailById(Guid employeeId, Guid id, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        var result = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+        if (result == null || result.EmployeeId != employeeId) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpPost("{employeeId:guid}/bank-details")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> AddBankDetail(Guid employeeId, [FromBody] CreateEmployeeBankDetailDto dto, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        dto.EmployeeId = employeeId;
+        try
+        {
+            return Ok(await _service.AddBankDetailAsync(dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPut("{employeeId:guid}/bank-details/{id:guid}")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> UpdateBankDetail(Guid employeeId, Guid id, [FromBody] UpdateEmployeeBankDetailDto dto, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        dto.Id = id;
+        try
+        {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.UpdateBankDetailAsync(dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpDelete("{employeeId:guid}/bank-details/{id:guid}")]
+    public async Task<ActionResult> RemoveBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        try
+        {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            var removed = await _service.RemoveBankDetailAsync(id, cancellationToken);
+            return removed ? NoContent() : NotFound();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPost("{employeeId:guid}/bank-details/{id:guid}/set-primary")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> SetPrimaryBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        try
+        {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.SetPrimaryBankDetailAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPost("{employeeId:guid}/bank-details/{id:guid}/verify")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> VerifyBankDetail(Guid employeeId, Guid id, [FromQuery] Guid verifiedById, [FromQuery] DateTime verifiedDate, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        if (verifiedById == Guid.Empty) return BadRequest("verifiedById is required.");
+        try
+        {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.VerifyBankDetailAsync(id, verifiedById, verifiedDate, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPost("{employeeId:guid}/bank-details/{id:guid}/unverify")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> UnverifyBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        try
+        {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.UnverifyBankDetailAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPost("{employeeId:guid}/bank-details/{id:guid}/activate")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> ActivateBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        try
+        {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.ActivateBankDetailAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPost("{employeeId:guid}/bank-details/{id:guid}/deactivate")]
+    public async Task<ActionResult<EmployeeBankDetailDto>> DeactivateBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
+        try
+        {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
+            return Ok(await _service.DeactivateBankDetailAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {

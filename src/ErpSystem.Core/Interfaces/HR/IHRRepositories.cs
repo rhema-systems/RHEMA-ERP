@@ -30,7 +30,7 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
     Task<IEnumerable<Employee>> GetByPositionAsync(Guid positionId);
     Task<IEnumerable<Employee>> GetByManagerAsync(Guid managerId);
     Task<IEnumerable<Employee>> GetByStatusAsync(StaffStatus status);
-    Task<IEnumerable<Employee>> GetByContractTypeAsync(ContractType contractType);
+    Task<IEnumerable<Employee>> GetByEmploymentTypeAsync(EmploymentType employmentType);
     Task<IEnumerable<Employee>> SearchEmployeesAsync(string searchTerm);
     Task<Employee?> GetEmployeeWithPositionHistoryAsync(Guid employeeId);
     Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync();
@@ -53,6 +53,16 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
     Task<bool> TinNumberExistsAsync(string tinNumber);
     Task<bool> TinNumberExistsAsync(string tinNumber, Guid excludeEmployeeId);
     Task<string> GenerateEmployeeNumberAsync();    
+}
+
+/// <summary>
+/// Repository interface for employee address/contact record operations
+/// </summary>
+public interface IEmployeeContactRepository : IGenericRepository<EmployeeContact>
+{
+    Task<IEnumerable<EmployeeContact>> GetByEmployeeAsync(Guid employeeId);
+    Task<EmployeeContact?> GetPrimaryContactAsync(Guid employeeId);
+    Task<IEnumerable<EmployeeContact>> GetByTypeAsync(Guid employeeId, EmployeeContactType contactType);
 }
 
 /// <summary>
@@ -151,6 +161,38 @@ public interface IEmployeeShiftPreferenceRepository : IGenericRepository<Employe
     Task<IEnumerable<EmployeeShiftPreference>> GetOrderedPreferencesAsync(Guid employeeId);
 }
 
+/// <summary>
+/// Repository interface for employee bank detail operations
+/// </summary>
+public interface IEmployeeBankDetailRepository : IGenericRepository<EmployeeBankDetail>
+{
+    Task<IEnumerable<EmployeeBankDetail>> GetByEmployeeAsync(Guid employeeId);
+    Task<EmployeeBankDetail?> GetPrimaryBankDetailAsync(Guid employeeId);
+    Task<IEnumerable<EmployeeBankDetail>> GetActiveByEmployeeAsync(Guid employeeId);
+}
+
+/// <summary>
+/// Repository interface for bank (financial institution) operations
+/// </summary>
+public interface IEmployeeBankRepository : IGenericRepository<EmployeeBank>
+{
+    Task<IEnumerable<EmployeeBank>> GetActiveAsync(Guid tenantId);
+    Task<EmployeeBank?> GetByCodeAsync(Guid tenantId, string code);
+    Task<EmployeeBank?> GetWithBranchesAsync(Guid tenantId, Guid id);
+    Task<bool> CodeExistsAsync(Guid tenantId, string code, Guid? excludeId = null);
+}
+
+/// <summary>
+/// Repository interface for bank branch operations
+/// </summary>
+public interface IEmployeeBankBranchRepository : IGenericRepository<EmployeeBankBranch>
+{
+    Task<IEnumerable<EmployeeBankBranch>> GetByBankAsync(Guid tenantId, Guid bankId);
+    Task<IEnumerable<EmployeeBankBranch>> GetActiveByBankAsync(Guid tenantId, Guid bankId);
+    Task<EmployeeBankBranch?> GetByCodeAsync(Guid tenantId, Guid bankId, string code);
+    Task<bool> CodeExistsAsync(Guid tenantId, Guid bankId, string code, Guid? excludeId = null);
+}
+
 #endregion Employee Management Repositories
 
 #region Organizational Structure Repositories
@@ -188,6 +230,7 @@ public interface ISectionRepository : IGenericRepository<Section>
 public interface IEmployeePositionRepository : IGenericRepository<EmployeePosition>
 {
     Task<IEnumerable<EmployeePosition>> GetActivePositionsAsync();
+    Task<IEnumerable<EmployeePosition>> GetByOrganizationUnitAsync(Guid organizationUnitId);
     Task<IEnumerable<EmployeePosition>> GetByDepartmentAsync(Guid departmentId);
     Task<EmployeePosition?> GetByCodeAsync(string code);
     Task<EmployeePosition?> GetWithSkillRequirementsAsync(Guid id);

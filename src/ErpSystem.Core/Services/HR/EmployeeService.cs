@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities.HR;
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities;
-using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.Services.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Interfaces;
 
@@ -535,7 +535,7 @@ public class EmployeeService : IEmployeeService
         if (searchCriteria.SectionId.HasValue) q = q.Where(e => e.SectionId == searchCriteria.SectionId);
         if (searchCriteria.PositionId.HasValue) q = q.Where(e => e.PositionId == searchCriteria.PositionId);
         if (searchCriteria.StaffStatus.HasValue) q = q.Where(e => e.StaffStatus == searchCriteria.StaffStatus);
-        if (searchCriteria.ContractType.HasValue) q = q.Where(e => e.ContractType == searchCriteria.ContractType);
+        if (searchCriteria.EmploymentType.HasValue) q = q.Where(e => e.EmploymentType == searchCriteria.EmploymentType);
         if (searchCriteria.IsActive.HasValue) q = q.Where(e => e.IsActive == searchCriteria.IsActive);
         if (searchCriteria.IsFullTime.HasValue) q = q.Where(e => e.IsFullTime == searchCriteria.IsFullTime);
         if (searchCriteria.MaintenanceTechniciansOnly == true) q = q.Where(e => e.CanBeAssignedToMaintenance);
@@ -585,6 +585,102 @@ public class EmployeeService : IEmployeeService
     #endregion
 
     #region 3) Relationship Management (subresources)
+
+        public async Task<IEnumerable<EmployeeContactDto>> GetContactsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var items = await repo.FindAsync(e => e.EmployeeId == employeeId);
+        return items.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.ContactType.ToString()).Select(x => x.ToDto());
+    }
+
+    public async Task<EmployeeContactDto> AddContactAsync(CreateEmployeeContactDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        await EnsureEmployeeExistsAsync(dto.EmployeeId);
+
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = dto.ToEntity();
+
+        if (entity.IsPrimary)
+        {
+            var existing = await repo.FindAsync(x => x.EmployeeId == dto.EmployeeId && x.IsPrimary);
+            foreach (var c in existing)
+            {
+                c.IsPrimary = false;
+                await repo.UpdateAsync(c);
+            }
+        }
+
+        await repo.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeContactDto> UpdateContactAsync(UpdateEmployeeContactDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(dto.Id);
+        if (entity == null) throw new ArgumentException($"Contact '{dto.Id}' not found.");
+
+        dto.Apply(entity);
+
+        if (entity.IsPrimary)
+        {
+            var others = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.Id != entity.Id && x.IsPrimary);
+            foreach (var c in others)
+            {
+                c.IsPrimary = false;
+                await repo.UpdateAsync(c);
+            }
+        }
+
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> RemoveContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(contactId);
+        if (entity == null) return false;
+
+        await repo.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    public async Task<EmployeeContactDto> SetPrimaryContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(contactId);
+        if (entity == null) throw new ArgumentException($"Contact '{contactId}' not found.");
+
+        var existing = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.IsPrimary && x.Id != entity.Id);
+        foreach (var c in existing)
+        {
+            c.IsPrimary = false;
+            await repo.UpdateAsync(c);
+        }
+
+        entity.IsPrimary = true;
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeContactDto?> GetContactByIdAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(contactId);
+        return entity?.ToDto();
+    }
 
     public async Task<IEnumerable<EmployeeEmergencyContactDto>> GetEmergencyContactsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
@@ -1254,7 +1350,7 @@ public class EmployeeService : IEmployeeService
         {
             EmployeeId = dto.EmployeeId,
             ContractNumber = dto.ContractNumber.Trim(),
-            ContractType = dto.ContractType,
+            EmploymentType = dto.EmploymentType,
             StartDate = dto.StartDate,
             EndDate = dto.EndDate,
             Salary = dto.Salary,
@@ -1289,7 +1385,7 @@ public class EmployeeService : IEmployeeService
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Contract not found.");
 
-        if (dto.ContractType.HasValue) entity.ContractType = dto.ContractType.Value;
+        if (dto.EmploymentType.HasValue) entity.EmploymentType = dto.EmploymentType.Value;
         if (dto.StartDate.HasValue) entity.StartDate = dto.StartDate.Value;
         if (dto.EndDate.HasValue) entity.EndDate = dto.EndDate;
         if (dto.Salary.HasValue) entity.Salary = dto.Salary.Value;
@@ -1877,6 +1973,153 @@ public class EmployeeService : IEmployeeService
         return entity.ToDetailDto();
     }
 
+    // ── Bank Details ─────────────────────────────────────────────────────────
+
+    public async Task<IEnumerable<EmployeeBankDetailDto>> GetBankDetailsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var items = await repo.FindAsync(x => x.EmployeeId == employeeId);
+        return items.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.BankName).Select(x => x.ToDto());
+    }
+
+    public async Task<EmployeeBankDetailDto?> GetBankDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        return entity?.ToDto();
+    }
+
+    public async Task<EmployeeBankDetailDto> AddBankDetailAsync(CreateEmployeeBankDetailDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        await EnsureEmployeeExistsAsync(dto.EmployeeId);
+
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+
+        // Enforce single primary: if new record is primary, clear others
+        if (dto.IsPrimary)
+        {
+            var existing = await repo.FindAsync(x => x.EmployeeId == dto.EmployeeId && x.IsPrimary);
+            foreach (var e in existing)
+            {
+                e.IsPrimary = false;
+                await repo.UpdateAsync(e);
+            }
+        }
+
+        var entity = dto.ToEntity();
+        await repo.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeBankDetailDto> UpdateBankDetailAsync(UpdateEmployeeBankDetailDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(dto.Id);
+        if (entity == null) throw new ArgumentException("Bank detail not found.");
+
+        // Enforce single primary: if patching to primary, clear others first
+        if (dto.IsPrimary == true && !entity.IsPrimary)
+        {
+            var others = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.IsPrimary && x.Id != entity.Id);
+            foreach (var o in others)
+            {
+                o.IsPrimary = false;
+                await repo.UpdateAsync(o);
+            }
+        }
+
+        dto.Apply(entity);
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> RemoveBankDetailAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        if (entity == null) return false;
+        if (entity.IsPrimary) throw new InvalidOperationException("Cannot remove the primary bank account. Set another account as primary first.");
+        await repo.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<EmployeeBankDetailDto> SetPrimaryBankDetailAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        if (entity == null) throw new ArgumentException("Bank detail not found.");
+
+        var others = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.Id != entity.Id && x.IsPrimary);
+        foreach (var o in others)
+        {
+            o.IsPrimary = false;
+            await repo.UpdateAsync(o);
+        }
+        entity.IsPrimary = true;
+        entity.IsActive = true;
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeBankDetailDto> VerifyBankDetailAsync(Guid id, Guid verifiedByEmployeeId, DateTime verifiedDate, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        if (entity == null) throw new ArgumentException("Bank detail not found.");
+
+        await EnsureEmployeeExistsAsync(verifiedByEmployeeId);
+
+        entity.IsVerified  = true;
+        entity.VerifiedDate = verifiedDate;
+        entity.VerifiedById = verifiedByEmployeeId;
+
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeBankDetailDto> UnverifyBankDetailAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        if (entity == null) throw new ArgumentException("Bank detail not found.");
+        entity.IsVerified   = false;
+        entity.VerifiedDate = null;
+        entity.VerifiedById = null;
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeBankDetailDto> ActivateBankDetailAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        if (entity == null) throw new ArgumentException("Bank detail not found.");
+        entity.IsActive = true;
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeBankDetailDto> DeactivateBankDetailAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        if (entity == null) throw new ArgumentException("Bank detail not found.");
+        if (entity.IsPrimary) throw new InvalidOperationException("Primary bank account cannot be deactivated.");
+        entity.IsActive = false;
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
     #endregion
 
     #region 4) Manager & Hierarchy
@@ -2138,9 +2381,9 @@ public class EmployeeService : IEmployeeService
             query = query.Where(e => e.StaffStatus == searchCriteria.StaffStatus.Value);
         }
 
-        if (searchCriteria.ContractType.HasValue)
+        if (searchCriteria.EmploymentType.HasValue)
         {
-            query = query.Where(e => e.ContractType == searchCriteria.ContractType.Value);
+            query = query.Where(e => e.EmploymentType == searchCriteria.EmploymentType.Value);
         }
 
         if (searchCriteria.IsActive.HasValue)
@@ -2216,7 +2459,7 @@ public class EmployeeService : IEmployeeService
             BusinessNumber = createDto.BusinessNumber,
             MobileNumber = createDto.MobileNumber,
             Extension = createDto.Extension,
-            ContractType = createDto.ContractType,
+            EmploymentType = createDto.EmploymentType,
             ProbationPeriodDays = createDto.ProbationPeriodDays,
             ConfirmationDate = createDto.ConfirmationDate,
             RetirementDate = createDto.RetirementDate,
@@ -2344,9 +2587,9 @@ public class EmployeeService : IEmployeeService
         }
 
         // Update employment details
-        if (updateDto.ContractType.HasValue)
+        if (updateDto.EmploymentType.HasValue)
         {
-            employee.ContractType = updateDto.ContractType.Value;
+            employee.EmploymentType = updateDto.EmploymentType.Value;
         }
 
         if (updateDto.ProbationPeriodDays.HasValue)
@@ -2599,10 +2842,9 @@ public class EmployeeService : IEmployeeService
         return employees.Select(MapToDto);
     }
 
-    public async Task<IEnumerable<EmployeeDto>> GetByContractTypeAsync(ContractType contractType)
+    public async Task<IEnumerable<EmployeeDto>> GetByEmploymentTypeAsync(EmploymentType employmentType)
     {
-        var employees = await _employeeRepository.GetAllAsync();
-        return employees.Where(e => e.ContractType == contractType).Select(MapToDto);
+        return (await _employeeRepository.GetByEmploymentTypeAsync(employmentType)).Select(e => e.ToSummaryDto());
     }
 
     public async Task<IEnumerable<EmployeeDto>> GetByStationAsync(Guid stationId)
@@ -2754,7 +2996,7 @@ public class EmployeeService : IEmployeeService
             UnitName = employee.Unit?.Name ?? string.Empty,
             PositionTitle = employee.Position?.Title ?? string.Empty,
             StaffStatus = employee.StaffStatus,
-            ContractType = employee.ContractType,
+            EmploymentType = employee.EmploymentType,
             IsActive = employee.IsActive,
             IsFullTime = employee.IsFullTime,
             IsExpatriate = employee.IsExpatriate,
@@ -2786,7 +3028,7 @@ public class EmployeeService : IEmployeeService
             SectionName = basicDto.SectionName,
             PositionTitle = basicDto.PositionTitle,
             StaffStatus = basicDto.StaffStatus,
-            ContractType = basicDto.ContractType,
+            EmploymentType = basicDto.EmploymentType,
             IsActive = basicDto.IsActive,
             IsFullTime = basicDto.IsFullTime,
             DateEmployed = basicDto.DateEmployed,

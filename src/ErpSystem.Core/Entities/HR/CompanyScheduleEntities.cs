@@ -328,7 +328,7 @@ public class FiscalPeriod : TenantEntity
     public int PeriodNumber { get; set; }
     public string PeriodName { get; set; } = string.Empty;
 
-    public PeriodType Type { get; set; } // Quarter, Month
+    public HRSchedulePeriodType Type { get; set; } // Quarter, Month
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
 

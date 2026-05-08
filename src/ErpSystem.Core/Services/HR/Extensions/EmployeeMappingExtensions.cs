@@ -2,7 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 
-namespace ErpSystem.Application.HR.Extensions;
+namespace ErpSystem.Core.Services.HR.Extensions;
 
 /// <summary>
 /// Explicit mapping for the Employee aggregate and its sub-resources.
@@ -41,7 +41,7 @@ public static class EmployeeMappingExtensions
             LocationName = e.Location?.Name,
 
             StaffStatus = e.StaffStatus,
-            ContractType = e.ContractType,
+            EmploymentType = e.EmploymentType,
             IsActive = e.IsActive,
             IsFullTime = e.IsFullTime,
             IsExpatriate = e.IsExpatriate,
@@ -78,7 +78,7 @@ public static class EmployeeMappingExtensions
             LocationName = e.Location?.Name,
 
             StaffStatus = e.StaffStatus,
-            ContractType = e.ContractType,
+            EmploymentType = e.EmploymentType,
             IsActive = e.IsActive,
             IsFullTime = e.IsFullTime,
             IsExpatriate = e.IsExpatriate,
@@ -188,7 +188,7 @@ public static class EmployeeMappingExtensions
         to.LocationLevelName = from.LocationLevelName;
         to.LocationName = from.LocationName;
         to.StaffStatus = from.StaffStatus;
-        to.ContractType = from.ContractType;
+        to.EmploymentType = from.EmploymentType;
         to.IsActive = from.IsActive;
         to.IsFullTime = from.IsFullTime;
         to.IsExpatriate = from.IsExpatriate;
@@ -276,7 +276,7 @@ public static class EmployeeMappingExtensions
             MobileNumber = dto.MobileNumber,
             Extension = dto.Extension,
 
-            ContractType = dto.ContractType,
+            EmploymentType = dto.EmploymentType,
             ProbationPeriodDays = dto.ProbationPeriodDays,
             ConfirmationDate = dto.ConfirmationDate,
             RetirementDate = dto.RetirementDate,
@@ -342,7 +342,7 @@ public static class EmployeeMappingExtensions
         if (dto.MobileNumber != null) e.MobileNumber = dto.MobileNumber;
         if (dto.Extension != null) e.Extension = dto.Extension;
 
-        if (dto.ContractType.HasValue) e.ContractType = dto.ContractType.Value;
+        if (dto.EmploymentType.HasValue) e.EmploymentType = dto.EmploymentType.Value;
         if (dto.ProbationPeriodDays.HasValue) e.ProbationPeriodDays = dto.ProbationPeriodDays.Value;
         if (dto.ConfirmationDate.HasValue) e.ConfirmationDate = dto.ConfirmationDate;
         if (dto.RetirementDate.HasValue) e.RetirementDate = dto.RetirementDate;
@@ -453,6 +453,51 @@ public static class EmployeeMappingExtensions
         if (dto.IsPrimary.HasValue) e.IsPrimary = dto.IsPrimary.Value;
         if (dto.IsActive.HasValue) e.IsActive = dto.IsActive.Value;
         e.Notes = dto.Notes;
+    }
+
+    #endregion
+
+    #region Address Contacts
+
+    public static EmployeeContactDto ToDto(this EmployeeContact e)
+        => new()
+        {
+            Id = e.Id,
+            EmployeeId = e.EmployeeId,
+            ContactType = e.ContactType,
+            AddressLine1 = e.AddressLine1,
+            AddressLine2 = e.AddressLine2,
+            City = e.City,
+            Region = e.Region,
+            DigitalAddress = e.DigitalAddress,
+            CountryId = e.CountryId,
+            IsPrimary = e.IsPrimary
+        };
+
+    public static EmployeeContact ToEntity(this CreateEmployeeContactDto dto)
+        => new()
+        {
+            EmployeeId = dto.EmployeeId,
+            ContactType = dto.ContactType,
+            AddressLine1 = dto.AddressLine1,
+            AddressLine2 = dto.AddressLine2,
+            City = dto.City,
+            Region = dto.Region,
+            DigitalAddress = dto.DigitalAddress,
+            CountryId = dto.CountryId,
+            IsPrimary = dto.IsPrimary
+        };
+
+    public static void Apply(this UpdateEmployeeContactDto dto, EmployeeContact e)
+    {
+        if (dto.ContactType.HasValue) e.ContactType = dto.ContactType.Value;
+        e.AddressLine1 = dto.AddressLine1;
+        e.AddressLine2 = dto.AddressLine2;
+        e.City = dto.City;
+        e.Region = dto.Region;
+        e.DigitalAddress = dto.DigitalAddress;
+        if (dto.CountryId.HasValue) e.CountryId = dto.CountryId;
+        if (dto.IsPrimary.HasValue) e.IsPrimary = dto.IsPrimary.Value;
     }
 
     #endregion
@@ -694,7 +739,7 @@ public static class EmployeeMappingExtensions
             Id = c.Id,
             EmployeeId = c.EmployeeId,
             ContractNumber = c.ContractNumber,
-            ContractType = c.ContractType,
+            EmploymentType = c.EmploymentType,
             StartDate = c.StartDate,
             EndDate = c.EndDate,
             Salary = c.Salary,
@@ -1217,6 +1262,139 @@ public static class EmployeeMappingExtensions
     {
         if (value.Length <= 4) return new string('*', value.Length);
         return new string('*', value.Length - 4) + value[^4..];
+    }
+
+    #endregion
+
+    #region Bank Reference Entities
+
+    public static EmployeeBankDto ToDto(this EmployeeBank b, int branchCount = 0) => new()
+    {
+        Id          = b.Id,
+        Name        = b.Name,
+        Code        = b.Code,
+        SwiftCode   = b.SwiftCode,
+        CountryId   = b.CountryId,
+        CountryName = b.Country?.Name,
+        IsActive    = b.IsActive,
+        BranchCount = branchCount,
+    };
+
+    public static EmployeeBank ToEntity(this CreateEmployeeBankDto dto) => new()
+    {
+        Name      = dto.Name.Trim(),
+        Code      = dto.Code.Trim().ToUpperInvariant(),
+        SwiftCode = dto.SwiftCode?.Trim().ToUpperInvariant(),
+        CountryId = dto.CountryId,
+        IsActive  = dto.IsActive,
+    };
+
+    public static void Apply(this UpdateEmployeeBankDto dto, EmployeeBank b)
+    {
+        if (dto.Name != null)      b.Name      = dto.Name.Trim();
+        if (dto.Code != null)      b.Code      = dto.Code.Trim().ToUpperInvariant();
+        if (dto.SwiftCode != null) b.SwiftCode = dto.SwiftCode.Trim().ToUpperInvariant();
+        if (dto.CountryId.HasValue) b.CountryId = dto.CountryId;
+        if (dto.IsActive.HasValue)  b.IsActive  = dto.IsActive.Value;
+    }
+
+    public static EmployeeBankBranchDto ToDto(this EmployeeBankBranch br) => new()
+    {
+        Id          = br.Id,
+        BankId      = br.BankId,
+        BankName    = br.Bank?.Name ?? string.Empty,
+        BankCode    = br.Bank?.Code ?? string.Empty,
+        Name        = br.Name,
+        Code        = br.Code,
+        Address     = br.Address,
+        City        = br.City,
+        CountryId   = br.CountryId,
+        CountryName = br.Country?.Name,
+        PhoneNumber = br.PhoneNumber,
+        Email       = br.Email,
+        IsActive    = br.IsActive,
+    };
+
+    public static EmployeeBankBranch ToEntity(this CreateEmployeeBankBranchDto dto) => new()
+    {
+        BankId      = dto.BankId,
+        Name        = dto.Name.Trim(),
+        Code        = dto.Code?.Trim().ToUpperInvariant(),
+        Address     = dto.Address?.Trim(),
+        City        = dto.City?.Trim(),
+        CountryId   = dto.CountryId,
+        PhoneNumber = dto.PhoneNumber?.Trim(),
+        Email       = dto.Email?.Trim(),
+        IsActive    = dto.IsActive,
+    };
+
+    public static void Apply(this UpdateEmployeeBankBranchDto dto, EmployeeBankBranch br)
+    {
+        if (dto.Name != null)         br.Name        = dto.Name.Trim();
+        if (dto.Code != null)         br.Code        = dto.Code.Trim().ToUpperInvariant();
+        if (dto.Address != null)      br.Address     = dto.Address.Trim();
+        if (dto.City != null)         br.City        = dto.City.Trim();
+        if (dto.CountryId.HasValue)   br.CountryId   = dto.CountryId;
+        if (dto.PhoneNumber != null)  br.PhoneNumber = dto.PhoneNumber.Trim();
+        if (dto.Email != null)        br.Email       = dto.Email.Trim();
+        if (dto.IsActive.HasValue)    br.IsActive    = dto.IsActive.Value;
+    }
+
+    #endregion
+
+    #region Bank Details
+
+    public static EmployeeBankDetailDto ToDto(this EmployeeBankDetail e) => new()
+    {
+        Id                   = e.Id,
+        EmployeeId           = e.EmployeeId,
+        BankId               = e.BankId,
+        BankCode             = e.Bank?.Code,
+        BranchId             = e.BranchId,
+        BranchCode           = e.Branch?.Code,
+        BankName             = e.Bank?.Name ?? e.BankName,
+        BranchName           = e.Branch?.Name ?? e.BranchName,
+        AccountNumber        = Mask(e.AccountNumber),
+        AccountName          = e.AccountName,
+        MobileMoneyNumber    = e.MobileMoneyNumber,
+        AccountType          = e.AccountType,
+        AllocationPercentage = e.AllocationPercentage,
+        IsPrimary            = e.IsPrimary,
+        IsActive             = e.IsActive,
+        IsVerified           = e.IsVerified,
+        VerifiedDate         = e.VerifiedDate,
+        VerifiedById         = e.VerifiedById,
+    };
+
+    public static EmployeeBankDetail ToEntity(this CreateEmployeeBankDetailDto dto) => new()
+    {
+        EmployeeId           = dto.EmployeeId,
+        BankId               = dto.BankId,
+        BranchId             = dto.BranchId,
+        BankName             = dto.BankName,
+        BranchName           = dto.BranchName,
+        AccountNumber        = dto.AccountNumber,
+        AccountName          = dto.AccountName,
+        MobileMoneyNumber    = dto.MobileMoneyNumber,
+        AccountType          = dto.AccountType,
+        AllocationPercentage = dto.AllocationPercentage,
+        IsPrimary            = dto.IsPrimary,
+        IsActive             = true,
+    };
+
+    public static void Apply(this UpdateEmployeeBankDetailDto dto, EmployeeBankDetail e)
+    {
+        if (dto.BankId.HasValue)               e.BankId               = dto.BankId;
+        if (dto.BranchId.HasValue)             e.BranchId             = dto.BranchId;
+        if (dto.BankName != null)              e.BankName             = dto.BankName;
+        if (dto.BranchName != null)            e.BranchName           = dto.BranchName;
+        if (dto.AccountNumber != null)         e.AccountNumber        = dto.AccountNumber;
+        if (dto.AccountName != null)           e.AccountName          = dto.AccountName;
+        if (dto.MobileMoneyNumber != null)     e.MobileMoneyNumber    = dto.MobileMoneyNumber;
+        if (dto.AccountType.HasValue)          e.AccountType          = dto.AccountType.Value;
+        if (dto.AllocationPercentage.HasValue) e.AllocationPercentage = dto.AllocationPercentage.Value;
+        if (dto.IsPrimary.HasValue)            e.IsPrimary            = dto.IsPrimary.Value;
+        if (dto.IsActive.HasValue)             e.IsActive             = dto.IsActive.Value;
     }
 
     #endregion

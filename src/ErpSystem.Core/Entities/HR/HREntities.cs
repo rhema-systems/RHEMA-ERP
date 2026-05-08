@@ -85,7 +85,7 @@ public class Employee : TenantEntity
     public string? Extension { get; set; }
 
     // Employment Details
-    public ContractType ContractType { get; set; } = ContractType.Permanent;
+    public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
 
     public int ProbationPeriodDays { get; set; } = 90;
 
@@ -280,8 +280,12 @@ public class Employee : TenantEntity
     public virtual Location? Location { get; set; }
     public virtual OrganizationLevel? OrganizationLevel { get; set; }
     public virtual OrganizationUnit? OrganizationUnit { get; set; }
+    
+    [NotMapped]
+    public virtual EmployeeContractDetail? CurrentTerms { get; set; }
 
     // Related Collections
+    public virtual ICollection<EmployeeContact> Contacts { get; set; } = new List<EmployeeContact>();
     public virtual ICollection<EmployeeEmergencyContact> EmergencyContacts { get; set; } = new List<EmployeeEmergencyContact>();
     public virtual ICollection<EmployeeDependent> Dependents { get; set; } = new List<EmployeeDependent>();
     public virtual ICollection<EmployeeQualification> Qualifications { get; set; } = new List<EmployeeQualification>();
@@ -298,6 +302,7 @@ public class Employee : TenantEntity
     public virtual ICollection<EmployeeSalaryAssignment> SalaryAssignments { get; set; } = new List<EmployeeSalaryAssignment>();
     public virtual ICollection<EmployeeGuarantor> Guarantors { get; set; } = new List<EmployeeGuarantor>();
     public virtual ICollection<EmployeeReferee> Referees { get; set; } = new List<EmployeeReferee>();
+    public virtual ICollection<EmployeeBankDetail> BankDetails { get; set; } = new List<EmployeeBankDetail>();
     
     // Leave Management
     public virtual ICollection<LeaveRequest> LeaveRequests { get; set; } = new List<LeaveRequest>();
@@ -583,13 +588,18 @@ public class BenefitPolicyRelation : TenantEntity
 public class EmployeePositionBenefit : TenantEntity
 {
     public Guid PositionId { get; set; }
-    
+
     public Guid PolicyId { get; set; }
 
-    [ForeignKey("PositionId")]
+    public DateOnly? ExpiryDate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? PositionAmount { get; set; }
+
+    [ForeignKey(nameof(PositionId))]
     public virtual EmployeePosition Position { get; set; } = null!;
 
-    [ForeignKey("PolicyId")]
+    [ForeignKey(nameof(PolicyId))]
     public virtual BenefitPolicy BenefitPolicy { get; set; } = null!;
 }
 
@@ -697,6 +707,40 @@ public class EmployeeContractType : TenantEntity
 #endregion
 
 #region Employee Details and Relations
+
+/// <summary>
+/// A residential or postal address record for an employee.
+/// An employee may have multiple contact records (e.g. home + mailing).
+/// </summary>
+public class EmployeeContact : TenantEntity
+{
+    public Guid EmployeeId { get; set; }
+ 
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
+ 
+    public EmployeeContactType ContactType { get; set; }
+ 
+    [MaxLength(200)]
+    public string? AddressLine1 { get; set; }
+ 
+    [MaxLength(200)]
+    public string? AddressLine2 { get; set; }
+ 
+    [MaxLength(100)]
+    public string? City { get; set; }
+ 
+    [MaxLength(100)]
+    public string? Region { get; set; }
+ 
+    [MaxLength(30)]
+    public string? DigitalAddress { get; set; }
+ 
+    public Guid? CountryId { get; set; }
+    public virtual Country? Country { get; set; }
+ 
+    public bool IsPrimary { get; set; }
+}
 
 /// <summary>
 /// Represents emergency contacts for employees
@@ -1000,7 +1044,7 @@ public class EmployeeContractDetail : TenantEntity
     [MaxLength(50)]
     public string ContractNumber { get; set; } = string.Empty;
 
-    public ContractType ContractType { get; set; } = ContractType.Permanent;
+    public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
 
     public DateOnly StartDate { get; set; }
 
@@ -1008,6 +1052,9 @@ public class EmployeeContractDetail : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal Salary { get; set; } = 0;
+
+    [MaxLength(10)]
+    public string CurrencyCode { get; set; } = "GHS";
 
     public PayFrequency PayFrequency { get; set; } = PayFrequency.Monthly;
 
@@ -1032,7 +1079,16 @@ public class EmployeeContractDetail : TenantEntity
     /// </summary>
     public bool IsTaxExempt { get; set; } = false;
 
+    public DateOnly EffectiveDate { get; set; }
+
+    /// <summary>
+    /// Null for permanent employment; populated for fixed-term/contract.
+    /// </summary>
+    public DateOnly? ContractEndDate { get; set; }
+
     public int WorkingHoursPerWeek { get; set; } = 40;
+
+    public int AnnualLeaveEntitlementDays { get; set; } = 20;
 
     public int VacationDaysPerYear { get; set; } = 15;
 
@@ -1042,8 +1098,18 @@ public class EmployeeContractDetail : TenantEntity
 
     public DateOnly? ConfirmationDate { get; set; }
 
+    public WorkSchedule WorkSchedule { get; set; } = WorkSchedule.FullTime;
+
     [MaxLength(1000)]
     public string? Terms { get; set; }
+
+    [MaxLength(2000)]
+    public string? SpecialConditions { get; set; }
+
+    /// <summary>
+    /// Whether this is the employee's currently active terms record.
+    /// </summary>
+    public bool IsCurrent { get; set; } = true;
 
     public bool IsActive { get; set; } = true;
 
@@ -1056,6 +1122,9 @@ public class EmployeeContractDetail : TenantEntity
 
     [MaxLength(1000)]
     public string? TerminationReason { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
 
     // Navigation Properties
     public virtual Employee Employee { get; set; } = null!;
@@ -1338,6 +1407,136 @@ public class EmployeeGuarantor : TenantEntity
         string.IsNullOrWhiteSpace(MiddleName)
             ? $"{FirstName} {LastName}"
             : $"{FirstName} {MiddleName} {LastName}";
+}
+
+/// <summary>
+/// Represents a bank (financial institution) used as a reference for employee bank details.
+/// </summary>
+public class EmployeeBank : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Short bank identifier, e.g. "GCB", "ABSA". Unique per tenant.</summary>
+    [Required]
+    [MaxLength(20)]
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>International SWIFT / BIC code, if applicable.</summary>
+    [MaxLength(20)]
+    public string? SwiftCode { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    [ForeignKey(nameof(CountryId))]
+    public virtual Country? Country { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<EmployeeBankBranch> Branches { get; set; } = new List<EmployeeBankBranch>();
+}
+
+/// <summary>
+/// Represents a branch of a <see cref="Bank"/>.
+/// </summary>
+public class EmployeeBankBranch : TenantEntity
+{
+    [Required]
+    public Guid BankId { get; set; }
+
+    [ForeignKey(nameof(BankId))]
+    public virtual EmployeeBank Bank { get; set; } = null!;
+
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Branch sort code or internal identifier. Unique per bank per tenant.</summary>
+    [MaxLength(20)]
+    public string? Code { get; set; }
+
+    [MaxLength(500)]
+    public string? Address { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    [ForeignKey(nameof(CountryId))]
+    public virtual Country? Country { get; set; }
+
+    [MaxLength(50)]
+    public string? PhoneNumber { get; set; }
+
+    [MaxLength(200)]
+    [EmailAddress]
+    public string? Email { get; set; }
+
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// Bank account details for payroll disbursement.
+/// An employee may have multiple accounts (e.g. split salary).
+/// </summary>
+public class EmployeeBankDetail : TenantEntity
+{
+    public Guid EmployeeId { get; set; }
+ 
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
+
+    // ── Structured reference (optional, links to Bank / BankBranch catalogue) ──
+
+    public Guid? BankId { get; set; }
+
+    [ForeignKey(nameof(BankId))]
+    public virtual EmployeeBank? Bank { get; set; }
+
+    public Guid? BranchId { get; set; }
+
+    [ForeignKey(nameof(BranchId))]
+    public virtual EmployeeBankBranch? Branch { get; set; }
+
+    // ── Free-text fallback (used when Bank/Branch entities are not selected) ──
+ 
+    [MaxLength(200)]
+    public string BankName { get; set; } = string.Empty;
+ 
+    [MaxLength(100)]
+    public string BranchName { get; set; } = string.Empty;
+ 
+    [MaxLength(50)]
+    public string AccountNumber { get; set; } = string.Empty;
+ 
+    [MaxLength(200)]
+    public string AccountName { get; set; } = string.Empty;
+ 
+    [MaxLength(50)]
+    public string? MobileMoneyNumber { get; set; }
+ 
+    public EmployeeBankAccountType AccountType { get; set; }
+ 
+    /// <summary>
+    /// If split payroll, the percentage of net pay directed to this account.
+    /// All active accounts for an employee must sum to 100.
+    /// </summary>
+    public decimal AllocationPercentage { get; set; } = 100;
+ 
+    public bool IsPrimary { get; set; }
+ 
+    public bool IsActive { get; set; } = true;
+ 
+    public bool IsVerified { get; set; }
+ 
+    public DateTime? VerifiedDate { get; set; }
+ 
+    public Guid? VerifiedById { get; set; }
+ 
+    [ForeignKey(nameof(VerifiedById))]
+    public virtual Employee? VerifiedBy { get; set; }
 }
 
 #endregion

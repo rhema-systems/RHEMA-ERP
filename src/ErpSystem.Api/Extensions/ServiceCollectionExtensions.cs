@@ -737,6 +737,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ISalaryNotchService, SalaryStructureService>();
 
             services.AddScoped<ILeaveService, LeaveService>();
+
+            services.AddScoped<IDepartmentService, DepartmentService>();
+            services.AddScoped<IEmployeePositionService, EmployeePositionService>();
+            services.AddScoped<IEmployeeBankService, EmployeeBankService>();
+            services.AddScoped<IEmployeeBankBranchService, EmployeeBankBranchService>();
             
             services.AddScoped<IAppraisalGradeDefinitionService, AppraisalGradeDefinitionService>();
             services.AddScoped<IKpiDefinitionService, KpiDefinitionService>();
@@ -751,10 +756,6 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Maintenance background services - temporarily disabled to get API running
             // services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceBackgroundService>();
             
-            // HR Services - NOW ENABLED
-            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeService, ErpSystem.Core.Services.HR.EmployeeService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.HR.IDepartmentService, ErpSystem.Core.Services.HR.DepartmentService>();
-
             // Business Partner / Supplier & Contractor Management Services - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerService, ErpSystem.Core.Services.Procurement.BusinessPartnerService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPartnerCategoryService, ErpSystem.Core.Services.Procurement.PartnerCategoryService>();

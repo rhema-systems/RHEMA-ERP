@@ -107,45 +107,14 @@ public enum StaffStatus
     OnLeave = 7
 }
 
-/// <summary>
-/// Employment contract types
-/// </summary>
-public enum ContractType
+public enum WorkSchedule
 {
-    /// <summary>
-    /// Permanent full-time employment
-    /// </summary>
-    Permanent = 1,
-
-    /// <summary>
-    /// Fixed-term contract
-    /// </summary>
-    Contract = 2,
-
-    /// <summary>
-    /// Part-time employment
-    /// </summary>
-    PartTime = 3,
-
-    /// <summary>
-    /// Temporary employment
-    /// </summary>
-    Temporary = 4,
-
-    /// <summary>
-    /// Internship
-    /// </summary>
-    Internship = 5,
-
-    /// <summary>
-    /// Consultancy
-    /// </summary>
-    Consultant = 6,
-
-    /// <summary>
-    /// Freelancer
-    /// </summary>
-    Freelance = 7
+    FullTime = 1,
+    PartTime = 2,
+    Shift = 3,
+    Flexi = 4,
+    Remote = 5,
+    Hybrid = 6
 }
 
 /// <summary>
@@ -249,7 +218,6 @@ public enum ContractStatus
     Terminated = 3
 }
 
-
 public enum DependentRelationship
 {
     Spouse = 1,
@@ -327,6 +295,23 @@ public enum PositionChangeReason
     Termination = 5,
     
     Other = 6
+}
+
+public enum EmployeeContactType
+{
+    Home = 1,
+    Postal = 2,
+    Temporary = 3,
+    Other = 4
+}
+
+public enum EmployeeBankAccountType
+{
+    Current = 1,
+    
+    Savings = 2,
+    
+    MobileMoney = 3
 }
 
 #endregion Employee Details
@@ -948,6 +933,19 @@ public enum ShortlistingCriteriaType
 
     [Description("Language")]
     Language = 5
+}
+
+public enum EmploymentType
+{
+    Permanent = 1,
+    Contract = 2,
+    FixedTerm = 3,
+    Internship = 4,
+    Casual = 5,
+    PartTime = 6,
+    Temporary = 7,
+    Consultant = 8,
+    Freelance = 9
 }
 
 #endregion Recruitment
@@ -2510,6 +2508,23 @@ public enum CompanyAssetStatus
     Reserved = 7
 }
 
+public enum HRAssetCondition
+{
+    [Description("Excellent")]
+    Excellent = 1,
+
+    [Description("Good")]
+    Good = 2,
+
+    [Description("Fair")]
+    Fair = 3,
+
+    [Description("Poor")]
+    Poor = 4,
+
+    [Description("Non-Functional")]
+    NonFunctional = 5
+}
 
 public enum DisposalMethod
 {
@@ -2652,6 +2667,17 @@ public enum AssetRequisitionStatus
     Cancelled = 6
 }
 
+public enum HRAssetTransferType
+{
+    [Description("Employee to Employee")]
+    EmployeeToEmployee = 1,
+
+    [Description("Location to Location")]
+    LocationToLocation = 2,
+
+    [Description("Department to Department")]
+    DepartmentToDepartment = 3
+}
 
 public enum HRAssetTransferStatus
 {
@@ -3481,5 +3507,16 @@ public enum FiscalYearStatus
     Archived = 3
 }
 
+public enum HRSchedulePeriodType
+{
+    [Description("Quarter")]
+    Quarter = 1,
+
+    [Description("Month")]
+    Month = 2,
+
+    [Description("Semi-Annual")]
+    SemiAnnual = 3
+}
 
 #endregion Company Schedule
