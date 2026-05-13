@@ -1,0 +1,961 @@
+'use client';
+
+import Link from 'next/link';
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  BarChart3,
+  CheckCircle2,
+  CreditCard,
+  FileText,
+  Loader2,
+  Mail,
+  Play,
+  Printer,
+  RefreshCw,
+  Save,
+  Settings,
+  Users,
+} from 'lucide-react';
+
+import { PayrollGridExportButton } from '@/components/hr/payroll/PayrollGridExportButton';
+import { PayrollPayslipPreviewDialog } from '@/components/hr/payroll/PayrollPayslipPreviewDialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/use-toast';
+import {
+  PayrollEmployeeProfile,
+  PayrollJournalPosting,
+  PayrollParameterSet,
+  PayrollPayslip,
+  PayrollPayslipEmailResult,
+  PayrollRun,
+  PayrollRunStatus,
+  PayrollSummaryReport,
+  payrollService,
+} from '@/services/payrollService';
+
+const today = new Date().toISOString().slice(0, 10);
+
+const defaultRunForm = {
+  payPeriod: Number(new Date().toISOString().slice(0, 7).replace('-', '')),
+  payPeriodFrom: today,
+  payPeriodTo: today,
+  currencyCode: 'GHS',
+  isSeparateBonusRun: false,
+  separateBonusCode: '',
+  notes: '',
+};
+
+const payrollTabValues = new Set(['runs', 'reports']);
+
+const statusTone: Record<PayrollRunStatus, 'outline' | 'secondary' | 'default' | 'destructive'> = {
+  Draft: 'outline',
+  Calculated: 'secondary',
+  InReview: 'secondary',
+  Approved: 'default',
+  Closed: 'default',
+  RolledBack: 'destructive',
+};
+
+type PayslipScope = 'all' | 'category' | 'employee';
+
+const payslipCategoryTypes = [
+  { value: 'StaffCategory', label: 'Staff Category' },
+  { value: 'Department', label: 'Department' },
+  { value: 'Section', label: 'Section' },
+  { value: 'Position', label: 'Position' },
+  { value: 'Location', label: 'Location' },
+];
+
+const money = (value: number | null | undefined, currency = 'GHS') =>
+  new Intl.NumberFormat('en-GH', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value ?? 0);
+
+function compactText(value?: string | null) {
+  return value?.trim() || '';
+}
+
+function profileCategoryValue(profile: PayrollEmployeeProfile, categoryType: string) {
+  switch (categoryType) {
+    case 'Department':
+      return compactText(profile.departmentName);
+    case 'Section':
+      return compactText(profile.sectionName);
+    case 'Position':
+      return compactText(profile.positionTitle);
+    case 'Location':
+      return compactText(profile.jobLocation);
+    case 'StaffCategory':
+    default:
+      return compactText(profile.staffCategory);
+  }
+}
+
+function dateValue(value?: string | null) {
+  return value ? value.slice(0, 10) : '';
+}
+
+function formatPayrollPeriodLabel(from?: string | null, to?: string | null) {
+  const source = dateValue(to) || dateValue(from);
+  if (!source) {
+    return 'Not configured';
+  }
+
+  const [year, month] = source.split('-').map(Number);
+  if (!year || !month) {
+    return 'Not configured';
+  }
+
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+export default function PayrollPage() {
+  const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState('runs');
+  const [runs, setRuns] = useState<PayrollRun[]>([]);
+  const [profiles, setProfiles] = useState<PayrollEmployeeProfile[]>([]);
+  const [activeParameters, setActiveParameters] = useState<PayrollParameterSet | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState('');
+  const [selectedRun, setSelectedRun] = useState<PayrollRun | null>(null);
+  const [summary, setSummary] = useState<PayrollSummaryReport | null>(null);
+  const [payslips, setPayslips] = useState<PayrollPayslip[]>([]);
+  const [previewPayslip, setPreviewPayslip] = useState<PayrollPayslip | null>(null);
+  const [selectedPayslipEmployeeIds, setSelectedPayslipEmployeeIds] = useState<Set<string>>(new Set<string>());
+  const [payslipEmailResult, setPayslipEmailResult] = useState<PayrollPayslipEmailResult | null>(null);
+  const [journalPosting, setJournalPosting] = useState<PayrollJournalPosting | null>(null);
+  const [runForm, setRunForm] = useState(defaultRunForm);
+  const [payslipDialogOpen, setPayslipDialogOpen] = useState(false);
+  const [payslipScope, setPayslipScope] = useState<PayslipScope>('all');
+  const [payslipCategoryType, setPayslipCategoryType] = useState('StaffCategory');
+  const [payslipCategoryValue, setPayslipCategoryValue] = useState('');
+  const [payslipEmployeeSearch, setPayslipEmployeeSearch] = useState('');
+  const [payslipEmployeeId, setPayslipEmployeeId] = useState('');
+  const [postDialogOpen, setPostDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const applyActivePayrollParameters = useCallback((parameters?: PayrollParameterSet | null) => {
+    setActiveParameters(parameters ?? null);
+    if (!parameters) {
+      return;
+    }
+
+    const periodFrom = dateValue(parameters.currentPeriodFrom);
+    const periodTo = dateValue(parameters.currentPeriodTo);
+
+    setRunForm((current) => ({
+      ...current,
+      payPeriod: parameters.currentPayPeriod || current.payPeriod,
+      payPeriodFrom: periodFrom || current.payPeriodFrom,
+      payPeriodTo: periodTo || current.payPeriodTo,
+      currencyCode: parameters.baseCurrency || current.currencyCode,
+    }));
+  }, []);
+
+  const selectedRunOption = useMemo(
+    () => runs.find((run) => run.id === selectedRunId) ?? null,
+    [runs, selectedRunId],
+  );
+
+  const activeProfiles = useMemo(
+    () => profiles.filter((profile) => profile.payrollActive).sort((left, right) => left.employeeNumber.localeCompare(right.employeeNumber)),
+    [profiles],
+  );
+
+  const payslipCategoryValues = useMemo(() => {
+    const values = new Set<string>();
+    activeProfiles.forEach((profile) => {
+      const value = profileCategoryValue(profile, payslipCategoryType);
+      if (value) {
+        values.add(value);
+      }
+    });
+
+    return Array.from(values).sort((left, right) => left.localeCompare(right));
+  }, [activeProfiles, payslipCategoryType]);
+
+  const filteredPayslipEmployees = useMemo(() => {
+    const term = payslipEmployeeSearch.trim().toLowerCase();
+    if (!term) {
+      return activeProfiles;
+    }
+
+    return activeProfiles.filter((profile) =>
+      profile.employeeNumber.toLowerCase().includes(term) ||
+      profile.employeeName.toLowerCase().includes(term),
+    );
+  }, [activeProfiles, payslipEmployeeSearch]);
+
+  useEffect(() => {
+    const syncTabFromHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (payrollTabValues.has(hash)) {
+        setActiveTab(hash);
+      }
+    };
+
+    syncTabFromHash();
+    window.addEventListener('hashchange', syncTabFromHash);
+    return () => window.removeEventListener('hashchange', syncTabFromHash);
+  }, []);
+
+  const selectTab = (value: string) => {
+    setActiveTab(value);
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', `${window.location.pathname}#${value}`);
+    }
+  };
+
+  const loadWorkspace = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [setup, runList, profileList] = await Promise.all([
+        payrollService.getSetupSummary(),
+        payrollService.getRuns(),
+        payrollService.getEmployeeProfiles(),
+      ]);
+      setRuns(runList);
+      setProfiles(profileList);
+      applyActivePayrollParameters(setup.activeParameters ?? null);
+
+      const nextRunId = selectedRunId || runList[0]?.id || '';
+      setSelectedRunId(nextRunId);
+      if (nextRunId) {
+        setSelectedRun(await payrollService.getRun(nextRunId));
+      } else {
+        setSelectedRun(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load payroll workspace.');
+    } finally {
+      setLoading(false);
+    }
+  }, [applyActivePayrollParameters, selectedRunId]);
+
+  useEffect(() => {
+    void loadWorkspace();
+  }, [loadWorkspace]);
+
+  useEffect(() => {
+    if (!selectedRunId || selectedRun?.id === selectedRunId) {
+      return;
+    }
+
+    void payrollService.getRun(selectedRunId).then(setSelectedRun).catch((err) => {
+      setError(err instanceof Error ? err.message : 'Unable to load payroll run.');
+    });
+  }, [selectedRunId, selectedRun?.id]);
+
+  useEffect(() => {
+    setPayslipCategoryValue((current) => current && payslipCategoryValues.includes(current) ? current : payslipCategoryValues[0] || '');
+  }, [payslipCategoryValues]);
+
+  useEffect(() => {
+    setPayslipEmployeeId((current) => current && activeProfiles.some((profile) => profile.employeeId === current) ? current : activeProfiles[0]?.employeeId || '');
+  }, [activeProfiles]);
+
+  const runOperation = async (label: string, action: () => Promise<PayrollRun | PayrollSummaryReport | PayrollPayslip[] | PayrollPayslipEmailResult | PayrollJournalPosting | PayrollEmployeeProfile | unknown>) => {
+    setBusy(label);
+    setError(null);
+    try {
+      const result = await action();
+      toast({ title: 'Payroll updated', description: `${label} completed.` });
+      const resultRunId =
+        result && typeof result === 'object' && 'id' in result && 'status' in result
+          ? String((result as PayrollRun).id)
+          : result && typeof result === 'object' && 'payrollRunId' in result
+            ? String((result as { payrollRunId: string }).payrollRunId)
+            : '';
+      if (result && typeof result === 'object' && 'runNumber' in result && 'status' in result) {
+        setSelectedRun(result as PayrollRun);
+        setSelectedRunId((result as PayrollRun).id);
+      }
+      if (['Create run', 'Process'].includes(label)) {
+        setSummary(null);
+        setPayslips([]);
+        setSelectedPayslipEmployeeIds(new Set<string>());
+        setPayslipEmailResult(null);
+        setJournalPosting(null);
+      }
+      const [setup, runList, profileList] = await Promise.all([
+        payrollService.getSetupSummary(),
+        payrollService.getRuns(),
+        payrollService.getEmployeeProfiles(),
+      ]);
+      applyActivePayrollParameters(setup.activeParameters ?? null);
+      setRuns(runList);
+      setProfiles(profileList);
+      const refreshRunId = resultRunId || selectedRunId;
+      if (refreshRunId) {
+        setSelectedRun(await payrollService.getRun(refreshRunId));
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Payroll operation failed.';
+      setError(message);
+      toast({ title: 'Payroll error', description: message, variant: 'destructive' });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openPayslipDialog = () => {
+    setPayslipScope('all');
+    setPayslipEmployeeSearch('');
+    setPayslipDialogOpen(true);
+  };
+
+  const generateScopedPayslips = async () => {
+    if (!selectedRun) {
+      return;
+    }
+
+    const filters =
+      payslipScope === 'employee'
+        ? { employeeId: payslipEmployeeId }
+        : payslipScope === 'category'
+          ? { categoryType: payslipCategoryType, categoryValue: payslipCategoryValue }
+          : undefined;
+
+    await runOperation('Payslips', async () => {
+      const slips = await payrollService.getPayslips(selectedRun.id, filters);
+      setPayslips(slips);
+      setSelectedPayslipEmployeeIds(new Set<string>());
+      setPayslipEmailResult(null);
+      setPayslipDialogOpen(false);
+      return slips;
+    });
+  };
+
+  const postSelectedRun = async () => {
+    if (!selectedRun) {
+      return;
+    }
+
+    await runOperation('Post payroll', async () => {
+      const posting = await payrollService.postJournal(selectedRun.id, 'Posted from payroll desk');
+      setJournalPosting(posting);
+      setPostDialogOpen(false);
+      return posting;
+    });
+  };
+
+  const payslipEmployeeIds = useMemo(() => payslips.map((slip) => slip.employeeId), [payslips]);
+  const selectedPayslipCount = selectedPayslipEmployeeIds.size;
+  const allPayslipsSelected = payslips.length > 0 && selectedPayslipCount === payslips.length;
+
+  const togglePayslipSelection = (employeeId: string, checked: boolean) => {
+    setSelectedPayslipEmployeeIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(employeeId);
+      } else {
+        next.delete(employeeId);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setSelectedPayslipEmployeeIds((current) => {
+      const available = new Set(payslipEmployeeIds);
+      const next = new Set([...current].filter((employeeId) => available.has(employeeId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [payslipEmployeeIds]);
+
+  const selectedCurrency = selectedRun?.currencyCode || runForm.currencyCode || 'GHS';
+  const currentPayPeriod = activeParameters?.currentPayPeriod || runForm.payPeriod;
+  const openRunForPeriod = runs.find((run) =>
+    run.payPeriod === runForm.payPeriod &&
+    run.status !== 'Closed' &&
+    run.status !== 'RolledBack',
+  );
+  const canCreateRun = !openRunForPeriod && busy !== 'Create run';
+  const canProcessRun = Boolean(selectedRun && selectedRun.status !== 'Closed' && busy !== 'Process');
+  const canPostPayroll = Boolean(selectedRun && selectedRun.status !== 'Draft' && selectedRun.status !== 'Closed' && busy !== 'Post payroll');
+  const canGeneratePayslips = Boolean(
+    selectedRun &&
+    (payslipScope === 'all' ||
+      (payslipScope === 'category' && payslipCategoryValue) ||
+      (payslipScope === 'employee' && payslipEmployeeId)),
+  );
+  const payslipScopeCount = payslipScope === 'employee'
+    ? (payslipEmployeeId ? 1 : 0)
+    : payslipScope === 'category'
+      ? activeProfiles.filter((profile) => profileCategoryValue(profile, payslipCategoryType) === payslipCategoryValue).length
+      : activeProfiles.length;
+  const currentPayrollPeriodLabel = activeParameters
+    ? formatPayrollPeriodLabel(activeParameters.currentPeriodFrom, activeParameters.currentPeriodTo)
+    : 'Not configured';
+
+  return (
+    <main className="space-y-5 p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-normal">Payroll</h1>
+            <Badge variant="outline">Human Resources</Badge>
+          </div>
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Run payroll from the migrated Oracle Forms payroll model while using ERP HR employees as the staff source.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 lg:items-end">
+          <div className="grid min-w-[280px] gap-3 rounded-md border bg-muted/40 p-3 text-sm sm:grid-cols-[1fr_auto] lg:min-w-[420px]">
+            <div>
+              <div className="text-xs text-muted-foreground">Payroll Period</div>
+              <div className="font-semibold">{currentPayrollPeriodLabel}</div>
+            </div>
+            <div className="sm:text-right">
+              <div className="text-xs text-muted-foreground">Period No</div>
+              <div className="font-semibold">{activeParameters ? currentPayPeriod : '-'}</div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => void loadWorkspace()} disabled={loading}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/hr/payroll/employee-profiles">
+                <Users className="mr-2 h-4 w-4" />
+                Employee Profiles
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/administration/hr/payroll">
+                <Settings className="mr-2 h-4 w-4" />
+                Payroll Setup
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {error && <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+
+      <section className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-md border p-3">
+          <div className="text-sm text-muted-foreground">Current Run</div>
+          <div className="mt-1 truncate font-medium">{selectedRun?.runNumber || selectedRunOption?.runNumber || 'Not started'}</div>
+        </div>
+        <div className="rounded-md border p-3">
+          <div className="text-sm text-muted-foreground">Status</div>
+          <div className="mt-1">{selectedRun ? <Badge variant={statusTone[selectedRun.status]}>{selectedRun.status}</Badge> : <Badge variant="outline">Pending</Badge>}</div>
+        </div>
+        <div className="rounded-md border p-3">
+          <div className="text-sm text-muted-foreground">Employees</div>
+          <div className="mt-1 font-medium">{selectedRun?.employeeCount ?? profiles.length}</div>
+        </div>
+        <div className="rounded-md border p-3">
+          <div className="text-sm text-muted-foreground">Net Pay</div>
+          <div className="mt-1 font-medium">{money(selectedRun?.netAmount, selectedCurrency)}</div>
+        </div>
+      </section>
+
+      <Tabs value={activeTab} onValueChange={selectTab} className="space-y-4">
+        <TabsList className="flex h-auto flex-wrap justify-start">
+          <TabsTrigger value="runs">Run Desk</TabsTrigger>
+          <TabsTrigger value="reports">Reports & Journals</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="runs">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,420px)_1fr]">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Play className="h-4 w-4" />
+                  Create Run
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form
+                  className="grid gap-3"
+                  onSubmit={(event: FormEvent) => {
+                    event.preventDefault();
+                    void runOperation('Create run', async () => {
+                      const run = await payrollService.createRun(runForm);
+                      setSelectedRunId(run.id);
+                      setSelectedRun(run);
+                      return run;
+                    });
+                  }}
+                >
+                  <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                    <Field label="Separate Bonus Run">
+                      <label className="flex h-9 items-center gap-2 rounded-md border px-3 text-sm">
+                        <Checkbox
+                          checked={runForm.isSeparateBonusRun}
+                          onCheckedChange={(checked) => setRunForm((current) => ({
+                            ...current,
+                            isSeparateBonusRun: checked === true,
+                            separateBonusCode: checked === true ? current.separateBonusCode : '',
+                          }))}
+                        />
+                        Yes
+                      </label>
+                    </Field>
+                    <Field label="Separate Bonus Code">
+                      <Input
+                        value={runForm.separateBonusCode}
+                        onChange={(event) => setRunForm((current) => ({ ...current, separateBonusCode: event.target.value }))}
+                        disabled={!runForm.isSeparateBonusRun}
+                        placeholder="Optional: run all due separate bonuses"
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Notes">
+                    <Input value={runForm.notes} onChange={(event) => setRunForm((current) => ({ ...current, notes: event.target.value }))} />
+                  </Field>
+                  {openRunForPeriod && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      {openRunForPeriod.runNumber} is still {openRunForPeriod.status}. Post and close it before creating another run for this period.
+                    </div>
+                  )}
+                  <Button type="submit" disabled={!canCreateRun}>
+                    {busy === 'Create run' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Create Run
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle className="text-base">Payroll Runs</CardTitle>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <PayrollGridExportButton
+                      rows={runs}
+                      fileName="payroll-runs"
+                      columns={[
+                        { header: 'Run', value: (row) => row.runNumber },
+                        { header: 'Status', value: (row) => row.status },
+                        { header: 'Employees', value: (row) => row.employeeCount },
+                        { header: 'Gross', value: (row) => row.grossAmount },
+                        { header: 'Net', value: (row) => row.netAmount },
+                      ]}
+                    />
+                    <select className="h-9 rounded-md border bg-background px-3 text-sm" value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
+                      <option value="">Select run</option>
+                      {runs.map((run) => (
+                        <option key={run.id} value={run.id}>{run.runNumber} - {run.status}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500/30"
+                    disabled={!canProcessRun}
+                    onClick={() => selectedRun && void runOperation('Process', () => payrollService.calculateRun(selectedRun.id))}
+                  >
+                    <CalculatorIcon />
+                    Process
+                  </Button>
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Run</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Employees</TableHead>
+                      <TableHead className="text-right">Gross</TableHead>
+                      <TableHead className="text-right">Net</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => (
+                      <TableRow key={run.id} className="cursor-pointer" onClick={() => setSelectedRunId(run.id)}>
+                        <TableCell className="font-medium">{run.runNumber}</TableCell>
+                        <TableCell><Badge variant={statusTone[run.status]}>{run.status}</Badge></TableCell>
+                        <TableCell className="text-right">{run.employeeCount}</TableCell>
+                        <TableCell className="text-right">{money(run.grossAmount, run.currencyCode)}</TableCell>
+                        <TableCell className="text-right">{money(run.netAmount, run.currencyCode)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="reports">
+          <div className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <BarChart3 className="h-4 w-4" />
+                      Reports & Journals
+                    </CardTitle>
+                    <CardDescription>Review payroll output and post the final run.</CardDescription>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" disabled={!selectedRun || busy === 'Summary'} onClick={() => selectedRun && void runOperation('Summary', async () => { const report = await payrollService.getRunSummary(selectedRun.id, false); setSummary(report); return report; })}>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Summary
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={!selectedRun || busy === 'Payslips'} onClick={openPayslipDialog}>
+                      <CreditCard className="mr-2 h-4 w-4" />
+                      {selectedRun?.isSeparateBonusRun ? 'Bonus Slips' : 'Payslips'}
+                    </Button>
+                    <Button size="sm" variant="warning" disabled={!canPostPayroll} onClick={() => setPostDialogOpen(true)}>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Post Payroll
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-5">
+                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Gross</div><div className="font-semibold">{money(summary?.grossAmount ?? selectedRun?.grossAmount, selectedCurrency)}</div></div>
+                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Tax</div><div className="font-semibold">{money(summary?.taxAmount ?? selectedRun?.taxAmount, selectedCurrency)}</div></div>
+                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Employee SSF</div><div className="font-semibold">{money(summary?.employeeContributionAmount ?? selectedRun?.employeeContributionAmount, selectedCurrency)}</div></div>
+                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Net</div><div className="font-semibold">{money(summary?.netAmount ?? selectedRun?.netAmount, selectedCurrency)}</div></div>
+                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Journal</div><div className="truncate font-semibold">{journalPosting?.journalNumber || '-'}</div></div>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <CardTitle className="text-base">Summary Components</CardTitle>
+                    <PayrollGridExportButton
+                      rows={summary?.components ?? []}
+                      fileName={`payroll-summary-components-${selectedRun?.runNumber || 'run'}`}
+                      columns={[
+                        { header: 'Type', value: (row) => row.transactionType },
+                        { header: 'Component Code', value: (row) => row.componentCode },
+                        { header: 'Description', value: (row) => row.description },
+                        { header: 'Amount', value: (row) => row.amount },
+                      ]}
+                      disabled={!summary}
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(summary?.components ?? []).slice(0, 12).map((line) => (
+                        <TableRow key={`${line.transactionType}-${line.componentCode ?? ''}`}>
+                          <TableCell>{line.transactionType}</TableCell>
+                          <TableCell>{line.description}</TableCell>
+                          <TableCell className="text-right">{money(line.amount, selectedCurrency)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <CardTitle className="text-base">{selectedRun?.isSeparateBonusRun ? 'Bonus Slips' : 'Payslips'}</CardTitle>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!selectedRun || payslips.length === 0 || busy === 'Email payslips'}
+                        onClick={() => selectedRun && void runOperation('Email payslips', async () => {
+                          const result = await payrollService.emailPayslips(selectedRun.id, { employeeIds: payslips.map((slip) => slip.employeeId) });
+                          setPayslipEmailResult(result);
+                          return result;
+                        })}
+                      >
+                        {busy === 'Email payslips' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+                        Email All
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!selectedRun || selectedPayslipCount === 0 || busy === 'Email selected payslips'}
+                        onClick={() => selectedRun && void runOperation('Email selected payslips', async () => {
+                          const result = await payrollService.emailPayslips(selectedRun.id, { employeeIds: [...selectedPayslipEmployeeIds] });
+                          setPayslipEmailResult(result);
+                          return result;
+                        })}
+                      >
+                        {busy === 'Email selected payslips' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+                        Email Selected
+                      </Button>
+                      <PayrollGridExportButton
+                        rows={payslips}
+                        fileName={`payroll-payslips-${selectedRun?.runNumber || 'run'}`}
+                        columns={[
+                          { header: 'Employee No', value: (row) => row.employeeNumber },
+                          { header: 'Employee Name', value: (row) => row.employeeName },
+                          { header: 'Email', value: (row) => row.employeeEmail || '' },
+                          { header: 'Gross', value: (row) => row.grossIncome },
+                          { header: 'Tax', value: (row) => row.incomeTax },
+                          { header: 'Net', value: (row) => row.netIncome },
+                          { header: 'Currency', value: (row) => row.currencyCode },
+                        ]}
+                      />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {payslipEmailResult && (
+                    <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                      <span className="font-medium">{payslipEmailResult.sentCount}</span> sent, <span className="font-medium">{payslipEmailResult.failedCount}</span> failed
+                    </div>
+                  )}
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[40px]">
+                          <Checkbox
+                            checked={allPayslipsSelected}
+                            onCheckedChange={(value) => setSelectedPayslipEmployeeIds(value === true ? new Set(payslipEmployeeIds) : new Set<string>())}
+                          />
+                        </TableHead>
+                        <TableHead>Employee</TableHead>
+                        <TableHead className="text-right">Gross</TableHead>
+                        <TableHead className="text-right">Tax</TableHead>
+                        <TableHead className="text-right">Net</TableHead>
+                        <TableHead className="w-[220px] text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {payslips.map((slip) => (
+                        <TableRow key={slip.payrollRunEmployeeId}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedPayslipEmployeeIds.has(slip.employeeId)}
+                              onCheckedChange={(value) => togglePayslipSelection(slip.employeeId, value === true)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{slip.employeeNumber}</div>
+                            <div className="text-xs text-muted-foreground">{slip.employeeName}</div>
+                            <div className="text-xs text-muted-foreground">{slip.employeeEmail || 'No email'}</div>
+                          </TableCell>
+                          <TableCell className="text-right">{money(slip.grossIncome, slip.currencyCode)}</TableCell>
+                          <TableCell className="text-right">{money(slip.incomeTax, slip.currencyCode)}</TableCell>
+                          <TableCell className="text-right">{money(slip.netIncome, slip.currencyCode)}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button type="button" size="sm" variant="outline" onClick={() => setPreviewPayslip(slip)}>
+                                <Printer className="mr-2 h-4 w-4" />
+                                {slip.isSeparateBonusRun ? 'Print Bonus Slip' : 'Print'}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading payroll workspace
+        </div>
+      )}
+
+      <Dialog open={payslipDialogOpen} onOpenChange={setPayslipDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{selectedRun?.isSeparateBonusRun ? 'Generate Bonus Slips' : 'Generate Payslips'}</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void generateScopedPayslips();
+            }}
+          >
+            <div className="grid gap-3 md:grid-cols-[220px_1fr_120px]">
+              <Field label="Scope">
+                <select
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  value={payslipScope}
+                  onChange={(event) => setPayslipScope(event.target.value as PayslipScope)}
+                >
+                  <option value="all">All</option>
+                  <option value="category">Employee Category</option>
+                  <option value="employee">Single Employee</option>
+                </select>
+              </Field>
+              {payslipScope === 'category' ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Field label="Category">
+                    <select
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                      value={payslipCategoryType}
+                      onChange={(event) => setPayslipCategoryType(event.target.value)}
+                    >
+                      {payslipCategoryTypes.map((category) => (
+                        <option key={category.value} value={category.value}>{category.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Value">
+                    <select
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                      value={payslipCategoryValue}
+                      onChange={(event) => setPayslipCategoryValue(event.target.value)}
+                    >
+                      {payslipCategoryValues.map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+              ) : payslipScope === 'employee' ? (
+                <div className="grid gap-3 md:grid-cols-[220px_1fr]">
+                  <Field label="Find Employee">
+                    <Input
+                      value={payslipEmployeeSearch}
+                      onChange={(event) => setPayslipEmployeeSearch(event.target.value)}
+                      placeholder="Employee no or name"
+                    />
+                  </Field>
+                  <Field label="Employee">
+                    <select
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                      value={payslipEmployeeId}
+                      onChange={(event) => setPayslipEmployeeId(event.target.value)}
+                    >
+                      {filteredPayslipEmployees.map((profile) => (
+                        <option key={profile.employeeId} value={profile.employeeId}>
+                          {profile.employeeNumber} - {profile.employeeName}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+              ) : (
+                <div className="flex h-full min-h-9 items-end rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium">
+                  All payroll employees
+                </div>
+              )}
+              <Field label="Selected">
+                <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-medium">
+                  {payslipScopeCount}
+                </div>
+              </Field>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setPayslipDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!canGeneratePayslips || busy === 'Payslips'}>
+                {busy === 'Payslips' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" />}
+                Generate
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={postDialogOpen} onOpenChange={setPostDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Post Payroll?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
+              Posting will finalize this payroll run and close the payroll period for this run.
+            </div>
+            <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
+              <div>
+                <div className="text-xs text-muted-foreground">Run</div>
+                <div className="font-medium">{selectedRun?.runNumber || '-'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Employees</div>
+                <div className="font-medium">{selectedRun?.employeeCount ?? 0}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Gross</div>
+                <div className="font-medium">{money(selectedRun?.grossAmount, selectedCurrency)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Net</div>
+                <div className="font-medium">{money(selectedRun?.netAmount, selectedCurrency)}</div>
+              </div>
+            </div>
+            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>A balanced finance journal will be created and posted.</li>
+              <li>The payroll run status will change to Closed.</li>
+              <li>Loan repayments in the run will be marked as paid.</li>
+              <li>Payslip snapshots will be saved for the posted run.</li>
+              <li>The active payroll period can advance after posting.</li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPostDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="warning" disabled={!canPostPayroll} onClick={() => void postSelectedRun()}>
+              {busy === 'Post payroll' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+              Confirm Post
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <PayrollPayslipPreviewDialog
+        open={Boolean(previewPayslip)}
+        payslip={previewPayslip}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewPayslip(null);
+          }
+        }}
+      />
+    </main>
+  );
+}
+
+function CalculatorIcon() {
+  return <Play className="mr-2 h-4 w-4" />;
+}

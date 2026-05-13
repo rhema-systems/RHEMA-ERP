@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260507221808_AddHrOraclePayrollMigration")]
+    partial class AddHrOraclePayrollMigration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -10125,9 +10128,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("LimitPeriod")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(2);
+                        .HasColumnType("int");
 
                     b.Property<int?>("MaxDependents")
                         .HasColumnType("int");
@@ -10142,14 +10143,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(150)");
 
                     b.Property<int>("PolicyType")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(1);
+                        .HasColumnType("int");
 
                     b.Property<int>("Recipient")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(1);
+                        .HasColumnType("int");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -10511,6 +10508,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateOnly?>("ConfirmationDate")
                         .HasColumnType("date");
 
+                    b.Property<int>("ContractType")
+                        .HasColumnType("int");
+
                     b.Property<string>("CorporateEmployeeID")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -10561,9 +10561,6 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
-
-                    b.Property<int>("EmploymentType")
-                        .HasColumnType("int");
 
                     b.Property<string>("ExperienceLevel")
                         .HasMaxLength(50)
@@ -10801,262 +10798,6 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("Employees");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBank", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<Guid?>("CountryId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("SwiftCode")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CountryId");
-
-                    b.HasIndex("TenantId", "Code")
-                        .IsUnique()
-                        .HasDatabaseName("IX_EmployeeBank_Tenant_Code");
-
-                    b.ToTable("EmployeeBanks");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBankBranch", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Address")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<Guid>("BankId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("City")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Code")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<Guid?>("CountryId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Email")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("PhoneNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BankId");
-
-                    b.HasIndex("CountryId");
-
-                    b.HasIndex("TenantId", "BankId", "Code")
-                        .HasDatabaseName("IX_EmployeeBankBranch_Tenant_Bank_Code");
-
-                    b.ToTable("EmployeeBankBranches");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBankDetail", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AccountName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("AccountNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<int>("AccountType")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("AllocationPercentage")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid?>("BankId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("BankName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<Guid?>("BranchId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("BranchName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsVerified")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("MobileMoneyNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("VerifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("VerifiedDate")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BankId");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("VerifiedById");
-
-                    b.HasIndex("TenantId", "EmployeeId", "AccountNumber")
-                        .IsUnique()
-                        .HasDatabaseName("IX_EmployeeBankDetail_Tenant_Employee_AccountNumber");
-
-                    b.ToTable("EmployeeBankDetails");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBiometric", b =>
                 {
                     b.Property<Guid>("Id")
@@ -11127,102 +10868,13 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("EmployeeBiometrics");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeContact", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AddressLine1")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("AddressLine2")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("City")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("ContactType")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("CountryId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("DigitalAddress")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Region")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ContactType");
-
-                    b.HasIndex("CountryId");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("TenantId");
-
-                    b.HasIndex("EmployeeId", "IsPrimary");
-
-                    b.ToTable("EmployeeContacts");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeContractDetail", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("AnnualLeaveEntitlementDays")
-                        .HasColumnType("int");
-
                     b.Property<DateOnly?>("ConfirmationDate")
-                        .HasColumnType("date");
-
-                    b.Property<DateOnly?>("ContractEndDate")
                         .HasColumnType("date");
 
                     b.Property<string>("ContractNumber")
@@ -11237,6 +10889,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("ContractStatus")
                         .HasColumnType("int");
 
+                    b.Property<int>("ContractType")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -11246,33 +10901,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("CurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateOnly>("EffectiveDate")
-                        .HasColumnType("date");
-
                     b.Property<Guid>("EmployeeId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("EmploymentType")
-                        .HasColumnType("int");
 
                     b.Property<DateOnly?>("EndDate")
                         .HasColumnType("date");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsCurrent")
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsDeleted")
@@ -11287,10 +10928,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("Notes")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
                     b.Property<int>("PayFrequency")
                         .HasColumnType("int");
 
@@ -11302,10 +10939,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<int>("SickDaysPerYear")
                         .HasColumnType("int");
-
-                    b.Property<string>("SpecialConditions")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date");
@@ -11338,9 +10971,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal?>("WithholdingTaxRate")
                         .HasColumnType("decimal(18,4)");
-
-                    b.Property<int>("WorkSchedule")
-                        .HasColumnType("int");
 
                     b.Property<int>("WorkingHoursPerWeek")
                         .HasColumnType("int");
@@ -12163,9 +11793,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateOnly?>("ExpiryDate")
-                        .HasColumnType("date");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -12174,9 +11801,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid>("PolicyId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("PositionAmount")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid>("PositionId")
                         .HasColumnType("uniqueidentifier");
@@ -13831,415 +13455,6 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("OrganizationUnitHistories", (string)null);
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBackpayException", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("Applicable")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("CalculationType")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<Guid?>("EmployeeProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("OperationType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "OperationType");
-
-                    b.HasIndex("TenantId", "OperationType", "EmployeeNumber")
-                        .IsUnique();
-
-                    b.ToTable("PayrollBackpayExceptions");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBackpayPolicy", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("ApplySsf")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ApplyTax")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("CalculationType")
-                        .HasColumnType("int");
-
-                    b.Property<string>("CategoryType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("EffectiveDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime?>("MinimumServiceDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("MinimumServiceMode")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<decimal?>("MinimumServiceValue")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("NumberOfMonths")
-                        .HasColumnType("int");
-
-                    b.Property<string>("OperationType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "OperationType")
-                        .IsUnique();
-
-                    b.ToTable("PayrollBackpayPolicies");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBackpayRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("Applicable")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("CalculationType")
-                        .HasColumnType("int");
-
-                    b.Property<string>("CategoryCode")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<string>("CategoryName")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("CategoryType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("OperationType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "OperationType", "CategoryType");
-
-                    b.HasIndex("TenantId", "OperationType", "CategoryType", "CategoryCode")
-                        .IsUnique();
-
-                    b.ToTable("PayrollBackpayRules");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBankBranch", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AccountCode")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("BankCode")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
-                    b.Property<string>("BranchCode")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
-                    b.Property<string>("BranchDescription")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("BranchSetupCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("Region")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("SortCode")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "BankCode");
-
-                    b.HasIndex("TenantId", "BankCode", "BranchCode", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollBankBranches");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBonusException", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("Applicable")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("BonusCode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<int>("CalculationType")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CurrencyCode")
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid?>("EmployeeProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<bool>("Taxable")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeProfileId");
-
-                    b.HasIndex("TenantId", "BonusCode");
-
-                    b.HasIndex("TenantId", "BonusCode", "EmployeeNumber")
-                        .IsUnique();
-
-                    b.ToTable("PayrollBonusExceptions");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBonusPolicy", b =>
                 {
                     b.Property<Guid>("Id")
@@ -14249,15 +13464,8 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<decimal?>("AnnualSalaryPercentToTax")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<int>("CalculationType")
                         .HasColumnType("int");
-
-                    b.Property<string>("Category")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -14272,10 +13480,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Cycle")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
 
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
@@ -14292,15 +13496,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int?>("LastPayPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("LastPayPeriodDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int?>("MinimumMonths")
-                        .HasColumnType("int");
-
                     b.Property<decimal?>("MinimumToTax")
                         .HasColumnType("decimal(18,4)");
 
@@ -14308,18 +13503,6 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
-
-                    b.Property<int?>("NextPayPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("NextPayPeriodDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("PaySeparate")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("PerAnnual")
-                        .HasColumnType("bit");
 
                     b.Property<bool>("Prorate")
                         .HasColumnType("bit");
@@ -14353,653 +13536,11 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PayrollBonusPolicies");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBonusRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("Applicable")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("BonusCode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<int>("CalculationType")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("GroupCode")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "BonusCode");
-
-                    b.HasIndex("TenantId", "BonusCode", "GroupCode")
-                        .IsUnique();
-
-                    b.ToTable("PayrollBonusRules");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBusinessUnit", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AccountsCode")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("AddressLine1")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("AddressLine2")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("AddressLine3")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("BusinessUnitCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("BusinessUnitId")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("BusinessUnitName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("CompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyPayBasis")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<string>("Country")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("DefaultEmployeePaymentMethod")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("DistributeLicence")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("LicencePercentOrNumber")
-                        .HasMaxLength(1)
-                        .HasColumnType("nvarchar(1)");
-
-                    b.Property<int?>("LicenceValue")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Location")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<bool>("MultipleEmployeePaymentMethods")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("MultiplePayBasis")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("PayrollCompanyProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("RegionOrState")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PayrollCompanyProfileId");
-
-                    b.HasIndex("TenantId", "BusinessUnitId", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.HasIndex("TenantId", "CompanyId", "CompanyCode");
-
-                    b.ToTable("PayrollBusinessUnits");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCodeType", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AccountCode")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<bool>("Blocked")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("CodeType")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("Dependent")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("DependentOnCodeType")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "Blocked");
-
-                    b.HasIndex("TenantId", "CodeType", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollCodeTypes");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCodeValue", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AccountCode")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("ActualCode")
-                        .IsRequired()
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<string>("AdditionalDescription")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<bool>("Blocked")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("CodeType")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("DependentActualCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("DependentCodeType")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("PayrollCodeTypeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PayrollCodeTypeId");
-
-                    b.HasIndex("TenantId", "CodeType", "Blocked");
-
-                    b.HasIndex("TenantId", "CodeType", "ActualCode", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollCodeValues");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCompanyBanker", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AccountNumber1")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("AccountNumber2")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("AccountNumber3")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("Address1")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Address2")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Address3")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("BankBranch")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("BankCode")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("BankRegion")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyCode")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyId")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid?>("PayrollCompanyProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Signatory1")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Signatory2")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Signatory3")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("SignatoryPosition1")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("SignatoryPosition2")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("SignatoryPosition3")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PayrollCompanyProfileId");
-
-                    b.HasIndex("TenantId", "LegacyCompanyCode");
-
-                    b.HasIndex("TenantId", "CompanyId", "CompanyCode", "BankCode", "BankBranch");
-
-                    b.ToTable("PayrollCompanyBankers");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCompanyProfile", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AddressLine1")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("AddressLine2")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("AddressLine3")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int?>("BusinessNumber")
-                        .HasColumnType("int");
-
-                    b.Property<string>("CityOrTown")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<string>("CompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyId")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("CompanyPayBasis")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<string>("CompanySystemName")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("Country")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("DefaultEmployeePaymentMethod")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<int?>("LicenceNo")
-                        .HasColumnType("int");
-
-                    b.Property<string>("LicencePercentOrNumber")
-                        .HasMaxLength(1)
-                        .HasColumnType("nvarchar(1)");
-
-                    b.Property<string>("LicenceType")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<string>("LogoName")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<bool>("MakeCompanyABusinessUnit")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("MultipleBusinessUnits")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("MultipleEmployeePaymentMethods")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("MultiplePayBasis")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("PictureName")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("RegionOrState")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<string>("SocialSecurityNo")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<bool>("SplitLicenceOnBusinessUnits")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("TaxpayerIdNo")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "CompanyId")
-                        .IsUnique();
-
-                    b.HasIndex("TenantId", "CompanyCode", "LegacyCompanyCode");
-
-                    b.ToTable("PayrollCompanyProfiles");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollComponent", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("AfterTaxContribution")
-                        .HasColumnType("bit");
 
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
@@ -15007,15 +13548,8 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("AppliesByDefault")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("ApplyToBenefit")
-                        .HasColumnType("bit");
-
                     b.Property<int>("CalculationType")
                         .HasColumnType("int");
-
-                    b.Property<string>("Category")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -15039,18 +13573,11 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(8)
                         .HasColumnType("nvarchar(8)");
 
-                    b.Property<string>("Cycle")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("EmployerAmount")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<bool>("EmployerTaxable")
                         .HasColumnType("bit");
@@ -15070,22 +13597,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTime?>("LastPayDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<decimal?>("MaxBenefitToTax")
-                        .HasColumnType("decimal(18,4)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
-
-                    b.Property<int?>("NextPayPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("NextPayPeriodDate")
-                        .HasColumnType("datetime2");
 
                     b.Property<bool>("Prorate")
                         .HasColumnType("bit");
@@ -15095,12 +13610,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<bool>("SeparateTax")
                         .HasColumnType("bit");
-
-                    b.Property<decimal?>("SeparateTaxPercent")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("TaxFreeCeiling")
-                        .HasColumnType("decimal(18,4)");
 
                     b.Property<bool>("Taxable")
                         .HasColumnType("bit");
@@ -15116,300 +13625,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "ComponentType", "Code")
+                    b.HasIndex("TenantId", "Code")
                         .IsUnique();
 
                     b.HasIndex("TenantId", "ComponentType", "IsActive");
 
                     b.ToTable("PayrollComponents");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollComponentRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("AfterTax")
-                        .HasColumnType("bit");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("Applicable")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("CalculationType")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Category")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<string>("ComponentCode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<int>("ComponentType")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("EmployerAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("EmployerTaxable")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<decimal?>("TaxFreeCeiling")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "ComponentType", "ComponentCode");
-
-                    b.HasIndex("TenantId", "ComponentType", "ComponentCode", "Category")
-                        .IsUnique();
-
-                    b.ToTable("PayrollComponentRules");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollContributionOpeningBalance", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("BalanceAsAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ContributionCode")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("ContributionCodeType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("ContributionName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("EmployeeProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("LegacyEmployeeId")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<decimal>("OpeningBalance")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("EmployeeProfileId");
-
-                    b.HasIndex("TenantId", "EmployeeNumber");
-
-                    b.HasIndex("TenantId", "ContributionCodeType", "ContributionCode", "EmployeeProfileId")
-                        .IsUnique();
-
-                    b.HasIndex("TenantId", "ContributionCodeType", "ContributionCode", "IsActive");
-
-                    b.ToTable("PayrollContributionOpeningBalances");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollContributionTransaction", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<string>("ContributionCode")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("ContributionCodeType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("ContributionName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("EffectiveDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("EmployeeProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("LegacyEmployeeId")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("TransactionType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("EmployeeProfileId");
-
-                    b.HasIndex("TenantId", "IsActive", "EffectiveDate");
-
-                    b.HasIndex("TenantId", "EmployeeProfileId", "ContributionCode", "EffectiveDate");
-
-                    b.HasIndex("TenantId", "ContributionCodeType", "ContributionCode", "TransactionType", "EffectiveDate");
-
-                    b.ToTable("PayrollContributionTransactions");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeComponent", b =>
@@ -15436,10 +13657,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("CurrencyCodeOverride")
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -15455,15 +13672,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("EmployeeProfileId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<decimal?>("EmployerAmountOverride")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool?>("EmployerTaxableOverride")
-                        .HasColumnType("bit");
-
-                    b.Property<bool?>("GrossUpOverride")
-                        .HasColumnType("bit");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -15475,12 +13683,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal?>("RateOverride")
                         .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("TaxFreeCeilingOverride")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool?>("TaxableOverride")
-                        .HasColumnType("bit");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -15606,453 +13808,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "PayrollActive");
 
                     b.ToTable("PayrollEmployeeProfiles");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeTaxRelief", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int>("CalculationType")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("EmployeeProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Factor")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("ReliefCode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("ReliefName")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("EmployeeProfileId");
-
-                    b.HasIndex("TenantId", "EmployeeProfileId", "IsActive");
-
-                    b.HasIndex("TenantId", "ReliefCode", "EmployeeProfileId")
-                        .IsUnique();
-
-                    b.HasIndex("TenantId", "ReliefCode", "IsActive");
-
-                    b.ToTable("PayrollEmployeeTaxReliefs");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollExchangeRate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<int>("PayPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("PayPeriodFrom")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("PayPeriodTo")
-                        .HasColumnType("datetime2");
-
-                    b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "PayPeriodFrom", "PayPeriodTo");
-
-                    b.HasIndex("TenantId", "CurrencyCode", "PayPeriod", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollExchangeRates");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollGrade", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("BusinessUnitId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("Ceiling")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("EndDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("EnforceNotchConsistency")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("GradeId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("GradeName")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<string>("GradeType")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<decimal?>("IncrementStep")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<decimal?>("MaxValue")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("MidPoint")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("MinValue")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("OrderField")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ReportingName")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime?>("StartDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("StartPoint")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("SystemGradeName")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "GradeId", "LegacyCompanyCode");
-
-                    b.HasIndex("TenantId", "GradeName", "CurrencyCode", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollGrades");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollGradeNotch", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("AnnualisedValue")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("BusinessUnitId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CompanyId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("EndDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("GradeId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("GradeName")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<decimal?>("HourlyRate")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("Notch")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<int?>("OrderField")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("PayrollGradeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ReportingName")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime?>("StartDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("SystemGradeName")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("Value")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PayrollGradeId");
-
-                    b.HasIndex("TenantId", "GradeName", "Notch", "LegacyCompanyCode");
-
-                    b.HasIndex("TenantId", "PayrollGradeId", "Notch", "CurrencyCode", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollGradeNotches");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollHoliday", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime>("HolidayDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "HolidayDate", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollHolidays");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollImportBatch", b =>
@@ -16368,335 +14123,6 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PayrollJournalMappings");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLeaveSetup", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Category")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CategoryDetail")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "Category", "CategoryDetail", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollLeaveSetups");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLeaveSetupDetail", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Category")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("CategoryDetail")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("Days")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("PayrollLeaveSetupId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("SequenceNo")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("ServiceFrom")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("ServiceTo")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PayrollLeaveSetupId");
-
-                    b.HasIndex("TenantId", "PayrollLeaveSetupId", "SequenceNo");
-
-                    b.HasIndex("TenantId", "Category", "CategoryDetail", "LegacyCompanyCode");
-
-                    b.ToTable("PayrollLeaveSetupDetails");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLegacyMenuSecurity", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("Allowed")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("CanEdit")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("FormCode")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<string>("FormName")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<string>("GroupName")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("SubMenu")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("TopMenu")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "GroupName", "Allowed");
-
-                    b.HasIndex("TenantId", "FormCode", "UserName", "GroupName", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollLegacyMenuSecurity");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLegacyMenuUser", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("BusinessUnitId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<bool>("CanApprove")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("CanViewSalary")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("CompanyId")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LastPasswordChange")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("LegacyPasswordHash")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<bool>("Locked")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("LoginEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("PasswordChangeRequired")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("PasswordExpiryDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("PasswordFailureCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RefreshToken")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("UserGroup")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<string>("UserNo")
-                        .IsRequired()
-                        .HasMaxLength(6)
-                        .HasColumnType("nvarchar(6)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "UserGroup");
-
-                    b.HasIndex("TenantId", "LoginEnabled", "Locked");
-
-                    b.HasIndex("TenantId", "UserName", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollLegacyMenuUsers");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLoan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -16732,15 +14158,8 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
-                    b.Property<string>("GeneralRemarks")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
                     b.Property<decimal>("InterestRatePercent")
                         .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("InterestRepaymentAmount")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -16753,10 +14172,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LoanPolicyId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LoanTypeCode")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
 
                     b.Property<decimal>("MonthlyRepaymentAmount")
                         .HasColumnType("decimal(18,2)");
@@ -16773,34 +14188,8 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("PaymentStartDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<int?>("PeriodOfSuspension")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RepaymentMode")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<DateTime?>("SuspensionEndDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("SuspensionNarration")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime?>("SuspensionStartDate")
-                        .HasColumnType("datetime2");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("TotalInterest")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -16819,8 +14208,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "IsActive", "PaymentStartDate");
 
-                    b.HasIndex("TenantId", "Status", "PaymentStartDate");
-
                     b.ToTable("PayrollLoans");
                 });
 
@@ -16829,9 +14216,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("ApplyInterest")
-                        .HasColumnType("bit");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -16870,10 +14254,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
                     b.Property<decimal?>("MaxDebitRatioPercent")
                         .HasColumnType("decimal(18,4)");
 
@@ -16899,9 +14279,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Code", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
 
                     b.ToTable("PayrollLoanPolicies");
                 });
@@ -16911,9 +14290,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("ActualRepaymentDate")
-                        .HasColumnType("datetime2");
 
                     b.Property<decimal>("AmountPaid")
                         .HasColumnType("decimal(18,2)");
@@ -16935,9 +14311,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal>("InterestAmount")
                         .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("InterestPaid")
-                        .HasColumnType("decimal(18,4)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -16977,68 +14350,6 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("PayrollLoanSchedules");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollNonWorkingDay", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("DayCode")
-                        .IsRequired()
-                        .HasMaxLength(1)
-                        .HasColumnType("nvarchar(1)");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<decimal?>("OvertimeRate")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "DayCode", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
-
-                    b.ToTable("PayrollNonWorkingDays");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollOvertimePolicy", b =>
@@ -17082,51 +14393,13 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<decimal?>("LeaveRecallRate")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<decimal?>("MaxOvertimeAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<bool>("MaxOvertimeIsPercent")
-                        .HasColumnType("bit");
-
-                    b.Property<decimal?>("MaxOvertimeSeparateTax")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("MaxOvertimeType")
-                        .HasMaxLength(1)
-                        .HasColumnType("nvarchar(1)");
-
-                    b.Property<decimal?>("MinimumBasicForSeparateTax")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("MinimumSeparateOvertimePercent")
-                        .HasColumnType("decimal(18,4)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
 
-                    b.Property<decimal?>("NormalHours")
-                        .HasColumnType("decimal(18,4)");
-
                     b.Property<decimal>("NormalWorkingHours")
                         .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("PayPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("PayPeriodFrom")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("PayPeriodTo")
-                        .HasColumnType("datetime2");
 
                     b.Property<bool>("SeparateOvertimeTax")
                         .HasColumnType("bit");
@@ -17154,75 +14427,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Code", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
 
                     b.HasIndex("TenantId", "IsDefault", "IsActive");
 
                     b.ToTable("PayrollOvertimePolicies");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollOvertimeRange", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<decimal>("MaxRange")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("MinRange")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid>("PayrollOvertimePolicyId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PayrollOvertimePolicyId");
-
-                    b.HasIndex("TenantId", "PayrollOvertimePolicyId", "MinRange", "MaxRange")
-                        .IsUnique();
-
-                    b.ToTable("PayrollOvertimeRanges");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollParameterSet", b =>
@@ -17230,9 +14440,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("AllowEmployeePaymentMethod")
-                        .HasColumnType("bit");
 
                     b.Property<string>("BaseCurrency")
                         .IsRequired()
@@ -17265,22 +14472,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("CurrentPeriodTo")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("DateFormat")
-                        .IsRequired()
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<decimal?>("DebitRatio")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("DefaultEmployeePaymentMethod")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)");
-
-                    b.Property<string>("DefaultPayBasis")
-                        .HasMaxLength(12)
-                        .HasColumnType("nvarchar(12)");
-
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -17293,12 +14484,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("EmployerSsfRate")
                         .HasColumnType("decimal(18,4)");
 
-                    b.Property<decimal?>("ExchangeRate")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("FemaleRetireAge")
-                        .HasColumnType("int");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -17308,42 +14493,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("LeaveClassification")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<int?>("MaleRetireAge")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("MaxLoginCount")
-                        .HasColumnType("int");
-
                     b.Property<decimal>("MinimumBonusToTax")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("MinimumHireAge")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("MinimumPasswordLength")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("MinimumPasswordLowercase")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("MinimumPasswordNumbers")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("MinimumPasswordSpecialCharacters")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("MinimumPasswordUppercase")
-                        .HasColumnType("int");
-
-                    b.Property<decimal?>("MinimumTaxableIncome")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("MonthDays")
@@ -17352,43 +14502,13 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("MultiCurrencyEnabled")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("MultiLoginEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("MultiplePayBasisEnabled")
-                        .HasColumnType("bit");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
 
-                    b.Property<decimal?>("NightAllowanceAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("NightAllowancePercent")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("PasswordExpirationDays")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("PasswordReuseCount")
-                        .HasColumnType("int");
-
                     b.Property<int>("PayFrequencyMonths")
                         .HasColumnType("int");
-
-                    b.Property<string>("PayMode")
-                        .HasMaxLength(1)
-                        .HasColumnType("nvarchar(1)");
-
-                    b.Property<string>("PictureDirectory")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("ReportingCurrency")
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
 
                     b.Property<bool>("SeparateBonusTax")
                         .HasColumnType("bit");
@@ -17396,21 +14516,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("SsfLimit")
                         .HasColumnType("decimal(18,4)");
 
-                    b.Property<decimal?>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("TimeSheetMode")
-                        .HasMaxLength(1)
-                        .HasColumnType("nvarchar(1)");
-
                     b.Property<bool>("TimesheetEnabled")
                         .HasColumnType("bit");
-
-                    b.Property<decimal?>("TotalAllowanceTaxCeiling")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -17691,106 +14801,6 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PayrollPensionSchemes");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollPromotionArrearsEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("BasicSalary")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("EffectiveDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("EmployeeProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("LegacyEmployeeId")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<int>("PayPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("PayPeriodFrom")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("PayPeriodTo")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("WorkingDays")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("EmployeeProfileId");
-
-                    b.HasIndex("TenantId", "EmployeeNumber")
-                        .IsUnique();
-
-                    b.HasIndex("TenantId", "EmployeeProfileId")
-                        .IsUnique();
-
-                    b.HasIndex("TenantId", "IsActive", "EffectiveDate");
-
-                    b.HasIndex("TenantId", "PayPeriod", "LegacyCompanyCode");
-
-                    b.ToTable("PayrollPromotionArrears");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollReportSnapshot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -17928,9 +14938,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsSeparateBonusRun")
-                        .HasColumnType("bit");
-
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -17963,10 +14970,6 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("SeparateBonusCode")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -18100,90 +15103,6 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PayrollRunEmployees");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollSalaryAdvance", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("AdvanceAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("AdvanceDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("EmployeeProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("EmployeeProfileId");
-
-                    b.HasIndex("TenantId", "EmployeeNumber", "AdvanceDate");
-
-                    b.HasIndex("TenantId", "EmployeeProfileId", "AdvanceDate");
-
-                    b.HasIndex("TenantId", "IsActive", "AdvanceDate");
-
-                    b.ToTable("PayrollSalaryAdvances");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollSalaryBasis", b =>
                 {
                     b.Property<Guid>("Id")
@@ -18274,21 +15193,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<decimal?>("CumulativeSalary")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("CumulativeTax")
-                        .HasColumnType("decimal(18,4)");
-
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
 
                     b.Property<DateTime>("EffectiveFrom")
                         .HasColumnType("datetime2");
@@ -18302,33 +15211,14 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsAnnual")
-                        .HasColumnType("bit");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
                     b.Property<decimal>("LowerBound")
                         .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("PayPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("PayPeriodFrom")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("PayPeriodTo")
-                        .HasColumnType("datetime2");
-
-                    b.Property<decimal?>("PerMonthAmount")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("RatePercent")
                         .HasColumnType("decimal(18,4)");
@@ -18340,9 +15230,6 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
-
-                    b.Property<decimal?>("TaxableIncome")
-                        .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -18358,13 +15245,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "PayPeriod", "LegacyCompanyCode");
-
                     b.HasIndex("TenantId", "TaxType", "IsActive");
 
-                    b.HasIndex("TenantId", "TaxType", "SerialNo", "EffectiveFrom", "IsAnnual", "LegacyCompanyCode")
-                        .IsUnique()
-                        .HasFilter("[LegacyCompanyCode] IS NOT NULL");
+                    b.HasIndex("TenantId", "TaxType", "SerialNo", "EffectiveFrom")
+                        .IsUnique();
 
                     b.ToTable("PayrollTaxBands");
                 });
@@ -18467,41 +15351,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid?>("EmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("EmployeeNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
                     b.Property<Guid>("EmployeeProfileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("HolidayHours")
                         .HasColumnType("decimal(18,4)");
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LegacyCompanyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<string>("LegacyEmployeeId")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
 
                     b.Property<decimal>("NightShiftCount")
                         .HasColumnType("decimal(18,4)");
@@ -18521,20 +15381,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("PayPeriodTo")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("RecordSource")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
                     b.Property<string>("Remarks")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
-
-                    b.Property<decimal>("SaturdayHours")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("SundayHours")
-                        .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -18550,16 +15399,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmployeeId");
-
                     b.HasIndex("EmployeeProfileId");
-
-                    b.HasIndex("TenantId", "EmployeeNumber", "PayPeriod");
 
                     b.HasIndex("TenantId", "EmployeeProfileId", "PayPeriod")
                         .IsUnique();
-
-                    b.HasIndex("TenantId", "IsActive", "PayPeriod");
 
                     b.ToTable("PayrollTimesheetSummaries");
                 });
@@ -61997,89 +58840,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Unit");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBank", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
-                        .WithMany()
-                        .HasForeignKey("CountryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Country");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBankBranch", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeBank", "Bank")
-                        .WithMany("Branches")
-                        .HasForeignKey("BankId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
-                        .WithMany()
-                        .HasForeignKey("CountryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Bank");
-
-                    b.Navigation("Country");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBankDetail", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeBank", "Bank")
-                        .WithMany()
-                        .HasForeignKey("BankId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeBankBranch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany("BankDetails")
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "VerifiedBy")
-                        .WithMany()
-                        .HasForeignKey("VerifiedById");
-
-                    b.Navigation("Bank");
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("Tenant");
-
-                    b.Navigation("VerifiedBy");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBiometric", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
@@ -62093,32 +58853,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeContact", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
-                        .WithMany()
-                        .HasForeignKey("CountryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany("Contacts")
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Country");
 
                     b.Navigation("Employee");
 
@@ -62865,157 +59599,7 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBackpayException", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBackpayPolicy", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBackpayRule", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBankBranch", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBonusException", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
-                        .WithMany()
-                        .HasForeignKey("EmployeeProfileId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("EmployeeProfile");
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBonusPolicy", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBonusRule", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBusinessUnit", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollCompanyProfile", "PayrollCompanyProfile")
-                        .WithMany("BusinessUnits")
-                        .HasForeignKey("PayrollCompanyProfileId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PayrollCompanyProfile");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCodeType", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCodeValue", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollCodeType", "PayrollCodeType")
-                        .WithMany("Values")
-                        .HasForeignKey("PayrollCodeTypeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PayrollCodeType");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCompanyBanker", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollCompanyProfile", "PayrollCompanyProfile")
-                        .WithMany("Bankers")
-                        .HasForeignKey("PayrollCompanyProfileId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PayrollCompanyProfile");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCompanyProfile", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -63033,69 +59617,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollComponentRule", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollContributionOpeningBalance", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
-                        .WithMany()
-                        .HasForeignKey("EmployeeProfileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("EmployeeProfile");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollContributionTransaction", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
-                        .WithMany()
-                        .HasForeignKey("EmployeeProfileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("EmployeeProfile");
 
                     b.Navigation("Tenant");
                 });
@@ -63149,85 +59670,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("DefaultPaymentMethod");
 
                     b.Navigation("Employee");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeTaxRelief", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
-                        .WithMany()
-                        .HasForeignKey("EmployeeProfileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("EmployeeProfile");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollExchangeRate", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollGrade", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollGradeNotch", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollGrade", "PayrollGrade")
-                        .WithMany("Notches")
-                        .HasForeignKey("PayrollGradeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PayrollGrade");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollHoliday", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -63299,58 +59741,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLeaveSetup", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLeaveSetupDetail", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollLeaveSetup", "PayrollLeaveSetup")
-                        .WithMany("Details")
-                        .HasForeignKey("PayrollLeaveSetupId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PayrollLeaveSetup");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLegacyMenuSecurity", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLegacyMenuUser", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLoan", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
@@ -63407,17 +59797,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollNonWorkingDay", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollOvertimePolicy", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -63425,25 +59804,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollOvertimeRange", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollOvertimePolicy", "PayrollOvertimePolicy")
-                        .WithMany("Ranges")
-                        .HasForeignKey("PayrollOvertimePolicyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PayrollOvertimePolicy");
 
                     b.Navigation("Tenant");
                 });
@@ -63524,33 +59884,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollPromotionArrearsEntry", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
-                        .WithMany()
-                        .HasForeignKey("EmployeeProfileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("EmployeeProfile");
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollReportSnapshot", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollRun", "PayrollRun")
@@ -63608,33 +59941,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollSalaryAdvance", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
-                        .WithMany("SalaryAdvances")
-                        .HasForeignKey("EmployeeProfileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("EmployeeProfile");
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollSalaryBasis", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
@@ -63678,11 +59984,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollTimesheetSummary", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("ErpSystem.Core.Entities.HR.Payroll.PayrollEmployeeProfile", "EmployeeProfile")
                         .WithMany()
                         .HasForeignKey("EmployeeProfileId")
@@ -63694,8 +59995,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Employee");
 
                     b.Navigation("EmployeeProfile");
 
@@ -74502,11 +70801,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("AttendanceRecords");
 
-                    b.Navigation("BankDetails");
-
                     b.Navigation("Biometrics");
-
-                    b.Navigation("Contacts");
 
                     b.Navigation("ContractDetails");
 
@@ -74549,11 +70844,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("TechnicianSchedules");
 
                     b.Navigation("WorkHistories");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBank", b =>
-                {
-                    b.Navigation("Branches");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeDependent", b =>
@@ -74622,18 +70912,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Positions");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCodeType", b =>
-                {
-                    b.Navigation("Values");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollCompanyProfile", b =>
-                {
-                    b.Navigation("Bankers");
-
-                    b.Navigation("BusinessUnits");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollComponent", b =>
                 {
                     b.Navigation("EmployeeComponents");
@@ -74649,14 +70927,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("PaymentMethods");
 
-                    b.Navigation("SalaryAdvances");
-
                     b.Navigation("SalaryBasis");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollGrade", b =>
-                {
-                    b.Navigation("Notches");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollImportBatch", b =>
@@ -74664,19 +70935,9 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Rows");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLeaveSetup", b =>
-                {
-                    b.Navigation("Details");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollLoan", b =>
                 {
                     b.Navigation("Schedules");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollOvertimePolicy", b =>
-                {
-                    b.Navigation("Ranges");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollRun", b =>
