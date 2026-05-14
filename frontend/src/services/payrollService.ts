@@ -578,6 +578,77 @@ export interface PayrollLegacyMenuItem {
   implemented: boolean;
 }
 
+export interface PayrollBudgetAnalysisRowAdjustment {
+  orderField: number;
+  transactionType: string;
+  actualTransaction?: string | null;
+  amount1?: number | null;
+  include1?: boolean | null;
+  amount2?: number | null;
+  include2?: boolean | null;
+  amount3?: number | null;
+  include3?: boolean | null;
+}
+
+export interface PayrollBudgetAnalysisRequest {
+  payPeriod: number;
+  basicPercent1: number;
+  basicPercent2: number;
+  basicPercent3: number;
+  adjustments?: PayrollBudgetAnalysisRowAdjustment[];
+  rows?: PayrollBudgetAnalysisRow[];
+}
+
+export interface PayrollBudgetAnalysisRow {
+  orderField: number;
+  payPeriod: number;
+  payPeriodFrom?: string | null;
+  payPeriodTo?: string | null;
+  transactionType: string;
+  actualTransaction?: string | null;
+  description: string;
+  percentage: boolean;
+  baseAmount: number;
+  amount1: number;
+  include1: boolean;
+  newAmount1: number;
+  variance1: number;
+  percent1: number;
+  amount2: number;
+  include2: boolean;
+  newAmount2: number;
+  variance2: number;
+  percent2: number;
+  amount3: number;
+  include3: boolean;
+  newAmount3: number;
+  variance3: number;
+  percent3: number;
+  companyCode: string;
+}
+
+export interface PayrollBudgetAnalysis {
+  menuId: string;
+  sourceForm: string;
+  sourceReport: string;
+  reportName: string;
+  payPeriod: number;
+  payPeriodFrom?: string | null;
+  payPeriodTo?: string | null;
+  companyCode: string;
+  basicPercent1: number;
+  basicPercent2: number;
+  basicPercent3: number;
+  totalBaseAmount: number;
+  totalNewAmount1: number;
+  totalNewAmount2: number;
+  totalNewAmount3: number;
+  totalVariance1: number;
+  totalVariance2: number;
+  totalVariance3: number;
+  rows: PayrollBudgetAnalysisRow[];
+}
+
 export interface PayrollCodeType {
   id?: string;
   codeType: string;
@@ -1126,6 +1197,70 @@ export interface PayrollSummaryReport {
   snapshot?: PayrollReportSnapshot | null;
 }
 
+export interface PayrollOracleReportRequest {
+  reportCode: string;
+  variantCode?: string | null;
+  departmentFrom?: string | null;
+  departmentTo?: string | null;
+  employeeNumberFrom?: string | null;
+  employeeNumberTo?: string | null;
+  bankFrom?: string | null;
+  bankTo?: string | null;
+  branchFrom?: string | null;
+  branchTo?: string | null;
+  locationFrom?: string | null;
+  locationTo?: string | null;
+  regionCode?: string | null;
+  departmentCode?: string | null;
+  componentCodeFrom?: string | null;
+  componentCodeTo?: string | null;
+  accountNumber?: string | null;
+  signer1?: string | null;
+  signer2?: string | null;
+  signer3?: string | null;
+  position1?: string | null;
+  position2?: string | null;
+  position3?: string | null;
+  reportingCurrency?: string | null;
+  loanType?: string | null;
+  facilityNumber?: string | null;
+  loanReportCategory?: string | null;
+}
+
+export interface PayrollOracleReportColumn {
+  key: string;
+  header: string;
+  alignment: 'left' | 'right' | string;
+  valueType: 'text' | 'number' | 'currency' | string;
+}
+
+export interface PayrollOracleReportRow {
+  values: Record<string, string | number | boolean | null | undefined>;
+}
+
+export interface PayrollOracleReport {
+  payrollRunId: string;
+  runNumber: string;
+  reportCode: string;
+  reportName: string;
+  variantCode: string;
+  variantName: string;
+  sourceForm: string;
+  sourceReport: string;
+  periodLabel: string;
+  companyCode: string;
+  currencyCode: string;
+  generatedAt: string;
+  parameters: Array<{
+    oracleName: string;
+    label: string;
+    value?: string | null;
+  }>;
+  columns: PayrollOracleReportColumn[];
+  rows: PayrollOracleReportRow[];
+  totalRows: number;
+}
+
 export interface PayrollReportSnapshot {
   id: string;
   payrollRunId: string;
@@ -1296,9 +1431,17 @@ export interface PagedResult<T> {
   pageSize: number;
 }
 
+export const buildPayrollBudgetAnalysis = (payload: PayrollBudgetAnalysisRequest) =>
+  apiRequest<PayrollBudgetAnalysis>('/hr/payroll/setup/budget-analysis', { method: 'POST', body: JSON.stringify(payload) });
+
+export const savePayrollBudgetAnalysis = (payload: PayrollBudgetAnalysisRequest) =>
+  apiRequest<PayrollBudgetAnalysis>('/hr/payroll/setup/budget-analysis/save', { method: 'POST', body: JSON.stringify(payload) });
+
 export const payrollService = {
   getLegacyMenu: () => apiRequest<PayrollLegacyMenuItem[]>('/hr/payroll/legacy-menu'),
   getSetupSummary: () => apiRequest<PayrollSetupSummary>('/hr/payroll/setup-summary'),
+  buildBudgetAnalysis: buildPayrollBudgetAnalysis,
+  saveBudgetAnalysis: savePayrollBudgetAnalysis,
   getCodeSetup: (codeType?: string) =>
     apiRequest<PayrollCodeSetup>(`/hr/payroll/setup/codes${buildQuery({ codeType })}`),
   upsertCodeType: (payload: PayrollCodeType) =>
@@ -1449,6 +1592,8 @@ export const payrollService = {
     apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/rollback`, { method: 'POST', body: JSON.stringify({ notes }) }),
   getRunSummary: (runId: string, createSnapshot = false) =>
     apiRequest<PayrollSummaryReport>(`/hr/payroll/runs/${runId}/summary${buildQuery({ createSnapshot })}`),
+  getOracleRunReport: (runId: string, payload: PayrollOracleReportRequest) =>
+    apiRequest<PayrollOracleReport>(`/hr/payroll/runs/${runId}/oracle-report`, { method: 'POST', body: JSON.stringify(payload) }),
   getPayslips: (runId: string, filters?: string | PayrollPayslipFilters) => {
     const query = typeof filters === 'string'
       ? { employeeId: filters }

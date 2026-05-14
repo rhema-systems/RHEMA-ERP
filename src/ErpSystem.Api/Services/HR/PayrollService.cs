@@ -55,6 +55,7 @@ public class PayrollService : IPayrollService
         Menu("A0000117", "A00001", "Allowances & Deductions Setup", "Main Menu > Setup > Allowances & Deductions Setup", "Form", "PR3_009.fmb", "001", 17),
         Menu("A0000118", "A00001", "Bonus Setup", "Main Menu > Setup > Bonus Setup", "Form", "PR3_022.fmb", "001", 18),
         Menu("A0000119", "A00001", "Backpay / Salary Increase", "Main Menu > Setup > Backpay / Salary Increase", "Form", "PR3_023.fmb", "001", 19, true),
+        Menu("A0000131", "A00001", "Budget Analysis", "Main Menu > Setup > Budget Analysis", "Form", "PR3_032.fmb", "DEMO", 31, true),
         Menu("A00002", "A000", "Payroll Process", "Main Menu > Payroll Process", "Folder", null, "001", 2),
         Menu("A0000212", "A00002", "Allowances & Ded Exception", "Main Menu > Payroll Process > Allowances & Ded Exception", "Form", "PR3_021.fmb", "001", 17, true),
         Menu("A0000215", "A00002", "Overtime Summary", "Main Menu > Payroll Process > Overtime Summary", "Form", "PR3_016.fmb", "001", 21, true),
@@ -323,6 +324,502 @@ public class PayrollService : IPayrollService
             Grades = grades.Select(ToDto).ToList()
         };
     }
+
+    public async Task<PayrollBudgetAnalysisDto> BuildBudgetAnalysisAsync(
+        Guid tenantId,
+        PayrollBudgetAnalysisRequestDto dto,
+        CancellationToken cancellationToken = default)
+        => await BuildBudgetAnalysisAsync(tenantId, dto, loadSavedRows: true, cancellationToken);
+
+    public async Task<PayrollBudgetAnalysisDto> SaveBudgetAnalysisAsync(
+        Guid tenantId,
+        PayrollBudgetAnalysisRequestDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var companyCode = await ResolvePayrollCompanyCodeAsync(tenantId, cancellationToken);
+        var submittedRows = dto.Rows ?? [];
+        var result = submittedRows.Count > 0
+            ? BuildBudgetAnalysisDtoFromRows(
+                dto.PayPeriod > 0 ? dto.PayPeriod : submittedRows.First().PayPeriod,
+                companyCode,
+                dto,
+                submittedRows)
+            : await BuildBudgetAnalysisAsync(tenantId, dto, loadSavedRows: false, cancellationToken);
+
+        await PersistBudgetAnalysisAsync(tenantId, result, cancellationToken);
+        return result;
+    }
+
+    private async Task<PayrollBudgetAnalysisDto> BuildBudgetAnalysisAsync(
+        Guid tenantId,
+        PayrollBudgetAnalysisRequestDto dto,
+        bool loadSavedRows,
+        CancellationToken cancellationToken = default)
+    {
+        var payPeriod = await ResolveBudgetAnalysisPayPeriodAsync(tenantId, dto.PayPeriod, cancellationToken);
+        var companyCode = await ResolvePayrollCompanyCodeAsync(tenantId, cancellationToken);
+        if (payPeriod <= 0)
+        {
+            return new PayrollBudgetAnalysisDto
+            {
+                CompanyCode = companyCode,
+                BasicPercent1 = RoundMoney(dto.BasicPercent1),
+                BasicPercent2 = RoundMoney(dto.BasicPercent2),
+                BasicPercent3 = RoundMoney(dto.BasicPercent3)
+            };
+        }
+
+        var hasAdjustments = (dto.Adjustments ?? []).Count > 0;
+        var hasScenarioInput = dto.BasicPercent1 != 0m || dto.BasicPercent2 != 0m || dto.BasicPercent3 != 0m;
+        if (loadSavedRows && !hasAdjustments && !hasScenarioInput)
+        {
+            var savedRows = await _context.PayrollBudgetAnalysisRows
+                .AsNoTracking()
+                .Where(e => e.TenantId == tenantId && e.CompanyCode == companyCode && e.PayPeriod == payPeriod)
+                .OrderBy(e => e.OrderField)
+                .ThenBy(e => e.Description)
+                .ToListAsync(cancellationToken);
+            if (savedRows.Count > 0)
+            {
+                return BuildBudgetAnalysisDtoFromRows(
+                    payPeriod,
+                    companyCode,
+                    dto,
+                    savedRows.Select(ToBudgetAnalysisRowDto).ToList());
+            }
+        }
+
+        var runs = await _context.PayrollRuns
+            .AsNoTracking()
+            .Include(e => e.Employees)
+            .Include(e => e.Transactions)
+                .ThenInclude(e => e.PayrollComponent)
+            .Where(e =>
+                e.TenantId == tenantId &&
+                e.PayPeriod == payPeriod &&
+                e.Status != PayrollRunStatus.Draft &&
+                e.Status != PayrollRunStatus.RolledBack)
+            .OrderBy(e => e.RunDate)
+            .ToListAsync(cancellationToken);
+
+        var rowsByKey = new Dictionary<string, PayrollBudgetAnalysisAccumulator>(StringComparer.OrdinalIgnoreCase);
+        foreach (var run in runs)
+        {
+            AddBudgetAnalysisBaseRows(rowsByKey, run, companyCode);
+            foreach (var transaction in run.Transactions)
+            {
+                if (IsBudgetAnalysisAllowance(transaction))
+                {
+                    AddBudgetAnalysisAmount(
+                        rowsByKey,
+                        run,
+                        companyCode,
+                        2,
+                        "ALW",
+                        transaction.ComponentCode ?? transaction.TransactionType,
+                        transaction.Description ?? transaction.PayrollComponent?.Name ?? transaction.ComponentCode ?? "Allowance",
+                        transaction.Amount,
+                        transaction.PayrollComponent?.CalculationType == PayrollCalculationType.PercentageOfBasic);
+                }
+                else if (IsBudgetAnalysisContribution(transaction))
+                {
+                    var amount = transaction.EmployerAmount ?? transaction.Amount;
+                    AddBudgetAnalysisAmount(
+                        rowsByKey,
+                        run,
+                        companyCode,
+                        3,
+                        "CON",
+                        transaction.ComponentCode ?? transaction.TransactionType,
+                        transaction.Description ?? transaction.PayrollComponent?.Name ?? transaction.ComponentCode ?? "Contribution",
+                        amount,
+                        transaction.PayrollComponent?.CalculationType == PayrollCalculationType.PercentageOfBasic);
+                }
+            }
+        }
+
+        var adjustments = (dto.Adjustments ?? []).ToDictionary(
+            e => BuildBudgetAnalysisKey(e.OrderField, e.TransactionType, e.ActualTransaction),
+            StringComparer.OrdinalIgnoreCase);
+        var rows = rowsByKey.Values
+            .OrderBy(e => e.OrderField)
+            .ThenBy(e => e.Description)
+            .Select(row =>
+            {
+                adjustments.TryGetValue(BuildBudgetAnalysisKey(row.OrderField, row.TransactionType, row.ActualTransaction), out var adjustment);
+                return BuildBudgetAnalysisRow(row, dto, adjustment);
+            })
+            .ToList();
+
+        var periodFrom = runs.Count == 0 ? (DateTime?)null : runs.Min(e => e.PayPeriodFrom);
+        var periodTo = runs.Count == 0 ? (DateTime?)null : runs.Max(e => e.PayPeriodTo);
+
+        return new PayrollBudgetAnalysisDto
+        {
+            PayPeriod = payPeriod,
+            PayPeriodFrom = periodFrom,
+            PayPeriodTo = periodTo,
+            CompanyCode = companyCode,
+            BasicPercent1 = RoundMoney(dto.BasicPercent1),
+            BasicPercent2 = RoundMoney(dto.BasicPercent2),
+            BasicPercent3 = RoundMoney(dto.BasicPercent3),
+            Rows = rows,
+            TotalBaseAmount = RoundMoney(rows.Sum(e => e.BaseAmount)),
+            TotalNewAmount1 = RoundMoney(rows.Where(e => e.Include1).Sum(e => e.NewAmount1)),
+            TotalNewAmount2 = RoundMoney(rows.Where(e => e.Include2).Sum(e => e.NewAmount2)),
+            TotalNewAmount3 = RoundMoney(rows.Where(e => e.Include3).Sum(e => e.NewAmount3)),
+            TotalVariance1 = RoundMoney(rows.Where(e => e.Include1).Sum(e => e.Variance1)),
+            TotalVariance2 = RoundMoney(rows.Where(e => e.Include2).Sum(e => e.Variance2)),
+            TotalVariance3 = RoundMoney(rows.Where(e => e.Include3).Sum(e => e.Variance3))
+        };
+    }
+
+    private async Task<int> ResolveBudgetAnalysisPayPeriodAsync(Guid tenantId, int requestedPayPeriod, CancellationToken cancellationToken)
+    {
+        var payPeriod = requestedPayPeriod;
+        if (payPeriod <= 0)
+        {
+            payPeriod = await _context.PayrollParameterSets
+                .AsNoTracking()
+                .Where(e => e.TenantId == tenantId && e.IsActive && e.CurrentPayPeriod > 0)
+                .OrderBy(e => e.Code)
+                .Select(e => e.CurrentPayPeriod)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (payPeriod <= 0)
+        {
+            payPeriod = await _context.PayrollRuns
+                .AsNoTracking()
+                .Where(e => e.TenantId == tenantId && e.Status != PayrollRunStatus.Draft && e.Status != PayrollRunStatus.RolledBack)
+                .OrderByDescending(e => e.PayPeriod)
+                .Select(e => e.PayPeriod)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return payPeriod;
+    }
+
+    private async Task PersistBudgetAnalysisAsync(Guid tenantId, PayrollBudgetAnalysisDto analysis, CancellationToken cancellationToken)
+    {
+        var companyCode = NormalizeBudgetAnalysisCode(analysis.CompanyCode, "001");
+        var existingRows = await _context.PayrollBudgetAnalysisRows
+            .Where(e => e.TenantId == tenantId && e.CompanyCode == companyCode && e.PayPeriod == analysis.PayPeriod)
+            .ToListAsync(cancellationToken);
+
+        _context.PayrollBudgetAnalysisRows.RemoveRange(existingRows);
+
+        var periodFrom = analysis.PayPeriodFrom ?? analysis.Rows.FirstOrDefault(e => e.PayPeriodFrom.HasValue)?.PayPeriodFrom ?? DateTime.UtcNow.Date;
+        var periodTo = analysis.PayPeriodTo ?? analysis.Rows.FirstOrDefault(e => e.PayPeriodTo.HasValue)?.PayPeriodTo ?? periodFrom;
+        foreach (var row in analysis.Rows)
+        {
+            _context.PayrollBudgetAnalysisRows.Add(new PayrollBudgetAnalysisRow
+            {
+                TenantId = tenantId,
+                OrderField = row.OrderField,
+                PayPeriod = analysis.PayPeriod,
+                PayPeriodFrom = row.PayPeriodFrom ?? periodFrom,
+                PayPeriodTo = row.PayPeriodTo ?? periodTo,
+                TransactionType = NormalizeBudgetAnalysisCode(row.TransactionType, "BUD"),
+                ActualTransaction = NormalizeBudgetAnalysisCode(row.ActualTransaction, string.Empty),
+                Description = TruncateText(row.Description, 200),
+                Percentage = row.Percentage,
+                BaseAmount = RoundMoney(row.BaseAmount),
+                Amount1 = RoundMoney(row.Amount1),
+                Include1 = row.Include1,
+                NewAmount1 = RoundMoney(row.NewAmount1),
+                Amount2 = RoundMoney(row.Amount2),
+                Include2 = row.Include2,
+                NewAmount2 = RoundMoney(row.NewAmount2),
+                Amount3 = RoundMoney(row.Amount3),
+                Include3 = row.Include3,
+                NewAmount3 = RoundMoney(row.NewAmount3),
+                CompanyCode = companyCode
+            });
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static PayrollBudgetAnalysisDto BuildBudgetAnalysisDtoFromRows(
+        int payPeriod,
+        string companyCode,
+        PayrollBudgetAnalysisRequestDto request,
+        IEnumerable<PayrollBudgetAnalysisRowDto> sourceRows)
+    {
+        var rows = sourceRows
+            .Select(row => RecalculateBudgetAnalysisRow(row, payPeriod, companyCode))
+            .OrderBy(e => e.OrderField)
+            .ThenBy(e => e.Description)
+            .ToList();
+        var firstPercentageRow = rows.FirstOrDefault(e => e.Percentage);
+        var basicPercent1 = request.BasicPercent1 != 0m ? RoundMoney(request.BasicPercent1) : RoundMoney(firstPercentageRow?.Amount1 ?? 0m);
+        var basicPercent2 = request.BasicPercent2 != 0m ? RoundMoney(request.BasicPercent2) : RoundMoney(firstPercentageRow?.Amount2 ?? 0m);
+        var basicPercent3 = request.BasicPercent3 != 0m ? RoundMoney(request.BasicPercent3) : RoundMoney(firstPercentageRow?.Amount3 ?? 0m);
+        var periodFromValues = rows.Where(e => e.PayPeriodFrom.HasValue).Select(e => e.PayPeriodFrom!.Value).ToList();
+        var periodToValues = rows.Where(e => e.PayPeriodTo.HasValue).Select(e => e.PayPeriodTo!.Value).ToList();
+
+        return new PayrollBudgetAnalysisDto
+        {
+            PayPeriod = payPeriod,
+            PayPeriodFrom = periodFromValues.Count == 0 ? null : periodFromValues.Min(),
+            PayPeriodTo = periodToValues.Count == 0 ? null : periodToValues.Max(),
+            CompanyCode = companyCode,
+            BasicPercent1 = basicPercent1,
+            BasicPercent2 = basicPercent2,
+            BasicPercent3 = basicPercent3,
+            Rows = rows,
+            TotalBaseAmount = RoundMoney(rows.Sum(e => e.BaseAmount)),
+            TotalNewAmount1 = RoundMoney(rows.Where(e => e.Include1).Sum(e => e.NewAmount1)),
+            TotalNewAmount2 = RoundMoney(rows.Where(e => e.Include2).Sum(e => e.NewAmount2)),
+            TotalNewAmount3 = RoundMoney(rows.Where(e => e.Include3).Sum(e => e.NewAmount3)),
+            TotalVariance1 = RoundMoney(rows.Where(e => e.Include1).Sum(e => e.Variance1)),
+            TotalVariance2 = RoundMoney(rows.Where(e => e.Include2).Sum(e => e.Variance2)),
+            TotalVariance3 = RoundMoney(rows.Where(e => e.Include3).Sum(e => e.Variance3))
+        };
+    }
+
+    private static PayrollBudgetAnalysisRowDto RecalculateBudgetAnalysisRow(PayrollBudgetAnalysisRowDto row, int payPeriod, string companyCode)
+    {
+        var baseAmount = RoundMoney(row.BaseAmount);
+        var amount1 = RoundMoney(row.Amount1);
+        var amount2 = RoundMoney(row.Amount2);
+        var amount3 = RoundMoney(row.Amount3);
+        var newAmount1 = CalculateBudgetAnalysisNewAmount(baseAmount, amount1);
+        var newAmount2 = CalculateBudgetAnalysisNewAmount(baseAmount, amount2);
+        var newAmount3 = CalculateBudgetAnalysisNewAmount(baseAmount, amount3);
+        var variance1 = RoundMoney(newAmount1 - baseAmount);
+        var variance2 = RoundMoney(newAmount2 - baseAmount);
+        var variance3 = RoundMoney(newAmount3 - baseAmount);
+
+        return new PayrollBudgetAnalysisRowDto
+        {
+            OrderField = row.OrderField,
+            PayPeriod = payPeriod,
+            PayPeriodFrom = row.PayPeriodFrom,
+            PayPeriodTo = row.PayPeriodTo,
+            TransactionType = NormalizeBudgetAnalysisCode(row.TransactionType, "BUD"),
+            ActualTransaction = NormalizeBudgetAnalysisCode(row.ActualTransaction, string.Empty) is { Length: > 0 } actualTransaction ? actualTransaction : null,
+            Description = TruncateText(row.Description, 200),
+            Percentage = row.Percentage,
+            BaseAmount = baseAmount,
+            Amount1 = amount1,
+            Include1 = row.Include1,
+            NewAmount1 = newAmount1,
+            Variance1 = variance1,
+            Percent1 = CalculateBudgetAnalysisPercent(variance1, baseAmount),
+            Amount2 = amount2,
+            Include2 = row.Include2,
+            NewAmount2 = newAmount2,
+            Variance2 = variance2,
+            Percent2 = CalculateBudgetAnalysisPercent(variance2, baseAmount),
+            Amount3 = amount3,
+            Include3 = row.Include3,
+            NewAmount3 = newAmount3,
+            Variance3 = variance3,
+            Percent3 = CalculateBudgetAnalysisPercent(variance3, baseAmount),
+            CompanyCode = companyCode
+        };
+    }
+
+    private static PayrollBudgetAnalysisRowDto ToBudgetAnalysisRowDto(PayrollBudgetAnalysisRow row)
+        => new()
+        {
+            OrderField = row.OrderField,
+            PayPeriod = row.PayPeriod,
+            PayPeriodFrom = row.PayPeriodFrom,
+            PayPeriodTo = row.PayPeriodTo,
+            TransactionType = row.TransactionType,
+            ActualTransaction = string.IsNullOrWhiteSpace(row.ActualTransaction) ? null : row.ActualTransaction,
+            Description = row.Description,
+            Percentage = row.Percentage,
+            BaseAmount = row.BaseAmount,
+            Amount1 = row.Amount1,
+            Include1 = row.Include1,
+            NewAmount1 = row.NewAmount1,
+            Amount2 = row.Amount2,
+            Include2 = row.Include2,
+            NewAmount2 = row.NewAmount2,
+            Amount3 = row.Amount3,
+            Include3 = row.Include3,
+            NewAmount3 = row.NewAmount3,
+            CompanyCode = row.CompanyCode
+        };
+
+    private static string NormalizeBudgetAnalysisCode(string? value, string fallback)
+    {
+        var text = TrimOrNull(value) ?? fallback;
+        return text.Length <= 5 ? text : text[..5];
+    }
+
+    private static string TruncateText(string? value, int maxLength)
+    {
+        var text = TrimOrNull(value) ?? string.Empty;
+        return text.Length <= maxLength ? text : text[..maxLength];
+    }
+
+    private async Task<string> ResolvePayrollCompanyCodeAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var parameterCompanyCode = TrimOrNull(await _context.PayrollParameterSets
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.IsActive)
+            .OrderBy(e => e.Code)
+            .Select(e => e.LegacyCompanyCode)
+            .FirstOrDefaultAsync(cancellationToken));
+        if (parameterCompanyCode is not null)
+        {
+            return parameterCompanyCode;
+        }
+
+        var profileCompanyCode = TrimOrNull(await _context.PayrollCompanyProfiles
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.IsActive)
+            .OrderBy(e => e.CompanyId)
+            .Select(e => e.CompanyCode ?? e.LegacyCompanyCode)
+            .FirstOrDefaultAsync(cancellationToken));
+
+        return profileCompanyCode ?? "001";
+    }
+
+    private static void AddBudgetAnalysisBaseRows(
+        IDictionary<string, PayrollBudgetAnalysisAccumulator> rowsByKey,
+        PayrollRun run,
+        string companyCode)
+    {
+        var basicTransactions = run.Transactions
+            .Where(e => e.TransactionType.Equals(BasicSalaryTransactionType, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        AddBudgetAnalysisAmount(
+            rowsByKey,
+            run,
+            companyCode,
+            1,
+            "BAS",
+            "BAS",
+            "BASIC SALARY",
+            basicTransactions.Count > 0 ? basicTransactions.Sum(e => e.Amount) : run.Employees.Sum(e => e.BasicSalary),
+            percentage: true);
+
+        var employerSsf = run.Transactions
+            .Where(e => e.TransactionType.Equals(EmployerPensionTransactionType, StringComparison.OrdinalIgnoreCase))
+            .Sum(e => e.EmployerAmount ?? e.Amount);
+        AddBudgetAnalysisAmount(rowsByKey, run, companyCode, 1, "CSF", "CSF", "EMPLOYER SSF", employerSsf, percentage: true);
+
+        var overtime = run.Transactions
+            .Where(e => e.TransactionType.Equals(OvertimeTransactionType, StringComparison.OrdinalIgnoreCase))
+            .Sum(e => e.Amount);
+        AddBudgetAnalysisAmount(rowsByKey, run, companyCode, 1, "OVE", "OVE", "OVERTIME", overtime, percentage: true);
+    }
+
+    private static void AddBudgetAnalysisAmount(
+        IDictionary<string, PayrollBudgetAnalysisAccumulator> rowsByKey,
+        PayrollRun run,
+        string companyCode,
+        int orderField,
+        string transactionType,
+        string? actualTransaction,
+        string description,
+        decimal amount,
+        bool percentage)
+    {
+        if (amount == 0m)
+        {
+            return;
+        }
+
+        var key = BuildBudgetAnalysisKey(orderField, transactionType, actualTransaction);
+        if (!rowsByKey.TryGetValue(key, out var row))
+        {
+            row = new PayrollBudgetAnalysisAccumulator
+            {
+                OrderField = orderField,
+                PayPeriod = run.PayPeriod,
+                PayPeriodFrom = run.PayPeriodFrom,
+                PayPeriodTo = run.PayPeriodTo,
+                TransactionType = transactionType,
+                ActualTransaction = actualTransaction,
+                Description = description,
+                Percentage = percentage,
+                CompanyCode = companyCode
+            };
+            rowsByKey.Add(key, row);
+        }
+
+        row.BaseAmount += amount;
+        row.Percentage = row.Percentage || percentage;
+        row.PayPeriodFrom = row.PayPeriodFrom <= run.PayPeriodFrom ? row.PayPeriodFrom : run.PayPeriodFrom;
+        row.PayPeriodTo = row.PayPeriodTo >= run.PayPeriodTo ? row.PayPeriodTo : run.PayPeriodTo;
+    }
+
+    private static bool IsBudgetAnalysisAllowance(PayrollTransaction transaction)
+        => transaction.TransactionType.Equals(PayrollComponentType.Allowance.ToString(), StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals("ALW", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBudgetAnalysisContribution(PayrollTransaction transaction)
+    {
+        if (transaction.TransactionType.Equals(EmployerPensionTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return transaction.TransactionType.Equals(PayrollComponentType.EmployerContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+               transaction.TransactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase) && transaction.EmployerAmount.GetValueOrDefault() != 0m ||
+               transaction.TransactionType.Equals("CON", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static PayrollBudgetAnalysisRowDto BuildBudgetAnalysisRow(
+        PayrollBudgetAnalysisAccumulator source,
+        PayrollBudgetAnalysisRequestDto request,
+        PayrollBudgetAnalysisRowAdjustmentDto? adjustment)
+    {
+        var amount1 = adjustment?.Amount1 ?? (source.Percentage ? request.BasicPercent1 : 0m);
+        var amount2 = adjustment?.Amount2 ?? (source.Percentage ? request.BasicPercent2 : 0m);
+        var amount3 = adjustment?.Amount3 ?? (source.Percentage ? request.BasicPercent3 : 0m);
+        var newAmount1 = CalculateBudgetAnalysisNewAmount(source.BaseAmount, amount1);
+        var newAmount2 = CalculateBudgetAnalysisNewAmount(source.BaseAmount, amount2);
+        var newAmount3 = CalculateBudgetAnalysisNewAmount(source.BaseAmount, amount3);
+        var variance1 = RoundMoney(newAmount1 - source.BaseAmount);
+        var variance2 = RoundMoney(newAmount2 - source.BaseAmount);
+        var variance3 = RoundMoney(newAmount3 - source.BaseAmount);
+
+        return new PayrollBudgetAnalysisRowDto
+        {
+            OrderField = source.OrderField,
+            PayPeriod = source.PayPeriod,
+            PayPeriodFrom = source.PayPeriodFrom,
+            PayPeriodTo = source.PayPeriodTo,
+            TransactionType = source.TransactionType,
+            ActualTransaction = source.ActualTransaction,
+            Description = source.Description,
+            Percentage = source.Percentage,
+            BaseAmount = RoundMoney(source.BaseAmount),
+            Amount1 = RoundMoney(amount1),
+            Include1 = adjustment?.Include1 ?? true,
+            NewAmount1 = newAmount1,
+            Variance1 = variance1,
+            Percent1 = CalculateBudgetAnalysisPercent(variance1, source.BaseAmount),
+            Amount2 = RoundMoney(amount2),
+            Include2 = adjustment?.Include2 ?? true,
+            NewAmount2 = newAmount2,
+            Variance2 = variance2,
+            Percent2 = CalculateBudgetAnalysisPercent(variance2, source.BaseAmount),
+            Amount3 = RoundMoney(amount3),
+            Include3 = adjustment?.Include3 ?? true,
+            NewAmount3 = newAmount3,
+            Variance3 = variance3,
+            Percent3 = CalculateBudgetAnalysisPercent(variance3, source.BaseAmount),
+            CompanyCode = source.CompanyCode
+        };
+    }
+
+    private static decimal CalculateBudgetAnalysisNewAmount(decimal baseAmount, decimal amount)
+        => RoundMoney(baseAmount + baseAmount * amount / 100m);
+
+    private static decimal CalculateBudgetAnalysisPercent(decimal variance, decimal baseAmount)
+        => baseAmount == 0m ? 0m : RoundMoney(variance / baseAmount * 100m);
+
+    private static string BuildBudgetAnalysisKey(int orderField, string transactionType, string? actualTransaction)
+        => string.Join("|", orderField.ToString(CultureInfo.InvariantCulture), transactionType.Trim().ToUpperInvariant(), (actualTransaction ?? string.Empty).Trim().ToUpperInvariant());
 
     public async Task<PayrollCodeSetupDto> GetCodeSetupAsync(Guid tenantId, string? codeType = null, CancellationToken cancellationToken = default)
     {
@@ -4193,6 +4690,42 @@ public class PayrollService : IPayrollService
         return report;
     }
 
+    public async Task<PayrollOracleReportDto> GetOracleRunReportAsync(
+        Guid tenantId,
+        Guid runId,
+        PayrollOracleReportRequestDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var run = await PayrollRunQuery(tenantId)
+            .FirstOrDefaultAsync(e => e.Id == runId, cancellationToken)
+            ?? throw new KeyNotFoundException("Payroll run not found.");
+
+        EnsureRunHasSavedOutput(run);
+
+        var reportCode = NormalizeOracleReportCode(dto.ReportCode);
+        IReadOnlyList<PayrollRun>? annualRuns = null;
+        IReadOnlyCollection<Guid>? contextEmployeeIds = null;
+
+        if (reportCode == "REP3_034")
+        {
+            var taxYear = run.PayPeriodTo.Year;
+            annualRuns = await PayrollRunQuery(tenantId)
+                .Where(e => e.PayPeriodTo.Year == taxYear &&
+                            e.Status != PayrollRunStatus.Draft &&
+                            e.Status != PayrollRunStatus.RolledBack)
+                .OrderBy(e => e.PayPeriodTo)
+                .ToListAsync(cancellationToken);
+            contextEmployeeIds = annualRuns
+                .SelectMany(e => e.Employees)
+                .Select(e => e.EmployeeId)
+                .Distinct()
+                .ToList();
+        }
+
+        var payslipContext = await LoadPayslipContextAsync(tenantId, run, cancellationToken, contextEmployeeIds);
+        return BuildOracleRunReport(run, payslipContext, dto, annualRuns);
+    }
+
     public async Task<IReadOnlyList<PayrollPayslipDto>> GetPayslipsAsync(
         Guid tenantId,
         Guid runId,
@@ -4718,10 +5251,2416 @@ public class PayrollService : IPayrollService
                 .ToList()
         };
 
-    private async Task<PayrollPayslipBuildContext> LoadPayslipContextAsync(Guid tenantId, PayrollRun run, CancellationToken cancellationToken)
+    private static PayrollOracleReportDto BuildOracleRunReport(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        IReadOnlyList<PayrollRun>? annualRuns = null)
     {
-        var employeeIds = run.Employees
+        var reportCode = NormalizeOracleReportCode(dto.ReportCode);
+        var variantCode = NormalizeOracleVariantCode(reportCode, dto.VariantCode);
+        var metadata = ResolveOracleReportMetadata(reportCode, variantCode);
+        var baseEmployees = ResolveOracleReportEmployees(run, reportCode, annualRuns);
+        var employees = ApplyOracleEmployeeFilters(baseEmployees, context, dto, reportCode)
+            .OrderBy(e => e.EmployeeNumber)
+            .ToList();
+        var rows = reportCode switch
+        {
+            "REP3_001" => BuildPayrollRegisterRows(run, context, employees, variantCode),
+            "REP3_002" => BuildPayrollAnalysisRows(context, employees, variantCode),
+            "REP3_006" => BuildPayeRows(employees, variantCode),
+            "REP3_007" => BuildSsfRows(context, employees, variantCode),
+            "REP3_009" => BuildEmployerBankAdviceRows(run, context, dto, employees, variantCode),
+            "REP3_010" => BuildAllowanceDeductionScheduleRows(run, employees, variantCode, dto),
+            "REP3_011" => BuildCashListRows(run, context, employees),
+            "REP3_034" => BuildAnnualTaxReturnRows(run, context, employees, annualRuns ?? [run], variantCode),
+            "REP3_035" => BuildBankAdviceRows(run, context, dto, employees, variantCode),
+            "REP3_036" => BuildLoanStatementRows(run, context, dto, employees, variantCode),
+            "REP3_305" => BuildStaffListRows(context, employees, variantCode),
+            "REP3_016" => BuildJournalRows(run, employees, variantCode),
+            "REP3_019" => BuildOvertimeRows(context, employees),
+            "REP3_028" => BuildBonusSlipRows(run, employees, dto),
+            "REP3_029" => BuildBonusRegisterRows(run, employees, dto),
+            "REP3_030" => BuildBonusTaxRows(run, employees, dto),
+            "REP3_031" => BuildBonusBankAdviceRows(run, context, dto, employees),
+            "REP3_032" => BuildBonusCashListRows(run, context, employees, dto),
+            _ => []
+        };
+        var companyCode = TrimOrNull(context.CompanyProfile?.CompanyCode)
+                          ?? TrimOrNull(context.CompanyProfile?.LegacyCompanyCode)
+                          ?? "001";
+
+        return new PayrollOracleReportDto
+        {
+            PayrollRunId = run.Id,
+            RunNumber = run.RunNumber,
+            ReportCode = reportCode,
+            ReportName = metadata.ReportName,
+            VariantCode = variantCode,
+            VariantName = metadata.VariantName,
+            SourceForm = metadata.SourceForm,
+            SourceReport = metadata.SourceReport,
+            PeriodLabel = ResolveOracleReportPeriodLabel(reportCode, run),
+            CompanyCode = companyCode,
+            CurrencyCode = TrimOrNull(dto.ReportingCurrency) ?? run.CurrencyCode,
+            GeneratedAt = DateTime.UtcNow,
+            Parameters = BuildOracleReportParameters(run, context, dto, reportCode),
+            Columns = BuildOracleReportColumns(reportCode, variantCode),
+            Rows = rows,
+            TotalRows = rows.Count
+        };
+    }
+
+    private static IReadOnlyList<PayrollRunEmployee> ResolveOracleReportEmployees(
+        PayrollRun run,
+        string reportCode,
+        IReadOnlyList<PayrollRun>? annualRuns)
+    {
+        if (reportCode != "REP3_034" || annualRuns is not { Count: > 0 })
+        {
+            return run.Employees.ToList();
+        }
+
+        return annualRuns
+            .SelectMany(annualRun => annualRun.Employees.Select(employee => new { annualRun, employee }))
+            .GroupBy(e => e.employee.EmployeeId)
+            .Select(group => group
+                .OrderByDescending(e => e.annualRun.PayPeriodTo)
+                .ThenByDescending(e => e.annualRun.PayPeriod)
+                .First().employee)
+            .ToList();
+    }
+
+    private static IReadOnlyList<PayrollRunEmployee> ApplyOracleEmployeeFilters(
+        IEnumerable<PayrollRunEmployee> employees,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        string reportCode)
+    {
+        var filtered = employees.AsEnumerable();
+
+        if (reportCode is "REP3_006" or "REP3_007" or "REP3_010" or "REP3_011" or "REP3_016" or "REP3_019" or "REP3_028" or "REP3_029" or "REP3_032" or "REP3_034" or "REP3_035" or "REP3_036")
+        {
+            filtered = filtered.Where(e => IsWithinOracleRange(e.EmployeeNumber, dto.EmployeeNumberFrom, dto.EmployeeNumberTo));
+            if (HasOracleRange(dto.DepartmentFrom, dto.DepartmentTo))
+            {
+                filtered = filtered.Where(e =>
+                {
+                    var profile = ResolveOracleProfile(context, e);
+                    return IsWithinOracleRange(ResolveOracleDepartmentCode(profile), dto.DepartmentFrom, dto.DepartmentTo);
+                });
+            }
+
+            if (HasOracleRange(dto.LocationFrom, dto.LocationTo))
+            {
+                filtered = filtered.Where(e =>
+                {
+                    var profile = ResolveOracleProfile(context, e);
+                    return IsWithinOracleRange(ResolveOracleLocationCode(profile), dto.LocationFrom, dto.LocationTo);
+                });
+            }
+        }
+
+        if (reportCode == "REP3_002")
+        {
+            var department = TrimOrNull(dto.DepartmentCode);
+            if (!string.IsNullOrWhiteSpace(department) && !department.Equals("ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                filtered = filtered.Where(e =>
+                {
+                    var profile = ResolveOracleProfile(context, e);
+                    return string.Equals(ResolveOracleDepartmentCode(profile), department, StringComparison.OrdinalIgnoreCase);
+                });
+            }
+
+            var region = TrimOrNull(dto.RegionCode);
+            if (!string.IsNullOrWhiteSpace(region) && !region.Equals("ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                filtered = filtered.Where(e =>
+                {
+                    var profile = ResolveOracleProfile(context, e);
+                    return string.Equals(ResolveOracleRegionCode(profile), region, StringComparison.OrdinalIgnoreCase);
+                });
+            }
+        }
+
+        return filtered.ToList();
+    }
+
+    private static IReadOnlyList<PayrollOracleReportColumnDto> BuildOracleReportColumns(string reportCode, string variantCode)
+    {
+        if (reportCode == "REP3_001" && variantCode == "S")
+        {
+            return
+            [
+                OracleColumn("description", "Description"),
+                OracleColumn("amount", "Amount", "right", "currency")
+            ];
+        }
+
+        if (reportCode == "REP3_001" && variantCode is "D" or "E")
+        {
+            return
+            [
+                OracleColumn("group", variantCode == "E" ? "Section" : "Department"),
+                OracleColumn("employeeCount", "Total Count", "right", "number"),
+                OracleColumn("basicSalary", "Basic", "right", "currency"),
+                OracleColumn("gross", "Gross", "right", "currency"),
+                OracleColumn("incomeTax", "Income Tax", "right", "currency"),
+                OracleColumn("netIncome", "Net", "right", "currency")
+            ];
+        }
+
+        return reportCode switch
+        {
+            "REP3_002" when variantCode == "IND" => new[]
+            {
+                OracleColumn("staffId", "Staff ID"),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("department", "Department"),
+                OracleColumn("basic", "Basic", "right", "currency"),
+                OracleColumn("allowances", "Allowances", "right", "currency"),
+                OracleColumn("total", "Total", "right", "currency")
+            },
+            "REP3_002" => new[]
+            {
+                OracleColumn("group", variantCode == "REG" ? "Region" : "Department"),
+                OracleColumn("count", "Count", "right", "number"),
+                OracleColumn("basic", "Basic", "right", "currency"),
+                OracleColumn("allowances", "Allowances", "right", "currency"),
+                OracleColumn("total", "Total", "right", "currency")
+            },
+            "REP3_001" when variantCode == "DR" => new[]
+            {
+                OracleColumn("employeeNumber", "Employee No"),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("basicSalary", "Basic Salary", "right", "currency"),
+                OracleColumn("houseSupport", "House Support", "right", "currency"),
+                OracleColumn("utility", "Utility", "right", "currency"),
+                OracleColumn("fuelTransport", "Fuel/Transport", "right", "currency"),
+                OracleColumn("professional", "Professional", "right", "currency"),
+                OracleColumn("carMaintenance", "Car Maintenance", "right", "currency"),
+                OracleColumn("carSubsidy", "Car Subsidy", "right", "currency"),
+                OracleColumn("accomodation", "Accomodation", "right", "currency"),
+                OracleColumn("educational", "Educational", "right", "currency"),
+                OracleColumn("risk", "Risk", "right", "currency"),
+                OracleColumn("leave", "Leave", "right", "currency"),
+                OracleColumn("lunch", "Lunch", "right", "currency"),
+                OracleColumn("clothing", "Clothing", "right", "currency"),
+                OracleColumn("livingAllowance", "Living Allowance", "right", "currency"),
+                OracleColumn("shift", "Shift", "right", "currency"),
+                OracleColumn("otherNonCashAllowance", "Other Non Cash Allowance", "right", "currency"),
+                OracleColumn("grossBonus", "Gross Bonus", "right", "currency"),
+                OracleColumn("overtime", "Overtime", "right", "currency"),
+                OracleColumn("totalCashEmolument", "Total Cash Emolument", "right", "currency"),
+                OracleColumn("excessContributions", "Excess Contributions", "right", "currency"),
+                OracleColumn("fuelOnly", "Fuel Only", "right", "currency"),
+                OracleColumn("vehicleFuelDriver", "Vehicle Fuel & Driver", "right", "currency"),
+                OracleColumn("vehicleFuelOnly", "Vehicle & Fuel Only", "right", "currency"),
+                OracleColumn("accomodationBenefit", "Accomodation Benefit", "right", "currency"),
+                OracleColumn("totalEmolument", "Total Emolument", "right", "currency"),
+                OracleColumn("employeeSsf", "Employee SSF", "right", "currency"),
+                OracleColumn("taxRelief", "Tax Relief", "right", "currency"),
+                OracleColumn("tier3", "Tier3", "right", "currency"),
+                OracleColumn("providentFund", "Provident Fund", "right", "currency"),
+                OracleColumn("taxableIncome", "Taxable Income", "right", "currency"),
+                OracleColumn("incomeTax", "Income Tax", "right", "currency"),
+                OracleColumn("otherNonCashBenefitDed", "Other Non Cash Benefit Ded", "right", "currency"),
+                OracleColumn("advanceDedNonLoan", "Advance Ded Non Loan", "right", "currency"),
+                OracleColumn("totalDeductions", "Total Deductions", "right", "currency"),
+                OracleColumn("netSalary", "Net Salary", "right", "currency"),
+                OracleColumn("netUsd", "Net USD", "right", "currency")
+            },
+            "REP3_001" => new[]
+            {
+                OracleColumn("rowNumber", "No", "right", "number"),
+                OracleColumn("employeeNumber", "Staff No"),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("basicSalary", "Basic Salary", "right", "currency"),
+                OracleColumn("otherAllowances", "Other Allowances", "right", "currency"),
+                OracleColumn("totalOvertime", "Total Overtime", "right", "currency"),
+                OracleColumn("grossSalary", "Gross Salary", "right", "currency"),
+                OracleColumn("employeeSsf", "Employee SSF", "right", "currency"),
+                OracleColumn("benefitsInKind", "Benefits In Kind", "right", "currency"),
+                OracleColumn("taxRelief", "Tax Relief", "right", "currency"),
+                OracleColumn("taxableIncome", "Taxable Income", "right", "currency"),
+                OracleColumn("incomeTax", "Income Tax", "right", "currency"),
+                OracleColumn("otherContributions", "Other Contributions", "right", "currency"),
+                OracleColumn("otherDeductions", "Other Deductions", "right", "currency"),
+                OracleColumn("loans", "Loans", "right", "currency"),
+                OracleColumn("salaryAdvance", "Salary Advance", "right", "currency"),
+                OracleColumn("totalDeductions", "Total Deductions", "right", "currency"),
+                OracleColumn("netPay", "Net Pay", "right", "currency")
+            },
+            "REP3_009" => new[]
+            {
+                OracleColumn("bank", "Bank"),
+                OracleColumn("staffName", "Staff Name"),
+                OracleColumn("accountNo", "Account N0"),
+                OracleColumn("amount", "Amount", "right", "currency")
+            },
+            "REP3_010" => new[]
+            {
+                OracleColumn("employeeNumber", "Employee"),
+                OracleColumn("employeeName", "Name"),
+                OracleColumn("transactionType", "Transaction Type"),
+                OracleColumn("actualTransaction", "Actual Transaction"),
+                OracleColumn("description", "Description"),
+                OracleColumn("amount", "Amount", "right", "currency"),
+                OracleColumn("employerAmount", "Employer Amount", "right", "currency")
+            },
+            "REP3_011" => new[]
+            {
+                OracleColumn("rowNumber", "No.", "right", "number"),
+                OracleColumn("employeeNumber", "Employee No."),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("amount", "Amount (GHC)", "right", "currency")
+            },
+            "REP3_034" when variantCode == "L" => new[]
+            {
+                OracleColumn("location", "Location"),
+                OracleColumn("department", "Department"),
+                OracleColumn("employeeNumber", "Staff"),
+                OracleColumn("employeeName", "Employee"),
+                OracleColumn("tin", "TIN"),
+                OracleColumn("position", "Position"),
+                OracleColumn("basicSalary", "Basic Salary", "right", "currency"),
+                OracleColumn("taxableAllowances", "Taxable Allowances", "right", "currency"),
+                OracleColumn("taxableOvertime", "Taxable OT", "right", "currency"),
+                OracleColumn("bonus", "Bonus", "right", "currency"),
+                OracleColumn("employeeSsf", "Employee SSF", "right", "currency"),
+                OracleColumn("taxRelief", "Tax Relief", "right", "currency"),
+                OracleColumn("taxableIncome", "Taxable Income", "right", "currency"),
+                OracleColumn("incomeTax", "Income Tax", "right", "currency"),
+                OracleColumn("taxPaid", "Tax Paid", "right", "currency")
+            },
+            "REP3_034" => new[]
+            {
+                OracleColumn("employeeNumber", "Staff No"),
+                OracleColumn("employeeName", "Name of Employee"),
+                OracleColumn("tin", "TIN"),
+                OracleColumn("position", "Position"),
+                OracleColumn("ssfNo", "SSF No"),
+                OracleColumn("basicSalary", "Basic Salary", "right", "currency"),
+                OracleColumn("taxableAllowances", "Taxable Allowances", "right", "currency"),
+                OracleColumn("taxableOvertime", "Taxable OT", "right", "currency"),
+                OracleColumn("bonus", "Bonus", "right", "currency"),
+                OracleColumn("taxableBenefits", "Taxable Benefits", "right", "currency"),
+                OracleColumn("employeeSsf", "Employee SSF", "right", "currency"),
+                OracleColumn("taxRelief", "Tax Relief", "right", "currency"),
+                OracleColumn("taxableIncome", "Taxable Income", "right", "currency"),
+                OracleColumn("incomeTax", "Income Tax", "right", "currency"),
+                OracleColumn("taxPaid", "Tax Paid", "right", "currency"),
+                OracleColumn("netTax", "Net Tax", "right", "currency")
+            },
+            "REP3_006" when variantCode == "MPR" => new[]
+            {
+                OracleColumn("employeeNumber", "Employee No"),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("employeeTin", "Employee TIN"),
+                OracleColumn("basicSalary", "Basic Salary", "right", "currency"),
+                OracleColumn("basic", "Basic", "right", "currency"),
+                OracleColumn("grossAllowance", "Gross Allowance", "right", "currency"),
+                OracleColumn("arrearsAllowance", "Arrears Allowance", "right", "currency"),
+                OracleColumn("excessBonus", "Excess Bonus", "right", "currency"),
+                OracleColumn("totalCashEmolument", "Total Cash Emolument", "right", "currency"),
+                OracleColumn("benefitsInKind", "Benefits In Kind", "right", "currency"),
+                OracleColumn("bonusInThreshold", "Bonus in Threshold", "right", "currency"),
+                OracleColumn("totalEmolument", "Total Emolument", "right", "currency"),
+                OracleColumn("deductableReliefs", "Deductable Reliefs", "right", "currency"),
+                OracleColumn("employeeSsf", "Employee SSF", "right", "currency"),
+                OracleColumn("employeeArrearsSsf", "Employee Arrears SSF", "right", "currency"),
+                OracleColumn("employeeTotalSsf", "Employee Total SSF", "right", "currency"),
+                OracleColumn("offPayrollExcessBonus", "OffPayroll Excess Bonus", "right", "currency"),
+                OracleColumn("taxableIncome", "Taxable Income", "right", "currency"),
+                OracleColumn("normalTax", "Normal Tax", "right", "currency"),
+                OracleColumn("arrearsTax", "Arrears Tax", "right", "currency"),
+                OracleColumn("bonusTax", "Bonus Tax", "right", "currency"),
+                OracleColumn("totalTaxCharge", "Total Tax Charge", "right", "currency")
+            },
+            "REP3_006" => new[]
+            {
+                OracleColumn("rowNumber", "No", "right", "number"),
+                OracleColumn("nameOfEmployee", "Name of Employee"),
+                OracleColumn("tin", "TIN"),
+                OracleColumn("position", "Position"),
+                OracleColumn("resident", "Non - Resident (Y / N)"),
+                OracleColumn("basicSalary", "Basic Salary", "right", "currency"),
+                OracleColumn("secondaryEmployment", "Secondary Employment (Y / N)"),
+                OracleColumn("socialSecurityFund", "Social Security Fund", "right", "currency"),
+                OracleColumn("thirdTier", "Third Tier", "right", "currency"),
+                OracleColumn("cashAllowances", "Cash Allowances", "right", "currency"),
+                OracleColumn("bonusIncome", "Bonus Income (up to 15% of Basic)", "right", "currency"),
+                OracleColumn("finalTaxOnBonus", "Final Tax On Bonus", "right", "currency"),
+                OracleColumn("excessBonus", "Excess Bonus", "right", "currency"),
+                OracleColumn("totalCashEmolument", "Total Cash emolument (6+10+13)", "right", "currency"),
+                OracleColumn("accomodationElement", "Accomodation Element", "right", "currency"),
+                OracleColumn("vehicleElement", "Vehicle Element", "right", "currency"),
+                OracleColumn("nonCashBenefit", "Non Cash Benefit", "right", "currency"),
+                OracleColumn("totalAssessableIncome", "Total Assessable Income (14+15+16+17)", "right", "currency"),
+                OracleColumn("deductibleReliefs", "Deductible Reliefs", "right", "currency"),
+                OracleColumn("totalReliefs", "Total Reliefs (8+9+19)", "right", "currency"),
+                OracleColumn("chargeableIncome", "Chargeable Income (18 - 20)", "right", "currency"),
+                OracleColumn("taxDeductible", "Tax Deductible", "right", "currency"),
+                OracleColumn("overtimeIncome", "Overtime Income", "right", "currency"),
+                OracleColumn("overtimeTax", "Overtime Tax", "right", "currency"),
+                OracleColumn("graTaxPayable", "GRA Tax Payable (12+22+24)", "right", "currency"),
+                OracleColumn("severancePayPaid", "Severance pay paid", "right", "currency"),
+                OracleColumn("remarks", "Remarks")
+            },
+            "REP3_007" => new[]
+            {
+                OracleColumn("employeeNumber", "Employee No"),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("ssfNo", "Social Security No"),
+                OracleColumn("basic", "Basic Salary", "right", "currency"),
+                OracleColumn("employeeSsf", "Employee SSF 5.5%", "right", "currency"),
+                OracleColumn("employerSsf", "Employer SSF 13%", "right", "currency"),
+                OracleColumn("total", "Total 18.5%", "right", "currency"),
+                OracleColumn("firstTier", "1st Tier 13.5%", "right", "currency"),
+                OracleColumn("secondTier", "2nd Tier 13.5%", "right", "currency"),
+                OracleColumn("totalContribution", "Total 18.5%", "right", "currency")
+            },
+            "REP3_035" when IsBankAdviceEmployeeVariant(variantCode) => new[]
+            {
+                OracleColumn("staffId", "Staff ID"),
+                OracleColumn("name", "Name"),
+                OracleColumn("acctNo", variantCode == "BNK" ? "Acct No" : "Account No"),
+                OracleColumn("net", variantCode == "BNK" ? "Net" : "Net PAY", "right", "currency")
+            },
+            "REP3_035" => new[]
+            {
+                OracleColumn("bankName", "Bank Name"),
+                OracleColumn("accountCount", "No of Accounts", "right", "number"),
+                OracleColumn("total", "Total", "right", "currency")
+            },
+            "REP3_036" when variantCode == "D" => new[]
+            {
+                OracleColumn("employeeNumber", "Staff ID"),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("loanType", "Loan Type"),
+                OracleColumn("facilityNumber", "Loan Reference"),
+                OracleColumn("dateGranted", "Date of Loan"),
+                OracleColumn("paymentStartDate", "Loan Start Date"),
+                OracleColumn("paymentEndDate", "Loan End Date"),
+                OracleColumn("amountGranted", "Loan Granted", "right", "currency"),
+                OracleColumn("monthlyRepayment", "Monthly Repayment", "right", "currency"),
+                OracleColumn("interestRepayment", "Monthly Interest", "right", "currency"),
+                OracleColumn("totalPaid", "Paid", "right", "currency"),
+                OracleColumn("outstandingBalance", "Loan Bal.", "right", "currency"),
+                OracleColumn("status", "Status")
+            },
+            "REP3_036" => new[]
+            {
+                OracleColumn("employeeNumber", "Staff No"),
+                OracleColumn("employeeName", "Staff Name"),
+                OracleColumn("loanType", "Loan Type"),
+                OracleColumn("facilityNumber", "Loan Reference"),
+                OracleColumn("dateGranted", "Date of Loan"),
+                OracleColumn("paymentStartDate", "Loan Start date"),
+                OracleColumn("paymentEndDate", "Loan End Date"),
+                OracleColumn("numberOfRepayments", "No of Repayments", "right", "number"),
+                OracleColumn("repaymentDate", "Repayment Date"),
+                OracleColumn("repaymentAmount", "Repayment", "right", "currency"),
+                OracleColumn("interestAmount", "Interest", "right", "currency"),
+                OracleColumn("amountPaid", "Amount Paid", "right", "currency"),
+                OracleColumn("interestPaid", "Interest Paid", "right", "currency"),
+                OracleColumn("cumulativePaid", "Cumulative Paid", "right", "currency"),
+                OracleColumn("outstandingBalance", "Loan Balance", "right", "currency")
+            },
+            "REP3_305" => new[]
+            {
+                OracleColumn("group", "Group"),
+                OracleColumn("employeeNumber", "Staff"),
+                OracleColumn("employeeName", "Staff on Roll"),
+                OracleColumn("dateEmployed", "Date Employed"),
+                OracleColumn("gender", "Gender"),
+                OracleColumn("department", "Department"),
+                OracleColumn("section", "Section"),
+                OracleColumn("position", "Position"),
+                OracleColumn("location", "Location"),
+                OracleColumn("grade", "Grade"),
+                OracleColumn("staffCategory", "Staff Category"),
+                OracleColumn("region", "Region"),
+                OracleColumn("basicSalary", "Basic Salary", "right", "currency"),
+                OracleColumn("status", "Status")
+            },
+            "REP3_016" => new[]
+            {
+                OracleColumn("accountNumber", "Account Number"),
+                OracleColumn("accountDescription", "Account Description"),
+                OracleColumn("debit", "Debit", "right", "currency"),
+                OracleColumn("credit", "Credit", "right", "currency")
+            },
+            "REP3_019" => new[]
+            {
+                OracleColumn("staffNumber", "STAFF NUMBER"),
+                OracleColumn("staff", "Staff"),
+                OracleColumn("weekHours", "WEEK HRS", "right", "number"),
+                OracleColumn("saturdayHours", "Saturday", "right", "number"),
+                OracleColumn("sundayHours", "Sunday", "right", "number"),
+                OracleColumn("holidayHours", "Holiday", "right", "number"),
+                OracleColumn("totalHours", "TOTAL HOURS", "right", "number"),
+                OracleColumn("totalAmount", "TOTAL AMOUNT", "right", "currency"),
+                OracleColumn("department", "Department")
+            },
+            "REP3_028" => new[]
+            {
+                OracleColumn("employeeId", "Employee ID"),
+                OracleColumn("staffName", "Staff Name"),
+                OracleColumn("amount", "Amount", "right", "currency"),
+                OracleColumn("bonusTax", "Bonus Tax", "right", "currency"),
+                OracleColumn("netSalary", "Net Salary", "right", "currency")
+            },
+            "REP3_029" => new[]
+            {
+                OracleColumn("employeeNumber", "Employee"),
+                OracleColumn("employeeName", "Name"),
+                OracleColumn("bonus", "Bonus", "right", "currency"),
+                OracleColumn("tax", "Tax", "right", "currency"),
+                OracleColumn("netBonus", "Bonus", "right", "currency")
+            },
+            "REP3_030" => new[]
+            {
+                OracleColumn("employeeNumber", "Employee"),
+                OracleColumn("employeeName", "Name"),
+                OracleColumn("taxableBonus", "Taxable Bonus", "right", "currency"),
+                OracleColumn("nonTaxableBonus", "Non Taxable Bonus", "right", "currency"),
+                OracleColumn("bonus", "Bonus", "right", "currency"),
+                OracleColumn("bonusTax", "Bonus Tax", "right", "currency"),
+                OracleColumn("netBonus", "Net Bonus", "right", "currency")
+            },
+            "REP3_031" => new[]
+            {
+                OracleColumn("bank", "Bank"),
+                OracleColumn("staffName", "Staff Name"),
+                OracleColumn("branch", "Branch"),
+                OracleColumn("accountNumber", "Account Number"),
+                OracleColumn("amount", "Amount", "right", "currency"),
+                OracleColumn("currencyCode", "Currency")
+            },
+            "REP3_032" => new[]
+            {
+                OracleColumn("rowNumber", "No.", "right", "number"),
+                OracleColumn("employeeNumber", "Employee No."),
+                OracleColumn("employeeName", "Employee Name"),
+                OracleColumn("amount", "Amount (GHC)", "right", "currency")
+            },
+            _ => []
+        };
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildPayrollRegisterRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        if (variantCode == "S")
+        {
+            return BuildPayrollRegisterSummaryRows(employees);
+        }
+
+        if (variantCode is "D" or "E")
+        {
+            return BuildPayrollRegisterGroupedRows(context, employees, variantCode);
+        }
+
+        if (variantCode == "DR")
+        {
+            return BuildPayrollRegisterDetailRows(run, employees);
+        }
+
+        var transactionsByEmployee = run.Transactions
+            .GroupBy(e => e.PayrollRunEmployeeId)
+            .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollTransaction>)e.ToList());
+
+        return employees.Select((employee, index) =>
+        {
+            transactionsByEmployee.TryGetValue(employee.Id, out var transactions);
+            transactions ??= [];
+            var otherAllowances = employee.TaxableAllowances + employee.NonTaxableAllowances +
+                                  SumTransactionsByType(transactions, PromotionAllowanceArrearsTransactionType);
+            var totalOvertime = SumTransactionsByType(transactions, OvertimeTransactionType);
+            var benefitsInKind = SumTransactionsByType(transactions, "Benefit");
+            var otherContributions = SumTransactionsByType(transactions,
+                PromotionEmployeeContributionArrearsTransactionType,
+                PromotionEmployerContributionArrearsTransactionType,
+                PromotionContributionArrearsTransactionType);
+            var loans = SumTransactionsByType(transactions, LoanRepaymentTransactionType, LoanInterestTransactionType);
+            var salaryAdvance = SumTransactionsByType(transactions, SalaryAdvanceTransactionType);
+            var totalDeductions = Math.Max(0, employee.GrossIncome - employee.NetIncome);
+            var otherDeductions = Math.Max(0,
+                totalDeductions - employee.EmployeeContribution - employee.IncomeTax - otherContributions - loans - salaryAdvance);
+
+            return OracleRow(new Dictionary<string, object?>
+            {
+                ["rowNumber"] = index + 1,
+                ["employeeNumber"] = employee.EmployeeNumber,
+                ["employeeName"] = employee.EmployeeName,
+                ["basicSalary"] = RoundMoney(employee.BasicSalary),
+                ["otherAllowances"] = RoundMoney(otherAllowances),
+                ["totalOvertime"] = RoundMoney(totalOvertime),
+                ["grossSalary"] = RoundMoney(employee.GrossIncome),
+                ["employeeSsf"] = RoundMoney(employee.EmployeeContribution),
+                ["benefitsInKind"] = RoundMoney(benefitsInKind),
+                ["taxRelief"] = RoundMoney(employee.TaxRelief),
+                ["taxableIncome"] = RoundMoney(employee.TaxableIncome),
+                ["incomeTax"] = RoundMoney(employee.IncomeTax),
+                ["otherContributions"] = RoundMoney(otherContributions),
+                ["otherDeductions"] = RoundMoney(otherDeductions),
+                ["loans"] = RoundMoney(loans),
+                ["salaryAdvance"] = RoundMoney(salaryAdvance),
+                ["totalDeductions"] = RoundMoney(totalDeductions),
+                ["netPay"] = RoundMoney(employee.NetIncome)
+            });
+        }).ToList();
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildPayrollRegisterSummaryRows(IReadOnlyList<PayrollRunEmployee> employees)
+    {
+        var totals = new (string Description, decimal Amount)[]
+        {
+            ("Basic", employees.Sum(e => e.BasicSalary)),
+            ("Allowances", employees.Sum(e => e.TaxableAllowances + e.NonTaxableAllowances)),
+            ("Gross", employees.Sum(e => e.GrossIncome)),
+            ("Employee SSF", employees.Sum(e => e.EmployeeContribution)),
+            ("Employer SSF", employees.Sum(e => e.EmployerContribution)),
+            ("Tax Relief", employees.Sum(e => e.TaxRelief)),
+            ("Income Tax", employees.Sum(e => e.IncomeTax)),
+            ("Total Deductions", employees.Sum(e => Math.Max(0, e.GrossIncome - e.NetIncome))),
+            ("Net", employees.Sum(e => e.NetIncome))
+        };
+
+        return totals
+            .Select(e => OracleRow(new Dictionary<string, object?>
+            {
+                ["description"] = e.Description,
+                ["amount"] = RoundMoney(e.Amount)
+            }))
+            .ToList();
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildPayrollRegisterGroupedRows(
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        return employees
+            .GroupBy(e =>
+            {
+                var profile = ResolveOracleProfile(context, e);
+                return variantCode == "E"
+                    ? ResolveOracleSectionLabel(profile)
+                    : ResolveOracleDepartmentLabel(profile);
+            }, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(e => e.Key)
+            .Select(group => OracleRow(new Dictionary<string, object?>
+            {
+                ["group"] = group.Key,
+                ["employeeCount"] = group.Count(),
+                ["basicSalary"] = RoundMoney(group.Sum(e => e.BasicSalary)),
+                ["gross"] = RoundMoney(group.Sum(e => e.GrossIncome)),
+                ["incomeTax"] = RoundMoney(group.Sum(e => e.IncomeTax)),
+                ["netIncome"] = RoundMoney(group.Sum(e => e.NetIncome))
+            }))
+            .ToList();
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildPayrollRegisterDetailRows(PayrollRun run, IReadOnlyList<PayrollRunEmployee> employees)
+    {
+        var transactionsByEmployee = run.Transactions
+            .GroupBy(e => e.PayrollRunEmployeeId)
+            .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollTransaction>)e.ToList());
+
+        return employees
+            .OrderBy(e => e.EmployeeNumber)
+            .Select(employee =>
+            {
+                transactionsByEmployee.TryGetValue(employee.Id, out var transactions);
+                transactions ??= [];
+                var basicArrears = SumTransactionsByType(transactions, PromotionBasicArrearsTransactionType);
+                var grossBonus = SumTransactionsByType(transactions, BonusTransactionType);
+                var overtime = SumTransactionsByType(transactions, OvertimeTransactionType);
+                var tier3 = SumTransactionsByComponent(transactions, "3001");
+                var providentFund = SumTransactionsByComponent(transactions, "3002");
+                var otherNonCashBenefitDed = SumTransactionsByComponent(transactions, "5001");
+                var advanceDedNonLoan = SumTransactionsByComponent(transactions, "5002") +
+                                        SumTransactionsByType(transactions, SalaryAdvanceTransactionType);
+                var excessContributions = transactions.Sum(e => e.EmployerAmount ?? 0m);
+                var totalDeductions = Math.Max(0, employee.GrossIncome - employee.NetIncome);
+                var totalCashEmolument = employee.BasicSalary + basicArrears +
+                                         SumTransactionsByComponent(transactions, "1001", "1002", "1003", "1004", "1005", "1006", "1007", "1008", "1009", "1010", "1011", "1012", "1013", "1015") +
+                                         grossBonus + overtime;
+
+                return OracleRow(new Dictionary<string, object?>
+                {
+                    ["employeeNumber"] = employee.EmployeeNumber,
+                    ["employeeName"] = employee.EmployeeName,
+                    ["basicSalary"] = RoundMoney(employee.BasicSalary),
+                    ["houseSupport"] = RoundMoney(SumTransactionsByComponent(transactions, "1001")),
+                    ["utility"] = RoundMoney(SumTransactionsByComponent(transactions, "1002")),
+                    ["fuelTransport"] = RoundMoney(SumTransactionsByComponent(transactions, "1003")),
+                    ["professional"] = RoundMoney(SumTransactionsByComponent(transactions, "1004")),
+                    ["carMaintenance"] = RoundMoney(SumTransactionsByComponent(transactions, "1005")),
+                    ["carSubsidy"] = RoundMoney(SumTransactionsByComponent(transactions, "1006")),
+                    ["accomodation"] = RoundMoney(SumTransactionsByComponent(transactions, "1007")),
+                    ["educational"] = RoundMoney(SumTransactionsByComponent(transactions, "1008")),
+                    ["risk"] = RoundMoney(SumTransactionsByComponent(transactions, "1009")),
+                    ["leave"] = RoundMoney(SumTransactionsByComponent(transactions, "1010")),
+                    ["lunch"] = RoundMoney(SumTransactionsByComponent(transactions, "1011")),
+                    ["clothing"] = RoundMoney(SumTransactionsByComponent(transactions, "1012")),
+                    ["livingAllowance"] = RoundMoney(SumTransactionsByComponent(transactions, "1013")),
+                    ["shift"] = RoundMoney(SumTransactionsByComponent(transactions, "1015")),
+                    ["otherNonCashAllowance"] = RoundMoney(SumTransactionsByComponent(transactions, "1014")),
+                    ["grossBonus"] = RoundMoney(grossBonus),
+                    ["overtime"] = RoundMoney(overtime),
+                    ["totalCashEmolument"] = RoundMoney(totalCashEmolument),
+                    ["excessContributions"] = RoundMoney(excessContributions),
+                    ["fuelOnly"] = RoundMoney(SumTransactionsByComponent(transactions, "2001")),
+                    ["vehicleFuelDriver"] = RoundMoney(SumTransactionsByComponent(transactions, "2002")),
+                    ["vehicleFuelOnly"] = RoundMoney(SumTransactionsByComponent(transactions, "2003")),
+                    ["accomodationBenefit"] = RoundMoney(SumTransactionsByComponent(transactions, "2004")),
+                    ["totalEmolument"] = RoundMoney(employee.GrossIncome),
+                    ["employeeSsf"] = RoundMoney(employee.EmployeeContribution),
+                    ["taxRelief"] = RoundMoney(employee.TaxRelief),
+                    ["tier3"] = RoundMoney(tier3),
+                    ["providentFund"] = RoundMoney(providentFund),
+                    ["taxableIncome"] = RoundMoney(employee.TaxableIncome),
+                    ["incomeTax"] = RoundMoney(employee.IncomeTax),
+                    ["otherNonCashBenefitDed"] = RoundMoney(otherNonCashBenefitDed),
+                    ["advanceDedNonLoan"] = RoundMoney(advanceDedNonLoan),
+                    ["totalDeductions"] = RoundMoney(totalDeductions),
+                    ["netSalary"] = RoundMoney(employee.NetIncome),
+                    ["netUsd"] = RoundMoney(employee.NetIncome)
+                });
+            })
+            .ToList();
+    }
+
+    private static decimal SumTransactionsByType(IEnumerable<PayrollTransaction> transactions, params string[] transactionTypes)
+        => transactions
+            .Where(e => transactionTypes.Contains(e.TransactionType, StringComparer.OrdinalIgnoreCase))
+            .Sum(e => e.Amount);
+
+    private static decimal SumTransactionsByComponent(IEnumerable<PayrollTransaction> transactions, params string[] componentCodes)
+        => transactions
+            .Where(e => e.ComponentCode != null && componentCodes.Contains(e.ComponentCode, StringComparer.OrdinalIgnoreCase))
+            .Sum(e => e.Amount);
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildPayrollAnalysisRows(
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        static decimal Allowances(PayrollRunEmployee employee)
+            => employee.TaxableAllowances + employee.NonTaxableAllowances;
+
+        if (variantCode == "IND")
+        {
+            var individualRows = employees
+                .Select(employee =>
+                {
+                    var profile = ResolveOracleProfile(context, employee);
+                    var allowances = Allowances(employee);
+
+                    return OracleRow(new Dictionary<string, object?>
+                    {
+                        ["staffId"] = employee.EmployeeNumber,
+                        ["employeeName"] = employee.EmployeeName,
+                        ["department"] = ResolveOracleDepartmentLabel(profile),
+                        ["basic"] = RoundMoney(employee.BasicSalary),
+                        ["allowances"] = RoundMoney(allowances),
+                        ["total"] = RoundMoney(employee.BasicSalary + allowances)
+                    });
+                })
+                .ToList();
+
+            individualRows.Add(OracleRow(new Dictionary<string, object?>
+            {
+                ["oracleRowType"] = "TOTAL",
+                ["staffId"] = $"Count : {employees.Count}",
+                ["employeeName"] = "Total",
+                ["basic"] = RoundMoney(employees.Sum(e => e.BasicSalary)),
+                ["allowances"] = RoundMoney(employees.Sum(Allowances)),
+                ["total"] = RoundMoney(employees.Sum(e => e.BasicSalary + Allowances(e)))
+            }));
+
+            return individualRows;
+        }
+
+        var groupedRows = employees
+            .GroupBy(employee =>
+            {
+                var profile = ResolveOracleProfile(context, employee);
+                return variantCode == "REG"
+                    ? ResolveOracleRegionLabel(profile)
+                    : ResolveOracleDepartmentLabel(profile);
+            }, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key)
+            .Select(group => OracleRow(new Dictionary<string, object?>
+            {
+                ["group"] = group.Key,
+                ["count"] = group.Count(),
+                ["basic"] = RoundMoney(group.Sum(e => e.BasicSalary)),
+                ["allowances"] = RoundMoney(group.Sum(Allowances)),
+                ["total"] = RoundMoney(group.Sum(e => e.BasicSalary + Allowances(e)))
+            }))
+            .ToList();
+
+        groupedRows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["group"] = "Total",
+            ["count"] = employees.Count,
+            ["basic"] = RoundMoney(employees.Sum(e => e.BasicSalary)),
+            ["allowances"] = RoundMoney(employees.Sum(Allowances)),
+            ["total"] = RoundMoney(employees.Sum(e => e.BasicSalary + Allowances(e)))
+        }));
+
+        return groupedRows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildEmployerBankAdviceRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        var payments = BuildOracleBankPaymentRows(run, context, dto, employees)
+            .OrderBy(e => e.BankName)
+            .ThenBy(e => e.BranchName)
+            .ThenBy(e => e.Employee.EmployeeNumber)
+            .ToList();
+
+        var rows = payments
+            .Select(e => OracleRow(new Dictionary<string, object?>
+            {
+                ["bank"] = e.BankName,
+                ["bankBranch"] = e.BranchName ?? string.Empty,
+                ["staffName"] = e.Employee.EmployeeName,
+                ["accountNo"] = e.AccountNumber ?? string.Empty,
+                ["amount"] = RoundMoney(e.Amount),
+                ["currencyCode"] = e.CurrencyCode,
+                ["sourceReportVariant"] = variantCode
+            }))
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["bank"] = "Total",
+            ["staffName"] = $"Count : {payments.Count}",
+            ["amount"] = RoundMoney(payments.Sum(e => e.Amount))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildAllowanceDeductionScheduleRows(
+        PayrollRun run,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode,
+        PayrollOracleReportRequestDto dto)
+    {
+        var employeeIds = employees.Select(e => e.Id).ToHashSet();
+        var rows = run.Transactions
+            .Where(e => employeeIds.Contains(e.PayrollRunEmployeeId))
+            .Where(e => IsAllowanceDeductionScheduleTransaction(e, variantCode))
+            .Where(e => IsWithinOracleRange(e.ComponentCode ?? e.TransactionType, dto.ComponentCodeFrom, dto.ComponentCodeTo))
+            .OrderBy(e => e.EmployeeNumber)
+            .ThenBy(e => e.TransactionType)
+            .ThenBy(e => e.ComponentCode)
+            .Select(transaction =>
+            {
+                var employee = employees.FirstOrDefault(e => e.Id == transaction.PayrollRunEmployeeId);
+                return OracleRow(new Dictionary<string, object?>
+                {
+                    ["employeeNumber"] = transaction.EmployeeNumber,
+                    ["employeeName"] = employee?.EmployeeName ?? string.Empty,
+                    ["transactionType"] = transaction.TransactionType,
+                    ["actualTransaction"] = transaction.ComponentCode ?? transaction.TransactionType,
+                    ["description"] = transaction.Description ?? transaction.TransactionType,
+                    ["amount"] = RoundMoney(transaction.Amount),
+                    ["employerAmount"] = RoundMoney(transaction.EmployerAmount ?? 0m)
+                });
+            })
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"Count : {rows.Count}",
+            ["employeeName"] = "Total",
+            ["amount"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "amount"))),
+            ["employerAmount"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "employerAmount")))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildCashListRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees)
+    {
+        var rows = new List<PayrollOracleReportRowDto>();
+        foreach (var employee in employees.OrderBy(e => e.EmployeeNumber))
+        {
+            var profile = ResolveOracleProfile(context, employee);
+            if (profile == null)
+            {
+                continue;
+            }
+
+            var cashMethods = profile.PaymentMethods
+                .Where(e => e.IsActive &&
+                            e.PaymentType.Equals("Cash", StringComparison.OrdinalIgnoreCase) &&
+                            IsEffective(e.StartDate, e.EndDate, run.PayPeriodFrom, run.PayPeriodTo))
+                .OrderBy(e => e.SequenceNo)
+                .ToList();
+
+            rows.AddRange(cashMethods.Select((method, index) => OracleRow(new Dictionary<string, object?>
+            {
+                ["rowNumber"] = rows.Count + index + 1,
+                ["employeeNumber"] = employee.EmployeeNumber,
+                ["employeeName"] = employee.EmployeeName,
+                ["amount"] = RoundMoney(ResolvePaymentMethodAmount(method, employee.NetIncome, cashMethods.Count, index))
+            })));
+        }
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"COUNT : {rows.Count}",
+            ["employeeName"] = "Total",
+            ["amount"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "amount")))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildOvertimeRows(
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees)
+    {
+        var rows = employees
+            .Select(employee =>
+            {
+                var profile = ResolveOracleProfile(context, employee);
+                var summary = profile != null && context.TimesheetSummariesByProfileId.TryGetValue(profile.Id, out var current)
+                    ? current
+                    : null;
+
+                var weekHours = summary?.WeekdayHours ?? 0m;
+                var saturdayHours = summary?.SaturdayHours ?? 0m;
+                var sundayHours = summary?.SundayHours ?? 0m;
+                var holidayHours = summary?.HolidayHours ?? 0m;
+                var totalHours = weekHours + saturdayHours + sundayHours + holidayHours;
+                var amount = summary?.OvertimeAmount ?? 0m;
+
+                return OracleRow(new Dictionary<string, object?>
+                {
+                    ["staffNumber"] = employee.EmployeeNumber,
+                    ["staff"] = employee.EmployeeName,
+                    ["weekHours"] = RoundMoney(weekHours),
+                    ["saturdayHours"] = RoundMoney(saturdayHours),
+                    ["sundayHours"] = RoundMoney(sundayHours),
+                    ["holidayHours"] = RoundMoney(holidayHours),
+                    ["totalHours"] = RoundMoney(totalHours),
+                    ["totalAmount"] = RoundMoney(amount),
+                    ["department"] = ResolveOracleDepartmentLabel(profile)
+                });
+            })
+            .Where(row => GetOracleDecimal(row, "totalHours") != 0 || GetOracleDecimal(row, "totalAmount") != 0)
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["staffNumber"] = $"COUNT: {rows.Count}",
+            ["staff"] = "GRAND TOTAL",
+            ["weekHours"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "weekHours"))),
+            ["saturdayHours"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "saturdayHours"))),
+            ["sundayHours"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "sundayHours"))),
+            ["holidayHours"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "holidayHours"))),
+            ["totalHours"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "totalHours"))),
+            ["totalAmount"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "totalAmount")))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildBonusSlipRows(
+        PayrollRun run,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        PayrollOracleReportRequestDto dto)
+    {
+        var bonusRows = BuildOracleBonusRows(run, employees, dto);
+        var rows = bonusRows
+            .Select(e => OracleRow(new Dictionary<string, object?>
+            {
+                ["employeeId"] = e.Employee.EmployeeNumber,
+                ["staffName"] = e.Employee.EmployeeName,
+                ["amount"] = RoundMoney(e.Bonus),
+                ["bonusTax"] = RoundMoney(e.BonusTax),
+                ["netSalary"] = RoundMoney(e.NetBonus)
+            }))
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeId"] = $"Count : {bonusRows.Count}",
+            ["staffName"] = "Total",
+            ["amount"] = RoundMoney(bonusRows.Sum(e => e.Bonus)),
+            ["bonusTax"] = RoundMoney(bonusRows.Sum(e => e.BonusTax)),
+            ["netSalary"] = RoundMoney(bonusRows.Sum(e => e.NetBonus))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildBonusRegisterRows(
+        PayrollRun run,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        PayrollOracleReportRequestDto dto)
+    {
+        var bonusRows = BuildOracleBonusRows(run, employees, dto);
+        var rows = bonusRows
+            .Select(e => OracleRow(new Dictionary<string, object?>
+            {
+                ["employeeNumber"] = e.Employee.EmployeeNumber,
+                ["employeeName"] = e.Employee.EmployeeName,
+                ["bonus"] = RoundMoney(e.Bonus),
+                ["tax"] = RoundMoney(e.BonusTax),
+                ["netBonus"] = RoundMoney(e.NetBonus)
+            }))
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"Count : {bonusRows.Count}",
+            ["employeeName"] = "Total",
+            ["bonus"] = RoundMoney(bonusRows.Sum(e => e.Bonus)),
+            ["tax"] = RoundMoney(bonusRows.Sum(e => e.BonusTax)),
+            ["netBonus"] = RoundMoney(bonusRows.Sum(e => e.NetBonus))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildBonusTaxRows(
+        PayrollRun run,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        PayrollOracleReportRequestDto dto)
+    {
+        var bonusRows = BuildOracleBonusRows(run, employees, dto);
+        var rows = bonusRows
+            .Select(e => OracleRow(new Dictionary<string, object?>
+            {
+                ["employeeNumber"] = e.Employee.EmployeeNumber,
+                ["employeeName"] = e.Employee.EmployeeName,
+                ["taxableBonus"] = RoundMoney(e.TaxableBonus),
+                ["nonTaxableBonus"] = RoundMoney(e.NonTaxableBonus),
+                ["bonus"] = RoundMoney(e.Bonus),
+                ["bonusTax"] = RoundMoney(e.BonusTax),
+                ["netBonus"] = RoundMoney(e.NetBonus)
+            }))
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"Count : {bonusRows.Count}",
+            ["employeeName"] = "Total",
+            ["taxableBonus"] = RoundMoney(bonusRows.Sum(e => e.TaxableBonus)),
+            ["nonTaxableBonus"] = RoundMoney(bonusRows.Sum(e => e.NonTaxableBonus)),
+            ["bonus"] = RoundMoney(bonusRows.Sum(e => e.Bonus)),
+            ["bonusTax"] = RoundMoney(bonusRows.Sum(e => e.BonusTax)),
+            ["netBonus"] = RoundMoney(bonusRows.Sum(e => e.NetBonus))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildBonusBankAdviceRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        IReadOnlyList<PayrollRunEmployee> employees)
+    {
+        var bonusRows = BuildOracleBonusRows(run, employees, dto);
+        var payments = BuildOracleBankPaymentRowsForAmounts(
+                run,
+                context,
+                dto,
+                bonusRows.Select(e => new OracleEmployeePaymentBase(e.Employee, e.NetBonus)).ToList())
+            .OrderBy(e => e.BankName)
+            .ThenBy(e => e.BranchName)
+            .ThenBy(e => e.Employee.EmployeeNumber)
+            .ToList();
+
+        var rows = payments
+            .Select(e => OracleRow(new Dictionary<string, object?>
+            {
+                ["bank"] = e.BankName,
+                ["staffName"] = e.Employee.EmployeeName,
+                ["branch"] = e.BranchName ?? string.Empty,
+                ["accountNumber"] = e.AccountNumber ?? string.Empty,
+                ["amount"] = RoundMoney(e.Amount),
+                ["currencyCode"] = e.CurrencyCode
+            }))
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["bank"] = "Total",
+            ["staffName"] = $"Count : {payments.Count}",
+            ["amount"] = RoundMoney(payments.Sum(e => e.Amount))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildBonusCashListRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        PayrollOracleReportRequestDto dto)
+    {
+        var bonusRows = BuildOracleBonusRows(run, employees, dto);
+        var rows = new List<PayrollOracleReportRowDto>();
+        foreach (var bonusRow in bonusRows.OrderBy(e => e.Employee.EmployeeNumber))
+        {
+            var profile = ResolveOracleProfile(context, bonusRow.Employee);
+            if (profile == null)
+            {
+                continue;
+            }
+
+            var cashMethods = profile.PaymentMethods
+                .Where(e => e.IsActive &&
+                            e.PaymentType.Equals("Cash", StringComparison.OrdinalIgnoreCase) &&
+                            IsEffective(e.StartDate, e.EndDate, run.PayPeriodFrom, run.PayPeriodTo))
+                .OrderBy(e => e.SequenceNo)
+                .ToList();
+
+            rows.AddRange(cashMethods.Select((method, index) => OracleRow(new Dictionary<string, object?>
+            {
+                ["rowNumber"] = rows.Count + index + 1,
+                ["employeeNumber"] = bonusRow.Employee.EmployeeNumber,
+                ["employeeName"] = bonusRow.Employee.EmployeeName,
+                ["amount"] = RoundMoney(ResolvePaymentMethodAmount(method, bonusRow.NetBonus, cashMethods.Count, index))
+            })));
+        }
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"COUNT : {rows.Count}",
+            ["employeeName"] = "Total",
+            ["amount"] = RoundMoney(rows.Sum(row => GetOracleDecimal(row, "amount")))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<OracleBonusEmployeeRow> BuildOracleBonusRows(
+        PayrollRun run,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        PayrollOracleReportRequestDto dto)
+    {
+        var bonusType = ResolveOracleBonusType(dto);
+        var transactionsByEmployee = run.Transactions
+            .GroupBy(e => e.PayrollRunEmployeeId)
+            .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollTransaction>)e.ToList());
+
+        return employees
+            .Select(employee =>
+            {
+                transactionsByEmployee.TryGetValue(employee.Id, out var transactions);
+                transactions ??= [];
+                var bonusTransactions = transactions
+                    .Where(e => IsOracleBonusTransaction(e, bonusType))
+                    .ToList();
+                var bonus = bonusTransactions.Sum(e => e.Amount);
+                var taxableBonus = bonusTransactions.Where(e => e.Taxable).Sum(e => e.Amount);
+                var nonTaxableBonus = bonusTransactions.Where(e => !e.Taxable).Sum(e => e.Amount);
+                var bonusTax = transactions.Where(e => IsOracleBonusTaxTransaction(e, bonusType)).Sum(e => e.Amount);
+
+                if (bonus == 0m && run.IsSeparateBonusRun)
+                {
+                    bonus = employee.GrossIncome;
+                    taxableBonus = employee.TaxableAllowances != 0m ? employee.TaxableAllowances : bonus;
+                    nonTaxableBonus = employee.NonTaxableAllowances;
+                }
+
+                if (bonusTax == 0m && run.IsSeparateBonusRun)
+                {
+                    bonusTax = employee.IncomeTax;
+                }
+
+                var netBonus = bonus - bonusTax;
+                if (netBonus == 0m && run.IsSeparateBonusRun)
+                {
+                    netBonus = employee.NetIncome;
+                }
+
+                return new OracleBonusEmployeeRow(
+                    employee,
+                    bonus,
+                    taxableBonus,
+                    nonTaxableBonus,
+                    bonusTax,
+                    netBonus);
+            })
+            .Where(e => e.Bonus != 0m || e.BonusTax != 0m || e.NetBonus != 0m)
+            .OrderBy(e => e.Employee.EmployeeNumber)
+            .ToList();
+    }
+
+    private static string? ResolveOracleBonusType(PayrollOracleReportRequestDto dto)
+    {
+        var bonusType = TrimOrNull(dto.ComponentCodeFrom);
+        return bonusType is null ||
+               bonusType.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+               bonusType.Equals("ALL", StringComparison.OrdinalIgnoreCase) ||
+               bonusType.Equals("ZZZZZ", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : bonusType;
+    }
+
+    private static bool IsOracleBonusTransaction(PayrollTransaction transaction, string? bonusType)
+        => transaction.TransactionType.Equals(BonusTransactionType, StringComparison.OrdinalIgnoreCase) &&
+           OracleBonusTypeMatches(transaction, bonusType);
+
+    private static bool IsOracleBonusTaxTransaction(PayrollTransaction transaction, string? bonusType)
+    {
+        if (!transaction.TransactionType.Equals(IncomeTaxTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var hasBonusMarker =
+            transaction.ComponentCode?.Equals(BonusTransactionType, StringComparison.OrdinalIgnoreCase) == true ||
+            transaction.Description?.Contains("bonus", StringComparison.OrdinalIgnoreCase) == true ||
+            !string.IsNullOrWhiteSpace(bonusType) && OracleBonusTypeMatches(transaction, bonusType);
+
+        return hasBonusMarker;
+    }
+
+    private static bool OracleBonusTypeMatches(PayrollTransaction transaction, string? bonusType)
+    {
+        if (string.IsNullOrWhiteSpace(bonusType))
+        {
+            return true;
+        }
+
+        return transaction.ComponentCode?.Equals(bonusType, StringComparison.OrdinalIgnoreCase) == true ||
+               transaction.Description?.Contains(bonusType, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool IsAllowanceDeductionScheduleTransaction(PayrollTransaction transaction, string variantCode)
+    {
+        if (transaction.TransactionType.Equals(BasicSalaryTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transaction.TransactionType.Equals(NetPayTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return variantCode switch
+        {
+            "ALW" => IsOracleAllowanceTransaction(transaction),
+            "DED" => IsOracleDeductionTransaction(transaction),
+            "ADV" => transaction.TransactionType.Equals(SalaryAdvanceTransactionType, StringComparison.OrdinalIgnoreCase),
+            "REP" => transaction.TransactionType.Equals(LoanRepaymentTransactionType, StringComparison.OrdinalIgnoreCase),
+            "INT" => transaction.TransactionType.Equals(LoanInterestTransactionType, StringComparison.OrdinalIgnoreCase),
+            _ => true
+        };
+    }
+
+    private static bool IsOracleAllowanceTransaction(PayrollTransaction transaction)
+        => transaction.TransactionType.Equals("Allowance", StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(PromotionAllowanceArrearsTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(BonusTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transaction.Amount > 0 && !IsOracleDeductionTransaction(transaction);
+
+    private static bool IsOracleDeductionTransaction(PayrollTransaction transaction)
+        => transaction.TransactionType.Equals("Deduction", StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(IncomeTaxTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(EmployeePensionTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(LoanRepaymentTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(LoanInterestTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(SalaryAdvanceTransactionType, StringComparison.OrdinalIgnoreCase);
+
+    private static decimal GetOracleDecimal(PayrollOracleReportRowDto row, string key)
+        => row.Values.TryGetValue(key, out var value) && value is decimal amount ? amount : 0m;
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildPayeRows(IReadOnlyList<PayrollRunEmployee> employees, string variantCode)
+    {
+        var rows = employees
+            .Select((employee, index) =>
+            {
+                var allowance = employee.TaxableAllowances + employee.NonTaxableAllowances;
+                if (variantCode == "MPR")
+                {
+                    return OracleRow(new Dictionary<string, object?>
+                    {
+                        ["employeeNumber"] = employee.EmployeeNumber,
+                        ["employeeName"] = employee.EmployeeName,
+                        ["employeeTin"] = string.Empty,
+                        ["basicSalary"] = RoundMoney(employee.BasicSalary),
+                        ["basic"] = RoundMoney(0m),
+                        ["grossAllowance"] = RoundMoney(allowance),
+                        ["arrearsAllowance"] = RoundMoney(0m),
+                        ["excessBonus"] = RoundMoney(0m),
+                        ["totalCashEmolument"] = RoundMoney(employee.GrossIncome),
+                        ["benefitsInKind"] = RoundMoney(0m),
+                        ["bonusInThreshold"] = RoundMoney(0m),
+                        ["totalEmolument"] = RoundMoney(employee.GrossIncome),
+                        ["deductableReliefs"] = RoundMoney(employee.TaxRelief),
+                        ["employeeSsf"] = RoundMoney(employee.EmployeeContribution),
+                        ["employeeArrearsSsf"] = RoundMoney(0m),
+                        ["employeeTotalSsf"] = RoundMoney(employee.EmployeeContribution),
+                        ["offPayrollExcessBonus"] = RoundMoney(0m),
+                        ["taxableIncome"] = RoundMoney(employee.TaxableIncome),
+                        ["normalTax"] = RoundMoney(employee.IncomeTax),
+                        ["arrearsTax"] = RoundMoney(0m),
+                        ["bonusTax"] = RoundMoney(0m),
+                        ["totalTaxCharge"] = RoundMoney(employee.IncomeTax)
+                    });
+                }
+
+                var totalContribution = employee.EmployeeContribution + employee.EmployerContribution;
+                var totalReliefs = employee.TaxRelief + employee.EmployeeContribution;
+                var totalAssessableIncome = employee.GrossIncome;
+                return OracleRow(new Dictionary<string, object?>
+                {
+                    ["rowNumber"] = index + 1,
+                    ["nameOfEmployee"] = employee.EmployeeName,
+                    ["tin"] = string.Empty,
+                    ["position"] = string.Empty,
+                    ["resident"] = "N",
+                    ["basicSalary"] = RoundMoney(employee.BasicSalary),
+                    ["secondaryEmployment"] = "N",
+                    ["socialSecurityFund"] = RoundMoney(employee.EmployeeContribution),
+                    ["thirdTier"] = RoundMoney(0m),
+                    ["cashAllowances"] = RoundMoney(allowance),
+                    ["bonusIncome"] = RoundMoney(0m),
+                    ["finalTaxOnBonus"] = RoundMoney(0m),
+                    ["excessBonus"] = RoundMoney(0m),
+                    ["totalCashEmolument"] = RoundMoney(employee.BasicSalary + allowance),
+                    ["accomodationElement"] = RoundMoney(0m),
+                    ["vehicleElement"] = RoundMoney(0m),
+                    ["nonCashBenefit"] = RoundMoney(0m),
+                    ["totalAssessableIncome"] = RoundMoney(totalAssessableIncome),
+                    ["deductibleReliefs"] = RoundMoney(employee.TaxRelief),
+                    ["totalReliefs"] = RoundMoney(totalReliefs),
+                    ["chargeableIncome"] = RoundMoney(Math.Max(0m, totalAssessableIncome - totalReliefs)),
+                    ["taxDeductible"] = RoundMoney(employee.IncomeTax),
+                    ["overtimeIncome"] = RoundMoney(0m),
+                    ["overtimeTax"] = RoundMoney(0m),
+                    ["graTaxPayable"] = RoundMoney(employee.IncomeTax),
+                    ["severancePayPaid"] = RoundMoney(0m),
+                    ["remarks"] = string.Empty,
+                    ["totalContribution"] = RoundMoney(totalContribution)
+                });
+            })
+            .ToList();
+
+        if (variantCode == "MPR")
+        {
+            rows.Add(OracleRow(new Dictionary<string, object?>
+            {
+                ["oracleRowType"] = "TOTAL",
+                ["employeeNumber"] = $"COUNT : {employees.Count}",
+                ["employeeName"] = "TOTAL",
+                ["basicSalary"] = RoundMoney(employees.Sum(e => e.BasicSalary)),
+                ["basic"] = RoundMoney(0m),
+                ["grossAllowance"] = RoundMoney(employees.Sum(e => e.TaxableAllowances + e.NonTaxableAllowances)),
+                ["arrearsAllowance"] = RoundMoney(0m),
+                ["excessBonus"] = RoundMoney(0m),
+                ["totalCashEmolument"] = RoundMoney(employees.Sum(e => e.GrossIncome)),
+                ["benefitsInKind"] = RoundMoney(0m),
+                ["bonusInThreshold"] = RoundMoney(0m),
+                ["totalEmolument"] = RoundMoney(employees.Sum(e => e.GrossIncome)),
+                ["deductableReliefs"] = RoundMoney(employees.Sum(e => e.TaxRelief)),
+                ["employeeSsf"] = RoundMoney(employees.Sum(e => e.EmployeeContribution)),
+                ["employeeArrearsSsf"] = RoundMoney(0m),
+                ["employeeTotalSsf"] = RoundMoney(employees.Sum(e => e.EmployeeContribution)),
+                ["offPayrollExcessBonus"] = RoundMoney(0m),
+                ["taxableIncome"] = RoundMoney(employees.Sum(e => e.TaxableIncome)),
+                ["normalTax"] = RoundMoney(employees.Sum(e => e.IncomeTax)),
+                ["arrearsTax"] = RoundMoney(0m),
+                ["bonusTax"] = RoundMoney(0m),
+                ["totalTaxCharge"] = RoundMoney(employees.Sum(e => e.IncomeTax))
+            }));
+
+            return rows;
+        }
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["rowNumber"] = $"Total Count  :  {employees.Count}",
+            ["basicSalary"] = RoundMoney(employees.Sum(e => e.BasicSalary)),
+            ["socialSecurityFund"] = RoundMoney(employees.Sum(e => e.EmployeeContribution)),
+            ["thirdTier"] = RoundMoney(0m),
+            ["cashAllowances"] = RoundMoney(employees.Sum(e => e.TaxableAllowances + e.NonTaxableAllowances)),
+            ["bonusIncome"] = RoundMoney(0m),
+            ["finalTaxOnBonus"] = RoundMoney(0m),
+            ["excessBonus"] = RoundMoney(0m),
+            ["totalCashEmolument"] = RoundMoney(employees.Sum(e => e.BasicSalary + e.TaxableAllowances + e.NonTaxableAllowances)),
+            ["accomodationElement"] = RoundMoney(0m),
+            ["vehicleElement"] = RoundMoney(0m),
+            ["nonCashBenefit"] = RoundMoney(0m),
+            ["totalAssessableIncome"] = RoundMoney(employees.Sum(e => e.GrossIncome)),
+            ["deductibleReliefs"] = RoundMoney(employees.Sum(e => e.TaxRelief)),
+            ["totalReliefs"] = RoundMoney(employees.Sum(e => e.TaxRelief + e.EmployeeContribution)),
+            ["chargeableIncome"] = RoundMoney(employees.Sum(e => Math.Max(0m, e.GrossIncome - e.TaxRelief - e.EmployeeContribution))),
+            ["taxDeductible"] = RoundMoney(employees.Sum(e => e.IncomeTax)),
+            ["overtimeIncome"] = RoundMoney(0m),
+            ["overtimeTax"] = RoundMoney(0m),
+            ["graTaxPayable"] = RoundMoney(employees.Sum(e => e.IncomeTax)),
+            ["severancePayPaid"] = RoundMoney(0m)
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildAnnualTaxReturnRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        IReadOnlyList<PayrollRun> annualRuns,
+        string variantCode)
+    {
+        var employeeIds = employees.Select(e => e.EmployeeId).ToHashSet();
+        var filterEmployeesById = employees
+            .GroupBy(e => e.EmployeeId)
+            .ToDictionary(e => e.Key, e => e.First());
+        var transactionsByRunEmployeeId = annualRuns
+            .SelectMany(e => e.Transactions)
+            .GroupBy(e => e.PayrollRunEmployeeId)
+            .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollTransaction>)e.ToList());
+
+        var rows = annualRuns
+            .SelectMany(annualRun => annualRun.Employees.Select(employee => new { annualRun, employee }))
+            .Where(e => employeeIds.Contains(e.employee.EmployeeId))
+            .GroupBy(e => e.employee.EmployeeId)
+            .OrderBy(e => filterEmployeesById.TryGetValue(e.Key, out var employee) ? employee.EmployeeNumber : e.First().employee.EmployeeNumber)
+            .Select(group =>
+            {
+                var representative = filterEmployeesById.TryGetValue(group.Key, out var selectedEmployee)
+                    ? selectedEmployee
+                    : group.OrderByDescending(e => e.annualRun.PayPeriodTo).First().employee;
+                var profile = ResolveOracleProfile(context, representative);
+                var annualEmployees = group.Select(e => e.employee).ToList();
+                var transactions = group
+                    .SelectMany(e => transactionsByRunEmployeeId.TryGetValue(e.employee.Id, out var lines) ? lines : [])
+                    .ToList();
+                var taxableOvertime = SumTransactionsByType(transactions, OvertimeTransactionType);
+                var taxableBenefits = SumTransactionsByType(transactions, "Benefit");
+                var bonus = SumTransactionsByType(transactions, BonusTransactionType);
+                var incomeTax = annualEmployees.Sum(e => e.IncomeTax);
+                var taxPaid = incomeTax;
+                var values = new Dictionary<string, object?>
+                {
+                    ["employeeNumber"] = representative.EmployeeNumber,
+                    ["employeeName"] = representative.EmployeeName,
+                    ["tin"] = ResolveOracleTin(profile),
+                    ["position"] = ResolveOraclePositionLabel(profile),
+                    ["ssfNo"] = profile?.SsfNumber ?? profile?.Employee.SocialSecurityNumber ?? string.Empty,
+                    ["department"] = ResolveOracleDepartmentLabel(profile),
+                    ["location"] = ResolveOracleLocationLabel(profile),
+                    ["basicSalary"] = RoundMoney(annualEmployees.Sum(e => e.BasicSalary)),
+                    ["taxableAllowances"] = RoundMoney(annualEmployees.Sum(e => e.TaxableAllowances)),
+                    ["taxableOvertime"] = RoundMoney(taxableOvertime),
+                    ["bonus"] = RoundMoney(bonus),
+                    ["taxableBenefits"] = RoundMoney(taxableBenefits),
+                    ["employeeSsf"] = RoundMoney(annualEmployees.Sum(e => e.EmployeeContribution)),
+                    ["taxRelief"] = RoundMoney(annualEmployees.Sum(e => e.TaxRelief)),
+                    ["taxableIncome"] = RoundMoney(annualEmployees.Sum(e => e.TaxableIncome)),
+                    ["incomeTax"] = RoundMoney(incomeTax),
+                    ["taxPaid"] = RoundMoney(taxPaid),
+                    ["netTax"] = RoundMoney(Math.Max(0m, incomeTax - taxPaid)),
+                    ["taxYear"] = run.PayPeriodTo.Year
+                };
+
+                return OracleRow(values);
+            })
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"COUNT : {rows.Count}",
+            ["employeeName"] = "TOTAL",
+            ["basicSalary"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "basicSalary"))),
+            ["taxableAllowances"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "taxableAllowances"))),
+            ["taxableOvertime"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "taxableOvertime"))),
+            ["bonus"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "bonus"))),
+            ["taxableBenefits"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "taxableBenefits"))),
+            ["employeeSsf"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "employeeSsf"))),
+            ["taxRelief"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "taxRelief"))),
+            ["taxableIncome"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "taxableIncome"))),
+            ["incomeTax"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "incomeTax"))),
+            ["taxPaid"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "taxPaid"))),
+            ["netTax"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "netTax")))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildStaffListRows(
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        static string GroupLabel(PayrollEmployeeProfile? profile, string variant) => variant switch
+        {
+            "CAT" => ResolveOracleStaffCategoryLabel(profile),
+            "GEN" => ResolveOracleGenderLabel(profile),
+            _ => ResolveOracleDepartmentLabel(profile)
+        };
+
+        var rows = employees
+            .Select(employee =>
+            {
+                var profile = ResolveOracleProfile(context, employee);
+                return OracleRow(new Dictionary<string, object?>
+                {
+                    ["group"] = GroupLabel(profile, variantCode),
+                    ["employeeNumber"] = employee.EmployeeNumber,
+                    ["employeeName"] = employee.EmployeeName,
+                    ["dateEmployed"] = FormatOracleDate(profile?.Employee.DateEmployed),
+                    ["gender"] = ResolveOracleGenderLabel(profile),
+                    ["department"] = ResolveOracleDepartmentLabel(profile),
+                    ["section"] = ResolveOracleSectionLabel(profile),
+                    ["position"] = ResolveOraclePositionLabel(profile),
+                    ["location"] = ResolveOracleLocationLabel(profile),
+                    ["grade"] = ResolveOracleGradeLabel(profile),
+                    ["staffCategory"] = ResolveOracleStaffCategoryLabel(profile),
+                    ["region"] = ResolveOracleRegionLabel(profile),
+                    ["basicSalary"] = RoundMoney(employee.BasicSalary),
+                    ["status"] = profile?.PayrollActive == false ? "Inactive" : profile?.Employee.StaffStatus.ToString() ?? "Active"
+                });
+            })
+            .OrderBy(e => rowText(e, "group"))
+            .ThenBy(e => rowText(e, "employeeNumber"))
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["group"] = "TOTAL",
+            ["employeeNumber"] = $"COUNT : {employees.Count}",
+            ["employeeName"] = "Staff on Roll",
+            ["basicSalary"] = RoundMoney(employees.Sum(e => e.BasicSalary))
+        }));
+
+        return rows;
+
+        static string rowText(PayrollOracleReportRowDto row, string key)
+            => row.Values.TryGetValue(key, out var value) ? value?.ToString() ?? string.Empty : string.Empty;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildLoanStatementRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        var loanType = NormalizeOracleOptionalFilter(dto.LoanType) ?? NormalizeOracleOptionalFilter(dto.ComponentCodeFrom);
+        var facilityNumber = NormalizeOracleOptionalFilter(dto.FacilityNumber);
+        var employeeIds = employees.Select(e => e.EmployeeId).ToHashSet();
+        var profiles = employees
+            .Select(e => ResolveOracleProfile(context, e))
+            .Where(e => e != null)
+            .GroupBy(e => e!.Id)
+            .Select(e => e.First()!)
+            .ToList();
+        var loans = profiles
+            .SelectMany(profile => profile.Loans.Select(loan => new { Profile = profile, Loan = loan }))
+            .Where(e => employeeIds.Contains(e.Profile.EmployeeId))
+            .Where(e => e.Loan.DateGranted.Date <= run.PayPeriodTo.Date)
+            .Where(e => loanType == null ||
+                        string.Equals(e.Loan.LoanTypeCode, loanType, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(e.Loan.LoanPolicy?.Code, loanType, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(e.Loan.LoanPolicy?.Name, loanType, StringComparison.OrdinalIgnoreCase))
+            .Where(e => facilityNumber == null || e.Loan.FacilityNumber.Equals(facilityNumber, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(e => e.Profile.EmployeeNumber)
+            .ThenBy(e => e.Loan.LoanTypeCode)
+            .ThenBy(e => e.Loan.FacilityNumber)
+            .ToList();
+
+        if (variantCode == "D")
+        {
+            return loans
+                .Select(row =>
+                {
+                    var loan = row.Loan;
+                    var paid = loan.Schedules.Sum(e => e.AmountPaid + e.InterestPaid);
+                    return OracleRow(new Dictionary<string, object?>
+                    {
+                        ["employeeNumber"] = row.Profile.EmployeeNumber,
+                        ["employeeName"] = row.Profile.Employee.FullName,
+                        ["loanType"] = ResolveOracleLoanTypeLabel(loan),
+                        ["facilityNumber"] = loan.FacilityNumber,
+                        ["dateGranted"] = FormatOracleDate(loan.DateGranted),
+                        ["paymentStartDate"] = FormatOracleDate(loan.PaymentStartDate),
+                        ["paymentEndDate"] = FormatOracleDate(loan.PaymentEndDate),
+                        ["amountGranted"] = RoundMoney(loan.AmountGranted),
+                        ["monthlyRepayment"] = RoundMoney(loan.MonthlyRepaymentAmount),
+                        ["interestRepayment"] = RoundMoney(loan.InterestRepaymentAmount),
+                        ["totalPaid"] = RoundMoney(paid),
+                        ["outstandingBalance"] = RoundMoney(loan.OutstandingBalance),
+                        ["status"] = loan.Status
+                    });
+                })
+                .ToList();
+        }
+
+        var rows = new List<PayrollOracleReportRowDto>();
+        foreach (var row in loans)
+        {
+            var loan = row.Loan;
+            var cumulativePaid = 0m;
+            foreach (var schedule in loan.Schedules.OrderBy(e => e.RepaymentDate).ThenBy(e => e.SequenceNo))
+            {
+                var paid = schedule.AmountPaid + schedule.InterestPaid;
+                if (paid <= 0m)
+                {
+                    continue;
+                }
+
+                cumulativePaid += paid;
+                var openingDebt = loan.AmountGranted + loan.TotalInterest;
+                rows.Add(OracleRow(new Dictionary<string, object?>
+                {
+                    ["employeeNumber"] = row.Profile.EmployeeNumber,
+                    ["employeeName"] = row.Profile.Employee.FullName,
+                    ["loanType"] = ResolveOracleLoanTypeLabel(loan),
+                    ["facilityNumber"] = loan.FacilityNumber,
+                    ["dateGranted"] = FormatOracleDate(loan.DateGranted),
+                    ["paymentStartDate"] = FormatOracleDate(loan.PaymentStartDate),
+                    ["paymentEndDate"] = FormatOracleDate(loan.PaymentEndDate),
+                    ["numberOfRepayments"] = loan.NumberOfRepayments,
+                    ["repaymentDate"] = FormatOracleDate(schedule.RepaymentDate),
+                    ["repaymentAmount"] = RoundMoney(schedule.PrincipalAmount),
+                    ["interestAmount"] = RoundMoney(schedule.InterestAmount),
+                    ["amountPaid"] = RoundMoney(schedule.AmountPaid),
+                    ["interestPaid"] = RoundMoney(schedule.InterestPaid),
+                    ["cumulativePaid"] = RoundMoney(cumulativePaid),
+                    ["outstandingBalance"] = RoundMoney(Math.Max(0m, openingDebt - cumulativePaid))
+                }));
+            }
+        }
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"COUNT : {loans.Count}",
+            ["employeeName"] = "TOTAL",
+            ["repaymentAmount"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "repaymentAmount"))),
+            ["interestAmount"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "interestAmount"))),
+            ["amountPaid"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "amountPaid"))),
+            ["interestPaid"] = RoundMoney(rows.Sum(e => GetOracleDecimal(e, "interestPaid")))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildSsfRows(
+        PayrollPayslipBuildContext context,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        var ssfEmployees = employees
+            .Select(employee => (Employee: employee, Profile: ResolveOracleProfile(context, employee)))
+            .Where(e => e.Profile?.SsfApplicable == true || e.Employee.EmployeeContribution != 0 || e.Employee.EmployerContribution != 0)
+            .ToList();
+
+        var rows = ssfEmployees
+            .Select(e =>
+            {
+                var total = e.Employee.EmployeeContribution + e.Employee.EmployerContribution;
+                var firstTier = variantCode is "REP1" or "REP1A"
+                    ? total
+                    : RoundMoney(total * 13.5m / 18.5m);
+                var secondTier = variantCode == "REP2"
+                    ? total
+                    : RoundMoney(total - firstTier);
+
+                return OracleRow(new Dictionary<string, object?>
+                {
+                    ["employeeNumber"] = e.Employee.EmployeeNumber,
+                    ["employeeName"] = e.Employee.EmployeeName,
+                    ["ssfNo"] = e.Profile?.SsfNumber ?? e.Profile?.Employee.SocialSecurityNumber ?? string.Empty,
+                    ["basic"] = RoundMoney(e.Employee.BasicSalary),
+                    ["employeeSsf"] = RoundMoney(e.Employee.EmployeeContribution),
+                    ["employerSsf"] = RoundMoney(e.Employee.EmployerContribution),
+                    ["total"] = RoundMoney(total),
+                    ["firstTier"] = RoundMoney(firstTier),
+                    ["secondTier"] = RoundMoney(secondTier),
+                    ["totalContribution"] = RoundMoney(total)
+                });
+            })
+            .ToList();
+
+        rows.Add(OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["employeeNumber"] = $"COUNT : {ssfEmployees.Count}",
+            ["employeeName"] = "TOTAL",
+            ["basic"] = RoundMoney(ssfEmployees.Sum(e => e.Employee.BasicSalary)),
+            ["employeeSsf"] = RoundMoney(ssfEmployees.Sum(e => e.Employee.EmployeeContribution)),
+            ["employerSsf"] = RoundMoney(ssfEmployees.Sum(e => e.Employee.EmployerContribution)),
+            ["total"] = RoundMoney(ssfEmployees.Sum(e => e.Employee.EmployeeContribution + e.Employee.EmployerContribution)),
+            ["firstTier"] = RoundMoney(ssfEmployees.Sum(e =>
+            {
+                var total = e.Employee.EmployeeContribution + e.Employee.EmployerContribution;
+                return variantCode is "REP1" or "REP1A" ? total : RoundMoney(total * 13.5m / 18.5m);
+            })),
+            ["secondTier"] = RoundMoney(ssfEmployees.Sum(e =>
+            {
+                var total = e.Employee.EmployeeContribution + e.Employee.EmployerContribution;
+                var firstTier = variantCode is "REP1" or "REP1A" ? total : RoundMoney(total * 13.5m / 18.5m);
+                return variantCode == "REP2" ? total : RoundMoney(total - firstTier);
+            })),
+            ["totalContribution"] = RoundMoney(ssfEmployees.Sum(e => e.Employee.EmployeeContribution + e.Employee.EmployerContribution))
+        }));
+
+        return rows;
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildBankAdviceRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        IReadOnlyList<PayrollRunEmployee> employees,
+        string variantCode)
+    {
+        var payments = BuildOracleBankPaymentRows(run, context, dto, employees);
+        if (IsBankAdviceEmployeeVariant(variantCode))
+        {
+            var companyName = BuildCompanyName(context);
+            var companyAddress = BuildCompanyAddress(context) ?? string.Empty;
+            var companyPhone = BuildCompanyPhone(context) ?? string.Empty;
+
+            return payments
+                .OrderBy(e => e.BankName)
+                .ThenBy(e => e.BranchName)
+                .ThenBy(e => e.Employee.EmployeeNumber)
+                .Select(e => OracleRow(new Dictionary<string, object?>
+                {
+                    ["companyName"] = companyName,
+                    ["companyAddress"] = companyAddress,
+                    ["companyPhone"] = companyPhone,
+                    ["bankName"] = e.BankName,
+                    ["bankBranch"] = e.BranchName ?? string.Empty,
+                    ["staffId"] = e.Employee.EmployeeNumber,
+                    ["name"] = e.Employee.EmployeeName,
+                    ["acctNo"] = e.AccountNumber ?? string.Empty,
+                    ["accountNo"] = e.AccountNumber ?? string.Empty,
+                    ["net"] = RoundMoney(e.Amount),
+                    ["netPay"] = RoundMoney(e.Amount),
+                    ["currencyCode"] = e.CurrencyCode,
+                    ["sourceReportVariant"] = variantCode
+                }))
+                .ToList();
+        }
+
+        return payments
+            .GroupBy(e => e.BankName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(e => e.Key)
+            .Select(group => OracleRow(new Dictionary<string, object?>
+            {
+                ["bankName"] = group.Key,
+                ["accountCount"] = group.Count(),
+                ["total"] = RoundMoney(group.Sum(e => e.Amount))
+            }))
+            .ToList();
+    }
+
+    private static IReadOnlyList<OracleBankPaymentRow> BuildOracleBankPaymentRows(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        IReadOnlyList<PayrollRunEmployee> employees)
+        => BuildOracleBankPaymentRowsForAmounts(
+            run,
+            context,
+            dto,
+            employees.Select(e => new OracleEmployeePaymentBase(e, e.NetIncome)).ToList());
+
+    private static IReadOnlyList<OracleBankPaymentRow> BuildOracleBankPaymentRowsForAmounts(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        IReadOnlyList<OracleEmployeePaymentBase> employeePayments)
+    {
+        var rows = new List<OracleBankPaymentRow>();
+
+        foreach (var employeePayment in employeePayments.Where(e => e.Amount != 0m))
+        {
+            var employee = employeePayment.Employee;
+            var paymentAmount = employeePayment.Amount;
+            var profile = ResolveOracleProfile(context, employee);
+            if (profile == null)
+            {
+                continue;
+            }
+
+            var payrollMethods = profile.PaymentMethods
+                .Where(e => e.IsActive &&
+                            e.PaymentType.Equals("Bank", StringComparison.OrdinalIgnoreCase) &&
+                            IsEffective(e.StartDate, e.EndDate, run.PayPeriodFrom, run.PayPeriodTo))
+                .OrderBy(e => e.SequenceNo)
+                .ToList();
+
+            if (payrollMethods.Count > 0)
+            {
+                rows.AddRange(payrollMethods.Select((method, index) =>
+                {
+                    var bankName = ResolvePaymentMethodBankName(method, context) ?? "BANK";
+                    var branchName = ResolvePaymentMethodBankBranchName(method, context);
+                    return new OracleBankPaymentRow(
+                        bankName,
+                        method.BankCode,
+                        method.BankBranchCode,
+                        branchName,
+                        method.AccountNumber,
+                        string.IsNullOrWhiteSpace(method.CurrencyCode) ? employee.CurrencyCode : method.CurrencyCode,
+                        ResolvePaymentMethodAmount(method, paymentAmount, payrollMethods.Count, index),
+                        employee);
+                }));
+                continue;
+            }
+
+            var bankDetails = profile.Employee.BankDetails
+                .Where(e => e.IsActive)
+                .OrderByDescending(e => e.IsPrimary)
+                .ThenBy(e => e.BankName)
+                .ToList();
+
+            rows.AddRange(bankDetails.Select((bank, index) => new OracleBankPaymentRow(
+                ResolveEmployeeBankName(bank) ?? "BANK",
+                bank.Bank?.Code ?? bank.BankName,
+                bank.Branch?.Code ?? bank.Branch?.Name,
+                ResolveEmployeeBankBranchName(bank),
+                bank.AccountNumber,
+                employee.CurrencyCode,
+                bank.AllocationPercentage > 0
+                    ? Math.Round(paymentAmount * (bank.AllocationPercentage / 100m), 2)
+                    : bankDetails.Count == 1 || index == 0
+                        ? paymentAmount
+                        : 0m,
+                employee)));
+        }
+
+        return rows
+            .Where(e =>
+                IsWithinOracleRange(e.BankCode ?? e.BankName, dto.BankFrom, dto.BankTo) &&
+                IsWithinOracleRange(e.BranchCode ?? string.Empty, dto.BranchFrom, dto.BranchTo))
+            .ToList();
+    }
+
+    private static IReadOnlyList<PayrollOracleReportRowDto> BuildJournalRows(PayrollRun run, IReadOnlyList<PayrollRunEmployee> employees, string variantCode)
+    {
+        if (variantCode == "D")
+        {
+            var employeeIds = employees.Select(e => e.Id).ToHashSet();
+            var detailRows = run.Transactions
+                .Where(e => employeeIds.Contains(e.PayrollRunEmployeeId))
+                .OrderBy(e => e.EmployeeNumber)
+                .ThenBy(e => e.TransactionType)
+                .ThenBy(e => e.ComponentCode)
+                .Select(transaction =>
+                {
+                    var line = FindJournalLineForTransaction(run, transaction);
+                    var debitCredit = line?.DebitCredit ?? InferDebitCredit(transaction.TransactionType);
+                    var amount = Math.Abs(transaction.EmployerAmount ?? transaction.Amount);
+                    return OracleRow(new Dictionary<string, object?>
+                    {
+                        ["accountNumber"] = line?.AccountCode ?? "UNMAPPED",
+                        ["accountDescription"] = transaction.Description ?? line?.Description ?? transaction.TransactionType,
+                        ["debit"] = RoundMoney(debitCredit.Equals("DR", StringComparison.OrdinalIgnoreCase) ? amount : 0m),
+                        ["credit"] = RoundMoney(debitCredit.Equals("CR", StringComparison.OrdinalIgnoreCase) ? amount : 0m)
+                    });
+                })
+                .ToList();
+
+            detailRows.Add(BuildOracleJournalTotalRow(detailRows));
+            return detailRows;
+        }
+
+        var summaryRows = run.JournalLines
+            .OrderBy(e => e.AccountCode)
+            .ThenBy(e => e.Description)
+            .GroupBy(e => new { e.AccountCode, e.Description })
+            .Select(group => OracleRow(new Dictionary<string, object?>
+            {
+                ["accountNumber"] = group.Key.AccountCode,
+                ["accountDescription"] = group.Key.Description,
+                ["debit"] = RoundMoney(group.Where(e => e.DebitCredit.Equals("DR", StringComparison.OrdinalIgnoreCase)).Sum(e => e.Amount)),
+                ["credit"] = RoundMoney(group.Where(e => e.DebitCredit.Equals("CR", StringComparison.OrdinalIgnoreCase)).Sum(e => e.Amount))
+            }))
+            .ToList();
+        summaryRows.Add(BuildOracleJournalTotalRow(summaryRows));
+        return summaryRows;
+    }
+
+    private static PayrollOracleReportRowDto BuildOracleJournalTotalRow(IReadOnlyList<PayrollOracleReportRowDto> rows)
+    {
+        static decimal GetAmount(PayrollOracleReportRowDto row, string key)
+            => row.Values.TryGetValue(key, out var value) && value is decimal amount ? amount : 0m;
+
+        return OracleRow(new Dictionary<string, object?>
+        {
+            ["oracleRowType"] = "TOTAL",
+            ["accountDescription"] = "Total",
+            ["debit"] = RoundMoney(rows.Sum(row => GetAmount(row, "debit"))),
+            ["credit"] = RoundMoney(rows.Sum(row => GetAmount(row, "credit")))
+        });
+    }
+
+    private static PayrollJournalLine? FindJournalLineForTransaction(PayrollRun run, PayrollTransaction transaction)
+        => run.JournalLines.FirstOrDefault(e =>
+               e.TransactionType.Equals(transaction.TransactionType, StringComparison.OrdinalIgnoreCase) &&
+               (transaction.ComponentCode == null || e.Description.Contains(transaction.ComponentCode, StringComparison.OrdinalIgnoreCase)))
+           ?? run.JournalLines.FirstOrDefault(e => e.TransactionType.Equals(transaction.TransactionType, StringComparison.OrdinalIgnoreCase));
+
+    private static IReadOnlyList<PayrollOracleReportParameterDto> BuildOracleReportParameters(
+        PayrollRun run,
+        PayrollPayslipBuildContext context,
+        PayrollOracleReportRequestDto dto,
+        string reportCode)
+    {
+        var companyCode = TrimOrNull(context.CompanyProfile?.CompanyCode)
+                          ?? TrimOrNull(context.CompanyProfile?.LegacyCompanyCode)
+                          ?? "001";
+        var parameters = new List<PayrollOracleReportParameterDto>
+        {
+            OracleParameter("P_PERIOD", reportCode == "REP3_034" ? "Tax Year" : "Pay Period", ResolveOracleReportPeriodLabel(reportCode, run)),
+            OracleParameter("P_COMPCODE", "Company", companyCode)
+        };
+
+        if (reportCode == "REP3_002")
+        {
+            parameters.AddRange(
+            [
+                OracleParameter("P_REGION", "Region", TrimOrNull(dto.RegionCode) ?? "ALL"),
+                OracleParameter("P_DEPARTMENT", "Department", TrimOrNull(dto.DepartmentCode) ?? "ALL")
+            ]);
+        }
+
+        if (reportCode is "REP3_009" or "REP3_031")
+        {
+            parameters.AddRange(
+            [
+                OracleParameter("P_CURR_CODE", "Currency", TrimOrNull(dto.ReportingCurrency) ?? run.CurrencyCode),
+                OracleParameter("P_ACCT_NO", "Account No", dto.AccountNumber),
+                OracleParameter("P_BANK_CODE", "Bank", dto.BankFrom ?? "0"),
+                OracleParameter("P_BRANCH_CODE", "Branch", dto.BranchFrom ?? "0"),
+                OracleParameter("P_SIG1", "Signatory 1", dto.Signer1),
+                OracleParameter("P_SIG2", "Signatory 2", dto.Signer2),
+                OracleParameter("P_SIG3", "Signatory 3", dto.Signer3),
+                OracleParameter("P_PSN1", "Position 1", dto.Position1),
+                OracleParameter("P_PSN2", "Position 2", dto.Position2),
+                OracleParameter("P_PSN3", "Position 3", dto.Position3)
+            ]);
+        }
+
+        if (reportCode == "REP3_010")
+        {
+            var variantCode = NormalizeOracleVariantCode(reportCode, dto.VariantCode);
+            if (variantCode == "ALL")
+            {
+                parameters.AddRange(
+                [
+                    OracleParameter("P_ALL_DED_FM", "Allowances / Deductions From", "0"),
+                    OracleParameter("P_ALL_DED_TO", "Allowances / Deductions To", "ZZZZZ")
+                ]);
+            }
+            else
+            {
+                parameters.AddRange(
+                [
+                    OracleParameter("P_ALL_DED_FM", "Allowances / Deductions From", variantCode),
+                    OracleParameter("P_ALL_DED_TO", "Allowances / Deductions To", variantCode)
+                ]);
+            }
+
+            parameters.AddRange(
+            [
+                OracleParameter("P_ALW_FM", "Code From", dto.ComponentCodeFrom ?? "0"),
+                OracleParameter("P_ALW_TO", "Code To", dto.ComponentCodeTo ?? "ZZZZZ"),
+                OracleParameter("P_REP_CURRENCY", "Reporting Currency", TrimOrNull(dto.ReportingCurrency) ?? run.CurrencyCode)
+            ]);
+        }
+
+        if (reportCode is "REP3_011" or "REP3_019" or "REP3_028" or "REP3_029" or "REP3_032" or "REP3_034" or "REP3_036")
+        {
+            parameters.AddRange(
+            [
+                OracleParameter("P_DEPT_FM", "Department From", dto.DepartmentFrom ?? "0"),
+                OracleParameter("P_DEPT_TO", "Department To", dto.DepartmentTo ?? "ZZZZZ"),
+                OracleParameter("P_LOC_FM", "Location From", dto.LocationFrom ?? "0"),
+                OracleParameter("P_LOC_TO", "Location To", dto.LocationTo ?? "ZZZZZ"),
+                OracleParameter("P_EMPNO_FM", "Employee From", dto.EmployeeNumberFrom ?? "0"),
+                OracleParameter("P_EMPNO_TO", "Employee To", dto.EmployeeNumberTo ?? "ZZZZZ")
+            ]);
+        }
+
+        if (reportCode == "REP3_036")
+        {
+            parameters.AddRange(
+            [
+                OracleParameter("P_LOANTYPE", "Loan Type", NormalizeOracleOptionalFilter(dto.LoanType) ?? NormalizeOracleOptionalFilter(dto.ComponentCodeFrom) ?? "ALL"),
+                OracleParameter("P_FACILITYNO", "Facility No", NormalizeOracleOptionalFilter(dto.FacilityNumber) ?? "ALL"),
+                OracleParameter("P_CATEGORY", "Category", NormalizeOracleVariantCode(reportCode, dto.VariantCode))
+            ]);
+        }
+
+        if (reportCode is "REP3_028" or "REP3_029" or "REP3_030" or "REP3_031" or "REP3_032")
+        {
+            parameters.Add(OracleParameter("P_BONUS_TYPE", "Bonus Type", dto.ComponentCodeFrom));
+        }
+
+        if (reportCode == "REP3_035")
+        {
+            parameters.AddRange(
+            [
+                OracleParameter("P_DEPT_FM", "Dept From", dto.DepartmentFrom ?? "0"),
+                OracleParameter("P_DEPT_TO", "Dept To", dto.DepartmentTo ?? "ZZZZZ"),
+                OracleParameter("P_EMPNO_FM", "Employee From", dto.EmployeeNumberFrom ?? "0"),
+                OracleParameter("P_EMPNO_TO", "Employee To", dto.EmployeeNumberTo ?? "ZZZZZ")
+            ]);
+        }
+
+        if (reportCode == "REP3_007")
+        {
+            parameters.Add(OracleParameter("P_REP_CURRENCY", "Reporting Currency", TrimOrNull(dto.ReportingCurrency) ?? run.CurrencyCode));
+        }
+
+        return parameters;
+    }
+
+    private static (string ReportName, string SourceForm, string SourceReport, string VariantName) ResolveOracleReportMetadata(string reportCode, string variantCode)
+        => reportCode switch
+        {
+            "REP3_001" => ("Payroll Register Report", "REP3_001.fmb", variantCode switch
+            {
+                "D" => "REP3_001_DEPT.RDF",
+                "B" => "REP3_037.RDF",
+                "S" => "REP3_001_SUM.RDF",
+                "E" => "REP3_001_SECT.RDF",
+                "RAN" => "REP3_001_RAN.RDF",
+                "P" => "REP3_039.RDF",
+                "N" => "REP3_038.RDF",
+                "DR" => "REP3_001_DETAIL.rdf",
+                "PD" => "REP3_039_USD.RDF",
+                _ => "REP3_001_ALL.RDF"
+            }, variantCode switch
+            {
+                "D" => "Department",
+                "B" => "Bank",
+                "S" => "Summary",
+                "E" => "Section",
+                "RAN" => "Range",
+                "P" => "Employer Cost",
+                "N" => "Net Pay Report",
+                "DR" => "Detail Report",
+                "PD" => "Employer Cost USD",
+                _ => "All"
+            }),
+            "REP3_006" => ("Monthly PAYE Report", "REP3_006.fmb", variantCode switch
+            {
+                "GRA" => "REP3_006_GRA.RDF",
+                "MPR" => "REP3_006_PWC.rdf",
+                _ => "REP3_006.RDF"
+            }, variantCode == "GRA" ? "GRA Monthly Payee" : "Monthly Payee"),
+            "REP3_007" => ("SSF Report", "REP3_007.fmb", variantCode switch
+            {
+                "REP1" => "REP3_007_1.rdf",
+                "REP2" => "REP3_007_2.rdf",
+                "REP1A" => "REP3_007_1A.rdf",
+                "REP3" => "REP3_007_3.RDF",
+                "FB" => "REP3_001_SSF.RDF",
+                _ => "REP3_007.rdf"
+            }, variantCode switch
+            {
+                "REP1" => "1st Tier",
+                "REP2" => "2nd Tier",
+                "REP1A" => "1st Tier New",
+                "REP3" => "Tier3 Contribution",
+                "FB" => "Format B",
+                _ => "SSF Report"
+            }),
+            "REP3_002" => ("Payroll Analysis - Month", "REP3_002.fmb", variantCode switch
+            {
+                "REG" => "ANALYSIS_REG.RDF",
+                "IND" => "ANALYSIS_INDV.RDF",
+                _ => "ANALYSIS_DEPT.rdf"
+            }, variantCode switch
+            {
+                "REG" => "Region",
+                "IND" => "Individual",
+                _ => "Department"
+            }),
+            "REP3_009" => ("Bank Advice By Employer Bank", "REP3_009.fmb", variantCode switch
+            {
+                "CD" => "REP3_009_GSLTF_USD.RDF",
+                "DC" => "REP3_009_USD_CEDI.RDF",
+                "DD" => "REP3_009_DOL_DOL.RDF",
+                _ => "REP3_009_PHC.RDF"
+            }, variantCode switch
+            {
+                "CD" => "Bank Advice(Cedi to Dollar)",
+                "DC" => "Bank Advice(Dollar to Cedi)",
+                "DD" => "Bank Advice(Dollar to Dollar)",
+                _ => "Bank Advice(Cedi to Cedi)"
+            }),
+            "REP3_010" => ("Allowances & Deductions Sch.", "REP3_010.fmb", "REP3_010_SLTF.rdf", variantCode switch
+            {
+                "ALW" => "Allowances",
+                "DED" => "Deductions",
+                "ADV" => "Advance",
+                "REP" => "Loan Repayment",
+                "INT" => "Loan Interest",
+                _ => "All"
+            }),
+            "REP3_011" => ("Cash List", "REP3_011.fmb", "CASHLIST.RDF", "Cash List"),
+            "REP3_034" => ("Annual Tax Returns", "REP3_034.fmb", variantCode switch
+            {
+                "A" => "REP3_034_A.RDF",
+                "R" => "REP3_034_R.RDF",
+                "P" => "REP3_034_P.RDF",
+                "L" => "REP3_034_LOC.rdf",
+                _ => "REP3_034.RDF"
+            }, variantCode switch
+            {
+                "A" => "Annual Employee Return",
+                "R" => "Annual Tax Register",
+                "P" => "Employee Tax Certificate",
+                "L" => "Annual Tax by Location",
+                _ => "Income Tax Deduction Form"
+            }),
+            "REP3_035" => ("Bank Advice", "BANK_ADV.fmb", variantCode switch
+            {
+                "BNK" => "REP3_004.RDF",
+                "BR1" => "REP3_005_GBC1.RDF",
+                "BSU" => "BANK_SUM.RDF",
+                "BRA" => "REP3_005_GBC.RDF",
+                "REG" => "REP3_020.RDF",
+                "ARR" => "REP3_005_ARR.RDF",
+                _ => "BANK_SUM.RDF"
+            }, variantCode switch
+            {
+                "BNK" => "Employee Bank",
+                "BR1" => "Employee Bank Branch",
+                "BSU" => "Bank Summary",
+                "BRA" => "Branch Summary",
+                "REG" => "Regional Bank Advice",
+                "ARR" => "Arreas Advice",
+                _ => "Bank Summary"
+            }),
+            "REP3_036" => ("Loan Statement", "REP3_036.fmb", variantCode switch
+            {
+                "F" => "REP3_036_A.RDF",
+                "T" => "REP3_036_B.RDF",
+                "D" => "REP3_036_DETAILS.RDF",
+                _ => "REP3_036.RDF"
+            }, variantCode switch
+            {
+                "F" => "Facility Statement",
+                "T" => "Loan Type Statement",
+                "D" => "Employees Loan Report",
+                _ => "Individual Statement"
+            }),
+            "REP3_305" => ("Staff Lists", "REP3_305.fmb", variantCode switch
+            {
+                "CAT" => "REP3_305_A.RDF",
+                "GEN" => "REP3_305_B.RDF",
+                _ => "REP3_305.RDF"
+            }, variantCode switch
+            {
+                "CAT" => "Staff Lists By Category",
+                "GEN" => "Staff Lists By Gender",
+                _ => "Staff Lists By Department"
+            }),
+            "REP3_016" => ("Journal Reports", "REP3_016.fmb", variantCode == "D" ? "JOUNAL_DETAIL.rdf" : "JOUNAL_REP.RDF", variantCode == "D" ? "Detail Journal Report" : "Summary Journal Report"),
+            "REP3_019" => ("Overtime Reports", "REP3_019.fmb", "REP3_019.RDF", "Overtime Reports"),
+            "REP3_028" => ("Bonus Slip", "REP3_028.fmb", "REP3_028.RDF", "Bonus Slip"),
+            "REP3_029" => ("Bonus Register", "REP3_029.fmb", "BONUS_REGISTER.rdf", "Bonus Register"),
+            "REP3_030" => ("Bonus Tax Report", "REP3_030.fmb", "REP3_030.RDF", "Bonus Tax Report"),
+            "REP3_031" => ("Bonus Bank Advice", "REP3_031.fmb", "REP3_031.RDF", "Bonus Bank Advice"),
+            "REP3_032" => ("Bonus Cash List", "REP3_032.fmb", "REP3_032.RDF", "Bonus Cash List"),
+            _ => ("Payroll Report", reportCode, reportCode, "Default")
+        };
+
+    private static string NormalizeOracleReportCode(string? reportCode)
+    {
+        var normalized = TrimOrNull(reportCode)?.ToUpperInvariant();
+        return normalized switch
+        {
+            "PAYROLL_REGISTER" or "REGISTER" or "A0000401" => "REP3_001",
+            "ANALYSIS" or "PAYROLL_ANALYSIS" or "A0000406" => "REP3_002",
+            "EMPLOYER_BANK_ADVICE" or "BANK_ADVICE_BY_EMPLOYER_BANK" or "A0000407" => "REP3_009",
+            "ALLOWANCES_DEDUCTIONS" or "ALLOWANCES_DEDUCTIONS_SCHEDULE" or "A0000408" => "REP3_010",
+            "CASH_LIST" or "CASHLIST" or "A0000410" => "REP3_011",
+            "PAYE" or "MONTHLY_PAYE" or "A0000405" => "REP3_006",
+            "SSF" or "A0000404" => "REP3_007",
+            "BANK" or "BANK_ADVICE" or "A0000402" => "REP3_035",
+            "JOURNAL" or "JOURNALS" or "A0000411" => "REP3_016",
+            "OVERTIME" or "OVERTIME_REPORTS" or "A0000412" => "REP3_019",
+            "ANNUAL_TAX_RETURNS" or "ANNUAL_TAX" or "A0000418" => "REP3_034",
+            "STAFF_LIST" or "STAFF_LISTS" or "A0000420" => "REP3_305",
+            "LOAN_STATEMENT" or "LOAN_STATEMENTS" or "A0000423" => "REP3_036",
+            "BONUS_SLIP" or "A000041402" => "REP3_028",
+            "BONUS_REGISTER" or "A0000415" => "REP3_029",
+            "BONUS_TAX" or "BONUS_TAX_REPORT" or "A000041403" => "REP3_030",
+            "BONUS_BANK_ADVICE" or "A000041404" => "REP3_031",
+            "BONUS_CASH_LIST" or "A000041405" => "REP3_032",
+            "REP3_002" or "REP3_006" or "REP3_007" or "REP3_009" or "REP3_010" or "REP3_011" or "REP3_034" or "REP3_035" or "REP3_036" or "REP3_305" or "REP3_016" or "REP3_019" or "REP3_028" or "REP3_029" or "REP3_030" or "REP3_031" or "REP3_032" => normalized,
+            _ => "REP3_001"
+        };
+    }
+
+    private static string NormalizeOracleVariantCode(string reportCode, string? variantCode)
+    {
+        var normalized = TrimOrNull(variantCode)?.ToUpperInvariant();
+        return reportCode switch
+        {
+            "REP3_001" => normalized is "D" or "B" or "S" or "A" or "E" or "RAN" or "P" or "N" or "DR" or "PD" ? normalized : "A",
+            "REP3_002" => normalized is "DEP" or "REG" or "IND" ? normalized : "DEP",
+            "REP3_006" => normalized is "GRA" or "MPR" ? normalized : "MPR",
+            "REP3_007" => normalized is "REP" or "REP1" or "REP2" or "REP1A" or "REP3" or "FB" ? normalized : "REP",
+            "REP3_009" => normalized is "CC" or "CD" or "DC" or "DD" ? normalized : "CC",
+            "REP3_010" => normalized is "ALL" or "ALW" or "DED" or "ADV" or "REP" or "INT" ? normalized : "ALL",
+            "REP3_011" => "CASH",
+            "REP3_034" => normalized is "O" or "A" or "R" or "P" or "L" ? normalized : "O",
+            "REP3_035" => normalized is "BNK" or "BR1" or "BSU" or "BRA" or "REG" or "ARR" ? normalized : "BNK",
+            "REP3_036" => normalized is "I" or "F" or "T" or "D" ? normalized : "I",
+            "REP3_305" => normalized is "DEP" or "CAT" or "GEN" ? normalized : "DEP",
+            "REP3_016" => normalized == "D" ? "D" : "S",
+            "REP3_019" => "OT",
+            "REP3_028" => "SLIP",
+            "REP3_029" => "REG",
+            "REP3_030" => "TAX",
+            "REP3_031" => "BANK",
+            "REP3_032" => "CASH",
+            _ => normalized ?? string.Empty
+        };
+    }
+
+    private static bool IsBankAdviceEmployeeVariant(string variantCode)
+        => variantCode is "BNK" or "BR1" or "BRA" or "REG" or "ARR";
+
+    private static PayrollOracleReportColumnDto OracleColumn(string key, string header, string alignment = "left", string valueType = "text")
+        => new()
+        {
+            Key = key,
+            Header = header,
+            Alignment = alignment,
+            ValueType = valueType
+        };
+
+    private static PayrollOracleReportParameterDto OracleParameter(string oracleName, string label, string? value)
+        => new()
+        {
+            OracleName = oracleName,
+            Label = label,
+            Value = value
+        };
+
+    private static PayrollOracleReportRowDto OracleRow(IReadOnlyDictionary<string, object?> values)
+        => new()
+        {
+            Values = values
+        };
+
+    private static PayrollEmployeeProfile? ResolveOracleProfile(PayrollPayslipBuildContext context, PayrollRunEmployee employee)
+        => context.ProfilesByEmployeeId.TryGetValue(employee.EmployeeId, out var profile) ? profile : null;
+
+    private static string? ResolveOracleDepartmentCode(PayrollEmployeeProfile? profile)
+        => TrimOrNull(profile?.Employee.Department?.Code) ?? TrimOrNull(profile?.Employee.Department?.Name);
+
+    private static string ResolveOracleDepartmentLabel(PayrollEmployeeProfile? profile)
+    {
+        var code = TrimOrNull(profile?.Employee.Department?.Code);
+        var name = TrimOrNull(profile?.Employee.Department?.Name);
+        return (code, name) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{code} - {name}",
+            ({ Length: > 0 }, _) => code,
+            (_, { Length: > 0 }) => name,
+            _ => "Unassigned"
+        };
+    }
+
+    private static string? ResolveOracleLocationCode(PayrollEmployeeProfile? profile)
+        => TrimOrNull(profile?.Employee.Location?.Code)
+           ?? TrimOrNull(profile?.Employee.Station?.Code)
+           ?? TrimOrNull(profile?.Employee.Location?.Name)
+           ?? TrimOrNull(profile?.Employee.Station?.Name);
+
+    private static string ResolveOracleLocationLabel(PayrollEmployeeProfile? profile)
+    {
+        var code = TrimOrNull(profile?.Employee.Location?.Code) ?? TrimOrNull(profile?.Employee.Station?.Code);
+        var name = TrimOrNull(profile?.Employee.Location?.Name) ?? TrimOrNull(profile?.Employee.Station?.Name);
+        return (code, name) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{code} - {name}",
+            ({ Length: > 0 }, _) => code,
+            (_, { Length: > 0 }) => name,
+            _ => "Unassigned"
+        };
+    }
+
+    private static string? ResolveOracleRegionCode(PayrollEmployeeProfile? profile)
+        => TrimOrNull(profile?.Employee.State)
+           ?? TrimOrNull(profile?.Employee.Location?.Code)
+           ?? TrimOrNull(profile?.Employee.Location?.Name);
+
+    private static string ResolveOracleRegionLabel(PayrollEmployeeProfile? profile)
+        => TrimOrNull(profile?.Employee.State) ?? ResolveOracleLocationLabel(profile);
+
+    private static string ResolveOracleSectionLabel(PayrollEmployeeProfile? profile)
+    {
+        var code = TrimOrNull(profile?.Employee.Section?.Code);
+        var name = TrimOrNull(profile?.Employee.Section?.Name);
+        return (code, name) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{code} - {name}",
+            ({ Length: > 0 }, _) => code,
+            (_, { Length: > 0 }) => name,
+            _ => "Unassigned"
+        };
+    }
+
+    private static string ResolveOraclePositionLabel(PayrollEmployeeProfile? profile)
+    {
+        var code = TrimOrNull(profile?.Employee.Position?.Code);
+        var title = TrimOrNull(profile?.Employee.Position?.Title);
+        return (code, title) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{code} - {title}",
+            ({ Length: > 0 }, _) => code,
+            (_, { Length: > 0 }) => title,
+            _ => string.Empty
+        };
+    }
+
+    private static string ResolveOracleGradeLabel(PayrollEmployeeProfile? profile)
+    {
+        var code = TrimOrNull(profile?.Employee.Position?.SalaryGrade?.Code);
+        var name = TrimOrNull(profile?.Employee.Position?.SalaryGrade?.Name);
+        return (code, name) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{code} - {name}",
+            ({ Length: > 0 }, _) => code,
+            (_, { Length: > 0 }) => name,
+            _ => string.Empty
+        };
+    }
+
+    private static string ResolveOracleStaffCategoryLabel(PayrollEmployeeProfile? profile)
+        => TrimOrNull(profile?.Employee.Position?.StaffLevel?.Name)
+           ?? TrimOrNull(profile?.Employee.Position?.StaffLevel?.Code)
+           ?? profile?.Employee.EmploymentType.ToString()
+           ?? "Unassigned";
+
+    private static string ResolveOracleGenderLabel(PayrollEmployeeProfile? profile)
+        => profile?.Employee.Gender?.ToString() ?? "Unassigned";
+
+    private static string ResolveOracleTin(PayrollEmployeeProfile? profile)
+        => TrimOrNull(profile?.TinNumber)
+           ?? TrimOrNull(profile?.Employee.TINNumber)
+           ?? TrimOrNull(profile?.Employee.TaxNumber)
+           ?? string.Empty;
+
+    private static string ResolveOracleLoanTypeLabel(PayrollLoan loan)
+    {
+        var code = TrimOrNull(loan.LoanTypeCode) ?? TrimOrNull(loan.LoanPolicy?.Code);
+        var name = TrimOrNull(loan.LoanPolicy?.Name);
+        return (code, name) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{code} - {name}",
+            ({ Length: > 0 }, _) => code,
+            (_, { Length: > 0 }) => name,
+            _ => "Loan"
+        };
+    }
+
+    private static string ResolveOracleReportPeriodLabel(string reportCode, PayrollRun run)
+        => reportCode == "REP3_034"
+            ? run.PayPeriodTo.Year.ToString(CultureInfo.InvariantCulture)
+            : FormatPayrollPeriodMonth(run.PayPeriodFrom, run.PayPeriodTo);
+
+    private static string FormatOracleDate(DateTime? value)
+        => value.HasValue ? value.Value.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture) : string.Empty;
+
+    private static string FormatOracleDate(DateOnly? value)
+        => value.HasValue ? value.Value.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture) : string.Empty;
+
+    private static bool IsWithinOracleRange(string? value, string? from, string? to)
+    {
+        var normalizedValue = TrimOrNull(value);
+        var normalizedFrom = NormalizeOracleRangeEndpoint(from);
+        var normalizedTo = NormalizeOracleRangeEndpoint(to);
+
+        if (string.IsNullOrWhiteSpace(normalizedValue))
+        {
+            return normalizedFrom == null && normalizedTo == null;
+        }
+
+        return (normalizedFrom == null || string.Compare(normalizedValue, normalizedFrom, StringComparison.OrdinalIgnoreCase) >= 0) &&
+               (normalizedTo == null || string.Compare(normalizedValue, normalizedTo, StringComparison.OrdinalIgnoreCase) <= 0);
+    }
+
+    private static bool HasOracleRange(string? from, string? to)
+        => NormalizeOracleRangeEndpoint(from) != null || NormalizeOracleRangeEndpoint(to) != null;
+
+    private static string? NormalizeOracleRangeEndpoint(string? value)
+    {
+        var normalized = TrimOrNull(value);
+        return normalized is null ||
+               normalized.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("ZZZZZ", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : normalized;
+    }
+
+    private static string? NormalizeOracleOptionalFilter(string? value)
+    {
+        var normalized = TrimOrNull(value);
+        return normalized is null ||
+               normalized.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("ALL", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("ZZZZZ", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : normalized;
+    }
+
+    private static decimal RoundMoney(decimal amount)
+        => Math.Round(amount, 2);
+
+    private async Task<PayrollPayslipBuildContext> LoadPayslipContextAsync(
+        Guid tenantId,
+        PayrollRun run,
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<Guid>? employeeIdsOverride = null)
+    {
+        var employeeIds = (employeeIdsOverride ?? run.Employees
             .Select(e => e.EmployeeId)
+            .ToList())
             .Distinct()
             .ToList();
 
@@ -4750,6 +7689,9 @@ public class PayrollService : IPayrollService
                     .ThenInclude(e => e.Position)
                         .ThenInclude(e => e.StaffLevel)
                 .Include(e => e.Employee)
+                    .ThenInclude(e => e.Position)
+                        .ThenInclude(e => e.SalaryGrade)
+                .Include(e => e.Employee)
                     .ThenInclude(e => e.Location)
                 .Include(e => e.Employee)
                     .ThenInclude(e => e.Station)
@@ -4760,6 +7702,10 @@ public class PayrollService : IPayrollService
                     .ThenInclude(e => e.BankDetails)
                         .ThenInclude(e => e.Branch)
                 .Include(e => e.PaymentMethods.OrderBy(m => m.SequenceNo))
+                .Include(e => e.Loans)
+                    .ThenInclude(e => e.LoanPolicy)
+                .Include(e => e.Loans)
+                    .ThenInclude(e => e.Schedules.OrderBy(s => s.SequenceNo))
                 .Where(e => e.TenantId == tenantId && employeeIds.Contains(e.EmployeeId))
                 .ToListAsync(cancellationToken);
 
@@ -5412,20 +8358,30 @@ public class PayrollService : IPayrollService
 
     private static string BuildPaymentMethodBankName(PayrollPaymentMethod method, PayrollPayslipBuildContext context)
     {
-        var bankCode = TrimOrNull(method.BankCode);
-        var branchCode = TrimOrNull(method.BankBranchCode);
-        var bankName = ResolveLookupValue(bankCode, context.EmployeeBankNamesByReference, context.PayrollBankNamesByCode) ?? bankCode;
-        var branchKey = bankCode != null && branchCode != null ? $"{bankCode}|{branchCode}" : null;
-        var branchName =
-            ResolveLookupValue(branchKey, context.EmployeeBankBranchNamesByReference, context.PayrollBankBranchNamesByReference) ??
-            ResolveLookupValue(branchCode, context.EmployeeBankBranchNamesByReference, context.PayrollBankBranchNamesByReference) ??
-            branchCode;
+        var bankName = ResolvePaymentMethodBankName(method, context);
+        var branchName = ResolvePaymentMethodBankBranchName(method, context);
         var parts = new[] { bankName, branchName }
             .Where(e => !string.IsNullOrWhiteSpace(e))
             .Select(e => e!.Trim())
             .ToList();
 
         return parts.Count == 0 ? "BANK" : string.Join(" - ", parts);
+    }
+
+    private static string? ResolvePaymentMethodBankName(PayrollPaymentMethod method, PayrollPayslipBuildContext context)
+    {
+        var bankCode = TrimOrNull(method.BankCode);
+        return ResolveLookupValue(bankCode, context.EmployeeBankNamesByReference, context.PayrollBankNamesByCode) ?? bankCode;
+    }
+
+    private static string? ResolvePaymentMethodBankBranchName(PayrollPaymentMethod method, PayrollPayslipBuildContext context)
+    {
+        var bankCode = TrimOrNull(method.BankCode);
+        var branchCode = TrimOrNull(method.BankBranchCode);
+        var branchKey = bankCode != null && branchCode != null ? $"{bankCode}|{branchCode}" : null;
+        return ResolveLookupValue(branchKey, context.EmployeeBankBranchNamesByReference, context.PayrollBankBranchNamesByReference) ??
+               ResolveLookupValue(branchCode, context.EmployeeBankBranchNamesByReference, context.PayrollBankBranchNamesByReference) ??
+               branchCode;
     }
 
     private static string? ResolveLookupValue(string? key, params IReadOnlyDictionary<string, string>[] lookups)
@@ -5449,8 +8405,8 @@ public class PayrollService : IPayrollService
 
     private static string BuildEmployeeBankName(EmployeeBankDetail bank)
     {
-        var bankName = bank.Bank?.Name ?? bank.BankName;
-        var branchName = bank.Branch?.Name ?? bank.BranchName;
+        var bankName = ResolveEmployeeBankName(bank);
+        var branchName = ResolveEmployeeBankBranchName(bank);
         var parts = new[] { bankName, branchName }
             .Where(e => !string.IsNullOrWhiteSpace(e))
             .Select(e => e!.Trim())
@@ -5458,6 +8414,12 @@ public class PayrollService : IPayrollService
 
         return parts.Count == 0 ? "BANK" : string.Join(" - ", parts);
     }
+
+    private static string? ResolveEmployeeBankName(EmployeeBankDetail bank)
+        => TrimOrNull(bank.Bank?.Name) ?? TrimOrNull(bank.BankName);
+
+    private static string? ResolveEmployeeBankBranchName(EmployeeBankDetail bank)
+        => TrimOrNull(bank.Branch?.Name) ?? TrimOrNull(bank.BranchName) ?? TrimOrNull(bank.Branch?.Code);
 
     private static decimal ResolvePaymentMethodAmount(PayrollPaymentMethod method, decimal netIncome, int methodCount, int index)
     {
@@ -8570,6 +11532,37 @@ public class PayrollService : IPayrollService
         };
 
     private sealed record ResolvedPayrollComponent(PayrollComponent Component, PayrollEmployeeComponent? Override, PayrollComponentRule? Rule);
+    private sealed class PayrollBudgetAnalysisAccumulator
+    {
+        public int OrderField { get; set; }
+        public int PayPeriod { get; set; }
+        public DateTime PayPeriodFrom { get; set; }
+        public DateTime PayPeriodTo { get; set; }
+        public string TransactionType { get; set; } = string.Empty;
+        public string? ActualTransaction { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public bool Percentage { get; set; }
+        public decimal BaseAmount { get; set; }
+        public string CompanyCode { get; set; } = "001";
+    }
+    private sealed record OracleBonusEmployeeRow(
+        PayrollRunEmployee Employee,
+        decimal Bonus,
+        decimal TaxableBonus,
+        decimal NonTaxableBonus,
+        decimal BonusTax,
+        decimal NetBonus);
+    private sealed record OracleEmployeePaymentBase(PayrollRunEmployee Employee, decimal Amount);
+    private sealed record OracleBankPaymentRow(
+        string BankName,
+        string? BankCode,
+        string? BranchCode,
+        string? BranchName,
+        string? AccountNumber,
+        string CurrencyCode,
+        decimal Amount,
+        PayrollRunEmployee Employee);
+
     private sealed record PayrollPayslipBuildContext(
         Tenant? Tenant,
         PayrollCompanyProfile? CompanyProfile,

@@ -1,6 +1,6 @@
 'use client';
 
-import { ClipboardEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ClipboardEvent, FormEvent, Fragment, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -15,11 +15,13 @@ import {
   ChevronRight,
   Circle,
   CreditCard,
+  FileSpreadsheet,
   FileText,
   GraduationCap,
   HandCoins,
   Landmark,
   Loader2,
+  Printer,
   Save,
   Search,
   Settings,
@@ -28,6 +30,7 @@ import {
   UserPlus,
   type LucideIcon,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,6 +50,8 @@ import {
   PayrollBackpayRule,
   PayrollBonusPolicy,
   PayrollBonusException,
+  PayrollBudgetAnalysis,
+  PayrollBudgetAnalysisRow,
   PayrollCodeSetup,
   PayrollCodeType,
   PayrollCodeValue,
@@ -66,11 +71,14 @@ import {
   PayrollNonWorkingDay,
   PayrollOvertimePolicy,
   PayrollParameterSet,
+  PayrollRun,
   PayrollSetupSummary,
   PayrollTaxBand,
   PayrollTaxRelief,
   PayrollTaxTable,
+  buildPayrollBudgetAnalysis,
   payrollService,
+  savePayrollBudgetAnalysis,
 } from '@/services/payrollService';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -490,6 +498,7 @@ const implementedMenuIds = new Set([
   'A0000117',
   'A0000118',
   'A0000119',
+  'A0000131',
 ]);
 
 const payrollAdministrationMenuItems: PayrollLegacyMenuItem[] = [
@@ -505,6 +514,7 @@ const payrollAdministrationMenuItems: PayrollLegacyMenuItem[] = [
   { menuId: 'A0000117', parentMenuId: 'A00001', caption: 'Allowances & Deductions Setup', path: 'Main Menu > Setup > Allowances & Deductions Setup', itemType: 'Form', target: 'PR3_009.fmb', companyScope: '001', sequenceNo: 17, implemented: true },
   { menuId: 'A0000118', parentMenuId: 'A00001', caption: 'Bonus Setup', path: 'Main Menu > Setup > Bonus Setup', itemType: 'Form', target: 'PR3_022.fmb', companyScope: '001', sequenceNo: 18, implemented: true },
   { menuId: 'A0000119', parentMenuId: 'A00001', caption: 'Backpay / Salary Increase', path: 'Main Menu > Setup > Backpay / Salary Increase', itemType: 'Form', target: 'PR3_023.fmb', companyScope: '001', sequenceNo: 19, implemented: true },
+  { menuId: 'A0000131', parentMenuId: 'A00001', caption: 'Budget Analysis', path: 'Main Menu > Setup > Budget Analysis', itemType: 'Form', target: 'PR3_032.fmb', companyScope: 'DEMO', sequenceNo: 31, implemented: true },
 ];
 
 const completedMenuIcons: Record<string, LucideIcon> = {
@@ -521,6 +531,7 @@ const completedMenuIcons: Record<string, LucideIcon> = {
   A0000117: CreditCard,
   A0000118: Award,
   A0000119: ArrowUp,
+  A0000131: Calculator,
 };
 
 function dateValue(value?: string | null) {
@@ -534,6 +545,27 @@ function nullableDateValue(value?: string | null) {
 
 function monthValue(value?: string | null) {
   return dateValue(value).slice(0, 7);
+}
+
+function formatPayrollPeriodLabel(from?: string | null, to?: string | null, period?: number) {
+  const source = dateValue(to) || dateValue(from);
+  if (source) {
+    const [year, month] = source.split('-').map(Number);
+    if (year && month) {
+      return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+    }
+  }
+
+  const periodText = String(period || '');
+  if (/^\d{6}$/.test(periodText)) {
+    const year = Number(periodText.slice(0, 4));
+    const month = Number(periodText.slice(4, 6));
+    if (year && month >= 1 && month <= 12) {
+      return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+    }
+  }
+
+  return 'Current payroll period';
 }
 
 function nullableMonthValue(value?: string | null) {
@@ -796,6 +828,76 @@ function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+type BudgetScenario = 1 | 2 | 3;
+
+function calculateBudgetAnalysisNewAmount(baseAmount: number, amount: number) {
+  return roundMoney((Number(baseAmount) || 0) + ((Number(baseAmount) || 0) * (Number(amount) || 0)) / 100);
+}
+
+function calculateBudgetAnalysisPercent(variance: number, baseAmount: number) {
+  const base = Number(baseAmount) || 0;
+  return base === 0 ? 0 : roundMoney(((Number(variance) || 0) / base) * 100);
+}
+
+function recalculateBudgetAnalysisRow(row: PayrollBudgetAnalysisRow): PayrollBudgetAnalysisRow {
+  const baseAmount = Number(row.baseAmount) || 0;
+  const amount1 = Number(row.amount1) || 0;
+  const amount2 = Number(row.amount2) || 0;
+  const amount3 = Number(row.amount3) || 0;
+  const newAmount1 = calculateBudgetAnalysisNewAmount(baseAmount, amount1);
+  const newAmount2 = calculateBudgetAnalysisNewAmount(baseAmount, amount2);
+  const newAmount3 = calculateBudgetAnalysisNewAmount(baseAmount, amount3);
+  const variance1 = roundMoney(newAmount1 - baseAmount);
+  const variance2 = roundMoney(newAmount2 - baseAmount);
+  const variance3 = roundMoney(newAmount3 - baseAmount);
+
+  return {
+    ...row,
+    baseAmount: roundMoney(baseAmount),
+    amount1: roundMoney(amount1),
+    newAmount1,
+    variance1,
+    percent1: calculateBudgetAnalysisPercent(variance1, baseAmount),
+    amount2: roundMoney(amount2),
+    newAmount2,
+    variance2,
+    percent2: calculateBudgetAnalysisPercent(variance2, baseAmount),
+    amount3: roundMoney(amount3),
+    newAmount3,
+    variance3,
+    percent3: calculateBudgetAnalysisPercent(variance3, baseAmount),
+  };
+}
+
+function applyBudgetBasicPercent(row: PayrollBudgetAnalysisRow, scenario: BudgetScenario, value: number): PayrollBudgetAnalysisRow {
+  const amount = row.percentage ? value : 0;
+  if (scenario === 1) {
+    return recalculateBudgetAnalysisRow({ ...row, amount1: amount });
+  }
+
+  if (scenario === 2) {
+    return recalculateBudgetAnalysisRow({ ...row, amount2: amount });
+  }
+
+  return recalculateBudgetAnalysisRow({ ...row, amount3: amount });
+}
+
+function calculateBudgetAnalysisTotals(rows: PayrollBudgetAnalysisRow[]) {
+  return {
+    totalBaseAmount: roundMoney(rows.reduce((sum, row) => sum + (Number(row.baseAmount) || 0), 0)),
+    totalNewAmount1: roundMoney(rows.filter((row) => row.include1).reduce((sum, row) => sum + (Number(row.newAmount1) || 0), 0)),
+    totalNewAmount2: roundMoney(rows.filter((row) => row.include2).reduce((sum, row) => sum + (Number(row.newAmount2) || 0), 0)),
+    totalNewAmount3: roundMoney(rows.filter((row) => row.include3).reduce((sum, row) => sum + (Number(row.newAmount3) || 0), 0)),
+    totalVariance1: roundMoney(rows.filter((row) => row.include1).reduce((sum, row) => sum + (Number(row.variance1) || 0), 0)),
+    totalVariance2: roundMoney(rows.filter((row) => row.include2).reduce((sum, row) => sum + (Number(row.variance2) || 0), 0)),
+    totalVariance3: roundMoney(rows.filter((row) => row.include3).reduce((sum, row) => sum + (Number(row.variance3) || 0), 0)),
+  };
+}
+
+function budgetAnalysisRowKey(row: PayrollBudgetAnalysisRow, index: number) {
+  return `${row.orderField}-${row.transactionType}-${row.actualTransaction || 'BASE'}-${index}`;
+}
+
 function recalculateTaxTableRows(rows: TaxTableGridRow[], selectedTaxType: string) {
   return rows.map((row, index) => {
     const taxableIncome = Number(row.taxableIncome ?? row.lowerBound ?? 0) || 0;
@@ -1037,7 +1139,10 @@ function LegacyMenu({
 }) {
   return (
     <aside className="rounded-md border bg-background">
-      <div className="max-h-[calc(100vh-220px)] overflow-auto p-2">
+      <div className="border-b px-3 py-2">
+        <h2 className="text-sm font-semibold text-foreground">Payroll Setup</h2>
+      </div>
+      <div className="max-h-[calc(100vh-190px)] overflow-auto p-2">
         {items.map((item) => {
           const isSelected = selectedId === item.menuId;
           const isFolder = item.itemType === 'Folder';
@@ -1409,7 +1514,7 @@ export default function PayrollAdministrationPage() {
 
   return (
     <main
-      className="space-y-4 p-6 [&_table]:text-xs [&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 [&_th]:py-1 [&_th]:text-xs"
+      className="space-y-4 px-4 pb-6 pt-4 [&_table]:text-xs [&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 [&_th]:py-1 [&_th]:text-xs"
       onKeyDownCapture={handlePayrollNumericKeyDown}
       onPasteCapture={handlePayrollNumericPaste}
     >
@@ -1850,6 +1955,13 @@ export default function PayrollAdministrationPage() {
                   async () => undefined,
                 )
               }
+            />
+          ) : selectedMenuId === 'A0000131' ? (
+            <BudgetAnalysisForm
+              defaultPayPeriod={parameters.currentPayPeriod || currentPayPeriod}
+              defaultPayPeriodFrom={parameters.currentPeriodFrom}
+              defaultPayPeriodTo={parameters.currentPeriodTo}
+              companyCode={parameters.legacyCompanyCode || '001'}
             />
           ) : (
             <MenuTracker selectedMenu={selectedMenu} />
@@ -4725,6 +4837,652 @@ function BackpaySalaryIncreaseForm({
         </DialogContent>
       </Dialog>
     </Tabs>
+  );
+}
+
+function BudgetAnalysisForm({
+  defaultPayPeriod,
+  defaultPayPeriodFrom,
+  defaultPayPeriodTo,
+  companyCode,
+}: {
+  defaultPayPeriod: number;
+  defaultPayPeriodFrom?: string | null;
+  defaultPayPeriodTo?: string | null;
+  companyCode: string;
+}) {
+  const { toast } = useToast();
+  const [payPeriod, setPayPeriod] = useState(defaultPayPeriod > 0 ? defaultPayPeriod : currentPayPeriod);
+  const [basicPercent1, setBasicPercent1] = useState(0);
+  const [basicPercent2, setBasicPercent2] = useState(0);
+  const [basicPercent3, setBasicPercent3] = useState(0);
+  const [analysis, setAnalysis] = useState<PayrollBudgetAnalysis | null>(null);
+  const [rows, setRows] = useState<PayrollBudgetAnalysisRow[]>([]);
+  const [runs, setRuns] = useState<PayrollRun[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadingPeriodRows, setLoadingPeriodRows] = useState(false);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const periodLoadRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingRuns(true);
+    payrollService.getRuns()
+      .then((items) => {
+        if (active) {
+          setRuns(items);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setRuns([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingRuns(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const payPeriodOptions = useMemo(
+    () => Array.from(new Set(runs.map((run) => run.payPeriod).filter((value) => value > 0))).sort((left, right) => right - left),
+    [runs],
+  );
+  const payPeriodSelectOptions = useMemo(() => {
+    const options = new Set(payPeriodOptions);
+    if (payPeriod > 0) {
+      options.add(payPeriod);
+    }
+
+    return Array.from(options).sort((left, right) => right - left);
+  }, [payPeriod, payPeriodOptions]);
+
+  const totals = useMemo(() => calculateBudgetAnalysisTotals(rows), [rows]);
+
+  const buildAdjustments = useCallback((period: number) => rows
+    .filter((row) => row.payPeriod === period)
+    .map((row) => ({
+      orderField: row.orderField,
+      transactionType: row.transactionType,
+      actualTransaction: row.actualTransaction,
+      amount1: row.amount1,
+      include1: row.include1,
+      amount2: row.amount2,
+      include2: row.include2,
+      amount3: row.amount3,
+      include3: row.include3,
+    })), [rows]);
+
+  const loadPeriodDetails = useCallback(async (selectedPeriod: number) => {
+    if (selectedPeriod <= 0) {
+      setAnalysis(null);
+      setRows([]);
+      return;
+    }
+
+    const requestId = periodLoadRef.current + 1;
+    periodLoadRef.current = requestId;
+    setLoadingPeriodRows(true);
+    setError(null);
+
+    try {
+      const result = await buildPayrollBudgetAnalysis({
+        payPeriod: selectedPeriod,
+        basicPercent1: 0,
+        basicPercent2: 0,
+        basicPercent3: 0,
+        adjustments: [],
+      });
+      if (periodLoadRef.current !== requestId) {
+        return;
+      }
+
+      setAnalysis(result);
+      setPayPeriod(result.payPeriod || selectedPeriod);
+      setBasicPercent1(result.basicPercent1);
+      setBasicPercent2(result.basicPercent2);
+      setBasicPercent3(result.basicPercent3);
+      setRows(result.rows.map(recalculateBudgetAnalysisRow));
+    } catch (err) {
+      if (periodLoadRef.current !== requestId) {
+        return;
+      }
+
+      const message = err instanceof Error ? err.message : 'Unable to load budget analysis details.';
+      setAnalysis(null);
+      setRows([]);
+      setError(message);
+      toast({ title: 'Budget Analysis', description: message, variant: 'destructive' });
+    } finally {
+      if (periodLoadRef.current === requestId) {
+        setLoadingPeriodRows(false);
+      }
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    const initialPayPeriod = defaultPayPeriod > 0 ? defaultPayPeriod : currentPayPeriod;
+    if (initialPayPeriod > 0) {
+      setPayPeriod(initialPayPeriod);
+      void loadPeriodDetails(initialPayPeriod);
+    }
+  }, [defaultPayPeriod, loadPeriodDetails]);
+
+  const handlePayPeriodChange = (value: number) => {
+    periodLoadRef.current += 1;
+    setPayPeriod(value);
+    setBasicPercent1(0);
+    setBasicPercent2(0);
+    setBasicPercent3(0);
+    setAnalysis(null);
+    setRows([]);
+    setAnalysisOpen(false);
+    void loadPeriodDetails(value);
+  };
+
+  const generateAnalysis = useCallback(async (preserveAdjustments = true) => {
+    const selectedPeriod = Number(payPeriod) || 0;
+    periodLoadRef.current += 1;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await buildPayrollBudgetAnalysis({
+        payPeriod: selectedPeriod,
+        basicPercent1,
+        basicPercent2,
+        basicPercent3,
+        adjustments: preserveAdjustments ? buildAdjustments(selectedPeriod) : [],
+      });
+      setAnalysis(result);
+      setPayPeriod(result.payPeriod || selectedPeriod);
+      setBasicPercent1(result.basicPercent1);
+      setBasicPercent2(result.basicPercent2);
+      setBasicPercent3(result.basicPercent3);
+      setRows(result.rows.map(recalculateBudgetAnalysisRow));
+      setAnalysisOpen(true);
+      const resultPeriodLabel = formatPayrollPeriodLabel(result.payPeriodFrom, result.payPeriodTo, result.payPeriod || selectedPeriod);
+      toast({
+        title: 'Budget Analysis',
+        description: `${result.rows.length} row${result.rows.length === 1 ? '' : 's'} generated for ${resultPeriodLabel}.`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to build budget analysis.';
+      setError(message);
+      toast({ title: 'Budget Analysis', description: message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }, [basicPercent1, basicPercent2, basicPercent3, buildAdjustments, payPeriod, toast]);
+
+  const saveAnalysis = useCallback(async () => {
+    const selectedPeriod = Number(analysis?.payPeriod || payPeriod) || 0;
+    periodLoadRef.current += 1;
+    setSaving(true);
+    setError(null);
+
+    try {
+      const normalizedRows = rows.map(recalculateBudgetAnalysisRow);
+      const result = await savePayrollBudgetAnalysis({
+        payPeriod: selectedPeriod,
+        basicPercent1,
+        basicPercent2,
+        basicPercent3,
+        adjustments: buildAdjustments(selectedPeriod),
+        rows: normalizedRows,
+      });
+      setAnalysis(result);
+      setPayPeriod(result.payPeriod || selectedPeriod);
+      setBasicPercent1(result.basicPercent1);
+      setBasicPercent2(result.basicPercent2);
+      setBasicPercent3(result.basicPercent3);
+      setRows(result.rows.map(recalculateBudgetAnalysisRow));
+      const resultPeriodLabel = formatPayrollPeriodLabel(result.payPeriodFrom, result.payPeriodTo, result.payPeriod || selectedPeriod);
+      toast({
+        title: 'Budget Analysis',
+        description: `${result.rows.length} row${result.rows.length === 1 ? '' : 's'} saved for ${resultPeriodLabel}.`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to save budget analysis.';
+      setError(message);
+      toast({ title: 'Budget Analysis', description: message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  }, [analysis?.payPeriod, basicPercent1, basicPercent2, basicPercent3, buildAdjustments, payPeriod, rows, toast]);
+
+  const updateBasicPercent = (scenario: BudgetScenario, value: number) => {
+    if (scenario === 1) {
+      setBasicPercent1(value);
+    } else if (scenario === 2) {
+      setBasicPercent2(value);
+    } else {
+      setBasicPercent3(value);
+    }
+
+    setRows((current) => current.map((row) => applyBudgetBasicPercent(row, scenario, value)));
+  };
+
+  const updateScenarioAmount = (index: number, scenario: BudgetScenario, value: number) => {
+    setRows((current) => current.map((row, rowIndex) => {
+      if (rowIndex !== index) {
+        return row;
+      }
+
+      if (scenario === 1) {
+        return recalculateBudgetAnalysisRow({ ...row, amount1: value });
+      }
+
+      if (scenario === 2) {
+        return recalculateBudgetAnalysisRow({ ...row, amount2: value });
+      }
+
+      return recalculateBudgetAnalysisRow({ ...row, amount3: value });
+    }));
+  };
+
+  const updateScenarioInclude = (index: number, scenario: BudgetScenario, checked: boolean) => {
+    setRows((current) => current.map((row, rowIndex) => {
+      if (rowIndex !== index) {
+        return row;
+      }
+
+      if (scenario === 1) {
+        return { ...row, include1: checked };
+      }
+
+      if (scenario === 2) {
+        return { ...row, include2: checked };
+      }
+
+      return { ...row, include3: checked };
+    }));
+  };
+
+  const periodLine = analysis?.payPeriodFrom || analysis?.payPeriodTo
+    ? `${dateValue(analysis?.payPeriodFrom) || '-'} to ${dateValue(analysis?.payPeriodTo) || '-'}`
+    : '';
+  const criteriaRows = () => [
+    ['Report', analysis?.reportName ?? 'Budget Analysis Report'],
+    ['Pay Period', selectedPeriodLabel],
+    ['Period From', dateValue(analysis?.payPeriodFrom)],
+    ['Period To', dateValue(analysis?.payPeriodTo)],
+    ['Basic (%) 1', basicPercent1],
+    ['Basic (%) 2', basicPercent2],
+    ['Basic (%) 3', basicPercent3],
+  ];
+  const detailHeaders = [
+    'Description',
+    'Type',
+    'Actual',
+    'Percentage?',
+    'Base Amount',
+    'Scenario 1 Amount',
+    'Scenario 1 Include?',
+    'Scenario 1 New Amount',
+    'Scenario 1 Variance',
+    'Scenario 2 Amount',
+    'Scenario 2 Include?',
+    'Scenario 2 New Amount',
+    'Scenario 2 Variance',
+    'Scenario 3 Amount',
+    'Scenario 3 Include?',
+    'Scenario 3 New Amount',
+    'Scenario 3 Variance',
+  ];
+  const detailRows = () => rows.map((row) => [
+    row.description,
+    row.transactionType,
+    row.actualTransaction ?? '',
+    row.percentage ? 'Yes' : 'No',
+    row.baseAmount,
+    row.amount1,
+    row.include1 ? 'Yes' : 'No',
+    row.newAmount1,
+    row.variance1,
+    row.amount2,
+    row.include2 ? 'Yes' : 'No',
+    row.newAmount2,
+    row.variance2,
+    row.amount3,
+    row.include3 ? 'Yes' : 'No',
+    row.newAmount3,
+    row.variance3,
+  ]);
+  const exportExcel = () => {
+    if (rows.length === 0) {
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+    const detailSheet = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows()]);
+    detailSheet['!cols'] = [
+      { wch: 32 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 11 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 19 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 19 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 19 },
+    ];
+    const criteriaSheet = XLSX.utils.aoa_to_sheet(criteriaRows());
+    criteriaSheet['!cols'] = [{ wch: 18 }, { wch: 24 }];
+
+    XLSX.utils.book_append_sheet(workbook, detailSheet, 'Budget Analysis');
+    XLSX.utils.book_append_sheet(workbook, criteriaSheet, 'Criteria');
+    XLSX.writeFile(workbook, `REP3_033-${analysis?.payPeriod ?? payPeriod}.xlsx`);
+  };
+  const escapeHtml = (value: string | number | boolean | null | undefined) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const printAnalysis = () => {
+    if (rows.length === 0) {
+      return;
+    }
+
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) {
+      toast({ title: 'Budget Analysis', description: 'Allow pop-ups to print the budget analysis report.', variant: 'destructive' });
+      return;
+    }
+
+    const rowHtml = detailRows()
+      .map((row) => `<tr>${row.map((cell, index) => `<td class="${index >= 4 ? 'num' : ''}">${escapeHtml(cell)}</td>`).join('')}</tr>`)
+      .join('');
+    const criteriaHtml = criteriaRows()
+      .map(([label, value]) => `<span><strong>${escapeHtml(label)}</strong>: ${escapeHtml(value)}</span>`)
+      .join('');
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(analysis?.reportName ?? 'Budget Analysis Report')}</title>
+  <style>
+    @page { size: A4 landscape; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 0; color: #111827; font-size: 7pt; }
+    h1 { margin: 0 0 4px; font-size: 13pt; }
+    .criteria { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; font-size: 8pt; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #9ca3af; padding: 2px 3px; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    th { background: #f3f4f6; font-weight: 700; white-space: normal; line-height: 1.1; }
+    th:nth-child(6), td:nth-child(6), th:nth-child(10), td:nth-child(10), th:nth-child(14), td:nth-child(14) { border-left: 2px solid #374151; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(analysis?.reportName ?? 'Budget Analysis Report')}</h1>
+  <div class="criteria">${criteriaHtml}</div>
+  <table>
+    <thead><tr>${detailHeaders.map((header, index) => `<th class="${index >= 4 ? 'num' : ''}">${escapeHtml(header)}</th>`).join('')}</tr></thead>
+    <tbody>${rowHtml}</tbody>
+  </table>
+</body>
+</html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  };
+  const periodOptionLabel = (period: number) => {
+    const periodRun = runs.find((run) => run.payPeriod === period);
+    if (periodRun) {
+      return formatPayrollPeriodLabel(periodRun.payPeriodFrom, periodRun.payPeriodTo, period);
+    }
+
+    if (period === defaultPayPeriod) {
+      return formatPayrollPeriodLabel(defaultPayPeriodFrom, defaultPayPeriodTo, period);
+    }
+
+    return formatPayrollPeriodLabel(null, null, period);
+  };
+  const selectedPeriodLabel = analysis
+    ? formatPayrollPeriodLabel(analysis.payPeriodFrom, analysis.payPeriodTo, analysis.payPeriod || payPeriod)
+    : periodOptionLabel(payPeriod);
+  const gridInputClassName = 'h-6 w-full min-w-0 rounded-sm border-0 bg-transparent px-1 text-right text-[11px] shadow-none focus-visible:ring-1';
+  const renderAnalysisSummary = (compact = false) => analysis ? (
+    <div className={`grid gap-2 ${compact ? 'md:grid-cols-5' : 'md:grid-cols-5'}`}>
+      <div className="rounded-md border bg-muted/20 p-2">
+        <div className="text-[11px] text-muted-foreground">Period</div>
+        <div className="text-xs font-medium">{selectedPeriodLabel}</div>
+        {periodLine ? <div className="truncate text-[11px] text-muted-foreground">{periodLine}</div> : null}
+      </div>
+      <div className="rounded-md border bg-muted/20 p-2">
+        <div className="text-[11px] text-muted-foreground">Base Amount</div>
+        <div className="truncate text-xs font-medium tabular-nums" title={formatAmount(totals.totalBaseAmount)}>{formatAmount(totals.totalBaseAmount)}</div>
+      </div>
+      {[1, 2, 3].map((scenario) => {
+        const totalNew = scenario === 1 ? totals.totalNewAmount1 : scenario === 2 ? totals.totalNewAmount2 : totals.totalNewAmount3;
+        const totalVariance = scenario === 1 ? totals.totalVariance1 : scenario === 2 ? totals.totalVariance2 : totals.totalVariance3;
+
+        return (
+          <div key={scenario} className="rounded-md border bg-muted/20 p-2">
+            <div className="text-[11px] text-muted-foreground">Scenario {scenario}</div>
+            <div className="truncate text-xs font-medium tabular-nums" title={formatAmount(totalNew)}>{formatAmount(totalNew)}</div>
+            <div className="truncate text-[11px] text-muted-foreground" title={formatAmount(totalVariance)}>Variance {formatAmount(totalVariance)}</div>
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
+
+  const renderAnalysisTable = () => (
+    <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden rounded-md border">
+      <Table className="w-full table-fixed text-[11px]">
+        <colgroup>
+          <col className="w-[15%]" />
+          <col className="w-[5%]" />
+          <col className="w-[8%]" />
+          <col className="w-[5%]" />
+          <col className="w-[5%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
+          <col className="w-[5%]" />
+          <col className="w-[5%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
+          <col className="w-[5%]" />
+          <col className="w-[5%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="sticky top-0 z-10 h-8 whitespace-normal bg-background px-2 py-1 text-[10px] font-bold leading-tight text-foreground">Description</TableHead>
+            <TableHead className="sticky top-0 z-10 h-8 whitespace-normal bg-background px-1 py-1 text-center text-[10px] font-bold leading-tight text-foreground">Percentage?</TableHead>
+            <TableHead className="sticky top-0 z-10 h-8 whitespace-normal bg-background px-1 py-1 text-right text-[10px] font-bold leading-tight text-foreground">Base Amount</TableHead>
+            {[1, 2, 3].map((scenario) => (
+              <Fragment key={scenario}>
+                <TableHead className="sticky top-0 z-10 h-8 whitespace-normal border-l-2 border-slate-500 bg-background px-1 py-1 text-right text-[10px] font-bold leading-tight text-foreground">Scenario {scenario} Amount</TableHead>
+                <TableHead className="sticky top-0 z-10 h-8 whitespace-normal bg-background px-0.5 py-1 text-center text-[10px] font-bold leading-tight text-foreground">Include?</TableHead>
+                <TableHead className="sticky top-0 z-10 h-8 whitespace-normal bg-background px-1 py-1 text-right text-[10px] font-bold leading-tight text-foreground">New Amount</TableHead>
+                <TableHead className="sticky top-0 z-10 h-8 whitespace-normal bg-background px-1 py-1 text-right text-[10px] font-bold leading-tight text-foreground">Variance</TableHead>
+              </Fragment>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={15} className="py-8 text-center text-sm text-muted-foreground">
+                No budget rows for this period.
+              </TableCell>
+            </TableRow>
+          ) : rows.map((row, index) => (
+            <TableRow key={budgetAnalysisRowKey(row, index)}>
+              <TableCell className="px-2 py-1 align-middle">
+                <div className="truncate font-medium" title={row.description}>{row.description}</div>
+                <div className="truncate text-[10px] text-muted-foreground" title={`${row.transactionType}${row.actualTransaction ? ` / ${row.actualTransaction}` : ''}`}>
+                  {row.transactionType}{row.actualTransaction ? ` / ${row.actualTransaction}` : ''}
+                </div>
+              </TableCell>
+              <TableCell className="px-1 py-1 text-center">{row.percentage ? 'Yes' : 'No'}</TableCell>
+              <TableCell className="truncate px-1 py-1 text-right tabular-nums" title={formatAmount(row.baseAmount)}>{formatAmount(row.baseAmount)}</TableCell>
+              {[1, 2, 3].map((scenario) => {
+                const amount = scenario === 1 ? row.amount1 : scenario === 2 ? row.amount2 : row.amount3;
+                const include = scenario === 1 ? row.include1 : scenario === 2 ? row.include2 : row.include3;
+                const newAmount = scenario === 1 ? row.newAmount1 : scenario === 2 ? row.newAmount2 : row.newAmount3;
+                const variance = scenario === 1 ? row.variance1 : scenario === 2 ? row.variance2 : row.variance3;
+
+                return (
+                  <Fragment key={scenario}>
+                    <TableCell className="border-l-2 border-slate-500 px-1 py-1">
+                      <Input className={gridInputClassName} type="number" step="0.01" value={amount} onChange={(event) => updateScenarioAmount(index, scenario as BudgetScenario, Number(event.target.value) || 0)} />
+                    </TableCell>
+                    <TableCell className="px-0.5 py-1 text-center">
+                      <Checkbox className="h-3.5 w-3.5" checked={include} onCheckedChange={(checked) => updateScenarioInclude(index, scenario as BudgetScenario, checked === true)} />
+                    </TableCell>
+                    <TableCell className="truncate px-1 py-1 text-right tabular-nums" title={formatAmount(newAmount)}>{formatAmount(newAmount)}</TableCell>
+                    <TableCell className="truncate px-1 py-1 text-right tabular-nums" title={formatAmount(variance)}>{formatAmount(variance)}</TableCell>
+                  </Fragment>
+                );
+              })}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+
+  return (
+    <>
+    <Card className="max-w-full">
+      <CardHeader className="border-b px-4 py-3">
+        <PayrollFormTitle menuId="A0000131">Budget Analysis</PayrollFormTitle>
+      </CardHeader>
+      <CardContent className="p-4">
+        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void generateAnalysis(true); }}>
+          <div className="grid gap-3 md:grid-cols-[minmax(220px,280px)_repeat(3,120px)_auto] md:items-end">
+            <Field label="Pay Period">
+              <select
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                value={payPeriod || ''}
+                onChange={(event) => handlePayPeriodChange(Number(event.target.value) || 0)}
+                disabled={loading || loadingPeriodRows}
+              >
+                {loadingRuns && payPeriodSelectOptions.length === 0 ? <option value="">Loading periods</option> : null}
+                {payPeriodSelectOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {periodOptionLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Basic (%) 1">
+              <Input type="number" step="0.01" value={basicPercent1} onChange={(event) => updateBasicPercent(1, Number(event.target.value) || 0)} disabled={loadingPeriodRows} />
+            </Field>
+            <Field label="Basic (%) 2">
+              <Input type="number" step="0.01" value={basicPercent2} onChange={(event) => updateBasicPercent(2, Number(event.target.value) || 0)} disabled={loadingPeriodRows} />
+            </Field>
+            <Field label="Basic (%) 3">
+              <Input type="number" step="0.01" value={basicPercent3} onChange={(event) => updateBasicPercent(3, Number(event.target.value) || 0)} disabled={loadingPeriodRows} />
+            </Field>
+            <div className="flex items-end gap-2">
+              <Button type="submit" disabled={loading || loadingPeriodRows}>
+                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Calculator className="mr-2 h-4 w-4" />}
+                Generate
+              </Button>
+              {rows.length > 0 ? (
+                <Button type="button" variant="outline" onClick={() => void loadPeriodDetails(payPeriod)} disabled={loading || loadingPeriodRows}>
+                  {loadingPeriodRows ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                  Refresh
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          {error ? <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+
+          {analysis ? renderAnalysisSummary(true) : null}
+
+          {analysis ? <div className="flex flex-wrap gap-3">
+            <Button type="button" onClick={() => setAnalysisOpen(true)}>
+              Open Full Page
+            </Button>
+            <Button type="button" onClick={() => void saveAnalysis()} disabled={rows.length === 0 || saving || loadingPeriodRows}>
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              Save
+            </Button>
+            <Button type="button" variant="outline" onClick={printAnalysis} disabled={rows.length === 0}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+            <Button type="button" variant="outline" onClick={exportExcel} disabled={rows.length === 0}>
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Excel
+            </Button>
+          </div> : null}
+
+          {loadingPeriodRows ? (
+            <div className="rounded-md border bg-muted/20 px-3 py-8 text-center text-sm text-muted-foreground">
+              Loading budget analysis details for {periodOptionLabel(payPeriod)}...
+            </div>
+          ) : analysis ? (
+            <div className="h-[52vh] min-h-[340px]">
+              {renderAnalysisTable()}
+            </div>
+          ) : null}
+        </form>
+      </CardContent>
+    </Card>
+
+    <Dialog open={analysisOpen} onOpenChange={setAnalysisOpen}>
+      <DialogContent className="flex h-screen w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0">
+        <DialogHeader className="border-b px-4 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
+            <div>
+              <DialogTitle>Budget Analysis</DialogTitle>
+              {periodLine ? <div className="mt-1 text-xs text-muted-foreground">{periodLine}</div> : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" onClick={() => void saveAnalysis()} disabled={rows.length === 0 || saving || loadingPeriodRows}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Save
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={printAnalysis} disabled={rows.length === 0}>
+                <Printer className="mr-2 h-4 w-4" />
+                Print
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={exportExcel} disabled={rows.length === 0}>
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Excel
+              </Button>
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+          {analysis ? renderAnalysisSummary(false) : null}
+          <div className="min-h-0 flex-1">
+            {analysis ? renderAnalysisTable() : null}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 

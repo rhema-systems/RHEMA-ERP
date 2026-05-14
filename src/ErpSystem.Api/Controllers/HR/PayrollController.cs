@@ -34,6 +34,14 @@ public class PayrollController : ControllerBase
     public async Task<ActionResult<PayrollSetupSummaryDto>> GetSetupSummary(CancellationToken cancellationToken)
         => Ok(await _payrollService.GetSetupSummaryAsync(GetTenantId(), cancellationToken));
 
+    [HttpPost("setup/budget-analysis")]
+    public Task<ActionResult<PayrollBudgetAnalysisDto>> BuildBudgetAnalysis([FromBody] PayrollBudgetAnalysisRequestDto? dto, CancellationToken cancellationToken)
+        => Handle(() => _payrollService.BuildBudgetAnalysisAsync(GetTenantId(), dto ?? new PayrollBudgetAnalysisRequestDto(), cancellationToken));
+
+    [HttpPost("setup/budget-analysis/save")]
+    public Task<ActionResult<PayrollBudgetAnalysisDto>> SaveBudgetAnalysis([FromBody] PayrollBudgetAnalysisRequestDto? dto, CancellationToken cancellationToken)
+        => Handle(() => _payrollService.SaveBudgetAnalysisAsync(GetTenantId(), dto ?? new PayrollBudgetAnalysisRequestDto(), cancellationToken));
+
     [HttpGet("setup/codes")]
     public async Task<ActionResult<PayrollCodeSetupDto>> GetCodes([FromQuery] string? codeType, CancellationToken cancellationToken)
         => Ok(await _payrollService.GetCodeSetupAsync(GetTenantId(), codeType, cancellationToken));
@@ -375,6 +383,10 @@ public class PayrollController : ControllerBase
     [HttpGet("runs/{runId:guid}/summary")]
     public Task<ActionResult<PayrollSummaryReportDto>> GetRunSummary(Guid runId, [FromQuery] bool createSnapshot, CancellationToken cancellationToken)
         => Handle(() => _payrollService.GetRunSummaryReportAsync(GetTenantId(), runId, GetUserId(), createSnapshot, cancellationToken));
+
+    [HttpPost("runs/{runId:guid}/oracle-report")]
+    public Task<ActionResult<PayrollOracleReportDto>> GetOracleRunReport(Guid runId, [FromBody] PayrollOracleReportRequestDto? dto, CancellationToken cancellationToken)
+        => Handle(() => _payrollService.GetOracleRunReportAsync(GetTenantId(), runId, dto ?? new PayrollOracleReportRequestDto(), cancellationToken));
 
     [HttpGet("runs/{runId:guid}/payslips")]
     public Task<ActionResult<IReadOnlyList<PayrollPayslipDto>>> GetPayslips(Guid runId, [FromQuery] Guid? employeeId, [FromQuery] string? categoryType, [FromQuery] string? categoryValue, CancellationToken cancellationToken)

@@ -46,6 +46,51 @@ public enum PayrollReportType
     JournalSummary = 6
 }
 
+public class PayrollBudgetAnalysisRow : TenantEntity
+{
+    public int OrderField { get; set; }
+
+    public int PayPeriod { get; set; }
+
+    public DateTime PayPeriodFrom { get; set; }
+
+    public DateTime PayPeriodTo { get; set; }
+
+    [Required, MaxLength(5)]
+    public string TransactionType { get; set; } = string.Empty;
+
+    [Required, MaxLength(5)]
+    public string ActualTransaction { get; set; } = string.Empty;
+
+    [Required, MaxLength(200)]
+    public string Description { get; set; } = string.Empty;
+
+    public bool Percentage { get; set; }
+
+    public decimal BaseAmount { get; set; }
+
+    public decimal Amount1 { get; set; }
+
+    public bool Include1 { get; set; } = true;
+
+    public decimal NewAmount1 { get; set; }
+
+    public decimal Amount2 { get; set; }
+
+    public bool Include2 { get; set; } = true;
+
+    public decimal NewAmount2 { get; set; }
+
+    public decimal Amount3 { get; set; }
+
+    public bool Include3 { get; set; } = true;
+
+    public decimal NewAmount3 { get; set; }
+
+    [Required, MaxLength(5)]
+    public string CompanyCode { get; set; } = "001";
+}
+
 public class PayrollParameterSet : TenantEntity
 {
     [Required, MaxLength(50)]

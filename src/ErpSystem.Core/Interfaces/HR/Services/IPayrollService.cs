@@ -7,6 +7,8 @@ public interface IPayrollService
 {
     Task<IReadOnlyList<PayrollLegacyMenuItemDto>> GetLegacyMenuAsync(CancellationToken cancellationToken = default);
     Task<PayrollSetupSummaryDto> GetSetupSummaryAsync(Guid tenantId, CancellationToken cancellationToken = default);
+    Task<PayrollBudgetAnalysisDto> BuildBudgetAnalysisAsync(Guid tenantId, PayrollBudgetAnalysisRequestDto dto, CancellationToken cancellationToken = default);
+    Task<PayrollBudgetAnalysisDto> SaveBudgetAnalysisAsync(Guid tenantId, PayrollBudgetAnalysisRequestDto dto, CancellationToken cancellationToken = default);
     Task<PayrollCodeSetupDto> GetCodeSetupAsync(Guid tenantId, string? codeType = null, CancellationToken cancellationToken = default);
     Task<PayrollCodeTypeDto> UpsertCodeTypeAsync(Guid tenantId, UpsertPayrollCodeTypeDto dto, CancellationToken cancellationToken = default);
     Task<PayrollCodeValueDto> UpsertCodeValueAsync(Guid tenantId, UpsertPayrollCodeValueDto dto, CancellationToken cancellationToken = default);
@@ -83,6 +85,7 @@ public interface IPayrollService
     Task<PayrollRunDto> CloseRunAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
     Task<PayrollRunDto> RollbackRunAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
     Task<PayrollSummaryReportDto> GetRunSummaryReportAsync(Guid tenantId, Guid runId, Guid? userId, bool createSnapshot = false, CancellationToken cancellationToken = default);
+    Task<PayrollOracleReportDto> GetOracleRunReportAsync(Guid tenantId, Guid runId, PayrollOracleReportRequestDto dto, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PayrollPayslipDto>> GetPayslipsAsync(Guid tenantId, Guid runId, Guid? employeeId = null, string? categoryType = null, string? categoryValue = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PayrollPayslipSnapshotDto>> GeneratePayslipSnapshotsAsync(Guid tenantId, Guid runId, Guid? userId, CancellationToken cancellationToken = default);
     Task<PayrollPayslipEmailResultDto> EmailPayslipsAsync(Guid tenantId, Guid runId, Guid? userId, PayrollPayslipEmailRequestDto dto, CancellationToken cancellationToken = default);

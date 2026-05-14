@@ -57,6 +57,81 @@ public class PayrollSetupSummaryDto
     public IReadOnlyList<PayrollGradeDto> Grades { get; set; } = [];
 }
 
+public class PayrollBudgetAnalysisRequestDto
+{
+    public int PayPeriod { get; set; }
+    public decimal BasicPercent1 { get; set; }
+    public decimal BasicPercent2 { get; set; }
+    public decimal BasicPercent3 { get; set; }
+    public IReadOnlyList<PayrollBudgetAnalysisRowAdjustmentDto> Adjustments { get; set; } = [];
+    public IReadOnlyList<PayrollBudgetAnalysisRowDto> Rows { get; set; } = [];
+}
+
+public class PayrollBudgetAnalysisRowAdjustmentDto
+{
+    public int OrderField { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
+    public string? ActualTransaction { get; set; }
+    public decimal? Amount1 { get; set; }
+    public bool? Include1 { get; set; }
+    public decimal? Amount2 { get; set; }
+    public bool? Include2 { get; set; }
+    public decimal? Amount3 { get; set; }
+    public bool? Include3 { get; set; }
+}
+
+public class PayrollBudgetAnalysisDto
+{
+    public string MenuId { get; set; } = "A0000131";
+    public string SourceForm { get; set; } = "PR3_032.fmb";
+    public string SourceReport { get; set; } = "REP3_033.rdf";
+    public string ReportName { get; set; } = "Budget Analysis Report";
+    public int PayPeriod { get; set; }
+    public DateTime? PayPeriodFrom { get; set; }
+    public DateTime? PayPeriodTo { get; set; }
+    public string CompanyCode { get; set; } = "001";
+    public decimal BasicPercent1 { get; set; }
+    public decimal BasicPercent2 { get; set; }
+    public decimal BasicPercent3 { get; set; }
+    public decimal TotalBaseAmount { get; set; }
+    public decimal TotalNewAmount1 { get; set; }
+    public decimal TotalNewAmount2 { get; set; }
+    public decimal TotalNewAmount3 { get; set; }
+    public decimal TotalVariance1 { get; set; }
+    public decimal TotalVariance2 { get; set; }
+    public decimal TotalVariance3 { get; set; }
+    public IReadOnlyList<PayrollBudgetAnalysisRowDto> Rows { get; set; } = [];
+}
+
+public class PayrollBudgetAnalysisRowDto
+{
+    public int OrderField { get; set; }
+    public int PayPeriod { get; set; }
+    public DateTime? PayPeriodFrom { get; set; }
+    public DateTime? PayPeriodTo { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
+    public string? ActualTransaction { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public bool Percentage { get; set; }
+    public decimal BaseAmount { get; set; }
+    public decimal Amount1 { get; set; }
+    public bool Include1 { get; set; } = true;
+    public decimal NewAmount1 { get; set; }
+    public decimal Variance1 { get; set; }
+    public decimal Percent1 { get; set; }
+    public decimal Amount2 { get; set; }
+    public bool Include2 { get; set; } = true;
+    public decimal NewAmount2 { get; set; }
+    public decimal Variance2 { get; set; }
+    public decimal Percent2 { get; set; }
+    public decimal Amount3 { get; set; }
+    public bool Include3 { get; set; } = true;
+    public decimal NewAmount3 { get; set; }
+    public decimal Variance3 { get; set; }
+    public decimal Percent3 { get; set; }
+    public string CompanyCode { get; set; } = "001";
+}
+
 public class PayrollParameterSetDto
 {
     public Guid Id { get; set; }
@@ -1532,6 +1607,77 @@ public class PayrollSummaryReportDto
     public IReadOnlyList<PayrollSummaryComponentDto> Components { get; set; } = [];
     public IReadOnlyList<PayrollSummaryEmployeeDto> Employees { get; set; } = [];
     public PayrollReportSnapshotDto? Snapshot { get; set; }
+}
+
+public class PayrollOracleReportRequestDto
+{
+    public string ReportCode { get; set; } = "REP3_001";
+    public string? VariantCode { get; set; }
+    public string? DepartmentFrom { get; set; } = "0";
+    public string? DepartmentTo { get; set; } = "ZZZZZ";
+    public string? EmployeeNumberFrom { get; set; } = "0";
+    public string? EmployeeNumberTo { get; set; } = "ZZZZZ";
+    public string? BankFrom { get; set; } = "0";
+    public string? BankTo { get; set; } = "ZZZZZ";
+    public string? BranchFrom { get; set; } = "0";
+    public string? BranchTo { get; set; } = "ZZZZZ";
+    public string? LocationFrom { get; set; } = "0";
+    public string? LocationTo { get; set; } = "ZZZZZ";
+    public string? RegionCode { get; set; } = "ALL";
+    public string? DepartmentCode { get; set; } = "ALL";
+    public string? ComponentCodeFrom { get; set; } = "0";
+    public string? ComponentCodeTo { get; set; } = "ZZZZZ";
+    public string? AccountNumber { get; set; }
+    public string? Signer1 { get; set; }
+    public string? Signer2 { get; set; }
+    public string? Signer3 { get; set; }
+    public string? Position1 { get; set; }
+    public string? Position2 { get; set; }
+    public string? Position3 { get; set; }
+    public string? ReportingCurrency { get; set; }
+    public string? LoanType { get; set; }
+    public string? FacilityNumber { get; set; }
+    public string? LoanReportCategory { get; set; }
+}
+
+public class PayrollOracleReportDto
+{
+    public Guid PayrollRunId { get; set; }
+    public string RunNumber { get; set; } = string.Empty;
+    public string ReportCode { get; set; } = string.Empty;
+    public string ReportName { get; set; } = string.Empty;
+    public string VariantCode { get; set; } = string.Empty;
+    public string VariantName { get; set; } = string.Empty;
+    public string SourceForm { get; set; } = string.Empty;
+    public string SourceReport { get; set; } = string.Empty;
+    public string PeriodLabel { get; set; } = string.Empty;
+    public string CompanyCode { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = "GHS";
+    public DateTime GeneratedAt { get; set; }
+    public IReadOnlyList<PayrollOracleReportParameterDto> Parameters { get; set; } = [];
+    public IReadOnlyList<PayrollOracleReportColumnDto> Columns { get; set; } = [];
+    public IReadOnlyList<PayrollOracleReportRowDto> Rows { get; set; } = [];
+    public int TotalRows { get; set; }
+}
+
+public class PayrollOracleReportParameterDto
+{
+    public string OracleName { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string? Value { get; set; }
+}
+
+public class PayrollOracleReportColumnDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Header { get; set; } = string.Empty;
+    public string Alignment { get; set; } = "left";
+    public string ValueType { get; set; } = "text";
+}
+
+public class PayrollOracleReportRowDto
+{
+    public IReadOnlyDictionary<string, object?> Values { get; set; } = new Dictionary<string, object?>();
 }
 
 public class PayrollSummaryComponentDto

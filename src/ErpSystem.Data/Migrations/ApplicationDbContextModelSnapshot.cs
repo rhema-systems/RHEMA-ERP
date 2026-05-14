@@ -14422,6 +14422,117 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PayrollBonusRules");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBudgetAnalysisRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActualTransaction")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.Property<decimal>("Amount1")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Amount2")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Amount3")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("BaseAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("CompanyCode")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("Include1")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("Include2")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("Include3")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("NewAmount1")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("NewAmount2")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("NewAmount3")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("OrderField")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PayPeriod")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("PayPeriodFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("PayPeriodTo")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("Percentage")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TransactionType")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyCode", "PayPeriod");
+
+                    b.HasIndex("TenantId", "CompanyCode", "PayPeriod", "OrderField", "TransactionType", "ActualTransaction")
+                        .IsUnique();
+
+                    b.ToTable("PayrollBudgetAnalysisRows");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBusinessUnit", b =>
                 {
                     b.Property<Guid>("Id")
@@ -62939,6 +63050,17 @@ namespace ErpSystem.Data.Migrations
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBonusRule", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Payroll.PayrollBudgetAnalysisRow", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()

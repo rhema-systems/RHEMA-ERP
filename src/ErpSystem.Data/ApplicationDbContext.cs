@@ -383,6 +383,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     #region HR Payroll
 
+    public DbSet<PayrollBudgetAnalysisRow> PayrollBudgetAnalysisRows { get; set; }
     public DbSet<PayrollParameterSet> PayrollParameterSets { get; set; }
     public DbSet<PayrollComponent> PayrollComponents { get; set; }
     public DbSet<PayrollComponentRule> PayrollComponentRules { get; set; }
@@ -2233,6 +2234,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     private static void ConfigurePayrollEntities(ModelBuilder builder)
     {
+        builder.Entity<PayrollBudgetAnalysisRow>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.CompanyCode, e.PayPeriod, e.OrderField, e.TransactionType, e.ActualTransaction }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyCode, e.PayPeriod });
+            entity.Property(e => e.BaseAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Amount1).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.NewAmount1).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Amount2).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.NewAmount2).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Amount3).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.NewAmount3).HasColumnType("decimal(18,2)");
+        });
+
         builder.Entity<PayrollParameterSet>(entity =>
         {
             entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();

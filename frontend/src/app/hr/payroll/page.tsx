@@ -479,7 +479,7 @@ export default function PayrollPage() {
       <Tabs value={activeTab} onValueChange={selectTab} className="space-y-4">
         <TabsList className="flex h-auto flex-wrap justify-start">
           <TabsTrigger value="runs">Run Desk</TabsTrigger>
-          <TabsTrigger value="reports">Reports & Journals</TabsTrigger>
+          <TabsTrigger value="reports">Payslips & Journals</TabsTrigger>
         </TabsList>
 
         <TabsContent value="runs">
@@ -618,7 +618,7 @@ export default function PayrollPage() {
                   <div>
                     <CardTitle className="flex items-center gap-2 text-base">
                       <BarChart3 className="h-4 w-4" />
-                      Reports & Journals
+                      Payslips & Journals
                     </CardTitle>
                     <CardDescription>Review payroll output and post the final run.</CardDescription>
                   </div>

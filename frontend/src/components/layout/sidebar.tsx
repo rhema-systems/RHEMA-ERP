@@ -558,7 +558,7 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Financial Reports', href: '/reports?module=financial', icon: CreditCard },
       { title: 'Sales Reports', href: '/reports?module=sales', icon: ShoppingCart },
-      { title: 'HR Reports', href: '/reports?module=hr', icon: UserCheck },
+      { title: 'HR Reports', href: '/reports/hr', icon: UserCheck },
       { title: 'Inventory Reports', href: '/reports?module=inventory', icon: Package },
       { title: 'Estate Reports', href: '/reports?module=estate', icon: Home },
       { title: 'Development Reports', href: '/reports?module=development', icon: Code },
