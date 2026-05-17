@@ -518,6 +518,44 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
+        /// Update a notification template (Admin only)
+        /// </summary>
+        [HttpPut("templates/{templateId:guid}")]
+        [HttpPost("templates/{templateId:guid}")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<ActionResult<NotificationTemplateDto>> UpdateTemplate(Guid templateId, UpdateNotificationTemplateDto templateDto)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var template = await _notificationService.UpdateNotificationTemplateAsync(templateId, templateDto, userId.Value, tenantId.Value);
+                if (template == null) return NotFound();
+                return Ok(template);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating notification template {TemplateId}", templateId);
+                return StatusCode(500, "An error occurred while updating template");
+            }
+        }
+
+        /// <summary>
         /// Delete a notification template (Admin only)
         /// </summary>
         [HttpDelete("templates/{templateId:guid}")]

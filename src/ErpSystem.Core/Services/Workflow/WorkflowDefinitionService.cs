@@ -76,10 +76,14 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
         var existingDefinition = await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id, cancellationToken) ?? throw new InvalidOperationException($"Workflow definition with ID {definition.Id} not found");
 
         // Check if definition is being used by active instances
-        var activeInstances = await _workflowDefinitionRepository.GetByIdAsync(definition.Id);
-        if (activeInstances?.Instances?.Any(i => i.Status == WorkflowInstanceStatus.InProgress) == true)
+        if (existingDefinition.Instances?.Any(i =>
+                i.Status == WorkflowInstanceStatus.Created ||
+                i.Status == WorkflowInstanceStatus.InProgress ||
+                i.Status == WorkflowInstanceStatus.Waiting ||
+                i.Status == WorkflowInstanceStatus.Suspended) == true)
         {
-            throw new InvalidOperationException("Cannot update workflow definition that has active instances. Create a new version instead.");
+            throw new InvalidOperationException(
+                "This workflow has live instances and cannot be edited. Complete or cancel the live instances before editing, or create a separate workflow for future records.");
         }
 
         // Validate the updated definition

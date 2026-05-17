@@ -37,6 +37,10 @@ interface TenantBackendResponse {
   welcomeMessage?: string;
   defaultPriority?: number;
   enableAutoSelection?: boolean;
+  baseCurrency?: string;
+  baseCurrencyName?: string;
+  currencySymbol?: string;
+  currencyDecimalPlaces?: number;
 }
 
 // Types that match the backend DTOs
@@ -141,6 +145,10 @@ export interface Tenant {
   welcomeMessage?: string;
   defaultPriority: number;
   enableAutoSelection: boolean;
+  baseCurrency: string;
+  baseCurrencyName?: string;
+  currencySymbol?: string;
+  currencyDecimalPlaces: number;
   
   // Computed properties (for compatibility)
   isActive: boolean; // derived from status === 'Active'
@@ -189,6 +197,10 @@ export interface CreateTenantRequest {
   welcomeMessage?: string;
   defaultPriority?: number;
   enableAutoSelection?: boolean;
+  baseCurrency?: string;
+  baseCurrencyName?: string;
+  currencySymbol?: string;
+  currencyDecimalPlaces?: number;
 }
 
 export interface SecurityLog {
@@ -360,6 +372,10 @@ class AdminApiService {
       welcomeMessage: dto.welcomeMessage,
       defaultPriority: dto.defaultPriority || 10,
       enableAutoSelection: dto.enableAutoSelection || false,
+      baseCurrency: dto.baseCurrency || 'GHS',
+      baseCurrencyName: dto.baseCurrencyName,
+      currencySymbol: dto.currencySymbol,
+      currencyDecimalPlaces: dto.currencyDecimalPlaces || 2,
     }));
   }
 
@@ -412,6 +428,10 @@ class AdminApiService {
       welcomeMessage: dto.welcomeMessage,
       defaultPriority: dto.defaultPriority || 10,
       enableAutoSelection: dto.enableAutoSelection || false,
+      baseCurrency: dto.baseCurrency || 'GHS',
+      baseCurrencyName: dto.baseCurrencyName,
+      currencySymbol: dto.currencySymbol,
+      currencyDecimalPlaces: dto.currencyDecimalPlaces || 2,
     };
   }
 
@@ -473,6 +493,10 @@ class AdminApiService {
         welcomeMessage: tenantData.welcomeMessage || null,
         defaultPriority: tenantData.defaultPriority || 10,
         enableAutoSelection: tenantData.enableAutoSelection || false,
+        baseCurrency: tenantData.baseCurrency || 'GHS',
+        baseCurrencyName: tenantData.baseCurrencyName || null,
+        currencySymbol: tenantData.currencySymbol || null,
+        currencyDecimalPlaces: tenantData.currencyDecimalPlaces ?? 2,
       };
       
       console.log('Mapped backend create data:', backendData);
@@ -533,6 +557,10 @@ class AdminApiService {
         welcomeMessage: resultDto.welcomeMessage,
         defaultPriority: resultDto.defaultPriority ?? 10,
         enableAutoSelection: resultDto.enableAutoSelection ?? false,
+        baseCurrency: resultDto.baseCurrency || 'GHS',
+        baseCurrencyName: resultDto.baseCurrencyName,
+        currencySymbol: resultDto.currencySymbol,
+        currencyDecimalPlaces: resultDto.currencyDecimalPlaces ?? 2,
       };
       
       console.log('Tenant created successfully:', result.name, 'ID:', result.id);
@@ -601,6 +629,10 @@ class AdminApiService {
         welcomeMessage: tenantData.welcomeMessage || null,
         defaultPriority: tenantData.defaultPriority || 10,
         enableAutoSelection: tenantData.enableAutoSelection || false,
+        baseCurrency: tenantData.baseCurrency || 'GHS',
+        baseCurrencyName: tenantData.baseCurrencyName || null,
+        currencySymbol: tenantData.currencySymbol || null,
+        currencyDecimalPlaces: tenantData.currencyDecimalPlaces ?? 2,
       };
       
       console.log('Mapped backend update data:', backendData);
@@ -661,6 +693,10 @@ class AdminApiService {
         welcomeMessage: resultDto.welcomeMessage,
         defaultPriority: resultDto.defaultPriority ?? 10,
         enableAutoSelection: resultDto.enableAutoSelection ?? false,
+        baseCurrency: resultDto.baseCurrency || 'GHS',
+        baseCurrencyName: resultDto.baseCurrencyName,
+        currencySymbol: resultDto.currencySymbol,
+        currencyDecimalPlaces: resultDto.currencyDecimalPlaces ?? 2,
       };
       
       console.log('Tenant updated successfully:', result.name, 'ID:', result.id);

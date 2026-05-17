@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -247,6 +246,15 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   const customEntityTypeValue = '__custom__';
 
   const isGuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+  const selectedWorkflowOption =
+    activeWorkflowId ? workflowOptions.find((item) => item.id === activeWorkflowId) : undefined;
+  const selectedWorkflowLiveInstanceCount = selectedWorkflowOption?.activeInstancesCount ?? 0;
+  const selectedWorkflowHasLiveInstances = selectedWorkflowLiveInstanceCount > 0;
+  const workflowLiveInstanceLockMessage =
+    selectedWorkflowLiveInstanceCount === 1
+      ? 'This workflow has 1 live instance and cannot be edited. Complete or cancel that instance first, or create a separate workflow for future records.'
+      : `This workflow has ${selectedWorkflowLiveInstanceCount} live instances and cannot be edited. Complete or cancel those instances first, or create a separate workflow for future records.`;
 
   const inferModuleForEntityType = (entityTypeName?: string | null) => {
     const key = (entityTypeName || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -686,9 +694,42 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     return null;
   };
 
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      if (selectedWorkflowHasLiveInstances) {
+        const selectionChanges = changes.filter((change) => change.type === 'select');
+        if (selectionChanges.length > 0) {
+          onNodesChange(selectionChanges);
+        }
+        return;
+      }
+
+      onNodesChange(changes);
+    },
+    [onNodesChange, selectedWorkflowHasLiveInstances]
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      if (selectedWorkflowHasLiveInstances) {
+        const selectionChanges = changes.filter((change) => change.type === 'select');
+        if (selectionChanges.length > 0) {
+          onEdgesChange(selectionChanges);
+        }
+        return;
+      }
+
+      onEdgesChange(changes);
+    },
+    [onEdgesChange, selectedWorkflowHasLiveInstances]
+  );
+
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
+    (params: Connection) => {
+      if (selectedWorkflowHasLiveInstances) return;
+      setEdges((eds) => addEdge(params, eds));
+    },
+    [selectedWorkflowHasLiveInstances, setEdges]
   );
 
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
@@ -705,12 +746,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
+    event.dataTransfer.dropEffect = selectedWorkflowHasLiveInstances ? 'none' : 'move';
+  }, [selectedWorkflowHasLiveInstances]);
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+      if (selectedWorkflowHasLiveInstances) return;
 
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
       const type = event.dataTransfer.getData('application/reactflow');
@@ -736,7 +778,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [reactFlowInstance, nodes.length, setNodes]
+    [reactFlowInstance, nodes.length, selectedWorkflowHasLiveInstances, setNodes]
   );
 
   const getDefaultNodeData = (type: string) => {
@@ -799,12 +841,25 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const onDragStart = (event: React.DragEvent, nodeType: string) => {
+    if (selectedWorkflowHasLiveInstances) {
+      event.preventDefault();
+      event.dataTransfer.effectAllowed = 'none';
+      return;
+    }
+
     event.dataTransfer.setData('application/reactflow', nodeType);
     event.dataTransfer.effectAllowed = 'move';
     setDraggedType(nodeType);
   };
 
   const handleSave = async () => {
+    if (selectedWorkflowHasLiveInstances) {
+      toast.error('Workflow is read-only', {
+        description: workflowLiveInstanceLockMessage,
+      });
+      return;
+    }
+
     setIsSaving(true);
     try {
       const payload = buildDefinitionPayload();
@@ -865,6 +920,12 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       onSave(savedDefinition);
     } catch (error) {
       console.error('Failed to save workflow:', error);
+      const message = error instanceof Error ? error.message : 'Unable to save workflow.';
+      toast.error('Failed to save workflow', {
+        description: message.includes('live instances') || message.includes('active instances')
+          ? 'This workflow has live instances and cannot be edited. Complete or cancel those instances first, or create a separate workflow for future records.'
+          : message,
+      });
     } finally {
       setIsSaving(false);
     }
@@ -1392,6 +1453,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const updateSelectedNode = (updates: Record<string, any>) => {
+    if (selectedWorkflowHasLiveInstances) return;
     if (!selectedNode) return;
     const updatedNode = {
       ...selectedNode,
@@ -1404,6 +1466,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const updateSelectedEdge = (updates: Record<string, any>) => {
+    if (selectedWorkflowHasLiveInstances) return;
     if (!selectedEdge) return;
     const updatedEdge = {
       ...selectedEdge,
@@ -1420,9 +1483,6 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
     return fullName ? `${fullName} (${user.username})` : user.username;
   };
-
-  const selectedWorkflowOption =
-    activeWorkflowId ? workflowOptions.find((item) => item.id === activeWorkflowId) : undefined;
 
   const workflowPickerLabel =
     selectedWorkflowOption?.name ||
@@ -1484,12 +1544,25 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                   <Play className="h-4 w-4 mr-2" />
                   Test
                 </Button>
-                <Button onClick={handleSave} disabled={isSaving}>
+                <Button
+                  onClick={handleSave}
+                  disabled={isSaving || selectedWorkflowHasLiveInstances}
+                  title={selectedWorkflowHasLiveInstances
+                    ? workflowLiveInstanceLockMessage
+                    : undefined}
+                >
                   <Save className="h-4 w-4 mr-2" />
                   {isSaving ? 'Saving...' : 'Save'}
                 </Button>
               </div>
             </div>
+
+            {selectedWorkflowHasLiveInstances && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{workflowLiveInstanceLockMessage}</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
               <div className="md:col-span-4 flex flex-col space-y-1">
@@ -1568,13 +1641,18 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                   placeholder="Optional description"
                   value={workflowDescription}
                   onChange={(e) => setWorkflowDescription(e.target.value)}
+                  disabled={selectedWorkflowHasLiveInstances}
                   className="w-full"
                 />
               </div>
 
               <div className="md:col-span-2 flex flex-col space-y-1">
                 <Label className="text-xs text-muted-foreground">Module</Label>
-                <Select value={entityTypeModuleFilter} onValueChange={setEntityTypeModuleFilter}>
+                <Select
+                  value={entityTypeModuleFilter}
+                  onValueChange={setEntityTypeModuleFilter}
+                  disabled={selectedWorkflowHasLiveInstances}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All Modules" />
                   </SelectTrigger>
@@ -1594,6 +1672,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                 <Select
                   value={isCustomEntityType ? customEntityTypeValue : entityType}
                   onValueChange={handleEntityTypeSelect}
+                  disabled={selectedWorkflowHasLiveInstances}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder={entityTypesLoading ? 'Loading...' : 'Entity Type'} />
@@ -1616,6 +1695,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                     placeholder="e.g. PurchaseRequisition"
                     value={entityType}
                     onChange={(e) => setEntityType(e.target.value)}
+                    disabled={selectedWorkflowHasLiveInstances}
                     className="w-full"
                   />
                 </div>
@@ -1654,8 +1734,14 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                         return (
                           <div
                             key={item.type}
-                            className={`flex items-center space-x-2 p-2 rounded cursor-pointer hover:bg-gray-100 ${item.color} text-white`}
-                            draggable
+                            className={cn(
+                              'flex items-center space-x-2 p-2 rounded text-white',
+                              selectedWorkflowHasLiveInstances
+                                ? 'cursor-not-allowed opacity-60'
+                                : 'cursor-pointer hover:bg-gray-100',
+                              item.color
+                            )}
+                            draggable={!selectedWorkflowHasLiveInstances}
                             onDragStart={(event) => onDragStart(event, item.type)}
                           >
                             <IconComponent className="h-4 w-4" />
@@ -1676,8 +1762,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                         return (
                           <div
                             key={module.id}
-                            className="flex items-center space-x-2 p-2 rounded cursor-pointer hover:bg-gray-100 border"
-                            draggable
+                            className={cn(
+                              'flex items-center space-x-2 p-2 rounded border',
+                              selectedWorkflowHasLiveInstances
+                                ? 'cursor-not-allowed opacity-60'
+                                : 'cursor-pointer hover:bg-gray-100'
+                            )}
+                            draggable={!selectedWorkflowHasLiveInstances}
                             onDragStart={(event) => {
                               onDragStart(event, 'integration');
                               // Set module-specific data
@@ -1700,14 +1791,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
+                  onNodesChange={handleNodesChange}
+                  onEdgesChange={handleEdgesChange}
                   onConnect={onConnect}
                   onInit={setReactFlowInstance}
                   onDrop={onDrop}
                   onDragOver={onDragOver}
                   onNodeClick={onNodeClick}
                   onEdgeClick={onEdgeClick}
+                  nodesDraggable={!selectedWorkflowHasLiveInstances}
+                  nodesConnectable={!selectedWorkflowHasLiveInstances}
+                  elementsSelectable
                   nodeTypes={nodeTypes}
                   fitView
                 >

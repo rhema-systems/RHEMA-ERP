@@ -99,32 +99,66 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const toUiStatus = (status: WorkflowInstanceStatus): UiWorkflowStatus => {
-    switch (status) {
-      case WorkflowInstanceStatus.Completed:
-        return 'completed';
-      case WorkflowInstanceStatus.Cancelled:
-        return 'cancelled';
-      case WorkflowInstanceStatus.Failed:
-        return 'failed';
-      case WorkflowInstanceStatus.Suspended:
-      case WorkflowInstanceStatus.Waiting:
-        return 'paused';
-      case WorkflowInstanceStatus.InProgress:
-      case WorkflowInstanceStatus.Created:
-      default:
-        return 'running';
+  const instanceStatusName = (status: WorkflowInstanceStatus | string | number | undefined) => {
+    if (typeof status === 'number') {
+      return WorkflowInstanceStatus[status] || String(status);
     }
+    return String(status || '');
+  };
+
+  const stepStatusName = (status: WorkflowStepInstanceStatus | string | number | undefined) => {
+    if (typeof status === 'number') {
+      return WorkflowStepInstanceStatus[status] || String(status);
+    }
+    return String(status || '');
+  };
+
+  const isInstanceStatus = (status: WorkflowInstanceStatus | string | number | undefined, expected: keyof typeof WorkflowInstanceStatus) =>
+    instanceStatusName(status).toLowerCase() === expected.toLowerCase();
+
+  const isStepStatus = (status: WorkflowStepInstanceStatus | string | number | undefined, expected: keyof typeof WorkflowStepInstanceStatus) =>
+    stepStatusName(status).toLowerCase() === expected.toLowerCase();
+
+  const formatApprovers = (approvals: WorkflowApprovalStatusDto[], maxNames = 2) => {
+    const names = (approvals || [])
+      .map(approval => approval.approverName?.trim())
+      .filter(Boolean);
+    const full = names.join(', ');
+    if (names.length <= maxNames) {
+      return { short: full, full };
+    }
+
+    return {
+      short: `${names.slice(0, maxNames).join(', ')} +${names.length - maxNames}`,
+      full,
+    };
+  };
+
+  const toUiStatus = (status: WorkflowInstanceStatus | string | number): UiWorkflowStatus => {
+    if (isInstanceStatus(status, 'Completed')) {
+      return 'completed';
+    }
+    if (isInstanceStatus(status, 'Cancelled')) {
+      return 'cancelled';
+    }
+    if (isInstanceStatus(status, 'Failed')) {
+      return 'failed';
+    }
+    if (isInstanceStatus(status, 'Suspended') || isInstanceStatus(status, 'Waiting')) {
+      return 'paused';
+    }
+
+    return 'running';
   };
 
   const getCurrentStep = (steps: WorkflowStepStatusDto[]): WorkflowStepStatusDto | null => {
     if (!steps || steps.length === 0) return null;
-    const inProgress = steps.find(step => step.status === WorkflowStepInstanceStatus.InProgress);
+    const inProgress = steps.find(step => isStepStatus(step.status, 'InProgress'));
     if (inProgress) return inProgress;
-    const pending = steps.find(step => step.status === WorkflowStepInstanceStatus.Pending);
+    const pending = steps.find(step => isStepStatus(step.status, 'Pending'));
     if (pending) return pending;
     const completedSteps = steps
-      .filter(step => step.status === WorkflowStepInstanceStatus.Completed)
+      .filter(step => isStepStatus(step.status, 'Completed'))
       .sort((a, b) => {
         const aDate = a.completedDate ? new Date(a.completedDate).getTime() : 0;
         const bDate = b.completedDate ? new Date(b.completedDate).getTime() : 0;
@@ -138,7 +172,7 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
       return Math.max(0, Math.min(100, status.progress.percentComplete));
     }
     if (!status.steps || status.steps.length === 0) return 0;
-    const completed = status.steps.filter(step => step.status === WorkflowStepInstanceStatus.Completed).length;
+    const completed = status.steps.filter(step => isStepStatus(step.status, 'Completed')).length;
     return Math.round((completed / status.steps.length) * 100);
   };
 
@@ -150,11 +184,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     const hasOverdueStep = steps.some(step => step.isOverdue);
     const hasOverdueApproval = approvals.some(approval => approval.isOverdue);
 
-    if (hasOverdueStep || hasOverdueApproval || status.status === WorkflowInstanceStatus.Failed) {
+    if (hasOverdueStep || hasOverdueApproval || isInstanceStatus(status.status, 'Failed')) {
       return 'high';
     }
 
-    if (status.status === WorkflowInstanceStatus.Completed || status.status === WorkflowInstanceStatus.Cancelled) {
+    if (isInstanceStatus(status.status, 'Completed') || isInstanceStatus(status.status, 'Cancelled')) {
       return 'low';
     }
 
@@ -219,11 +253,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
         entityType: instance.entityType || 'Workflow',
         entityId: instance.entityId || instance.workflowInstanceId,
         status: toUiStatus(instance.status),
-        currentStepId: currentStep?.stepInstanceId ?? '',
-        currentStepName: currentStep?.stepName ?? 'Pending',
+        currentStepId: instance.currentStepInstanceId || currentStep?.stepInstanceId || '',
+        currentStepName: instance.currentStepName || currentStep?.stepName || 'No current step',
         startedAt,
         completedAt,
-        assignedTo: currentStep?.assignedToName ?? 'Unassigned',
+        assignedTo: currentStep?.assignedToName || formatApprovers(approvals).short || 'Unassigned',
         priority: determinePriority(instance, steps, approvals),
         progress: calculateProgress(instance),
         steps,
@@ -298,15 +332,14 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
       return a.stepName.localeCompare(b.stepName);
     });
 
-    const getNodeClassName = (status: WorkflowStepInstanceStatus) => {
-      switch (status) {
-        case WorkflowStepInstanceStatus.Completed:
-          return 'completed-node';
-        case WorkflowStepInstanceStatus.InProgress:
-          return 'active-node';
-        default:
-          return 'pending-node';
+    const getNodeClassName = (status: WorkflowStepInstanceStatus | string | number) => {
+      if (isStepStatus(status, 'Completed')) {
+        return 'completed-node';
       }
+      if (isStepStatus(status, 'InProgress')) {
+        return 'active-node';
+      }
+      return 'pending-node';
     };
 
     const nodes: Node[] = [
@@ -486,7 +519,10 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                 {!isLoading && !loadError && filteredInstances.length === 0 && (
                   <div className="text-sm text-muted-foreground">No workflow instances found.</div>
                 )}
-                {filteredInstances.map((instance) => (
+                {filteredInstances.map((instance) => {
+                  const pending = formatApprovers(instance.pendingApprovals);
+
+                  return (
                   <Card 
                     key={instance.id}
                     className={`cursor-pointer transition-colors ${
@@ -530,6 +566,13 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                           <span className="text-gray-600">Assigned To:</span>
                           <span>{instance.assignedTo}</span>
                         </div>
+
+                        {pending.short && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">Pending With:</span>
+                            <span className="font-medium" title={pending.full}>{pending.short}</span>
+                          </div>
+                        )}
                         
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-gray-600">Priority:</span>
@@ -553,7 +596,8 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             </ScrollArea>
           </div>
@@ -574,11 +618,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-4 gap-4 text-sm">
-                    <div>
+                  <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2 xl:grid-cols-5">
+                    <div className="min-w-0">
                       <span className="text-gray-600">Entity ID:</span>
                       <div className="flex items-center gap-2">
-                        <p className="font-medium">{selectedInstance.entityId}</p>
+                        <p className="break-all font-medium">{selectedInstance.entityId}</p>
                         {selectedInstance.entityLink && (
                           <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
                             <Link href={selectedInstance.entityLink} target="_blank" rel="noreferrer">
@@ -588,13 +632,19 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                         )}
                       </div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-gray-600">Current Step:</span>
-                      <p className="font-medium">{selectedInstance.currentStepName}</p>
+                      <p className="break-words font-medium">{selectedInstance.currentStepName}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-gray-600">Assigned To:</span>
-                      <p className="font-medium">{selectedInstance.assignedTo}</p>
+                      <p className="break-words font-medium">{selectedInstance.assignedTo}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-600">Pending With:</span>
+                      <p className="break-words font-medium" title={formatApprovers(selectedInstance.pendingApprovals).full}>
+                        {formatApprovers(selectedInstance.pendingApprovals).short || 'None'}
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Started:</span>
@@ -637,8 +687,8 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                         <div className="text-sm text-muted-foreground">No step history available.</div>
                       )}
                       {selectedInstance.steps.map((step) => {
-                        const isCompleted = step.status === WorkflowStepInstanceStatus.Completed;
-                        const isInProgress = step.status === WorkflowStepInstanceStatus.InProgress;
+                        const isCompleted = isStepStatus(step.status, 'Completed');
+                        const isInProgress = isStepStatus(step.status, 'InProgress');
                         const statusIcon = isCompleted ? (
                           <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
                         ) : isInProgress ? (

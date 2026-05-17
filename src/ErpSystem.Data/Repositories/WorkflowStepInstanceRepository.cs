@@ -14,17 +14,34 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
     {
     }
 
+    public override async Task<WorkflowStepInstance?> GetByIdAsync(Guid id)
+    {
+        var stepInstance = await _dbSet
+            .Include(si => si.AssignedTo)
+            .FirstOrDefaultAsync(si => si.Id == id && !si.IsDeleted);
+
+        if (stepInstance != null)
+        {
+            await PopulateWorkflowStepIncludingDeletedAsync(stepInstance);
+        }
+
+        return stepInstance;
+    }
+
     /// <summary>
     /// Gets step instances for a workflow instance
     /// </summary>
     public async Task<IEnumerable<WorkflowStepInstance>> GetByWorkflowInstanceAsync(Guid workflowInstanceId, CancellationToken cancellationToken = default)
     {
-        return await _dbSet
+        var stepInstances = await _dbSet
             .Include(si => si.WorkflowStep)
             .Include(si => si.AssignedTo)
             .Where(si => si.WorkflowInstanceId == workflowInstanceId && !si.IsDeleted)
             .OrderBy(si => si.CreatedAt)
             .ToListAsync(cancellationToken);
+
+        await PopulateWorkflowStepsIncludingDeletedAsync(stepInstances, cancellationToken);
+        return stepInstances;
     }
 
     /// <summary>
@@ -32,13 +49,16 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
     /// </summary>
     public async Task<IEnumerable<WorkflowStepInstance>> GetActiveAssignedToUserAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken = default)
     {
-        return await _dbSet
+        var stepInstances = await _dbSet
             .Include(si => si.WorkflowStep)
             .Include(si => si.WorkflowInstance)
             .Where(si => si.AssignedToId == userId && si.TenantId == tenantId &&
                         si.Status == WorkflowStepInstanceStatus.Pending && !si.IsDeleted)
             .OrderBy(si => si.DueDate)
             .ToListAsync(cancellationToken);
+
+        await PopulateWorkflowStepsIncludingDeletedAsync(stepInstances, cancellationToken);
+        return stepInstances;
     }
 
     /// <summary>
@@ -46,12 +66,15 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
     /// </summary>
     public async Task<IEnumerable<WorkflowStepInstance>> GetByStatusAsync(WorkflowStepInstanceStatus status, Guid tenantId, CancellationToken cancellationToken = default)
     {
-        return await _dbSet
+        var stepInstances = await _dbSet
             .Include(si => si.WorkflowStep)
             .Include(si => si.WorkflowInstance)
             .Where(si => si.Status == status && si.TenantId == tenantId && !si.IsDeleted)
             .OrderByDescending(si => si.CreatedAt)
             .ToListAsync(cancellationToken);
+
+        await PopulateWorkflowStepsIncludingDeletedAsync(stepInstances, cancellationToken);
+        return stepInstances;
     }
 
     /// <summary>
@@ -82,13 +105,21 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
 
             if (match != null)
             {
+                await PopulateWorkflowStepIncludingDeletedAsync(match, cancellationToken);
                 return match;
             }
         }
 
-        return await baseQuery
+        var currentStep = await baseQuery
             .OrderByDescending(si => si.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
+
+        if (currentStep != null)
+        {
+            await PopulateWorkflowStepIncludingDeletedAsync(currentStep, cancellationToken);
+        }
+
+        return currentStep;
     }
 
     /// <summary>
@@ -97,7 +128,7 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
     public async Task<IEnumerable<WorkflowStepInstance>> GetOverdueStepInstancesAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         var currentTime = DateTime.UtcNow;
-        return await _dbSet
+        var stepInstances = await _dbSet
             .Include(si => si.WorkflowStep)
             .Include(si => si.WorkflowInstance)
             .Where(si => si.TenantId == tenantId &&
@@ -105,5 +136,51 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
                         si.DueDate.HasValue && si.DueDate < currentTime && !si.IsDeleted)
             .OrderBy(si => si.DueDate)
             .ToListAsync(cancellationToken);
+
+        await PopulateWorkflowStepsIncludingDeletedAsync(stepInstances, cancellationToken);
+        return stepInstances;
+    }
+
+    private async Task PopulateWorkflowStepIncludingDeletedAsync(
+        WorkflowStepInstance stepInstance,
+        CancellationToken cancellationToken = default)
+    {
+        if (stepInstance.WorkflowStep != null)
+        {
+            return;
+        }
+
+        stepInstance.WorkflowStep = await _context.WorkflowSteps
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(step => step.Id == stepInstance.WorkflowStepId, cancellationToken);
+    }
+
+    private async Task PopulateWorkflowStepsIncludingDeletedAsync(
+        IReadOnlyCollection<WorkflowStepInstance> stepInstances,
+        CancellationToken cancellationToken = default)
+    {
+        var missingStepIds = stepInstances
+            .Where(stepInstance => stepInstance.WorkflowStep == null)
+            .Select(stepInstance => stepInstance.WorkflowStepId)
+            .Distinct()
+            .ToList();
+
+        if (missingStepIds.Count == 0)
+        {
+            return;
+        }
+
+        var stepsById = await _context.WorkflowSteps
+            .IgnoreQueryFilters()
+            .Where(step => missingStepIds.Contains(step.Id))
+            .ToDictionaryAsync(step => step.Id, cancellationToken);
+
+        foreach (var stepInstance in stepInstances.Where(stepInstance => stepInstance.WorkflowStep == null))
+        {
+            if (stepsById.TryGetValue(stepInstance.WorkflowStepId, out var step))
+            {
+                stepInstance.WorkflowStep = step;
+            }
+        }
     }
 }

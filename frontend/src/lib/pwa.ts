@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client"
 
 // PWA utilities for service worker registration and management
@@ -20,6 +19,13 @@ export class PWAManager {
 
   async init() {
     if (typeof window !== 'undefined') {
+      if (this.shouldDisableServiceWorker()) {
+        await this.unregisterServiceWorkers()
+        this.setupNetworkListeners()
+        this.setupInstallPrompt()
+        return
+      }
+
       // Check if service workers are supported
       if ('serviceWorker' in navigator) {
         try {
@@ -34,6 +40,37 @@ export class PWAManager {
       
       // Set up beforeinstallprompt listener for PWA installation
       this.setupInstallPrompt()
+    }
+  }
+
+  private shouldDisableServiceWorker() {
+    if (process.env.NODE_ENV !== 'production') {
+      return true
+    }
+
+    const localHosts = new Set(['localhost', '127.0.0.1', '::1'])
+    return localHosts.has(window.location.hostname)
+  }
+
+  private async unregisterServiceWorkers() {
+    if (!('serviceWorker' in navigator)) {
+      return
+    }
+
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(registrations.map((registration) => registration.unregister()))
+
+      if ('caches' in window) {
+        const cacheNames = await caches.keys()
+        await Promise.all(
+          cacheNames
+            .filter((cacheName) => cacheName.startsWith('erp-'))
+            .map((cacheName) => caches.delete(cacheName))
+        )
+      }
+    } catch (error) {
+      console.error('Failed to clear development service worker state:', error)
     }
   }
 

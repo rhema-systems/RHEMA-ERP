@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -155,6 +156,63 @@ public sealed class PurchaseOrderWorkflowStatusAdapter : IWorkflowStatusAdapter
 
     private static PurchaseOrder RequirePurchaseOrder(object entity)
         => entity as PurchaseOrder ?? throw new InvalidOperationException("Expected PurchaseOrder entity.");
+}
+
+public sealed class PayrollRunWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "PayrollRun",
+        "Payroll Run",
+        "PAYROLL_RUN"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var run = RequirePayrollRun(entity);
+        Apply(run, outcome, userId);
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var run = RequirePayrollRun(entity);
+        Apply(run, outcome, userId);
+        if (!string.IsNullOrWhiteSpace(rejectionReason))
+        {
+            run.Notes = string.IsNullOrWhiteSpace(run.Notes)
+                ? rejectionReason.Trim()
+                : $"{run.Notes}{Environment.NewLine}{rejectionReason.Trim()}";
+        }
+    }
+
+    private static void Apply(PayrollRun run, WorkflowOutcome outcome, Guid? userId)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                run.Status = PayrollRunStatus.Approved;
+                run.ApprovedAt = DateTime.UtcNow;
+                run.ApprovedByUserId = userId;
+                break;
+            case WorkflowOutcome.Rejected:
+                run.Status = PayrollRunStatus.RolledBack;
+                run.ReviewedAt = null;
+                run.ReviewedByUserId = null;
+                run.ApprovedAt = null;
+                run.ApprovedByUserId = null;
+                break;
+            default:
+                run.Status = PayrollRunStatus.InReview;
+                run.ReviewedAt = DateTime.UtcNow;
+                run.ReviewedByUserId = userId;
+                run.ApprovedAt = null;
+                run.ApprovedByUserId = null;
+                break;
+        }
+    }
+
+    private static PayrollRun RequirePayrollRun(object entity)
+        => entity as PayrollRun ?? throw new InvalidOperationException("Expected PayrollRun entity.");
 }
 
 public sealed class FleetTripWorkflowStatusAdapter : IWorkflowStatusAdapter

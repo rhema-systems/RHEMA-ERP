@@ -244,6 +244,8 @@ namespace ErpSystem.Core.DTOs.Notifications
         public string Subject { get; set; } = string.Empty;
         public string HtmlTemplate { get; set; } = string.Empty;
         public string? TextTemplate { get; set; }
+        public string? LinkedEntityType { get; set; }
+        public string? Description { get; set; }
         public List<string>? Variables { get; set; }
         public bool IsActive { get; set; } = true;
         public string CreatedBy { get; set; } = string.Empty;
@@ -259,6 +261,21 @@ namespace ErpSystem.Core.DTOs.Notifications
         public string Subject { get; set; } = string.Empty;
         public string HtmlTemplate { get; set; } = string.Empty;
         public string? TextTemplate { get; set; }
+        public string? LinkedEntityType { get; set; }
+        public string? Description { get; set; }
+        public List<string>? Variables { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
+
+    public class UpdateNotificationTemplateDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public string Subject { get; set; } = string.Empty;
+        public string HtmlTemplate { get; set; } = string.Empty;
+        public string? TextTemplate { get; set; }
+        public string? LinkedEntityType { get; set; }
+        public string? Description { get; set; }
         public List<string>? Variables { get; set; }
         public bool IsActive { get; set; } = true;
     }

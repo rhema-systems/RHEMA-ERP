@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { compatibleApiService as apiService } from './compatibleApiService';
 import type { ApiResponse } from '../types';
 import type {
@@ -168,13 +167,12 @@ export class WorkflowApiService {
   }
 
   /**
-   * Ensures workflow entity types exist, seeding when empty
+   * Ensures workflow entity types exist for both fresh and older tenants.
+   * The seed endpoint is idempotent and fills missing defaults without
+   * replacing custom entity types.
    */
   async ensureWorkflowEntityTypes(): Promise<WorkflowEntityTypeInfo[]> {
     const existing = await this.getWorkflowEntityTypes();
-    if (existing.length > 0) {
-      return existing;
-    }
 
     try {
       const seeded = await this.seedWorkflowEntityTypes();

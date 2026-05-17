@@ -2533,6 +2533,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.SequenceNo });
             entity.HasIndex(e => new { e.TenantId, e.PaymentType, e.IsActive });
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
         });
 
         builder.Entity<PayrollEmployeeComponent>(entity =>

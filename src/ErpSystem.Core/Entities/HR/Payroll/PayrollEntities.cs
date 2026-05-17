@@ -1321,6 +1321,9 @@ public class PayrollPaymentMethod : TenantEntity
     [Required, MaxLength(40)]
     public string PaymentType { get; set; } = "Bank";
 
+    [Required, MaxLength(20)]
+    public string PaymentMode { get; set; } = "Percentage";
+
     public decimal? PaymentPercent { get; set; }
 
     public decimal? Amount { get; set; }
@@ -1334,8 +1337,16 @@ public class PayrollPaymentMethod : TenantEntity
     [MaxLength(50)]
     public string? AccountNumber { get; set; }
 
+    [MaxLength(30)]
+    public string? ChequeNumber { get; set; }
+
+    [MaxLength(20)]
+    public string? ChequeBankCode { get; set; }
+
     [MaxLength(8)]
     public string CurrencyCode { get; set; } = "GHS";
+
+    public decimal? ExchangeRate { get; set; }
 
     public int SequenceNo { get; set; }
 

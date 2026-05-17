@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Award,
   BarChart3,
   CheckCircle2,
   CreditCard,
@@ -19,6 +21,7 @@ import {
 
 import { PayrollGridExportButton } from '@/components/hr/payroll/PayrollGridExportButton';
 import { PayrollPayslipPreviewDialog } from '@/components/hr/payroll/PayrollPayslipPreviewDialog';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,6 +32,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
+import { formatPendingApprovers, useWorkflowEntitySummaries } from '@/hooks/useWorkflowEntitySummaries';
 import {
   PayrollEmployeeProfile,
   PayrollJournalPosting,
@@ -63,6 +67,19 @@ const statusTone: Record<PayrollRunStatus, 'outline' | 'secondary' | 'default' |
   Closed: 'default',
   RolledBack: 'destructive',
 };
+
+const statusClassName: Partial<Record<PayrollRunStatus, string>> = {
+  Calculated: 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-100',
+  InReview: 'border-sky-300 bg-sky-100 text-sky-900 hover:bg-sky-100',
+};
+
+function RunStatusBadge({ status }: { status: PayrollRunStatus }) {
+  return (
+    <Badge variant={statusTone[status]} className={statusClassName[status]}>
+      {status}
+    </Badge>
+  );
+}
 
 type PayslipScope = 'all' | 'category' | 'employee';
 
@@ -131,6 +148,7 @@ function Field({
 }
 
 export default function PayrollPage() {
+  const router = useRouter();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('runs');
   const [runs, setRuns] = useState<PayrollRun[]>([]);
@@ -155,6 +173,19 @@ export default function PayrollPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const workflowSummaryRefreshKey = useMemo(
+    () => runs
+      .map((run) => `${run.id}:${run.status}:${run.reviewedAt || ''}:${run.approvedAt || ''}`)
+      .sort()
+      .join('|'),
+    [runs],
+  );
+  const { summariesById: workflowSummariesById } = useWorkflowEntitySummaries(
+    'PayrollRun',
+    runs.map((run) => run.id),
+    runs.length > 0,
+    workflowSummaryRefreshKey,
+  );
 
   const applyActivePayrollParameters = useCallback((parameters?: PayrollParameterSet | null) => {
     setActiveParameters(parameters ?? null);
@@ -178,6 +209,10 @@ export default function PayrollPage() {
     () => runs.find((run) => run.id === selectedRunId) ?? null,
     [runs, selectedRunId],
   );
+
+  const selectedWorkflowSummary = selectedRun ? workflowSummariesById[selectedRun.id] : undefined;
+  const selectedPendingApprovers = formatPendingApprovers(selectedWorkflowSummary?.pendingApprovers || []);
+  const showSelectedWorkflowBadges = selectedRun?.status === 'InReview';
 
   const activeProfiles = useMemo(
     () => profiles.filter((profile) => profile.payrollActive).sort((left, right) => left.employeeNumber.localeCompare(right.employeeNumber)),
@@ -395,9 +430,15 @@ export default function PayrollPage() {
   );
   const canCreateRun = !openRunForPeriod && busy !== 'Create run';
   const canProcessRun = Boolean(selectedRun && selectedRun.status !== 'Closed' && busy !== 'Process');
-  const canPostPayroll = Boolean(selectedRun && selectedRun.status !== 'Draft' && selectedRun.status !== 'Closed' && busy !== 'Post payroll');
-  const canGeneratePayslips = Boolean(
+  const canGenerateOutputForSelectedRun = Boolean(
     selectedRun &&
+    selectedRun.status !== 'Draft' &&
+    selectedRun.status !== 'InReview' &&
+    selectedRun.status !== 'RolledBack',
+  );
+  const canPostPayroll = Boolean(canGenerateOutputForSelectedRun && selectedRun?.status !== 'Closed' && busy !== 'Post payroll');
+  const canGeneratePayslips = Boolean(
+    canGenerateOutputForSelectedRun &&
     (payslipScope === 'all' ||
       (payslipScope === 'category' && payslipCategoryValue) ||
       (payslipScope === 'employee' && payslipEmployeeId)),
@@ -410,6 +451,37 @@ export default function PayrollPage() {
   const currentPayrollPeriodLabel = activeParameters
     ? formatPayrollPeriodLabel(activeParameters.currentPeriodFrom, activeParameters.currentPeriodTo)
     : 'Not configured';
+
+  const renderPayrollRunWorkflowActions = (run: PayrollRun, className?: string) => {
+    const summary = workflowSummariesById[run.id];
+
+    return (
+      <WorkflowApprovalActions
+        entityType="PayrollRun"
+        entityId={run.id}
+        entityLabel="Payroll Run"
+        entityNumber={run.runNumber}
+        status={run.status}
+        showStepBadge={run.status === 'InReview'}
+        currentStepName={summary?.currentStepName}
+        workflowSummary={summary}
+        canSubmit={run.status === 'Calculated'}
+        canApproveReject={run.status === 'InReview'}
+        onSubmit={async () => {
+          await payrollService.submitRun(run.id, 'Submitted from payroll run desk');
+        }}
+        onApprove={async (comments) => {
+          await payrollService.approveRun(run.id, comments || undefined);
+        }}
+        onReject={async (comments) => {
+          await payrollService.rejectRun(run.id, comments || undefined);
+        }}
+        onAfterAction={loadWorkspace}
+        onOpenWorkflows={() => router.push('/administration/workflow')}
+        className={className}
+      />
+    );
+  };
 
   return (
     <main className="space-y-5 p-6">
@@ -446,6 +518,12 @@ export default function PayrollPage() {
               </Link>
             </Button>
             <Button asChild variant="outline">
+              <Link href="/hr/payroll/bonus-exceptions">
+                <Award className="mr-2 h-4 w-4" />
+                Bonus Exceptions
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
               <Link href="/administration/hr/payroll">
                 <Settings className="mr-2 h-4 w-4" />
                 Payroll Setup
@@ -464,7 +542,18 @@ export default function PayrollPage() {
         </div>
         <div className="rounded-md border p-3">
           <div className="text-sm text-muted-foreground">Status</div>
-          <div className="mt-1">{selectedRun ? <Badge variant={statusTone[selectedRun.status]}>{selectedRun.status}</Badge> : <Badge variant="outline">Pending</Badge>}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {selectedRun ? <RunStatusBadge status={selectedRun.status} /> : <Badge variant="outline">Pending</Badge>}
+            {showSelectedWorkflowBadges && selectedWorkflowSummary?.currentStepName ? (
+              <Badge variant="outline" className="text-xs">Step: {selectedWorkflowSummary.currentStepName}</Badge>
+            ) : null}
+            {showSelectedWorkflowBadges && selectedPendingApprovers.short ? (
+              <Badge variant="outline" className="text-xs" title={selectedPendingApprovers.full}>
+                Pending with: {selectedPendingApprovers.short}
+              </Badge>
+            ) : null}
+          </div>
+          {selectedRun ? renderPayrollRunWorkflowActions(selectedRun, 'mt-2') : null}
         </div>
         <div className="rounded-md border p-3">
           <div className="text-sm text-muted-foreground">Employees</div>
@@ -530,11 +619,6 @@ export default function PayrollPage() {
                   <Field label="Notes">
                     <Input value={runForm.notes} onChange={(event) => setRunForm((current) => ({ ...current, notes: event.target.value }))} />
                   </Field>
-                  {openRunForPeriod && (
-                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      {openRunForPeriod.runNumber} is still {openRunForPeriod.status}. Post and close it before creating another run for this period.
-                    </div>
-                  )}
                   <Button type="submit" disabled={!canCreateRun}>
                     {busy === 'Create run' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                     Create Run
@@ -591,18 +675,40 @@ export default function PayrollPage() {
                       <TableHead className="text-right">Employees</TableHead>
                       <TableHead className="text-right">Gross</TableHead>
                       <TableHead className="text-right">Net</TableHead>
+                      <TableHead className="text-right">Workflow</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {runs.map((run) => (
-                      <TableRow key={run.id} className="cursor-pointer" onClick={() => setSelectedRunId(run.id)}>
-                        <TableCell className="font-medium">{run.runNumber}</TableCell>
-                        <TableCell><Badge variant={statusTone[run.status]}>{run.status}</Badge></TableCell>
-                        <TableCell className="text-right">{run.employeeCount}</TableCell>
-                        <TableCell className="text-right">{money(run.grossAmount, run.currencyCode)}</TableCell>
-                        <TableCell className="text-right">{money(run.netAmount, run.currencyCode)}</TableCell>
-                      </TableRow>
-                    ))}
+                    {runs.map((run) => {
+                      const summary = workflowSummariesById[run.id];
+                      const pending = formatPendingApprovers(summary?.pendingApprovers || []);
+                      const showWorkflowBadges = run.status === 'InReview';
+
+                      return (
+                        <TableRow key={run.id} className="cursor-pointer" onClick={() => setSelectedRunId(run.id)}>
+                          <TableCell className="font-medium">
+                            <div>{run.runNumber}</div>
+                            {showWorkflowBadges && summary?.currentStepName ? (
+                              <div className="mt-1 text-xs text-muted-foreground">Step: {summary.currentStepName}</div>
+                            ) : null}
+                            {showWorkflowBadges && pending.short ? (
+                              <div className="mt-0.5 text-xs text-muted-foreground" title={pending.full}>
+                                Pending with: {pending.short}
+                              </div>
+                            ) : null}
+                          </TableCell>
+                          <TableCell><RunStatusBadge status={run.status} /></TableCell>
+                          <TableCell className="text-right">{run.employeeCount}</TableCell>
+                          <TableCell className="text-right">{money(run.grossAmount, run.currencyCode)}</TableCell>
+                          <TableCell className="text-right">{money(run.netAmount, run.currencyCode)}</TableCell>
+                          <TableCell className="text-right" onClick={(event) => event.stopPropagation()}>
+                            <div className="flex justify-end">
+                              {renderPayrollRunWorkflowActions(run)}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -627,7 +733,7 @@ export default function PayrollPage() {
                       <FileText className="mr-2 h-4 w-4" />
                       Summary
                     </Button>
-                    <Button size="sm" variant="outline" disabled={!selectedRun || busy === 'Payslips'} onClick={openPayslipDialog}>
+                    <Button size="sm" variant="outline" disabled={!canGenerateOutputForSelectedRun || busy === 'Payslips'} onClick={openPayslipDialog}>
                       <CreditCard className="mr-2 h-4 w-4" />
                       {selectedRun?.isSeparateBonusRun ? 'Bonus Slips' : 'Payslips'}
                     </Button>
@@ -695,7 +801,7 @@ export default function PayrollPage() {
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={!selectedRun || payslips.length === 0 || busy === 'Email payslips'}
+                        disabled={!canGenerateOutputForSelectedRun || payslips.length === 0 || busy === 'Email payslips'}
                         onClick={() => selectedRun && void runOperation('Email payslips', async () => {
                           const result = await payrollService.emailPayslips(selectedRun.id, { employeeIds: payslips.map((slip) => slip.employeeId) });
                           setPayslipEmailResult(result);
@@ -709,7 +815,7 @@ export default function PayrollPage() {
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={!selectedRun || selectedPayslipCount === 0 || busy === 'Email selected payslips'}
+                        disabled={!canGenerateOutputForSelectedRun || selectedPayslipCount === 0 || busy === 'Email selected payslips'}
                         onClick={() => selectedRun && void runOperation('Email selected payslips', async () => {
                           const result = await payrollService.emailPayslips(selectedRun.id, { employeeIds: [...selectedPayslipEmployeeIds] });
                           setPayslipEmailResult(result);
@@ -738,7 +844,7 @@ export default function PayrollPage() {
                 <CardContent className="space-y-3">
                   {payslipEmailResult && (
                     <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
-                      <span className="font-medium">{payslipEmailResult.sentCount}</span> sent, <span className="font-medium">{payslipEmailResult.failedCount}</span> failed
+                      <span className="font-medium">{payslipEmailResult.sentCount}</span> queued, <span className="font-medium">{payslipEmailResult.failedCount}</span> failed
                     </div>
                   )}
                   <Table>

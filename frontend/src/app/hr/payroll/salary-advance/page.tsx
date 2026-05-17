@@ -112,16 +112,23 @@ export default function SalaryAdvancePage() {
     }));
   }, []);
 
+  const loadAdvancesForPeriod = useCallback((parameters?: PayrollParameterSet | null) => {
+    const fromDate = dateValue(parameters?.currentPeriodFrom) || undefined;
+    const toDate = dateValue(parameters?.currentPeriodTo) || undefined;
+    return payrollService.getSalaryAdvances({ fromDate, toDate });
+  }, []);
+
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [setup, profileList, advanceList] = await Promise.all([
+      const [setup, profileList] = await Promise.all([
         payrollService.getSetupSummary(),
         payrollService.getEmployeeProfiles(),
-        payrollService.getSalaryAdvances(),
       ]);
-      applyActivePeriod(setup.activeParameters ?? null);
+      const parameters = setup.activeParameters ?? null;
+      const advanceList = await loadAdvancesForPeriod(parameters);
+      applyActivePeriod(parameters);
       setProfiles(profileList);
       setSalaryAdvances(advanceList);
     } catch (err) {
@@ -129,7 +136,7 @@ export default function SalaryAdvancePage() {
     } finally {
       setLoading(false);
     }
-  }, [applyActivePeriod]);
+  }, [applyActivePeriod, loadAdvancesForPeriod]);
 
   useEffect(() => {
     void loadWorkspace();
@@ -186,11 +193,10 @@ export default function SalaryAdvancePage() {
         description: form.description || null,
         isActive: true,
       });
-      const [setup, advanceList] = await Promise.all([
-        payrollService.getSetupSummary(),
-        payrollService.getSalaryAdvances(),
-      ]);
-      applyActivePeriod(setup.activeParameters ?? null);
+      const setup = await payrollService.getSetupSummary();
+      const parameters = setup.activeParameters ?? null;
+      const advanceList = await loadAdvancesForPeriod(parameters);
+      applyActivePeriod(parameters);
       setSalaryAdvances(advanceList);
       setForm((current) => ({
         ...defaultForm,

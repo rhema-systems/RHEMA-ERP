@@ -26,8 +26,6 @@ import {
   Search,
   Settings,
   Timer,
-  Trash2,
-  UserPlus,
   type LucideIcon,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -49,7 +47,7 @@ import {
   PayrollBackpayPolicy,
   PayrollBackpayRule,
   PayrollBonusPolicy,
-  PayrollBonusException,
+  PayrollBonusRule,
   PayrollBudgetAnalysis,
   PayrollBudgetAnalysisRow,
   PayrollCodeSetup,
@@ -165,7 +163,7 @@ const defaultComponent: PayrollComponent = {
 };
 
 const defaultComponentRule: PayrollComponentRule = {
-  componentType: 'Deduction',
+  componentType: 'Allowance',
   componentCode: '',
   category: '',
   calculationType: 'FixedAmount',
@@ -423,7 +421,7 @@ const defaultBonusPolicy: PayrollBonusPolicy = {
   lastPayPeriod: null,
   nextPayPeriodDate: today,
   lastPayPeriodDate: null,
-  category: 'All',
+  category: 'ALL',
   cycle: 'Recurring',
   paySeparate: false,
   perAnnual: false,
@@ -432,16 +430,12 @@ const defaultBonusPolicy: PayrollBonusPolicy = {
   isActive: true,
 };
 
-const defaultBonusException: PayrollBonusException = {
+const defaultBonusRule: PayrollBonusRule = {
   bonusCode: '',
-  employeeProfileId: null,
-  employeeNumber: '',
-  employeeName: '',
+  groupCode: '',
   calculationType: 'FixedAmount',
   amount: 0,
-  taxable: true,
   applicable: true,
-  currencyCode: 'GHS',
   legacyCompanyCode: '001',
 };
 
@@ -899,20 +893,31 @@ function budgetAnalysisRowKey(row: PayrollBudgetAnalysisRow, index: number) {
 }
 
 function recalculateTaxTableRows(rows: TaxTableGridRow[], selectedTaxType: string) {
+  let cumulativeTax = 0;
+  let cumulativeSalary = 0;
+
   return rows.map((row, index) => {
     const taxableIncome = Number(row.taxableIncome ?? row.lowerBound ?? 0) || 0;
-    const tax = Number(row.perMonthAmount ?? row.fixedAmount ?? 0) || 0;
+    const calculatedTax = roundMoney((taxableIncome * (Number(row.ratePercent) || 0)) / 100);
+    const tax = row.taxManuallyEdited
+      ? Number(row.perMonthAmount ?? row.fixedAmount ?? calculatedTax) || 0
+      : calculatedTax;
+    cumulativeSalary = roundMoney(cumulativeSalary + taxableIncome);
+    cumulativeTax = roundMoney(cumulativeTax + tax);
+    const label = index === 0 ? 'First' : index === rows.length - 1 ? 'Exceeding' : 'Next';
 
     return {
       ...row,
       taxType: selectedTaxType,
       serialNo: index + 1,
+      description: label,
+      label,
       lowerBound: taxableIncome,
       taxableIncome,
       fixedAmount: tax,
       perMonthAmount: tax,
-      cumulativeTax: row.cumulativeTax ?? null,
-      cumulativeSalary: row.cumulativeSalary ?? null,
+      cumulativeTax,
+      cumulativeSalary,
       payPeriod: row.payPeriod ?? currentPayPeriod,
       payPeriodFrom: dateValue(row.payPeriodFrom) || today,
       payPeriodTo: dateValue(row.payPeriodTo) || today,
@@ -1726,7 +1731,12 @@ export default function PayrollAdministrationPage() {
                   'Grade',
                   async () => {
                     const saved = await payrollService.upsertGrade(grade);
-                    setGrade(defaultGrade);
+                    setGrade({
+                      ...defaultGrade,
+                      ...saved,
+                      startDate: dateValue(saved.startDate) || today,
+                      endDate: dateValue(saved.endDate),
+                    });
                     setGradeNotch((current) => ({
                       ...current,
                       payrollGradeId: saved.id || '',
@@ -1736,6 +1746,48 @@ export default function PayrollAdministrationPage() {
                       currencyCode: saved.currencyCode,
                       legacyCompanyCode: saved.legacyCompanyCode || '001',
                     }));
+                    setGradeSetup(await payrollService.getGradeSetup());
+                  },
+                  async () => undefined,
+                )
+              }
+              onSaveNotch={() =>
+                save(
+                  'Grade notch',
+                  async () => {
+                    const savedGrade = grade.id
+                      ? grade
+                      : await payrollService.upsertGrade({
+                          ...defaultGrade,
+                          ...grade,
+                          gradeName: grade.gradeName,
+                          currencyCode: grade.currencyCode || defaultGrade.currencyCode,
+                          legacyCompanyCode: grade.legacyCompanyCode || defaultGrade.legacyCompanyCode,
+                          isActive: grade.isActive ?? true,
+                        });
+                    const savedNotch = await payrollService.upsertGradeNotch({
+                      ...defaultGradeNotch,
+                      ...gradeNotch,
+                      payrollGradeId: savedGrade.id || gradeNotch.payrollGradeId || '',
+                      gradeId: savedGrade.gradeId || gradeNotch.gradeId || '',
+                      gradeName: savedGrade.gradeName,
+                      systemGradeName: savedGrade.systemGradeName || savedGrade.gradeName,
+                      reportingName: gradeNotch.reportingName || savedGrade.reportingName || savedGrade.gradeName,
+                      currencyCode: gradeNotch.currencyCode || savedGrade.currencyCode,
+                      legacyCompanyCode: gradeNotch.legacyCompanyCode || savedGrade.legacyCompanyCode || '001',
+                    });
+                    setGrade({
+                      ...defaultGrade,
+                      ...savedGrade,
+                      startDate: dateValue(savedGrade.startDate) || today,
+                      endDate: dateValue(savedGrade.endDate),
+                    });
+                    setGradeNotch({
+                      ...defaultGradeNotch,
+                      ...savedNotch,
+                      startDate: dateValue(savedNotch.startDate) || today,
+                      endDate: dateValue(savedNotch.endDate),
+                    });
                     setGradeSetup(await payrollService.getGradeSetup());
                   },
                   async () => undefined,
@@ -1827,6 +1879,8 @@ export default function PayrollAdministrationPage() {
               componentRules={setup?.componentRules ?? []}
               componentCodeValues={componentCodeValues}
               staffCategories={staffCategoryCodeValues}
+              departments={departmentCodeValues}
+              positions={positionCodeValues}
               component={component}
               busy={busy}
               onChange={setComponent}
@@ -1836,7 +1890,7 @@ export default function PayrollAdministrationPage() {
                   async () => {
                     const savedComponentType = component.componentType;
                     await payrollService.upsertComponent(component);
-                    if (savedComponentType === 'Deduction' && rules) {
+                    if (rules) {
                       for (const rule of rules) {
                         if (!rule.category || !component.code) {
                           continue;
@@ -1845,7 +1899,7 @@ export default function PayrollAdministrationPage() {
                         await payrollService.upsertComponentRule({
                           ...defaultComponentRule,
                           ...rule,
-                          componentType: 'Deduction',
+                          componentType: savedComponentType,
                           componentCode: component.code,
                           legacyCompanyCode: rule.legacyCompanyCode || '001',
                         });
@@ -1867,34 +1921,32 @@ export default function PayrollAdministrationPage() {
           ) : selectedMenuId === 'A0000118' ? (
             <BonusSetupForm
               bonuses={setup?.bonusPolicies ?? []}
-              bonusExceptions={setup?.bonusExceptions ?? []}
+              bonusRules={setup?.bonusRules ?? []}
               bonusTypes={bonusCodeValues}
               staffCategories={staffCategoryCodeValues}
-              employees={payrollEmployees}
+              departments={departmentCodeValues}
+              positions={positionCodeValues}
               bonus={bonusPolicy}
               busy={busy}
               onChange={setBonusPolicy}
-              onSave={(exceptionRows) =>
+              onSave={(rules) =>
                 save(
                   'Bonus setup',
                   async () => {
                     const savedBonus = await payrollService.upsertBonusPolicy(bonusPolicy);
-                    await payrollService.saveBonusExceptions({
+                    await payrollService.saveBonusRules({
                       bonusCode: savedBonus.code,
-                      legacyCompanyCode: setup?.activeParameters?.legacyCompanyCode ?? null,
-                      entries: exceptionRows.map((row) => ({
-                        id: row.id,
-                        employeeProfileId: row.employeeProfileId,
-                        employeeNumber: row.employeeNumber,
-                        calculationType: row.calculationType,
-                        amount: row.amount,
-                        taxable: row.taxable,
-                        applicable: row.applicable,
-                        currencyCode: row.currencyCode,
-                        legacyCompanyCode: row.legacyCompanyCode || setup?.activeParameters?.legacyCompanyCode || '001',
-                        isSelected: row.isSelected !== false,
-                      })),
+                      legacyCompanyCode: '001',
+                      rules: rules
+                        .filter((rule) => !!rule.groupCode)
+                        .map((rule) => ({
+                          ...defaultBonusRule,
+                          ...rule,
+                          bonusCode: savedBonus.code,
+                          legacyCompanyCode: rule.legacyCompanyCode || '001',
+                        })),
                     });
+
                     setBonusPolicy(defaultBonusPolicy);
                     setSetup(await payrollService.getSetupSummary());
                   },
@@ -3130,6 +3182,7 @@ function GradesSetupForm({
   onGradeChange,
   onNotchChange,
   onSaveGrade,
+  onSaveNotch,
   onSaveGeneratedGrades,
 }: {
   setup: PayrollGradeSetup;
@@ -3139,6 +3192,7 @@ function GradesSetupForm({
   onGradeChange: (value: PayrollGrade) => void;
   onNotchChange: (value: PayrollGradeNotch) => void;
   onSaveGrade: () => void;
+  onSaveNotch: () => void;
   onSaveGeneratedGrades: (rows: GradeSetupRow[], draft: GradeSetupDraft) => void;
 }) {
   const [rearrangeOpen, setRearrangeOpen] = useState(false);
@@ -3153,10 +3207,30 @@ function GradesSetupForm({
   const existingGradeRows = useMemo(() => gradeSetupRowsFromExisting(setup.grades), [setup.grades]);
   const setupRows = generatedRows.length > 0 ? generatedRows : existingGradeRows.length > 0 ? existingGradeRows : generateGradeSetupRows(setupDraft);
   const rearrangeRows = existingGradeRows.length > 0 ? existingGradeRows : generateGradeSetupRows(setupDraft);
+  const selectedNotches = useMemo(() => {
+    const gradeId = grade.id || notch.payrollGradeId;
+    const gradeName = (grade.gradeName || notch.gradeName || '').trim().toLowerCase();
+    const currencyCode = (grade.currencyCode || notch.currencyCode || '').trim().toUpperCase();
+    return setup.notches
+      .filter((item) => {
+        if (gradeId && item.payrollGradeId === gradeId) {
+          return true;
+        }
+
+        return Boolean(
+          gradeName &&
+          item.gradeName?.trim().toLowerCase() === gradeName &&
+          (!currencyCode || item.currencyCode.toUpperCase() === currencyCode),
+        );
+      })
+      .sort((first, second) => (first.orderField ?? 0) - (second.orderField ?? 0) || first.notch.localeCompare(second.notch));
+  }, [grade.currencyCode, grade.gradeName, grade.id, notch.gradeName, notch.payrollGradeId, notch.currencyCode, setup.notches]);
   const editableGridInputClassName = 'h-8 rounded-none border-0 bg-transparent px-1 shadow-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0';
 
   const selectGradeRow = (row: GradeSetupRow) => {
     if (row.grade) {
+      const selectedGradeNotch = setup.notches.find((item) => item.payrollGradeId === row.grade?.id && item.notch === row.firstNotch) ??
+        setup.notches.find((item) => item.payrollGradeId === row.grade?.id);
       onGradeChange({
         ...grade,
         ...row.grade,
@@ -3164,14 +3238,17 @@ function GradesSetupForm({
         endDate: dateValue(row.grade.endDate),
       });
       onNotchChange({
-        ...notch,
+        ...defaultGradeNotch,
+        ...selectedGradeNotch,
         payrollGradeId: row.grade.id || notch.payrollGradeId,
         gradeId: row.grade.gradeId || notch.gradeId,
         gradeName: row.grade.gradeName,
         systemGradeName: row.grade.systemGradeName || notch.systemGradeName,
         currencyCode: row.grade.currencyCode,
-        notch: row.firstNotch,
+        notch: selectedGradeNotch?.notch || row.firstNotch,
         legacyCompanyCode: row.grade.legacyCompanyCode || notch.legacyCompanyCode || '001',
+        startDate: dateValue(selectedGradeNotch?.startDate) || today,
+        endDate: dateValue(selectedGradeNotch?.endDate),
       });
       return;
     }
@@ -3269,6 +3346,85 @@ function GradesSetupForm({
                 <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                   <Label className="text-xs text-muted-foreground">Mid Point</Label>
                   <Input type="number" step="0.01" value={grade.midPoint ?? ''} onChange={(event) => onGradeChange({ ...grade, midPoint: numberOrNull(event.target.value) })} />
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="rounded-md border p-3">
+              <legend className="px-1 text-xs font-medium">Notches</legend>
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)]">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+                    <Label className="text-xs text-muted-foreground">Notch</Label>
+                    <Input value={notch.notch} onChange={(event) => onNotchChange({ ...notch, notch: event.target.value, orderField: Number(event.target.value) || notch.orderField })} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+                    <Label className="text-xs text-muted-foreground">Value</Label>
+                    <Input type="number" step="0.01" value={notch.value ?? ''} onChange={(event) => onNotchChange({ ...notch, value: numberOrNull(event.target.value) })} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+                    <Label className="text-xs text-muted-foreground">Annualised</Label>
+                    <Input type="number" step="0.01" value={notch.annualisedValue ?? ''} onChange={(event) => onNotchChange({ ...notch, annualisedValue: numberOrNull(event.target.value) })} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+                    <Label className="text-xs text-muted-foreground">Hourly Rate</Label>
+                    <Input type="number" step="0.01" value={notch.hourlyRate ?? ''} onChange={(event) => onNotchChange({ ...notch, hourlyRate: numberOrNull(event.target.value) })} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+                    <Label className="text-xs text-muted-foreground">Start Date</Label>
+                    <Input type="date" value={dateValue(notch.startDate) || today} onChange={(event) => onNotchChange({ ...notch, startDate: event.target.value || null })} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+                    <Label className="text-xs text-muted-foreground">End Date</Label>
+                    <Input type="date" value={dateValue(notch.endDate)} onChange={(event) => onNotchChange({ ...notch, endDate: event.target.value || null })} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Button type="button" onClick={onSaveNotch} disabled={busy === 'Grade notch' || !grade.gradeName || !notch.notch}>
+                      {busy === 'Grade notch' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                      Save Notch
+                    </Button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Notch</TableHead>
+                        <TableHead className="text-right">Value</TableHead>
+                        <TableHead className="text-right">Annualised</TableHead>
+                        <TableHead className="text-right">Hourly</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedNotches.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
+                            No notches saved for this grade.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        selectedNotches.map((item) => (
+                          <TableRow
+                            key={item.id || `${item.gradeName}-${item.notch}`}
+                            className="cursor-pointer"
+                            onClick={() =>
+                              onNotchChange({
+                                ...defaultGradeNotch,
+                                ...item,
+                                startDate: dateValue(item.startDate) || today,
+                                endDate: dateValue(item.endDate),
+                              })
+                            }
+                          >
+                            <TableCell className="font-medium">{item.notch}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatAmount(item.value)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatAmount(item.annualisedValue)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatAmount(item.hourlyRate)}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
                 </div>
               </div>
             </fieldset>
@@ -3627,11 +3783,28 @@ function componentTypeLabel(value: PayrollComponent['componentType']) {
   return componentTabs.find((item) => item.value === value)?.label ?? value;
 }
 
+function isAllComponentSetupCategory(value?: string | null) {
+  const normalized = (value || '').trim().replace(/\s+/g, '').toUpperCase();
+  return !normalized || normalized === 'ALL' || normalized === 'ALLSTAFF' || normalized === 'ANY' || normalized === '*';
+}
+
+function normalizeComponentSetupCategory(value?: string | null) {
+  const normalized = (value || '').trim().replace(/\s+/g, '').toUpperCase();
+  if (!normalized) return 'ALL';
+  if (normalized === 'POSITION') return 'POS';
+  if (normalized === 'DEPARTMENT') return 'DEP';
+  if (normalized === 'STAFFCATEGORY') return 'CAT';
+  if (normalized === 'RANK' || normalized === 'RANKS') return 'RAN';
+  return normalized;
+}
+
 function AllowancesDeductionsSetupForm({
   components,
   componentRules,
   componentCodeValues,
   staffCategories,
+  departments,
+  positions,
   component,
   busy,
   onChange,
@@ -3641,24 +3814,59 @@ function AllowancesDeductionsSetupForm({
   componentRules: PayrollComponentRule[];
   componentCodeValues: Record<string, PayrollCodeValue[]>;
   staffCategories: PayrollCodeValue[];
+  departments: PayrollCodeValue[];
+  positions: PayrollCodeValue[];
   component: PayrollComponent;
   busy: string | null;
   onChange: (value: PayrollComponent) => void;
   onSave: (rules?: PayrollComponentRule[]) => void;
 }) {
   const activeTab = componentTabs.some((item) => item.value === component.componentType) ? component.componentType : 'Allowance';
-  const [deductionGridRows, setDeductionGridRows] = useState<PayrollComponentRule[]>([]);
+  const [detailGridRows, setDetailGridRows] = useState<PayrollComponentRule[]>([]);
   const staffCategoryOptions = staffCategories.map((item) => ({ value: item.actualCode, label: item.description || item.actualCode }));
+  const departmentOptions = departments.map((item) => ({ value: item.actualCode, label: item.description || item.actualCode }));
+  const positionOptions = positions.map((item) => ({ value: item.actualCode, label: item.description || item.actualCode }));
 
   useEffect(() => {
-    if (activeTab !== 'Deduction' || !component.code) {
-      setDeductionGridRows([]);
+    if (!component.code || isAllComponentSetupCategory(component.category)) {
+      setDetailGridRows([]);
       return;
     }
 
-    const existingRows = componentRules.filter((item) => item.componentType === 'Deduction' && item.componentCode === component.code);
-    setDeductionGridRows(existingRows.length > 0 ? existingRows : [{ ...defaultComponentRule, componentCode: component.code }]);
-  }, [activeTab, component.code, componentRules]);
+    const existingRows = componentRules
+      .filter((item) => item.componentType === activeTab && item.componentCode === component.code)
+      .map((item) => ({ ...defaultComponentRule, ...item, componentType: activeTab, componentCode: component.code }));
+
+    if (existingRows.length > 0) {
+      setDetailGridRows(existingRows);
+      return;
+    }
+
+    setDetailGridRows([{
+      ...defaultComponentRule,
+      componentType: activeTab,
+      componentCode: component.code,
+      calculationType: component.calculationType,
+      amount: component.amount,
+      taxFreeCeiling: component.taxFreeCeiling,
+      employerAmount: component.employerAmount,
+      afterTax: activeTab === 'Allowance' || activeTab === 'Benefit' ? component.taxable : component.afterTaxContribution,
+      employerTaxable: component.employerTaxable,
+      category: isAllComponentSetupCategory(component.category) ? '' : '',
+    }]);
+  }, [
+    activeTab,
+    component.code,
+    component.category,
+    component.calculationType,
+    component.amount,
+    component.taxFreeCeiling,
+    component.employerAmount,
+    component.taxable,
+    component.afterTaxContribution,
+    component.employerTaxable,
+    componentRules,
+  ]);
 
   const switchTab = (value: string) => {
     const componentType = value as PayrollComponent['componentType'];
@@ -3671,12 +3879,25 @@ function AllowancesDeductionsSetupForm({
     });
   };
 
-  const updateDeductionGridRow = (index: number, patch: Partial<PayrollComponentRule>) => {
-    setDeductionGridRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+  const updateDetailGridRow = (index: number, patch: Partial<PayrollComponentRule>) => {
+    setDetailGridRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
   };
 
-  const addDeductionGridRow = () => {
-    setDeductionGridRows((current) => [...current, { ...defaultComponentRule, componentCode: component.code }]);
+  const addDetailGridRow = () => {
+    setDetailGridRows((current) => [
+      ...current,
+      {
+        ...defaultComponentRule,
+        componentType: activeTab,
+        componentCode: component.code,
+        calculationType: component.calculationType,
+        amount: component.amount,
+        taxFreeCeiling: component.taxFreeCeiling,
+        employerAmount: component.employerAmount,
+        afterTax: activeTab === 'Allowance' || activeTab === 'Benefit' ? component.taxable : component.afterTaxContribution,
+        employerTaxable: component.employerTaxable,
+      },
+    ]);
   };
 
   const renderTab = (tab: (typeof componentTabs)[number]) => {
@@ -3685,21 +3906,36 @@ function AllowancesDeductionsSetupForm({
     const selectedIsPercentage = component.calculationType === 'PercentageOfBasic';
     const isContribution = tab.value === 'EmployeeContribution';
     const isDeduction = tab.value === 'Deduction';
-    const deductionStaffCategoryOptions = [
-      ...staffCategoryOptions,
-      ...deductionGridRows
-        .filter((row) => row.category && !staffCategoryOptions.some((option) => option.value === row.category))
+    const currentComponentCategory = normalizeComponentSetupCategory(component.category);
+    const detailOptions =
+      currentComponentCategory === 'DEP'
+        ? departmentOptions
+        : currentComponentCategory === 'POS' || currentComponentCategory === 'JOB' || currentComponentCategory === 'RAN'
+          ? positionOptions
+          : currentComponentCategory === 'CAT'
+            ? staffCategoryOptions
+            : [];
+    const detailCategoryOptions = [
+      ...detailOptions,
+      ...detailGridRows
+        .filter((row) => row.category && !detailOptions.some((option) => option.value === row.category))
         .map((row) => ({ value: row.category, label: row.category })),
     ];
-    const deductionGridInputClassName = 'h-8 border-0 bg-transparent px-1 text-sm shadow-none focus-visible:ring-1';
+    const detailGridInputClassName = 'h-8 border-0 bg-transparent px-1 text-sm shadow-none focus-visible:ring-1';
+    const showDetailGrid = Boolean(component.code) && !isAllComponentSetupCategory(component.category);
+    const componentCategoryLabel =
+      component.category && !isAllComponentSetupCategory(component.category)
+        ? component.category
+        : 'Category';
     const showEmployeeTaxable = tab.value === 'Allowance' || tab.value === 'Benefit';
     const afterTaxLabel = isContribution ? 'After Tax Contribution?' : isDeduction ? 'After Tax Deduction?' : null;
+    const detailTaxColumnLabel = showEmployeeTaxable ? 'Taxable?' : isContribution ? 'After Tax Contribution?' : 'After Tax Deduction?';
     const checkboxFields = [
       showEmployeeTaxable ? <BooleanField key="taxable" checked={component.taxable} label="Employee Taxable?" onChange={(checked) => onChange({ ...component, taxable: checked })} /> : null,
       afterTaxLabel ? <BooleanField key="afterTax" checked={component.afterTaxContribution} label={afterTaxLabel} onChange={(checked) => onChange({ ...component, afterTaxContribution: checked })} /> : null,
       <BooleanField key="percentage" checked={selectedIsPercentage} label="Percentage?" onChange={(checked) => onChange({ ...component, calculationType: checked ? 'PercentageOfBasic' : 'FixedAmount' })} />,
       <BooleanField key="separateTax" checked={component.separateTax} label="Tax Separately?" onChange={(checked) => onChange({ ...component, separateTax: checked })} />,
-      <BooleanField key="applyBenefit" checked={component.applyToBenefit} label="Apply To Benefit?" onChange={(checked) => onChange({ ...component, applyToBenefit: checked })} />,
+      tab.value === 'Allowance' ? <BooleanField key="applyBenefit" checked={component.applyToBenefit} label="Apply To Benefit?" onChange={(checked) => onChange({ ...component, applyToBenefit: checked })} /> : null,
       <BooleanField key="employerTaxable" checked={component.employerTaxable} label="Employer Taxable?" onChange={(checked) => onChange({ ...component, employerTaxable: checked })} />,
       <BooleanField key="prorate" checked={component.prorate} label="Prorate?" onChange={(checked) => onChange({ ...component, prorate: checked })} />,
       <BooleanField key="applicable" checked={component.appliesByDefault} label="Applicable?" onChange={(checked) => onChange({ ...component, appliesByDefault: checked, isActive: checked })} />,
@@ -3717,7 +3953,7 @@ function AllowancesDeductionsSetupForm({
                 className="grid gap-3 lg:grid-cols-2"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  onSave(tab.value === 'Deduction' ? deductionGridRows : undefined);
+                  onSave(showDetailGrid ? detailGridRows.map((row) => ({ ...row, componentType: tab.value, componentCode: component.code })) : undefined);
                 }}
               >
                 <Field label={tab.fieldLabel}>
@@ -3824,68 +4060,68 @@ function AllowancesDeductionsSetupForm({
             </CardContent>
           </Card>
 
-          {tab.value === 'Deduction' ? (
+          {showDetailGrid ? (
             <Card className="2xl:col-span-2">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Deduction Staff Category Details</CardTitle>
+                <CardTitle className="text-base">{tab.fieldLabel} {componentCategoryLabel} Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="min-w-48">Staff Category</TableHead>
+                        <TableHead className="min-w-48">{componentCategoryLabel}</TableHead>
                         <TableHead className="w-32">Amount</TableHead>
                         <TableHead className="w-32">Tax Free Ceiling</TableHead>
                         <TableHead className="w-32">Employer Amount</TableHead>
                         <TableHead className="w-28">Percentage?</TableHead>
-                        <TableHead className="w-36">After Tax Deduction</TableHead>
+                        <TableHead className="w-36">{detailTaxColumnLabel}</TableHead>
                         <TableHead className="w-36">Employer Taxable?</TableHead>
                         <TableHead className="w-28">Applicable?</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {deductionGridRows.map((row, index) => (
+                      {detailGridRows.map((row, index) => (
                         <TableRow key={row.id || `${row.category || 'new'}-${index}`}>
                           <TableCell>
                             <select
                               className="h-8 w-full rounded-sm border bg-background px-2 text-sm"
                               value={row.category}
-                              onChange={(event) => updateDeductionGridRow(index, { category: event.target.value })}
+                              onChange={(event) => updateDetailGridRow(index, { category: event.target.value })}
                             >
-                              <option value="">Select category</option>
-                              {deductionStaffCategoryOptions.map((option) => (
+                              <option value="">Select {componentCategoryLabel.toLowerCase()}</option>
+                              {detailCategoryOptions.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
                             </select>
                           </TableCell>
                           <TableCell>
-                            <Input className={deductionGridInputClassName} type="number" step="0.01" value={row.amount ?? ''} onChange={(event) => updateDeductionGridRow(index, { amount: Number(event.target.value) || 0 })} />
+                            <Input className={detailGridInputClassName} type="number" step="0.01" value={row.amount ?? ''} onChange={(event) => updateDetailGridRow(index, { amount: Number(event.target.value) || 0 })} />
                           </TableCell>
                           <TableCell>
-                            <Input className={deductionGridInputClassName} type="number" step="0.01" value={row.taxFreeCeiling ?? ''} onChange={(event) => updateDeductionGridRow(index, { taxFreeCeiling: numberOrNull(event.target.value) })} />
+                            <Input className={detailGridInputClassName} type="number" step="0.01" value={row.taxFreeCeiling ?? ''} onChange={(event) => updateDetailGridRow(index, { taxFreeCeiling: numberOrNull(event.target.value) })} />
                           </TableCell>
                           <TableCell>
-                            <Input className={deductionGridInputClassName} type="number" step="0.01" value={row.employerAmount ?? ''} onChange={(event) => updateDeductionGridRow(index, { employerAmount: numberOrNull(event.target.value) })} />
+                            <Input className={detailGridInputClassName} type="number" step="0.01" value={row.employerAmount ?? ''} onChange={(event) => updateDetailGridRow(index, { employerAmount: numberOrNull(event.target.value) })} />
                           </TableCell>
                           <TableCell>
-                            <Checkbox checked={row.calculationType === 'PercentageOfBasic'} onCheckedChange={(checked) => updateDeductionGridRow(index, { calculationType: checked === true ? 'PercentageOfBasic' : 'FixedAmount' })} />
+                            <Checkbox checked={row.calculationType === 'PercentageOfBasic'} onCheckedChange={(checked) => updateDetailGridRow(index, { calculationType: checked === true ? 'PercentageOfBasic' : 'FixedAmount' })} />
                           </TableCell>
                           <TableCell>
-                            <Checkbox checked={row.afterTax} onCheckedChange={(checked) => updateDeductionGridRow(index, { afterTax: checked === true })} />
+                            <Checkbox checked={row.afterTax} onCheckedChange={(checked) => updateDetailGridRow(index, { afterTax: checked === true })} />
                           </TableCell>
                           <TableCell>
-                            <Checkbox checked={row.employerTaxable} onCheckedChange={(checked) => updateDeductionGridRow(index, { employerTaxable: checked === true })} />
+                            <Checkbox checked={row.employerTaxable} onCheckedChange={(checked) => updateDetailGridRow(index, { employerTaxable: checked === true })} />
                           </TableCell>
                           <TableCell>
-                            <Checkbox checked={row.applicable} onCheckedChange={(checked) => updateDeductionGridRow(index, { applicable: checked === true })} />
+                            <Checkbox checked={row.applicable} onCheckedChange={(checked) => updateDetailGridRow(index, { applicable: checked === true })} />
                           </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
-                <Button type="button" variant="outline" disabled={!component.code} onClick={addDeductionGridRow}>
+                <Button type="button" variant="outline" disabled={!component.code} onClick={addDetailGridRow}>
                   Add Row
                 </Button>
               </CardContent>
@@ -3910,28 +4146,48 @@ function AllowancesDeductionsSetupForm({
   );
 }
 
-type BonusExceptionGridRow = PayrollBonusException & { isSelected?: boolean };
+function isAllBonusSetupCategory(value?: string | null) {
+  const normalized = (value || '').trim().replace(/\s+/g, '').toUpperCase();
+  return !normalized || normalized === 'ALL' || normalized === 'ALLSTAFF' || normalized === 'ANY' || normalized === '*';
+}
+
+function normalizeBonusSetupCategory(value?: string | null) {
+  const normalized = (value || '').trim().replace(/\s+/g, '').toUpperCase();
+  if (!normalized) return 'ALL';
+  if (normalized === 'POSITION') return 'POS';
+  if (normalized === 'DEPARTMENT') return 'DEP';
+  if (normalized === 'STAFFCATEGORY') return 'CAT';
+  if (normalized === 'JOB') return 'JOB';
+  if (normalized === 'RANK' || normalized === 'RANKS') return 'RAN';
+  return normalized;
+}
+
+function isBonusSetupCategoryType(value?: string | null) {
+  return ['ALL', 'POS', 'DEP', 'CAT', 'JOB', 'RAN'].includes(normalizeBonusSetupCategory(value));
+}
 
 function BonusSetupForm({
   bonuses,
-  bonusExceptions,
+  bonusRules,
   bonusTypes,
   staffCategories,
-  employees,
+  departments,
+  positions,
   bonus,
   busy,
   onChange,
   onSave,
 }: {
   bonuses: PayrollBonusPolicy[];
-  bonusExceptions: PayrollBonusException[];
+  bonusRules: PayrollBonusRule[];
   bonusTypes: PayrollCodeValue[];
   staffCategories: PayrollCodeValue[];
-  employees: PayrollEmployeeProfile[];
+  departments: PayrollCodeValue[];
+  positions: PayrollCodeValue[];
   bonus: PayrollBonusPolicy;
   busy: string | null;
   onChange: (value: PayrollBonusPolicy) => void;
-  onSave: (exceptions: BonusExceptionGridRow[]) => void;
+  onSave: (rules: PayrollBonusRule[]) => void;
 }) {
   const bonusOptions: PayrollCodeValue[] =
     bonusTypes.length > 0
@@ -3949,151 +4205,73 @@ function BonusSetupForm({
           legacyCompanyCode: null,
         }));
   const isPercentage = bonus.calculationType === 'PercentageOfBasic';
-  const [exceptionRows, setExceptionRows] = useState<BonusExceptionGridRow[]>([]);
-  const [removedExceptionRows, setRemovedExceptionRows] = useState<BonusExceptionGridRow[]>([]);
-  const [employeeSearch, setEmployeeSearch] = useState('');
-  const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState('');
-  const [pickerSelectedIds, setPickerSelectedIds] = useState<string[]>([]);
-  const bonusExceptionInputClassName = 'h-8 border-0 bg-transparent px-1 text-right text-sm shadow-none focus-visible:ring-1';
   const staffCategoryOptions = staffCategories.map((item) => ({ value: item.actualCode, label: item.description || item.actualCode }));
-  const bonusCategoryOptions = [{ value: 'All', label: 'All' }, ...staffCategoryOptions];
-  const activeEmployees = useMemo(
-    () => employees.filter((employee) => employee.payrollActive).sort((left, right) => left.employeeNumber.localeCompare(right.employeeNumber)),
-    [employees],
-  );
-  const selectedExceptionProfileIds = useMemo(
-    () => new Set(exceptionRows.map((row) => row.employeeProfileId).filter(Boolean) as string[]),
-    [exceptionRows],
-  );
-  const filteredExceptionRows = useMemo(() => {
-    const term = employeeSearch.trim().toLowerCase();
-    if (!term) {
-      return exceptionRows;
-    }
-
-    return exceptionRows.filter((row) =>
-      row.employeeNumber.toLowerCase().includes(term) ||
-      row.employeeName.toLowerCase().includes(term),
-    );
-  }, [employeeSearch, exceptionRows]);
-  const filteredPickerEmployees = useMemo(() => {
-    const term = pickerSearch.trim().toLowerCase();
-    const candidates = activeEmployees.filter((employee) => !selectedExceptionProfileIds.has(employee.id || ''));
-    if (!term) {
-      return candidates;
-    }
-
-    return candidates.filter((employee) =>
-      employee.employeeNumber.toLowerCase().includes(term) ||
-      employee.employeeName.toLowerCase().includes(term),
-    );
-  }, [activeEmployees, pickerSearch, selectedExceptionProfileIds]);
-  const pickerSelectedSet = useMemo(() => new Set(pickerSelectedIds), [pickerSelectedIds]);
-  const selectablePickerIds = useMemo(
-    () => activeEmployees
-      .filter((employee) => !selectedExceptionProfileIds.has(employee.id || ''))
-      .map((employee) => employee.id || '')
-      .filter(Boolean),
-    [activeEmployees, selectedExceptionProfileIds],
-  );
-  const allPickerEmployeesSelected = selectablePickerIds.length > 0 &&
-    selectablePickerIds.every((id) => pickerSelectedSet.has(id));
-  const pickerSelectAllState = allPickerEmployeesSelected
-    ? true
-    : pickerSelectedIds.length > 0
-      ? 'indeterminate'
-      : false;
+  const departmentOptions = departments.map((item) => ({ value: item.actualCode, label: item.description || item.actualCode }));
+  const positionOptions = positions.map((item) => ({ value: item.actualCode, label: item.description || item.actualCode }));
+  const baseBonusCategoryOptions = [
+    { value: 'ALL', label: 'All' },
+    { value: 'POS', label: 'Position' },
+    { value: 'DEP', label: 'Department' },
+    { value: 'CAT', label: 'Staff Category' },
+    { value: 'JOB', label: 'Job' },
+    { value: 'RAN', label: 'Rank' },
+  ];
+  const currentBonusCategory = normalizeBonusSetupCategory(bonus.category);
+  const bonusCategoryOptions = baseBonusCategoryOptions.some((option) => option.value === currentBonusCategory)
+    ? baseBonusCategoryOptions
+    : [...baseBonusCategoryOptions, { value: currentBonusCategory, label: bonus.category || currentBonusCategory }];
+  const detailOptions =
+    currentBonusCategory === 'DEP'
+      ? departmentOptions
+      : currentBonusCategory === 'POS' || currentBonusCategory === 'JOB'
+        ? positionOptions
+        : currentBonusCategory === 'CAT'
+          ? staffCategoryOptions
+          : [];
+  const [detailRows, setDetailRows] = useState<PayrollBonusRule[]>([]);
+  const bonusDetailInputClassName = 'h-8 border-0 bg-transparent px-1 text-sm shadow-none focus-visible:ring-1';
 
   useEffect(() => {
     if (!bonus.code) {
-      setExceptionRows([]);
-      setRemovedExceptionRows([]);
+      setDetailRows([]);
       return;
     }
 
-    const selectedBonusCode = bonus.code.trim().toUpperCase();
-    setExceptionRows(bonusExceptions.filter((item) => item.bonusCode.trim().toUpperCase() === selectedBonusCode));
-    setRemovedExceptionRows([]);
-    setEmployeeSearch('');
-  }, [bonus.code, bonusExceptions]);
-
-  const updateExceptionRow = (employeeNumber: string, patch: Partial<PayrollBonusException>) => {
-    setExceptionRows((current) => current.map((row) => (row.employeeNumber === employeeNumber ? { ...row, ...patch } : row)));
-  };
-
-  const openEmployeePicker = () => {
-    setPickerSearch('');
-    setPickerSelectedIds([]);
-    setEmployeePickerOpen(true);
-  };
-
-  const togglePickerEmployee = (employeeProfileId: string, selected: boolean) => {
-    setPickerSelectedIds((current) => {
-      if (selected) {
-        return current.includes(employeeProfileId) ? current : [...current, employeeProfileId];
-      }
-
-      return current.filter((id) => id !== employeeProfileId);
-    });
-  };
-
-  const setVisiblePickerSelection = (selected: boolean) => {
-    const visibleIds = new Set(filteredPickerEmployees.map((employee) => employee.id || '').filter(Boolean));
-    setPickerSelectedIds((current) => {
-      if (selected) {
-        return Array.from(new Set([...current, ...visibleIds]));
-      }
-
-      return current.filter((id) => !visibleIds.has(id));
-    });
-  };
-
-  const setAllPickerSelection = (selected: boolean) => {
-    setPickerSelectedIds((current) =>
-      selected
-        ? Array.from(new Set([...current, ...selectablePickerIds]))
-        : [],
-    );
-  };
-
-  const addPickerEmployees = () => {
-    const selectedIds = new Set(pickerSelectedIds);
-    const selectedEmployees = activeEmployees.filter((employee) => selectedIds.has(employee.id || ''));
-    setExceptionRows((current) => [
-      ...current,
-      ...selectedEmployees
-        .filter((employee) => !current.some((row) => row.employeeProfileId === employee.id || row.employeeNumber === employee.employeeNumber))
-        .map((employee) => ({
-          ...defaultBonusException,
-          bonusCode: bonus.code,
-          employeeProfileId: employee.id,
-          employeeNumber: employee.employeeNumber,
-          employeeName: employee.employeeName,
-          calculationType: bonus.calculationType,
-          amount: 0,
-          taxable: bonus.taxable,
-        })),
-    ]);
-    setRemovedExceptionRows((current) => current.filter((row) => !selectedIds.has(row.employeeProfileId || '')));
-    setEmployeePickerOpen(false);
-  };
-
-  const removeExceptionRow = (row: BonusExceptionGridRow) => {
-    setExceptionRows((current) => current.filter((item) => item.employeeNumber !== row.employeeNumber));
-    if (row.id) {
-      setRemovedExceptionRows((current) =>
-        current.some((item) => item.id === row.id)
-          ? current
-          : [...current, { ...row, isSelected: false }],
-      );
+    const existingRows = bonusRules
+      .filter((item) => item.bonusCode === bonus.code)
+      .map((item) => ({ ...defaultBonusRule, ...item }));
+    if (existingRows.length > 0) {
+      setDetailRows(existingRows);
+      return;
     }
+
+    if (isAllBonusSetupCategory(bonus.category)) {
+      setDetailRows([]);
+      return;
+    }
+
+    setDetailRows([{
+      ...defaultBonusRule,
+      bonusCode: bonus.code,
+      groupCode: isBonusSetupCategoryType(bonus.category) ? '' : bonus.category || '',
+      calculationType: bonus.calculationType,
+      amount: bonus.amount,
+    }]);
+  }, [bonus.code, bonus.category, bonus.calculationType, bonus.amount, bonusRules]);
+
+  const updateDetailRow = (index: number, patch: Partial<PayrollBonusRule>) => {
+    setDetailRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
   };
 
-  const saveBonus = () => {
-    onSave([
-      ...exceptionRows.map((row) => ({ ...row, isSelected: true })),
-      ...removedExceptionRows.map((row) => ({ ...row, isSelected: false })),
+  const addDetailRow = () => {
+    setDetailRows((current) => [
+      ...current,
+      {
+        ...defaultBonusRule,
+        bonusCode: bonus.code,
+        calculationType: bonus.calculationType,
+        amount: bonus.amount,
+      },
     ]);
   };
 
@@ -4108,7 +4286,7 @@ function BonusSetupForm({
             className="grid gap-3 lg:grid-cols-2"
             onSubmit={(event) => {
               event.preventDefault();
-              saveBonus();
+              onSave(detailRows.map((row) => ({ ...row, bonusCode: bonus.code })));
             }}
           >
             <Field label="Bonus Type">
@@ -4144,7 +4322,7 @@ function BonusSetupForm({
               <Input type="number" value={bonus.minimumMonths ?? ''} onChange={(event) => onChange({ ...bonus, minimumMonths: numberOrNull(event.target.value) })} />
             </Field>
             <Field label="Category">
-              <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={bonus.category || 'All'} onChange={(event) => onChange({ ...bonus, category: event.target.value })}>
+              <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={currentBonusCategory} onChange={(event) => onChange({ ...bonus, category: event.target.value })}>
                 {bonusCategoryOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </Field>
@@ -4190,6 +4368,76 @@ function BonusSetupForm({
                 <BooleanField checked={bonus.isActive} label="Applicable?" onChange={(checked) => onChange({ ...bonus, isActive: checked })} />
               </div>
             </div>
+            <div className="space-y-2 lg:col-span-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium">Bonus Details</Label>
+                <Button type="button" variant="outline" size="sm" disabled={!bonus.code} onClick={addDetailRow}>
+                  Add Detail
+                </Button>
+              </div>
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[180px]">Category Detail</TableHead>
+                      <TableHead className="min-w-[120px] text-right">Amount</TableHead>
+                      <TableHead className="w-24 text-center">Percentage?</TableHead>
+                      <TableHead className="w-24 text-center">Applicable?</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {detailRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell className="text-sm text-muted-foreground" colSpan={4}>No detail rows</TableCell>
+                      </TableRow>
+                    ) : detailRows.map((row, index) => (
+                      <TableRow key={row.id || `${row.bonusCode || bonus.code}-${row.groupCode || index}`}>
+                        <TableCell>
+                          {detailOptions.length > 0 ? (
+                            <select
+                              className="h-8 w-full rounded-none border-0 bg-transparent px-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              value={row.groupCode}
+                              onChange={(event) => updateDetailRow(index, { groupCode: event.target.value })}
+                            >
+                              <option value="">Select detail</option>
+                              <option value="All">All</option>
+                              {(row.groupCode && !detailOptions.some((option) => option.value === row.groupCode)
+                                ? [...detailOptions, { value: row.groupCode, label: row.groupCode }]
+                                : detailOptions
+                              ).map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <Input
+                              className={bonusDetailInputClassName}
+                              placeholder="Detail code"
+                              value={row.groupCode}
+                              onChange={(event) => updateDetailRow(index, { groupCode: event.target.value })}
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className={`${bonusDetailInputClassName} text-right`}
+                            type="number"
+                            step="0.01"
+                            value={row.amount ?? ''}
+                            onChange={(event) => updateDetailRow(index, { amount: Number(event.target.value) || 0 })}
+                          />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Checkbox checked={row.calculationType === 'PercentageOfBasic'} onCheckedChange={(checked) => updateDetailRow(index, { calculationType: checked === true ? 'PercentageOfBasic' : 'FixedAmount' })} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Checkbox checked={row.applicable} onCheckedChange={(checked) => updateDetailRow(index, { applicable: checked === true })} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
             <div className="flex items-end lg:col-span-2">
               <Button type="submit" disabled={busy === 'Bonus setup' || !bonus.code}>
                 {busy === 'Bonus setup' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
@@ -4231,190 +4479,6 @@ function BonusSetupForm({
           </Table>
         </CardContent>
       </Card>
-
-      <Card className="2xl:col-span-2">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div className="grid flex-1 gap-3 sm:grid-cols-[minmax(240px,1fr)_120px]">
-              <Field label="Find Employee">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="h-9 pl-9"
-                    value={employeeSearch}
-                    onChange={(event) => setEmployeeSearch(event.target.value)}
-                    placeholder="Employee no or name"
-                  />
-                </div>
-              </Field>
-              <Field label="Selected">
-                <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-medium">
-                  {exceptionRows.length}
-                </div>
-              </Field>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={openEmployeePicker} disabled={!bonus.code}>
-                <UserPlus className="mr-2 h-4 w-4" />
-                Add Employee
-              </Button>
-              <Button type="button" size="sm" onClick={saveBonus} disabled={busy === 'Bonus setup' || !bonus.code}>
-                {busy === 'Bonus setup' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save Bonus
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="min-w-32">Employee No</TableHead>
-                  <TableHead className="min-w-64">Employee Name</TableHead>
-                  <TableHead className="w-36 text-right">Amount</TableHead>
-                  <TableHead className="w-28">Percentage?</TableHead>
-                  <TableHead className="w-24">Taxable?</TableHead>
-                  <TableHead className="w-28">Applicable?</TableHead>
-                  <TableHead className="w-12" aria-label="Remove" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredExceptionRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
-                      No employees selected.
-                    </TableCell>
-                  </TableRow>
-                ) : filteredExceptionRows.map((row) => (
-                  <TableRow key={row.id || row.employeeProfileId || row.employeeNumber}>
-                    <TableCell className="font-medium">{row.employeeNumber}</TableCell>
-                    <TableCell>{row.employeeName}</TableCell>
-                    <TableCell>
-                      <Input className={bonusExceptionInputClassName} type="number" step="0.01" value={row.amount ?? ''} onChange={(event) => updateExceptionRow(row.employeeNumber, { amount: Number(event.target.value) || 0 })} />
-                    </TableCell>
-                    <TableCell>
-                      <Checkbox checked={row.calculationType === 'PercentageOfBasic'} onCheckedChange={(checked) => updateExceptionRow(row.employeeNumber, { calculationType: checked === true ? 'PercentageOfBasic' : 'FixedAmount' })} />
-                    </TableCell>
-                    <TableCell>
-                      <Checkbox checked={row.taxable} onCheckedChange={(checked) => updateExceptionRow(row.employeeNumber, { taxable: checked === true })} />
-                    </TableCell>
-                    <TableCell>
-                      <Checkbox checked={row.applicable} onCheckedChange={(checked) => updateExceptionRow(row.employeeNumber, { applicable: checked === true })} />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => removeExceptionRow(row)} aria-label={`Remove ${row.employeeName}`}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Dialog open={employeePickerOpen} onOpenChange={setEmployeePickerOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Add Employee</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div className="relative md:w-80">
-                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="h-9 pl-9"
-                  value={pickerSearch}
-                  onChange={(event) => setPickerSearch(event.target.value)}
-                  placeholder="Search employees"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-muted-foreground">{pickerSelectedIds.length} selected</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAllPickerSelection(true)}
-                  disabled={selectablePickerIds.length === 0 || allPickerEmployeesSelected}
-                >
-                  Select All
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAllPickerSelection(false)}
-                  disabled={pickerSelectedIds.length === 0}
-                >
-                  Clear All
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => setVisiblePickerSelection(true)} disabled={filteredPickerEmployees.length === 0}>
-                  Select Visible
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => setVisiblePickerSelection(false)} disabled={filteredPickerEmployees.length === 0}>
-                  Clear Visible
-                </Button>
-              </div>
-            </div>
-            <div className="max-h-[420px] overflow-auto rounded-md border">
-              <table className="w-full min-w-[620px] text-sm">
-                <thead className="sticky top-0 bg-muted text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="w-12 px-3 py-2 text-left">
-                      <Checkbox
-                        aria-label="Select all employees"
-                        checked={pickerSelectAllState}
-                        onCheckedChange={(checked) => setAllPickerSelection(checked === true)}
-                        disabled={selectablePickerIds.length === 0}
-                      />
-                    </th>
-                    <th className="w-[120px] px-3 py-2 text-left">Employee No</th>
-                    <th className="px-3 py-2 text-left">Employee Name</th>
-                    <th className="w-36 whitespace-nowrap px-3 py-2 text-right">Basic Salary</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredPickerEmployees.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                        No employees found.
-                      </td>
-                    </tr>
-                  ) : filteredPickerEmployees.map((employee) => {
-                    const employeeProfileId = employee.id || '';
-                    return (
-                      <tr key={employeeProfileId || employee.employeeNumber} className="border-t">
-                        <td className="px-3 py-2">
-                          <Checkbox
-                            checked={pickerSelectedSet.has(employeeProfileId)}
-                            disabled={!employeeProfileId}
-                            onCheckedChange={(checked) => togglePickerEmployee(employeeProfileId, checked === true)}
-                          />
-                        </td>
-                        <td className="px-3 py-2 font-medium">{employee.employeeNumber}</td>
-                        <td className="px-3 py-2">{employee.employeeName}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatAmount(employee.salaryBasis?.monthlyBasicSalary)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEmployeePickerOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={addPickerEmployees} disabled={pickerSelectedIds.length === 0}>
-              <UserPlus className="mr-2 h-4 w-4" />
-              Add Selected
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -5377,7 +5441,7 @@ function BudgetAnalysisForm({
       <CardContent className="p-4">
         <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void generateAnalysis(true); }}>
           <div className="grid gap-3 md:grid-cols-[minmax(220px,280px)_repeat(3,120px)_auto] md:items-end">
-            <Field label="Pay Period">
+            <Field label="Base Period">
               <select
                 className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                 value={payPeriod || ''}
@@ -5420,9 +5484,6 @@ function BudgetAnalysisForm({
           {analysis ? renderAnalysisSummary(true) : null}
 
           {analysis ? <div className="flex flex-wrap gap-3">
-            <Button type="button" onClick={() => setAnalysisOpen(true)}>
-              Open Full Page
-            </Button>
             <Button type="button" onClick={() => void saveAnalysis()} disabled={rows.length === 0 || saving || loadingPeriodRows}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Save
@@ -5434,6 +5495,9 @@ function BudgetAnalysisForm({
             <Button type="button" variant="outline" onClick={exportExcel} disabled={rows.length === 0}>
               <FileSpreadsheet className="mr-2 h-4 w-4" />
               Excel
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setAnalysisOpen(true)}>
+              Open Full Page
             </Button>
           </div> : null}
 
@@ -5676,20 +5740,20 @@ function TaxTableForm({
                           </TableCell>
                           <TableCell className="border p-0">
                             <Input
-                              className={gridInputClassName}
+                              className={`${gridInputClassName} bg-muted/30`}
                               type="number"
                               step="0.01"
                               value={row.cumulativeTax ?? ''}
-                              onChange={(event) => updateRow(index, { cumulativeTax: numberOrNull(event.target.value) }, true)}
+                              readOnly
                             />
                           </TableCell>
                           <TableCell className="border p-0">
                             <Input
-                              className={gridInputClassName}
+                              className={`${gridInputClassName} bg-muted/30`}
                               type="number"
                               step="0.01"
                               value={row.cumulativeSalary ?? ''}
-                              onChange={(event) => updateRow(index, { cumulativeSalary: numberOrNull(event.target.value) }, true)}
+                              readOnly
                             />
                           </TableCell>
                         </TableRow>

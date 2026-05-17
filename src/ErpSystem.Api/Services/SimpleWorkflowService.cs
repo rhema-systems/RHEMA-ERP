@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
@@ -108,7 +109,7 @@ public class SimpleWorkflowService : IWorkflowService
         WorkflowStepInstance? currentStepInstance = null;
         foreach (var candidate in activeCandidates)
         {
-            currentStepInstance = await _stepInstanceRepository.GetCurrentStepAsync(candidate.Id);
+            currentStepInstance = await EnsureCurrentStepInstanceAsync(candidate, entityTypeRecord, entityId);
             if (currentStepInstance != null)
             {
                 existingActiveInstance = candidate;
@@ -121,7 +122,7 @@ public class SimpleWorkflowService : IWorkflowService
         if (existingActiveInstance != null)
         {
             // Self-heal: if the active step is an approval step and approvals are missing, materialize them.
-            currentStepInstance ??= await _stepInstanceRepository.GetCurrentStepAsync(existingActiveInstance.Id);
+            currentStepInstance ??= await EnsureCurrentStepInstanceAsync(existingActiveInstance, entityTypeRecord, entityId);
             if (currentStepInstance?.WorkflowStep?.StepType == WorkflowStepType.Approval)
             {
                 try
@@ -241,6 +242,15 @@ public class SimpleWorkflowService : IWorkflowService
 
         // Fallback for instances created before approval rows were generated correctly:
         // allow if the current step configuration explicitly includes this user/role.
+        var hasPendingApprovalRows = approvals.Any(a => a.Status == WorkflowApprovalStatus.Pending);
+        if (!canApprove &&
+            !hasPendingApprovalRows &&
+            !string.IsNullOrWhiteSpace(stepInstance.WorkflowStep?.RequiredRole) &&
+            roleSet.Contains(stepInstance.WorkflowStep.RequiredRole))
+        {
+            canApprove = true;
+        }
+
         if (!canApprove && IsUserConfiguredAsApprover(stepInstance, userId, roleSet))
         {
             canApprove = true;
@@ -493,9 +503,7 @@ public class SimpleWorkflowService : IWorkflowService
         }
 
         var activeTypes = await _entityTypeRepository.GetActiveEntityTypesAsync(tenantId);
-        entityTypeRecord = activeTypes.FirstOrDefault(et =>
-            string.Equals(et.Code, entityType, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(et.Name, entityType, StringComparison.OrdinalIgnoreCase));
+        entityTypeRecord = activeTypes.FirstOrDefault(et => IsEntityType(et, entityType));
 
         if (entityTypeRecord == null)
         {
@@ -536,7 +544,7 @@ public class SimpleWorkflowService : IWorkflowService
         // Prefer an instance that actually has a current pending/in-progress step.
         foreach (var candidate in active)
         {
-            var stepInstance = await _stepInstanceRepository.GetCurrentStepAsync(candidate.Id);
+            var stepInstance = await EnsureCurrentStepInstanceAsync(candidate, entityTypeRecord, entityId);
             if (stepInstance != null)
             {
                 return candidate;
@@ -544,6 +552,105 @@ public class SimpleWorkflowService : IWorkflowService
         }
 
         return active.FirstOrDefault();
+    }
+
+    private async Task<WorkflowStepInstance?> EnsureCurrentStepInstanceAsync(
+        WorkflowInstance instance,
+        WorkflowEntityType entityTypeRecord,
+        Guid entityId)
+    {
+        var currentStepInstance = await _stepInstanceRepository.GetCurrentStepAsync(instance.Id);
+        if (currentStepInstance != null)
+        {
+            return currentStepInstance;
+        }
+
+        var definition = await _definitionRepository.GetWithDetailsAsync(instance.WorkflowDefinitionId);
+        if (definition == null)
+        {
+            return null;
+        }
+
+        var stepDefinition = ResolveRecoverableCurrentStep(instance, definition);
+        if (stepDefinition == null)
+        {
+            return null;
+        }
+
+        var repairedStepInstance = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(),
+            WorkflowInstanceId = instance.Id,
+            WorkflowStepId = stepDefinition.Id,
+            Status = WorkflowStepInstanceStatus.Pending,
+            StartedDate = DateTime.UtcNow,
+            AssignedToId = stepDefinition.StepType == WorkflowStepType.Approval
+                ? null
+                : instance.StartedById ?? instance.InitiatedById,
+            DueDate = stepDefinition.EstimatedHours.HasValue
+                ? DateTime.UtcNow.AddHours(stepDefinition.EstimatedHours.Value)
+                : null,
+            TenantId = instance.TenantId
+        };
+
+        await _stepInstanceRepository.AddAsync(repairedStepInstance);
+        await _stepInstanceRepository.SaveChangesAsync();
+
+        instance.CurrentStepId = stepDefinition.Id;
+        if (instance.Status == WorkflowInstanceStatus.Created)
+        {
+            instance.Status = WorkflowInstanceStatus.InProgress;
+            instance.StartedDate ??= DateTime.UtcNow;
+        }
+
+        await _instanceRepository.UpdateAsync(instance);
+        await _instanceRepository.SaveChangesAsync();
+
+        if (stepDefinition.StepType == WorkflowStepType.Approval)
+        {
+            try
+            {
+                var dataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
+                await _workflowEngine.EnsureApprovalsForStepAsync(repairedStepInstance.Id, dataContext);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Failed to create approvals while repairing workflow instance {WorkflowInstanceId}",
+                    instance.Id);
+            }
+        }
+
+        return await _stepInstanceRepository.GetCurrentStepAsync(instance.Id) ?? repairedStepInstance;
+    }
+
+    private static WorkflowStep? ResolveRecoverableCurrentStep(
+        WorkflowInstance instance,
+        WorkflowDefinition definition)
+    {
+        var steps = definition.Steps
+            .Where(step => !step.IsDeleted)
+            .OrderBy(step => step.Order)
+            .ToList();
+
+        if (steps.Count == 0)
+        {
+            return null;
+        }
+
+        if (instance.CurrentStepId.HasValue)
+        {
+            var currentStep = steps.FirstOrDefault(step => step.Id == instance.CurrentStepId.Value);
+            if (currentStep != null)
+            {
+                return currentStep;
+            }
+        }
+
+        return steps.FirstOrDefault(step => step.IsStartStep)
+            ?? steps.FirstOrDefault(step => !step.IsEndStep)
+            ?? steps.FirstOrDefault();
     }
 
     private async Task<WorkflowInstance?> ResolveWorkflowInstanceAsync(string entityType, Guid entityId)
@@ -715,6 +822,34 @@ public class SimpleWorkflowService : IWorkflowService
             context["totalOrderedQuantity"] = items.Sum(i => i.OrderedQuantity);
             context["totalReceivedQuantity"] = items.Sum(i => i.ReceivedQuantity);
             context["totalRemainingQuantity"] = items.Sum(i => i.RemainingQuantity);
+        }
+
+        if (IsEntityType(entityTypeRecord, "PAYROLL_RUN", "PayrollRun", "Payroll Run"))
+        {
+            var payrollRun = await _unitOfWork.Repository<PayrollRun>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Payroll run not found");
+
+            context["runNumber"] = payrollRun.RunNumber;
+            context["payPeriod"] = payrollRun.PayPeriod;
+            context["payPeriodFrom"] = payrollRun.PayPeriodFrom;
+            context["payPeriodTo"] = payrollRun.PayPeriodTo;
+            context["runDate"] = payrollRun.RunDate;
+            context["status"] = payrollRun.Status.ToString();
+            context["currencyCode"] = payrollRun.CurrencyCode;
+            context["employeeCount"] = payrollRun.EmployeeCount;
+            context["grossAmount"] = payrollRun.GrossAmount;
+            context["netAmount"] = payrollRun.NetAmount;
+            context["taxAmount"] = payrollRun.TaxAmount;
+            context["employeeContributionAmount"] = payrollRun.EmployeeContributionAmount;
+            context["employerContributionAmount"] = payrollRun.EmployerContributionAmount;
+            context["isSeparateBonusRun"] = payrollRun.IsSeparateBonusRun;
+            context["separateBonusCode"] = payrollRun.SeparateBonusCode ?? string.Empty;
+            context["calculatedByUserId"] = payrollRun.CalculatedByUserId;
+            context["calculatedAt"] = payrollRun.CalculatedAt;
+            context["reviewedByUserId"] = payrollRun.ReviewedByUserId;
+            context["approvedByUserId"] = payrollRun.ApprovedByUserId;
+            context["notes"] = payrollRun.Notes ?? string.Empty;
         }
 
         if (IsEntityType(entityTypeRecord, "PURCHASE_REQUISITION", "PurchaseRequisition", "Purchase Requisition", "PR"))
@@ -898,14 +1033,18 @@ public class SimpleWorkflowService : IWorkflowService
     {
         foreach (var match in matches)
         {
-            if (!string.IsNullOrWhiteSpace(entityTypeRecord.Code) &&
-                string.Equals(entityTypeRecord.Code, match, StringComparison.OrdinalIgnoreCase))
+            var normalizedMatch = NormalizeEntityTypeKey(match);
+            if (string.IsNullOrWhiteSpace(normalizedMatch))
+            {
+                continue;
+            }
+
+            if (NormalizeEntityTypeKey(entityTypeRecord.Code) == normalizedMatch)
             {
                 return true;
             }
 
-            if (!string.IsNullOrWhiteSpace(entityTypeRecord.Name) &&
-                string.Equals(entityTypeRecord.Name, match, StringComparison.OrdinalIgnoreCase))
+            if (NormalizeEntityTypeKey(entityTypeRecord.Name) == normalizedMatch)
             {
                 return true;
             }
@@ -913,6 +1052,12 @@ public class SimpleWorkflowService : IWorkflowService
 
         return false;
     }
+
+    private static string NormalizeEntityTypeKey(string? value)
+        => new((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
 
     private async Task AttachWorkflowInstanceAsync(WorkflowEntityType entityTypeRecord, Guid entityId, Guid workflowInstanceId)
     {

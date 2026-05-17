@@ -89,9 +89,20 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
     public async Task<WorkflowDefinition> UpdateWorkflowDefinitionAsync(Guid id, UpdateWorkflowDefinitionDto updateDto)
     {
         var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(id) ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
-        if (definition.Instances?.Any(i => i.Status == WorkflowInstanceStatus.InProgress || i.Status == WorkflowInstanceStatus.Waiting) == true)
+        var hasActiveInstances = await _workflowDefinitionRepository
+            .GetQueryable(d => d.Id == id && d.TenantId == definition.TenantId)
+            .SelectMany(d => d.Instances)
+            .AnyAsync(i =>
+                !i.IsDeleted &&
+                (i.Status == WorkflowInstanceStatus.Created ||
+                 i.Status == WorkflowInstanceStatus.InProgress ||
+                 i.Status == WorkflowInstanceStatus.Waiting ||
+                 i.Status == WorkflowInstanceStatus.Suspended));
+
+        if (hasActiveInstances)
         {
-            throw new InvalidOperationException("Cannot update workflow definition that has active instances. Create a new version instead.");
+            throw new InvalidOperationException(
+                "This workflow has live instances and cannot be edited. Complete or cancel the live instances before editing, or create a separate workflow for future records.");
         }
 
         if (!string.IsNullOrWhiteSpace(updateDto.Name))
@@ -388,6 +399,13 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             return existing;
         }
 
+        var activeTypes = await _workflowEntityTypeRepository.GetActiveEntityTypesAsync(tenantId);
+        existing = activeTypes.FirstOrDefault(et => EntityTypeMatches(et, entityType));
+        if (existing != null)
+        {
+            return existing;
+        }
+
         var code = GenerateEntityTypeCode(entityType);
         var entity = new WorkflowEntityType
         {
@@ -436,4 +454,23 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         var code = new string(codeChars.ToArray()).Trim('_');
         return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
     }
+
+    private static bool EntityTypeMatches(WorkflowEntityType entityType, string requestedType)
+    {
+        var requested = NormalizeEntityTypeKey(requestedType);
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return false;
+        }
+
+        return NormalizeEntityTypeKey(entityType.Code) == requested ||
+               NormalizeEntityTypeKey(entityType.Name) == requested ||
+               NormalizeEntityTypeKey(entityType.DisplayName) == requested;
+    }
+
+    private static string NormalizeEntityTypeKey(string? value)
+        => new((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
 }

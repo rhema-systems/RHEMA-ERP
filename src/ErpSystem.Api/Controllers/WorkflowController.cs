@@ -370,7 +370,7 @@ public class WorkflowController : ControllerBase
 
             var definition = await _workflowDefinitionService.UpdateWorkflowDefinitionAsync(id, workflowDto);
 
-            await _workflowDefinitionService.SetWorkflowDefinitionActiveAsync(id, updateDto.IsActive, currentUserId.Value);
+            await _workflowDefinitionService.SetWorkflowDefinitionActiveAsync(definition.Id, updateDto.IsActive, currentUserId.Value);
 
             var responseDto = MapToWorkflowDefinitionDto(definition);
             return Ok(new
@@ -383,11 +383,19 @@ public class WorkflowController : ControllerBase
         {
             // Validation/activation errors should be surfaced to the UI as a friendly message.
             _logger.LogWarning(ex, "Invalid operation while updating workflow definition {WorkflowId}", id);
-            return BadRequest(new
+            var response = new
             {
                 success = false,
                 error = ex.Message
-            });
+            };
+
+            if (ex.Message.Contains("live instances", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("active instances", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(response);
+            }
+
+            return BadRequest(response);
         }
         catch (DbUpdateException ex)
         {
@@ -699,9 +707,7 @@ public class WorkflowController : ControllerBase
             if (entityTypeRecord == null)
             {
                 var activeTypes = await _workflowEntityTypeRepository.GetActiveEntityTypesAsync(tenantId);
-                entityTypeRecord = activeTypes.FirstOrDefault(et =>
-                    string.Equals(et.Code, entityType, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(et.Name, entityType, StringComparison.OrdinalIgnoreCase));
+                entityTypeRecord = activeTypes.FirstOrDefault(et => EntityTypeMatches(et, entityType));
             }
 
             if (entityTypeRecord == null)
@@ -750,6 +756,11 @@ public class WorkflowController : ControllerBase
             var currentStepName = stepInfo?.StepName;
             var currentStepInstanceId = stepInfo?.Id;
 
+            currentStepName = string.IsNullOrWhiteSpace(currentStepName)
+                ? status.CurrentStepName
+                : currentStepName;
+            currentStepInstanceId ??= status.CurrentStepInstanceId;
+
             if (string.IsNullOrWhiteSpace(currentStepName))
             {
                 // Fallback to last pending/in-progress step instance name from the status view.
@@ -759,14 +770,18 @@ public class WorkflowController : ControllerBase
                     ?.StepName;
             }
 
+            var normalizedStepName = currentStepName?.Trim();
             var pendingApprovalsForCurrentStep = status.PendingApprovals
                 .Where(a => a.Status == WorkflowApprovalStatus.Pending &&
-                            (string.IsNullOrWhiteSpace(currentStepName) || a.StepName == currentStepName))
+                            (string.IsNullOrWhiteSpace(normalizedStepName) ||
+                             string.Equals(a.StepName?.Trim(), normalizedStepName, StringComparison.OrdinalIgnoreCase)))
+                .GroupBy(GetPendingApproverKey, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
                 .Select(a => new WorkflowPendingApproverDto
                 {
-                    ApproverId = a.ApproverId,
+                    ApproverId = a.ApproverId == Guid.Empty ? null : a.ApproverId,
                     ApproverName = a.ApproverName,
-                    ApproverRole = null
+                    ApproverRole = a.ApproverRole
                 })
                 .ToList();
 
@@ -836,9 +851,7 @@ public class WorkflowController : ControllerBase
             WorkflowEntityType? ResolveEntityTypeRecord(string type)
             {
                 if (string.IsNullOrWhiteSpace(type)) return null;
-                return activeTypes.FirstOrDefault(et =>
-                    string.Equals(et.Code, type, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(et.Name, type, StringComparison.OrdinalIgnoreCase));
+                return activeTypes.FirstOrDefault(et => EntityTypeMatches(et, type));
             }
 
             async Task<WorkflowEntitySummaryDto> BuildSummaryAsync(string requestedEntityType, Guid requestedEntityId)
@@ -903,6 +916,11 @@ public class WorkflowController : ControllerBase
                 var currentStepName = stepInfo?.StepName;
                 var currentStepInstanceId = stepInfo?.Id;
 
+                currentStepName = string.IsNullOrWhiteSpace(currentStepName)
+                    ? status.CurrentStepName
+                    : currentStepName;
+                currentStepInstanceId ??= status.CurrentStepInstanceId;
+
                 if (string.IsNullOrWhiteSpace(currentStepName))
                 {
                     currentStepName = status.Steps
@@ -916,13 +934,13 @@ public class WorkflowController : ControllerBase
                     .Where(a => a.Status == WorkflowApprovalStatus.Pending &&
                                 (string.IsNullOrWhiteSpace(normalizedStepName) ||
                                  string.Equals(a.StepName?.Trim(), normalizedStepName, StringComparison.OrdinalIgnoreCase)))
-                    .GroupBy(a => a.ApproverId)
+                    .GroupBy(GetPendingApproverKey, StringComparer.OrdinalIgnoreCase)
                     .Select(g => g.First())
                     .Select(a => new WorkflowPendingApproverDto
                     {
-                        ApproverId = a.ApproverId,
+                        ApproverId = a.ApproverId == Guid.Empty ? null : a.ApproverId,
                         ApproverName = a.ApproverName,
-                        ApproverRole = null
+                        ApproverRole = a.ApproverRole
                     })
                     .ToList();
 
@@ -997,9 +1015,7 @@ public class WorkflowController : ControllerBase
             if (entityTypeRecord == null)
             {
                 var activeTypes = await _workflowEntityTypeRepository.GetActiveEntityTypesAsync(tenantId);
-                entityTypeRecord = activeTypes.FirstOrDefault(et =>
-                    string.Equals(et.Code, entityType, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(et.Name, entityType, StringComparison.OrdinalIgnoreCase));
+                entityTypeRecord = activeTypes.FirstOrDefault(et => EntityTypeMatches(et, entityType));
             }
 
             if (entityTypeRecord == null)
@@ -1275,6 +1291,11 @@ public class WorkflowController : ControllerBase
             new("InventoryTransfer", "Inventory transfers", "Truck", "#A855F7", 65),
             new("InventoryRequisition", "Inventory requisitions", "ClipboardList", "#0EA5E9", 68),
             new("Employee", "Human resources employees", "Users", "#6366F1", 70),
+            new("PayrollRun", "HR payroll runs, payslip generation, and posting", "WalletCards", "#0EA5E9", 72),
+            new("PayrollPayslipEmail", "HR payroll payslip email notifications", "Mail", "#2563EB", 73),
+            new("PayrollSalaryAdvance", "HR payroll salary advance requests", "ReceiptText", "#14B8A6", 74),
+            new("PayrollBonusSetup", "HR payroll bonus setup and exception approval", "BadgePercent", "#F97316", 76),
+            new("PayrollBackpaySetup", "HR payroll salary back pay and salary increase setup", "TrendingUp", "#22C55E", 78),
             new("Project", "Project management items", "CheckCircle", "#22C55E", 80),
             new("ProjectDeliverable", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Project closure approval and close-out governance", "Flag", "#15803D", 84),
@@ -1331,6 +1352,25 @@ public class WorkflowController : ControllerBase
         var code = new string(codeChars.ToArray()).Trim('_');
         return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
     }
+
+    private static bool EntityTypeMatches(WorkflowEntityType entityType, string requestedType)
+    {
+        var requested = NormalizeEntityTypeKey(requestedType);
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return false;
+        }
+
+        return NormalizeEntityTypeKey(entityType.Code) == requested ||
+               NormalizeEntityTypeKey(entityType.Name) == requested ||
+               NormalizeEntityTypeKey(entityType.DisplayName) == requested;
+    }
+
+    private static string NormalizeEntityTypeKey(string? value)
+        => new((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
 
     /// <summary>
     /// Gets workflow instance status by ID
@@ -1942,6 +1982,14 @@ public class WorkflowController : ControllerBase
                 ? query.OrderByDescending(i => i.StartedDate ?? i.CreatedDate)
                 : query.OrderBy(i => i.StartedDate ?? i.CreatedDate)
         };
+    }
+
+    private static string GetPendingApproverKey(WorkflowApprovalStatusDto approval)
+    {
+        var approverId = approval.ApproverId == Guid.Empty ? string.Empty : approval.ApproverId.ToString("N");
+        var role = approval.ApproverRole?.Trim() ?? string.Empty;
+        var name = approval.ApproverName?.Trim() ?? string.Empty;
+        return $"{approverId}|{role}|{name}";
     }
 
     #endregion

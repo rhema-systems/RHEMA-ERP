@@ -24,6 +24,7 @@ using NotificationStatisticsDto = ErpSystem.Core.DTOs.Notifications.Notification
 using NotificationTemplateDto = ErpSystem.Core.DTOs.Notifications.NotificationTemplateDto;
 using PushSubscriptionDto = ErpSystem.Core.DTOs.Notifications.PushSubscriptionDto;
 using SendPushNotificationDto = ErpSystem.Core.DTOs.Notifications.SendPushNotificationDto;
+using UpdateNotificationTemplateDto = ErpSystem.Core.DTOs.Notifications.UpdateNotificationTemplateDto;
 using UpdateNotificationPreferencesDto = ErpSystem.Core.DTOs.Notifications.UpdateNotificationPreferencesDto;
 
 namespace ErpSystem.Api.Services;
@@ -699,6 +700,8 @@ public class UnifiedNotificationService : INotificationService
     {
         try
         {
+            await EnsureDefaultNotificationTemplatesAsync(tenantId);
+
             var query = _dbContext.EmailTemplates
                 .AsNoTracking()
                 .Where(t =>
@@ -723,6 +726,8 @@ public class UnifiedNotificationService : INotificationService
                 Subject = t.Subject,
                 HtmlTemplate = t.HtmlBody,
                 TextTemplate = t.PlainTextBody,
+                LinkedEntityType = t.TableName,
+                Description = t.Description,
                 Variables = TryParseTemplateVariables(t.TemplateVariables),
                 IsActive = t.IsActive,
                 CreatedBy = t.CreatedBy ?? string.Empty,
@@ -737,6 +742,161 @@ public class UnifiedNotificationService : INotificationService
             return new List<NotificationTemplateDto>();
         }
     }
+
+    private async Task EnsureDefaultNotificationTemplatesAsync(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+        {
+            return;
+        }
+
+        var defaults = GetDefaultNotificationTemplates();
+        var names = defaults.Select(t => t.Name).ToList();
+        var existing = await _dbContext.EmailTemplates
+            .Where(t =>
+                t.TenantId == tenantId &&
+                !t.IsDeleted &&
+                t.Module == "Notifications" &&
+                names.Contains(t.Name))
+            .ToListAsync();
+
+        var changed = false;
+        foreach (var template in defaults)
+        {
+            var match = existing.FirstOrDefault(t => string.Equals(t.Name, template.Name, StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+            {
+                _dbContext.EmailTemplates.Add(new EmailTemplate
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Name = template.Name,
+                    Module = "Notifications",
+                    Category = template.Type,
+                    TableName = template.LinkedEntityType,
+                    Subject = template.Subject,
+                    HtmlBody = template.HtmlTemplate,
+                    PlainTextBody = template.TextTemplate,
+                    TemplateVariables = JsonSerializer.Serialize(template.Variables),
+                    Description = template.Description,
+                    IsActive = true,
+                    CreatedBy = "System"
+                });
+                changed = true;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(match.TemplateVariables))
+            {
+                match.TemplateVariables = JsonSerializer.Serialize(template.Variables);
+                match.UpdatedAt = DateTime.UtcNow;
+                match.UpdatedBy = "System";
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(match.Description))
+            {
+                match.Description = template.Description;
+                match.UpdatedAt = DateTime.UtcNow;
+                match.UpdatedBy = "System";
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(match.TableName))
+            {
+                match.TableName = template.LinkedEntityType;
+                match.UpdatedAt = DateTime.UtcNow;
+                match.UpdatedBy = "System";
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+
+    private static IReadOnlyList<DefaultNotificationTemplateDefinition> GetDefaultNotificationTemplates()
+        =>
+        [
+            new(
+                "Payroll Payslip Email",
+                "Payroll",
+                "PayrollPayslipEmail",
+                "Payslip - {{pay_period}}",
+                "<p>Dear {{employee_name}},</p><p>Your payslip for {{pay_period}} is attached as a PDF.</p><p>Run: <strong>{{run_number}}</strong></p><p>Net salary: <strong>{{net_salary}}</strong> {{currency_code}}</p>{{message}}",
+                "Dear {{employee_name}}, your payslip for {{pay_period}} is attached.",
+                "Payroll payslip email body. The full payslip is attached as a PDF generated from the payroll print preview layout.",
+                PayrollPayslipTemplateVariables()),
+            new(
+                "Payroll Run Approval Requested",
+                "Payroll",
+                "PayrollRun",
+                "Payroll run {{run_number}} requires approval",
+                "<p>Payroll run <strong>{{run_number}}</strong> for {{pay_period}} is awaiting approval.</p><p>Gross: {{gross_amount}} | Net: {{net_amount}} | Employees: {{employee_count}}</p><p><a href=\"{{action_url}}\">Open payroll run</a></p>",
+                "Payroll run {{run_number}} for {{pay_period}} is awaiting approval.",
+                "Notification template for payroll run workflow approval requests.",
+                ["run_number", "pay_period", "employee_count", "gross_amount", "net_amount", "tax_amount", "requested_by", "action_url"]),
+            new(
+                "Payroll Run Approved",
+                "Payroll",
+                "PayrollRun",
+                "Payroll run {{run_number}} approved",
+                "<p>Payroll run <strong>{{run_number}}</strong> for {{pay_period}} has been approved.</p><p>Payslip generation, emailing, and posting can proceed.</p><p><a href=\"{{action_url}}\">Open payroll run</a></p>",
+                "Payroll run {{run_number}} for {{pay_period}} has been approved.",
+                "Notification template for payroll run approval completion.",
+                ["run_number", "pay_period", "approved_by", "approved_at", "action_url"]),
+            new(
+                "Payroll Exception Approval",
+                "Payroll",
+                "PayrollException",
+                "Payroll exception {{exception_number}} requires approval",
+                "<p>{{exception_type}} <strong>{{exception_number}}</strong> for {{employee_name}} requires approval.</p><p>Amount: {{amount}} | Period: {{pay_period}}</p><p><a href=\"{{action_url}}\">Open payroll exception</a></p>",
+                "{{exception_type}} {{exception_number}} for {{employee_name}} requires approval.",
+                "Reusable HR/payroll template for bonus, salary advance, backpay, and salary increase approval notifications.",
+                ["exception_type", "exception_number", "employee_number", "employee_name", "amount", "percentage", "pay_period", "requested_by", "action_url"])
+        ];
+
+    private static IReadOnlyList<string> PayrollPayslipTemplateVariables()
+        =>
+        [
+            "employee_id",
+            "employee_number",
+            "employee_name",
+            "employee_email",
+            "department",
+            "section",
+            "position",
+            "pay_period",
+            "run_number",
+            "payslip_number",
+            "company_name",
+            "company_address",
+            "currency_code",
+            "gross_amount",
+            "total_earnings",
+            "total_deductions",
+            "net_salary",
+            "taxable_income",
+            "income_tax",
+            "normal_income_tax",
+            "bonus_income_tax",
+            "employee_contribution",
+            "employer_contribution",
+            "message",
+            "action_url"
+        ];
+
+    private sealed record DefaultNotificationTemplateDefinition(
+        string Name,
+        string Type,
+        string LinkedEntityType,
+        string Subject,
+        string HtmlTemplate,
+        string? TextTemplate,
+        string Description,
+        IReadOnlyList<string> Variables);
 
     public async Task<NotificationTemplateDto> CreateNotificationTemplateAsync(
         CreateNotificationTemplateDto templateDto, Guid createdBy, Guid tenantId)
@@ -773,10 +933,12 @@ public class UnifiedNotificationService : INotificationService
                 Name = name,
                 Module = "Notifications",
                 Category = templateDto.Type?.Trim(),
+                TableName = TrimOrNull(templateDto.LinkedEntityType),
                 Subject = templateDto.Subject?.Trim() ?? string.Empty,
                 HtmlBody = templateDto.HtmlTemplate ?? string.Empty,
                 PlainTextBody = templateDto.TextTemplate,
                 TemplateVariables = templateDto.Variables != null ? JsonSerializer.Serialize(templateDto.Variables) : null,
+                Description = TrimOrNull(templateDto.Description),
                 IsActive = templateDto.IsActive,
                 CreatedById = createdBy,
                 CreatedBy = user?.UserName ?? user?.Email ?? string.Empty
@@ -793,6 +955,8 @@ public class UnifiedNotificationService : INotificationService
                 Subject = entity.Subject,
                 HtmlTemplate = entity.HtmlBody,
                 TextTemplate = entity.PlainTextBody,
+                LinkedEntityType = entity.TableName,
+                Description = entity.Description,
                 Variables = templateDto.Variables,
                 IsActive = entity.IsActive,
                 CreatedBy = entity.CreatedBy ?? string.Empty,
@@ -804,6 +968,90 @@ public class UnifiedNotificationService : INotificationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating notification template for tenant {TenantId}", tenantId);
+            throw;
+        }
+    }
+
+    public async Task<NotificationTemplateDto?> UpdateNotificationTemplateAsync(
+        Guid templateId,
+        UpdateNotificationTemplateDto templateDto,
+        Guid updatedBy,
+        Guid tenantId)
+    {
+        try
+        {
+            var template = await _dbContext.EmailTemplates
+                .FirstOrDefaultAsync(t =>
+                    t.Id == templateId &&
+                    t.TenantId == tenantId &&
+                    !t.IsDeleted &&
+                    t.Module == "Notifications");
+
+            if (template == null)
+            {
+                return null;
+            }
+
+            var name = templateDto.Name?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidOperationException("Template name is required");
+            }
+
+            var duplicate = await _dbContext.EmailTemplates
+                .AsNoTracking()
+                .AnyAsync(t =>
+                    t.Id != templateId &&
+                    t.TenantId == tenantId &&
+                    !t.IsDeleted &&
+                    t.Module == "Notifications" &&
+                    t.Name == name);
+
+            if (duplicate)
+            {
+                throw new InvalidOperationException($"A template with name '{name}' already exists");
+            }
+
+            var user = await _dbContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == updatedBy);
+
+            template.Name = name;
+            template.Category = templateDto.Type?.Trim();
+            template.TableName = TrimOrNull(templateDto.LinkedEntityType);
+            template.Subject = templateDto.Subject?.Trim() ?? string.Empty;
+            template.HtmlBody = templateDto.HtmlTemplate ?? string.Empty;
+            template.PlainTextBody = templateDto.TextTemplate;
+            template.TemplateVariables = templateDto.Variables != null ? JsonSerializer.Serialize(templateDto.Variables) : null;
+            template.Description = TrimOrNull(templateDto.Description);
+            template.IsActive = templateDto.IsActive;
+            template.UpdatedAt = DateTime.UtcNow;
+            template.LastModifiedById = updatedBy;
+            template.UpdatedBy = user?.UserName ?? user?.Email ?? string.Empty;
+
+            await _dbContext.SaveChangesAsync();
+
+            return new NotificationTemplateDto
+            {
+                Id = template.Id,
+                Name = template.Name,
+                Type = template.Category ?? string.Empty,
+                Subject = template.Subject,
+                HtmlTemplate = template.HtmlBody,
+                TextTemplate = template.PlainTextBody,
+                LinkedEntityType = template.TableName,
+                Description = template.Description,
+                Variables = templateDto.Variables,
+                IsActive = template.IsActive,
+                CreatedBy = template.CreatedBy ?? string.Empty,
+                CreatedAt = template.CreatedAt,
+                LastUsed = null,
+                UsageCount = 0
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating notification template {TemplateId} for tenant {TenantId}", templateId, tenantId);
             throw;
         }
     }
@@ -1303,8 +1551,8 @@ public class UnifiedNotificationService : INotificationService
                         var emailDto = new ErpSystem.Core.Interfaces.Common.EmailDto
                         {
                             To = notification.EmailAddress,
-                            Subject = notification.Title ?? string.Empty,
-                            Body = notification.Message ?? string.Empty,
+                            Subject = emailPayload?.Subject ?? notification.Title ?? string.Empty,
+                            Body = emailPayload?.BodyHtml ?? notification.Message ?? string.Empty,
                             IsHtml = emailPayload?.IsHtml ?? true,
                             Attachments = emailPayload?.Attachments?.Select(a => new ErpSystem.Core.Interfaces.Common.EmailAttachmentDto
                             {
@@ -1755,9 +2003,18 @@ WHERE [Id] = {notificationId}
         }
     }
 
+    private static string? TrimOrNull(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
     private sealed class EmailPayload
     {
         public bool IsHtml { get; set; } = true;
+        public string? Subject { get; set; }
+        public string? BodyHtml { get; set; }
+        public string? TextBody { get; set; }
         public List<EmailPayloadAttachment>? Attachments { get; set; }
     }
 

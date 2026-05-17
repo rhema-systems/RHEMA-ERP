@@ -3,6 +3,7 @@ using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Entities.HR.Payroll;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Workflow;
@@ -114,6 +115,19 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityType = "JobCard";
                 info.EntityNumber = jobCard?.JobCardNumber;
                 info.ActionUrl = $"/maintenance/job-cards?id={entityId}";
+                return info;
+            }
+
+            if (key == Normalize("PayrollRun") || key == Normalize("PAYROLL_RUN") || key == Normalize("Payroll Run"))
+            {
+                var run = await _unitOfWork.Repository<PayrollRun>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "PayrollRun";
+                info.EntityNumber = run?.RunNumber;
+                info.EntityName = run == null
+                    ? null
+                    : $"{run.PayPeriodFrom:MMM yyyy} - {run.PayPeriodTo:MMM yyyy}";
+                info.ActionUrl = $"/hr/payroll?runId={entityId}";
                 return info;
             }
 

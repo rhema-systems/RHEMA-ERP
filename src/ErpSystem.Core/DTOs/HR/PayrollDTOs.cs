@@ -459,6 +459,8 @@ public class PayrollPromotionArrearsLineDto
     public Guid? EmployeeProfileId { get; set; }
     public string EmployeeNumber { get; set; } = string.Empty;
     public DateTime? EffectiveDate { get; set; }
+    public decimal? WorkingDays { get; set; }
+    public decimal? BasicSalary { get; set; }
     public bool IsSelected { get; set; }
 }
 
@@ -683,6 +685,13 @@ public class PayrollBonusRuleDto
 
 public class UpsertPayrollBonusRuleDto : PayrollBonusRuleDto
 {
+}
+
+public class PayrollBonusRuleBulkSaveDto
+{
+    public string BonusCode { get; set; } = string.Empty;
+    public string? LegacyCompanyCode { get; set; }
+    public IReadOnlyList<PayrollBonusRuleDto> Rules { get; set; } = [];
 }
 
 public class PayrollBonusExceptionDto
@@ -1268,12 +1277,16 @@ public class PayrollPaymentMethodDto
 {
     public Guid Id { get; set; }
     public string PaymentType { get; set; } = "Bank";
+    public string PaymentMode { get; set; } = "Percentage";
     public decimal? PaymentPercent { get; set; }
     public decimal? Amount { get; set; }
     public string? BankCode { get; set; }
     public string? BankBranchCode { get; set; }
     public string? AccountNumber { get; set; }
+    public string? ChequeNumber { get; set; }
+    public string? ChequeBankCode { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
+    public decimal? ExchangeRate { get; set; }
     public int SequenceNo { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
@@ -1747,6 +1760,7 @@ public class PayrollPayslipDto
     public IReadOnlyList<PayrollTransactionDto> Deductions { get; set; } = [];
     public IReadOnlyList<PayrollPayslipContributionDto> Contributions { get; set; } = [];
     public IReadOnlyList<PayrollPayslipBankDetailDto> BankDetails { get; set; } = [];
+    public string? HtmlContent { get; set; }
     public PayrollPayslipSnapshotDto? Snapshot { get; set; }
 }
 

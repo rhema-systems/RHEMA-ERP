@@ -365,6 +365,8 @@ export default function PromotionArrearsPage() {
             employeeProfileId: row.employeeProfileId,
             employeeNumber: row.employeeNumber,
             effectiveDate: row.effectiveDate,
+            workingDays: row.workingDays ?? null,
+            basicSalary: row.basicSalary ?? null,
             isSelected: true,
           })),
           ...removedRows.map((row) => ({
@@ -372,6 +374,8 @@ export default function PromotionArrearsPage() {
             employeeProfileId: row.employeeProfileId,
             employeeNumber: row.employeeNumber,
             effectiveDate: row.effectiveDate,
+            workingDays: row.workingDays ?? null,
+            basicSalary: row.basicSalary ?? null,
             isSelected: false,
           })),
         ],
@@ -493,7 +497,7 @@ export default function PromotionArrearsPage() {
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto rounded-md border">
-              <table className="min-w-[820px] w-full text-sm">
+              <table className="min-w-[980px] w-full text-sm">
                 <thead className="bg-muted/60 text-xs uppercase text-muted-foreground">
                   <tr>
                     <th className="w-10 px-3 py-2 text-left">
@@ -503,6 +507,7 @@ export default function PromotionArrearsPage() {
                     <th className="px-3 py-2 text-left">Employee Name</th>
                     <th className="w-44 px-3 py-2 text-left">Effective Date</th>
                     <th className="w-36 whitespace-nowrap px-3 py-2 text-right">Basic Salary</th>
+                    <th className="w-32 whitespace-nowrap px-3 py-2 text-right">Working Days</th>
                     <th className="w-28 px-3 py-2 text-right">Pay Period</th>
                     <th className="w-12 px-3 py-2" aria-label="Remove" />
                   </tr>
@@ -510,7 +515,7 @@ export default function PromotionArrearsPage() {
                 <tbody>
                   {filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                      <td colSpan={8} className="px-3 py-8 text-center text-sm text-muted-foreground">
                         No promotion arrears employees selected.
                       </td>
                     </tr>
@@ -531,7 +536,26 @@ export default function PromotionArrearsPage() {
                             onChange={(event) => updateRow(row.employeeProfileId, { effectiveDate: event.target.value })}
                           />
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{amount(row.basicSalary)}</td>
+                        <td className="px-3 py-2">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="h-8 text-right"
+                            value={row.basicSalary ?? 0}
+                            onChange={(event) => updateRow(row.employeeProfileId, { basicSalary: Number(event.target.value) || 0 })}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="h-8 text-right"
+                            value={row.workingDays ?? ''}
+                            onChange={(event) => updateRow(row.employeeProfileId, { workingDays: event.target.value === '' ? null : Number(event.target.value) || 0 })}
+                          />
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums">{row.payPeriod || activeParameters?.currentPayPeriod || '-'}</td>
                         <td className="px-3 py-2 text-center">
                           <Button

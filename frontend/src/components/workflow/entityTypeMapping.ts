@@ -16,8 +16,8 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
   maintenance: ['WorkOrder', 'JobCard', 'Asset', 'FleetTrip', 'FleetVehicle', 'FleetTripInspection', 'FleetDefect'],
   procurement: ['PurchaseOrder', 'PurchaseRequisition', 'Vendor'],
   inventory: ['Inventory', 'Asset'],
-  hr: ['Employee'],
-  helpdesk: ['EhcTicket'],
+  hr: ['Employee', 'PayrollRun', 'PayrollSalaryAdvance', 'PayrollBonusSetup', 'PayrollBackpaySetup'],
+  helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],
   sales: ['Customer'],
   quality: ['Quality']

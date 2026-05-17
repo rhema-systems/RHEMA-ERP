@@ -23,7 +23,7 @@ export function formatPendingApprovers(pending: WorkflowPendingApproverDto[], ma
  * Loads workflow entity summaries in batch for a single entityType.
  * Intended for list/grid pages to avoid per-row summary calls.
  */
-export function useWorkflowEntitySummaries(entityType: string, entityIds: string[], enabled = true) {
+export function useWorkflowEntitySummaries(entityType: string, entityIds: string[], enabled = true, refreshKey = '') {
   const [loading, setLoading] = React.useState(false);
   const [summariesById, setSummariesById] = React.useState<Record<string, WorkflowEntitySummaryDto>>({});
 
@@ -66,7 +66,7 @@ export function useWorkflowEntitySummaries(entityType: string, entityIds: string
     return () => {
       mounted = false;
     };
-  }, [enabled, entityType, idsKey]);
+  }, [enabled, entityType, idsKey, refreshKey]);
 
   return { loading, summariesById };
 }

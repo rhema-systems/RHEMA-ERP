@@ -189,6 +189,8 @@ export interface WorkflowStatusDto {
   status: WorkflowInstanceStatus;
   startedDate: Date;
   completedDate?: Date;
+  currentStepName?: string;
+  currentStepInstanceId?: string;
   progress: WorkflowProgressDto;
   steps: WorkflowStepStatusDto[];
   pendingApprovals: WorkflowApprovalStatusDto[];
@@ -218,6 +220,7 @@ export interface WorkflowApprovalStatusDto {
   stepName: string;
   approverId: string;
   approverName: string;
+  approverRole?: string;
   status: WorkflowApprovalStatus;
   requestedDate: Date;
   dueDate?: Date;

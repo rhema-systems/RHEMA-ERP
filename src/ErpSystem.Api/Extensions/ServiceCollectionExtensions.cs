@@ -429,6 +429,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapterRegistry, ErpSystem.Core.Services.Workflow.WorkflowStatusAdapterRegistry>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.JobCardWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.PurchaseOrderWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.PayrollRunWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.FleetTripWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.PurchaseRequisitionWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryTransferWorkflowStatusAdapter>();

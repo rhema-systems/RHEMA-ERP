@@ -4,15 +4,19 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Payroll;
+using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using WebEmailAttachment = ErpSystem.Web.Services.EmailAttachment;
-using WebEmailService = ErpSystem.Web.Services.IEmailService;
 
 namespace ErpSystem.Api.Services.HR;
 
@@ -34,7 +38,17 @@ public class PayrollService : IPayrollService
     private const string PromotionEmployeeContributionArrearsTransactionType = "ESR";
     private const string PromotionEmployerContributionArrearsTransactionType = "CSR";
     private const string PromotionContributionArrearsTransactionType = "COR";
+    private const string BackpayDeductionArrearsTransactionType = "DER";
     private const string NetPayTransactionType = "NetPay";
+    private const string PaymentModePercentage = "Percentage";
+    private const string PaymentModeFixedAmount = "FixedAmount";
+    private const string PayrollRunWorkflowEntityType = "PayrollRun";
+    private const string PayrollRunWorkflowEntityCode = "PAYROLL_RUN";
+    private const string PayrollNotificationModule = "Notifications";
+    private const string PayrollNotificationCategory = "Payroll";
+    private const string PayrollPayslipEmailTemplateName = "Payroll Payslip Email";
+    private const string PayrollPayslipEmailEntityType = "PayrollPayslipEmail";
+    private const string PayrollPayslipEmailTopicKey = PayrollPayslipEmailEntityType + ".PayslipEmail.Employee";
 
     private static readonly IReadOnlyList<PayrollLegacyMenuItemDto> LegacyMenuItems =
     [
@@ -66,19 +80,23 @@ public class PayrollService : IPayrollService
 
     private readonly ApplicationDbContext _context;
     private readonly IJournalEntryService _journalEntryService;
-    private readonly WebEmailService _emailService;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly INotificationTopicPublisher _notificationTopicPublisher;
     private readonly ILogger<PayrollService> _logger;
 
     public PayrollService(
         ApplicationDbContext context,
         IJournalEntryService journalEntryService,
-        WebEmailService emailService,
+        IWorkflowIntegrationService workflowIntegrationService,
+        INotificationTopicPublisher notificationTopicPublisher,
         ILogger<PayrollService> logger)
     {
         _context = context;
         _journalEntryService = journalEntryService;
-        _emailService = emailService;
+        _workflowIntegrationService = workflowIntegrationService;
+        _notificationTopicPublisher = notificationTopicPublisher;
         _logger = logger;
+        QuestPDF.Settings.License = LicenseType.Community;
     }
 
     public Task<IReadOnlyList<PayrollLegacyMenuItemDto>> GetLegacyMenuAsync(CancellationToken cancellationToken = default)
@@ -1960,6 +1978,78 @@ public class PayrollService : IPayrollService
         return ToDto(entity);
     }
 
+    public async Task<IReadOnlyList<PayrollBonusRuleDto>> SaveBonusRulesAsync(
+        Guid tenantId,
+        PayrollBonusRuleBulkSaveDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var bonusCode = NormalizeCode(dto.BonusCode);
+        var policyExists = await _context.PayrollBonusPolicies
+            .AsNoTracking()
+            .AnyAsync(e => e.TenantId == tenantId && e.Code == bonusCode, cancellationToken);
+        if (!policyExists)
+        {
+            throw new KeyNotFoundException("Payroll bonus policy was not found.");
+        }
+
+        var existingRows = await _context.PayrollBonusRules
+            .Where(e => e.TenantId == tenantId && e.BonusCode == bonusCode)
+            .ToListAsync(cancellationToken);
+
+        var incomingRows = dto.Rules
+            .Select(e => new
+            {
+                Line = e,
+                GroupCode = TrimOrNull(e.GroupCode)
+            })
+            .Where(e => e.GroupCode != null)
+            .GroupBy(e => e.GroupCode!, StringComparer.OrdinalIgnoreCase)
+            .Select(e => e.Last())
+            .ToList();
+
+        var incomingCodes = incomingRows
+            .Select(e => e.GroupCode!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var incomingIds = incomingRows
+            .Select(e => e.Line.Id)
+            .Where(e => e != Guid.Empty)
+            .ToHashSet();
+
+        foreach (var existing in existingRows.Where(e => !incomingCodes.Contains(e.GroupCode) && !incomingIds.Contains(e.Id)).ToList())
+        {
+            _context.PayrollBonusRules.Remove(existing);
+        }
+
+        foreach (var incoming in incomingRows)
+        {
+            var line = incoming.Line;
+            var groupCode = incoming.GroupCode!;
+            var entity = existingRows.FirstOrDefault(e =>
+                    line.Id != Guid.Empty && e.Id == line.Id)
+                ?? existingRows.FirstOrDefault(e => e.GroupCode.Equals(groupCode, StringComparison.OrdinalIgnoreCase))
+                ?? new PayrollBonusRule { TenantId = tenantId };
+
+            entity.BonusCode = bonusCode;
+            entity.GroupCode = groupCode;
+            entity.CalculationType = line.CalculationType;
+            entity.Amount = line.Amount;
+            entity.Applicable = line.Applicable;
+            entity.LegacyCompanyCode = NormalizeOptionalLegacyCode(line.LegacyCompanyCode ?? dto.LegacyCompanyCode, 5);
+
+            AddIfNew(_context.PayrollBonusRules, entity);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var savedRows = await _context.PayrollBonusRules
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.BonusCode == bonusCode)
+            .OrderBy(e => e.GroupCode)
+            .ToListAsync(cancellationToken);
+
+        return savedRows.Select(ToDto).ToList();
+    }
+
     public async Task<IReadOnlyList<PayrollBonusExceptionDto>> GetBonusExceptionsAsync(
         Guid tenantId,
         string? bonusCode = null,
@@ -2653,7 +2743,7 @@ public class PayrollService : IPayrollService
     {
         var query = _context.PayrollSalaryAdvances
             .AsNoTracking()
-            .Where(e => e.TenantId == tenantId);
+            .Where(e => e.TenantId == tenantId && e.IsActive);
 
         if (fromDate.HasValue)
         {
@@ -3208,8 +3298,13 @@ public class PayrollService : IPayrollService
             entity.PayPeriodFrom = period.From.Value.Date;
             entity.PayPeriodTo = period.To.Value.Date;
             entity.LegacyCompanyCode = legacyCompanyCode;
-            entity.BasicSalary = CalculateBasicSalary(profile.SalaryBasis);
-            entity.WorkingDays = null;
+            var basicSalary = line.BasicSalary.GetValueOrDefault();
+            entity.BasicSalary = basicSalary > 0
+                ? Math.Round(basicSalary, 2)
+                : CalculateBasicSalary(profile.SalaryBasis);
+            entity.WorkingDays = line.WorkingDays.HasValue
+                ? NormalizeNonNegative(line.WorkingDays, "Working days", 4)
+                : null;
             entity.IsActive = true;
             entity.UpdatedAt = now;
 
@@ -3862,11 +3957,6 @@ public class PayrollService : IPayrollService
             .GroupBy(e => ComponentRuleKey(e.ComponentType, e.ComponentCode), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollComponentRule>)e.ToList(), StringComparer.OrdinalIgnoreCase);
 
-        var defaultTaxReliefs = await _context.PayrollTaxReliefs
-            .AsNoTracking()
-            .Where(e => e.TenantId == tenantId && e.IsActive && e.AppliesByDefault)
-            .ToListAsync(cancellationToken);
-
         var employeeTaxReliefs = await _context.PayrollEmployeeTaxReliefs
             .AsNoTracking()
             .Where(e => e.TenantId == tenantId && e.IsActive)
@@ -3938,6 +4028,21 @@ public class PayrollService : IPayrollService
             .OrderBy(e => e.Code)
             .ToListAsync(cancellationToken);
 
+        var bonusPolicyCodes = bonusPolicies
+            .Select(e => NormalizeMatchToken(e.Code))
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var bonusRules = bonusPolicyCodes.Count == 0
+            ? new List<PayrollBonusRule>()
+            : (await _context.PayrollBonusRules
+                .AsNoTracking()
+                .Where(e => e.TenantId == tenantId)
+                .OrderBy(e => e.BonusCode)
+                .ThenBy(e => e.GroupCode)
+                .ToListAsync(cancellationToken))
+            .Where(e => bonusPolicyCodes.Contains(NormalizeMatchToken(e.BonusCode)))
+            .ToList();
+
         var bonusExceptions = await _context.PayrollBonusExceptions
             .AsNoTracking()
             .Where(e => e.TenantId == tenantId)
@@ -3945,9 +4050,44 @@ public class PayrollService : IPayrollService
             .ThenBy(e => e.EmployeeNumber)
             .ToListAsync(cancellationToken);
 
+        var bonusRulesByCode = bonusRules
+            .GroupBy(e => NormalizeMatchToken(e.BonusCode), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollBonusRule>)e.ToList(), StringComparer.OrdinalIgnoreCase);
+
         var bonusExceptionsByCode = bonusExceptions
             .GroupBy(e => NormalizeMatchToken(e.BonusCode), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollBonusException>)e.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var backpayPolicies = await _context.PayrollBackpayPolicies
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId &&
+                        (!e.EffectiveDate.HasValue || e.EffectiveDate.Value.Date <= run.PayPeriodTo.Date))
+            .OrderBy(e => e.OperationType)
+            .ThenBy(e => e.CategoryType)
+            .ToListAsync(cancellationToken);
+
+        var backpayRules = await _context.PayrollBackpayRules
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.OperationType)
+            .ThenBy(e => e.CategoryType)
+            .ThenBy(e => e.CategoryCode)
+            .ToListAsync(cancellationToken);
+
+        var backpayExceptions = await _context.PayrollBackpayExceptions
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.OperationType)
+            .ThenBy(e => e.EmployeeNumber)
+            .ToListAsync(cancellationToken);
+
+        var backpayRulesByOperation = backpayRules
+            .GroupBy(e => NormalizeBackpayOperation(e.OperationType), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollBackpayRule>)e.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var backpayExceptionsByOperation = backpayExceptions
+            .GroupBy(e => NormalizeBackpayOperation(e.OperationType), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(e => e.Key, e => (IReadOnlyList<PayrollBackpayException>)e.ToList(), StringComparer.OrdinalIgnoreCase);
 
         var taxYearStart = new DateTime(run.PayPeriodFrom.Year, 1, 1);
         var previousBonusRows = await _context.PayrollTransactions
@@ -4022,16 +4162,25 @@ public class PayrollService : IPayrollService
             .ToDictionary(e => e.Key, e => e.OrderByDescending(x => x.EffectiveDate).First());
 
         var historicalRunEmployeesByNumber = new Dictionary<string, List<PayrollRunEmployee>>(StringComparer.OrdinalIgnoreCase);
-        if (promotionEntries.Count > 0)
+        if (promotionEntries.Count > 0 || backpayPolicies.Count > 0)
         {
-            var earliestPromotionDate = promotionEntries.Min(e => e.EffectiveDate.Date);
+            var historyStartDates = new List<DateTime>();
+            if (promotionEntries.Count > 0)
+            {
+                var earliestPromotionDate = promotionEntries.Min(e => e.EffectiveDate.Date);
+                historyStartDates.Add(new DateTime(earliestPromotionDate.Year, earliestPromotionDate.Month, 1));
+            }
+
+            historyStartDates.AddRange(backpayPolicies.Select(e => ResolveBackpayHistoryStart(e, run.PayPeriodFrom)));
+            var earliestHistoryDate = historyStartDates.Min();
             var historicalRunEmployees = await _context.PayrollRunEmployees
                 .AsNoTracking()
                 .Include(e => e.PayrollRun)
                 .Include(e => e.Transactions)
+                    .ThenInclude(e => e.PayrollComponent)
                 .Where(e => e.TenantId == tenantId &&
                             e.PayrollRun.PayPeriod < run.PayPeriod &&
-                            e.PayrollRun.PayPeriodFrom.Date >= earliestPromotionDate &&
+                            e.PayrollRun.PayPeriodFrom.Date >= earliestHistoryDate &&
                             e.PayrollRun.Status == PayrollRunStatus.Closed)
                 .ToListAsync(cancellationToken);
 
@@ -4097,6 +4246,23 @@ public class PayrollService : IPayrollService
             var grossIncome = run.IsSeparateBonusRun ? 0m : basicSalary;
             var netIncomeBeforeTax = run.IsSeparateBonusRun ? 0m : basicSalary;
             var pension = new PayrollPensionCalculation(0m, 0m);
+            var previousYearBonus = previousBonusByEmployeeNumber.GetValueOrDefault(profile.EmployeeNumber);
+            var annualBasicSalary = CalculateAnnualBasicForBonusTax(
+                originalBasicSalary,
+                historicalBasicByEmployeeNumber.GetValueOrDefault(profile.EmployeeNumber),
+                run.PayPeriodFrom);
+            var bonusCalculation = CalculatePayrollBonuses(
+                bonusPolicies,
+                bonusRulesByCode,
+                bonusExceptionsByCode,
+                profile,
+                basicSalary,
+                annualBasicSalary,
+                previousYearBonus,
+                run.PayPeriodTo,
+                run.CurrencyCode,
+                activeParameters);
+            var benefitPercentageBase = basicSalary + bonusCalculation.TaxableBonusAmount;
 
             if (!run.IsSeparateBonusRun)
             {
@@ -4142,10 +4308,17 @@ public class PayrollService : IPayrollService
                     }
                 }
 
-                foreach (var componentLine in ResolveComponents(defaultComponents, componentRulesByKey, profile, profile.EmployeeComponents, run.PayPeriodFrom, run.PayPeriodTo))
+                var componentLines = ResolveComponents(defaultComponents, componentRulesByKey, profile, profile.EmployeeComponents, run.PayPeriodFrom, run.PayPeriodTo)
+                    .OrderBy(e => e.Component.ComponentType == PayrollComponentType.Benefit ? 1 : 0)
+                    .ToList();
+
+                foreach (var componentLine in componentLines)
                 {
                     var component = componentLine.Component;
-                    var amount = CalculateComponentAmount(componentLine, basicSalary);
+                    var percentageBase = component.ComponentType == PayrollComponentType.Benefit
+                        ? benefitPercentageBase
+                        : basicSalary;
+                    var amount = CalculateComponentAmount(componentLine, basicSalary, percentageBase);
                     amount = ApplyBenefitCap(componentLine, amount);
                     amount = ApplyComponentProration(componentLine, profile, amount, run.PayPeriodFrom, run.PayPeriodTo, activeParameters);
                     amount = ApplyComponentGrossUp(componentLine, profile, amount, taxBands, activeParameters);
@@ -4189,6 +4362,11 @@ public class PayrollService : IPayrollService
                     switch (component.ComponentType)
                     {
                         case PayrollComponentType.Allowance:
+                            if (component.ApplyToBenefit)
+                            {
+                                benefitPercentageBase += amount;
+                            }
+
                             if (taxable)
                             {
                                 taxableAllowances += amount;
@@ -4317,21 +4495,6 @@ public class PayrollService : IPayrollService
                 }
             }
 
-            var previousYearBonus = previousBonusByEmployeeNumber.GetValueOrDefault(profile.EmployeeNumber);
-            var annualBasicSalary = CalculateAnnualBasicForBonusTax(
-                originalBasicSalary,
-                historicalBasicByEmployeeNumber.GetValueOrDefault(profile.EmployeeNumber),
-                run.PayPeriodFrom);
-            var bonusCalculation = CalculatePayrollBonuses(
-                bonusPolicies,
-                bonusExceptionsByCode,
-                profile,
-                basicSalary,
-                annualBasicSalary,
-                previousYearBonus,
-                run.PayPeriodTo,
-                activeParameters);
-
             if (bonusCalculation.TotalAmount > 0)
             {
                 foreach (var bonusLine in bonusCalculation.Lines)
@@ -4361,9 +4524,7 @@ public class PayrollService : IPayrollService
 
             var taxRelief = run.IsSeparateBonusRun
                 ? 0m
-                : employeeTaxReliefs.Count > 0
-                ? CalculateEmployeeTaxRelief(employeeTaxReliefsByProfile.GetValueOrDefault(profile.Id) ?? [], basicSalary)
-                : CalculateTaxRelief(defaultTaxReliefs, basicSalary);
+                : CalculateEmployeeTaxRelief(employeeTaxReliefsByProfile.GetValueOrDefault(profile.Id) ?? [], basicSalary);
             var totalAllowanceTaxCeiling = activeParameters?.TotalAllowanceTaxCeiling ?? 0m;
             var taxableAllowanceAmount = Math.Max(0, taxableAllowances - separateTaxableAllowances - totalAllowanceTaxCeiling);
             var taxableBenefitAmount = Math.Max(0, taxableBenefits - separateTaxableBenefits);
@@ -4459,14 +4620,18 @@ public class PayrollService : IPayrollService
                 historicalRunEmployeesByNumber.TryGetValue(profile.EmployeeNumber, out var historicalRunEmployees))
             {
                 var currentContributionArrearsSplit = BuildContributionArrearsSplit(employeeTransactions);
+                var promotionBasicSalary = promotionEntry.BasicSalary.GetValueOrDefault() > 0m
+                    ? Math.Round(promotionEntry.BasicSalary.Value, 2)
+                    : basicSalary;
                 var arrears = CalculatePromotionArrears(
                     promotionEntry,
                     historicalRunEmployees,
-                    basicSalary,
+                    promotionBasicSalary,
                     taxableAllowances + nonTaxableAllowances,
                     currentContributionArrearsSplit,
                     taxableIncome,
-                    normalIncomeTax);
+                    normalIncomeTax,
+                    activeParameters);
 
                 if (arrears.NetAmount > 0)
                 {
@@ -4488,6 +4653,43 @@ public class PayrollService : IPayrollService
                 }
             }
 
+            if (!run.IsSeparateBonusRun &&
+                backpayPolicies.Count > 0 &&
+                historicalRunEmployeesByNumber.TryGetValue(profile.EmployeeNumber, out var backpayHistory))
+            {
+                var backpayArrears = CalculateSetupBackpayArrears(
+                    backpayPolicies,
+                    backpayRulesByOperation,
+                    backpayExceptionsByOperation,
+                    backpayHistory,
+                    profile,
+                    taxBands,
+                    pensionScheme,
+                    activeParameters,
+                    run.PayPeriodFrom);
+
+                if (backpayArrears.NetAmount > 0)
+                {
+                    ApplyPromotionArrearsTransactions(
+                        tenantId,
+                        run,
+                        runEmployee,
+                        profile,
+                        employeeTransactions,
+                        backpayArrears,
+                        "Salary back pay");
+
+                    taxableAllowances += backpayArrears.BasicAmount + backpayArrears.AllowanceAmount;
+                    nonTaxableDeductions += backpayArrears.DeductionAmount;
+                    employeeContribution += backpayArrears.EmployeeContributionAmount + backpayArrears.OtherContributionAmount;
+                    employerContribution += backpayArrears.EmployerContributionAmount + backpayArrears.OtherEmployerContributionAmount;
+                    taxableIncome += backpayArrears.TaxableIncomeAmount;
+                    incomeTax += backpayArrears.TaxAmount;
+                    grossIncome += backpayArrears.BasicAmount + backpayArrears.AllowanceAmount;
+                    netIncomeBeforeTax += backpayArrears.BasicAmount + backpayArrears.AllowanceAmount - backpayArrears.EmployeeContributionAmount - backpayArrears.OtherContributionAmount - backpayArrears.DeductionAmount;
+                }
+            }
+
             var loanRepayment = run.IsSeparateBonusRun
                 ? 0m
                 : CalculateLoanRepayments(profile, run.PayPeriodFrom, run.PayPeriodTo, tenantId, run, runEmployee, employeeTransactions);
@@ -4496,7 +4698,6 @@ public class PayrollService : IPayrollService
                 : Math.Round(salaryAdvancesByProfile.GetValueOrDefault(profile.Id), 2);
             if (!run.IsSeparateBonusRun && salaryAdvance > 0)
             {
-                nonTaxableDeductions += salaryAdvance;
                 employeeTransactions.Add(CreateTransaction(
                     tenantId,
                     run,
@@ -4505,7 +4706,7 @@ public class PayrollService : IPayrollService
                     SalaryAdvanceTransactionType,
                     "Salary advance",
                     salaryAdvance,
-                    taxable: false,
+                    taxable: true,
                     componentCode: SalaryAdvanceTransactionType));
             }
 
@@ -4546,6 +4747,7 @@ public class PayrollService : IPayrollService
         _context.PayrollJournalLines.AddRange(journalLines);
 
         await _context.SaveChangesAsync(cancellationToken);
+        await SubmitPayrollRunWorkflowIfConfiguredAsync(tenantId, run, userId, cancellationToken);
 
         var calculated = await PayrollRunQuery(tenantId)
             .FirstAsync(e => e.Id == run.Id, cancellationToken);
@@ -4561,9 +4763,18 @@ public class PayrollService : IPayrollService
             throw new InvalidOperationException("Only calculated payroll runs can be submitted for review.");
         }
 
-        run.Status = PayrollRunStatus.InReview;
-        run.ReviewedAt = DateTime.UtcNow;
-        run.ReviewedByUserId = userId;
+        if (await IsPayrollRunWorkflowConfiguredAsync(tenantId, cancellationToken))
+        {
+            var workflowResult = await _workflowIntegrationService.SubmitAsync(PayrollRunWorkflowEntityType, run.Id);
+            ApplyPayrollRunWorkflowOutcome(run, workflowResult.Outcome, userId);
+        }
+        else
+        {
+            run.Status = PayrollRunStatus.InReview;
+            run.ReviewedAt = DateTime.UtcNow;
+            run.ReviewedByUserId = userId;
+        }
+
         AppendNotes(run, dto.Notes);
         await _context.SaveChangesAsync(cancellationToken);
         return await RequireRunDtoAsync(tenantId, run.Id, cancellationToken);
@@ -4577,9 +4788,82 @@ public class PayrollService : IPayrollService
             throw new InvalidOperationException("Only payroll runs in review can be approved.");
         }
 
-        run.Status = PayrollRunStatus.Approved;
-        run.ApprovedAt = DateTime.UtcNow;
-        run.ApprovedByUserId = userId;
+        if (await IsPayrollRunWorkflowConfiguredAsync(tenantId, cancellationToken))
+        {
+            if (!userId.HasValue || userId.Value == Guid.Empty)
+            {
+                throw new UnauthorizedAccessException("A valid approver user is required.");
+            }
+
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync(PayrollRunWorkflowEntityType, run.Id, userId.Value);
+            if (!canApprove)
+            {
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current payroll workflow step.");
+            }
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                PayrollRunWorkflowEntityType,
+                run.Id,
+                userId.Value,
+                "approve",
+                dto.Notes);
+            ApplyPayrollRunWorkflowOutcome(run, workflowResult.Outcome, userId);
+        }
+        else
+        {
+            run.Status = PayrollRunStatus.Approved;
+            run.ApprovedAt = DateTime.UtcNow;
+            run.ApprovedByUserId = userId;
+        }
+
+        AppendNotes(run, dto.Notes);
+        await _context.SaveChangesAsync(cancellationToken);
+        return await RequireRunDtoAsync(tenantId, run.Id, cancellationToken);
+    }
+
+    public async Task<PayrollRunDto> RejectRunAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default)
+    {
+        var run = await GetMutableRunAsync(tenantId, runId, cancellationToken);
+        if (run.Status != PayrollRunStatus.InReview)
+        {
+            throw new InvalidOperationException("Only payroll runs in review can be rejected.");
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.Notes))
+        {
+            throw new InvalidOperationException("A rejection reason is required.");
+        }
+
+        if (await IsPayrollRunWorkflowConfiguredAsync(tenantId, cancellationToken))
+        {
+            if (!userId.HasValue || userId.Value == Guid.Empty)
+            {
+                throw new UnauthorizedAccessException("A valid approver user is required.");
+            }
+
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync(PayrollRunWorkflowEntityType, run.Id, userId.Value);
+            if (!canApprove)
+            {
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current payroll workflow step.");
+            }
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                PayrollRunWorkflowEntityType,
+                run.Id,
+                userId.Value,
+                "reject",
+                dto.Notes);
+            ApplyPayrollRunWorkflowOutcome(run, workflowResult.Outcome, userId);
+        }
+        else
+        {
+            run.Status = PayrollRunStatus.RolledBack;
+            run.ReviewedAt = null;
+            run.ReviewedByUserId = null;
+            run.ApprovedAt = null;
+            run.ApprovedByUserId = null;
+        }
+
         AppendNotes(run, dto.Notes);
         await _context.SaveChangesAsync(cancellationToken);
         return await RequireRunDtoAsync(tenantId, run.Id, cancellationToken);
@@ -4592,9 +4876,15 @@ public class PayrollService : IPayrollService
         return await strategy.ExecuteAsync(async () =>
         {
             var run = await GetMutableRunAsync(tenantId, runId, cancellationToken);
-            if (run.Status != PayrollRunStatus.Approved)
+            var workflowRequired = await IsPayrollRunWorkflowConfiguredAsync(tenantId, cancellationToken);
+            if (workflowRequired && run.Status != PayrollRunStatus.Approved)
             {
-                throw new InvalidOperationException("Only approved payroll runs can be closed.");
+                throw new InvalidOperationException("Payroll run workflow approval is required before closing the run.");
+            }
+
+            if (!workflowRequired && run.Status is PayrollRunStatus.Draft or PayrollRunStatus.RolledBack or PayrollRunStatus.Closed)
+            {
+                throw new InvalidOperationException("Calculate the payroll run before closing it.");
             }
 
             await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
@@ -4739,6 +5029,7 @@ public class PayrollService : IPayrollService
             ?? throw new KeyNotFoundException("Payroll run not found.");
 
         EnsureRunHasSavedOutput(run);
+        await EnsurePayrollRunWorkflowApprovedForFinalOutputAsync(tenantId, run, "viewing payslips", cancellationToken);
 
         var snapshots = await _context.PayrollPayslipSnapshots
             .AsNoTracking()
@@ -4773,10 +5064,7 @@ public class PayrollService : IPayrollService
             ?? throw new KeyNotFoundException("Payroll run not found.");
 
         EnsureRunHasSavedOutput(run);
-        if (run.Status != PayrollRunStatus.Closed)
-        {
-            throw new InvalidOperationException("Post the payroll run before saving final payslip snapshots.");
-        }
+        await EnsurePayrollRunWorkflowApprovedForFinalOutputAsync(tenantId, run, "generating payslip snapshots", cancellationToken);
 
         var payslipContext = await LoadPayslipContextAsync(tenantId, run, cancellationToken);
 
@@ -4832,6 +5120,7 @@ public class PayrollService : IPayrollService
             ?? throw new KeyNotFoundException("Payroll run not found.");
 
         EnsureRunHasSavedOutput(run);
+        await EnsurePayrollRunWorkflowApprovedForFinalOutputAsync(tenantId, run, "emailing payslips", cancellationToken);
 
         var selectedEmployeeIds = (dto.EmployeeIds ?? [])
             .Where(e => e != Guid.Empty)
@@ -4855,8 +5144,14 @@ public class PayrollService : IPayrollService
 
         var payslipContext = await LoadPayslipContextAsync(tenantId, run, cancellationToken);
         var periodLabel = FormatPayrollPeriodMonth(run.PayPeriodFrom, run.PayPeriodTo);
-        var subject = TrimOrNull(dto.Subject) ?? $"Payslip - {periodLabel}";
         var message = TrimOrNull(dto.Message);
+        var defaultSubject = $"Payslip - {periodLabel}";
+        var payslipEmailTemplate = await EnsurePayrollPayslipEmailTemplateAsync(tenantId, cancellationToken);
+        var payslipEmailTopic = await EnsurePayrollPayslipEmailTopicAsync(tenantId, payslipEmailTemplate.Id, userId, cancellationToken);
+        var activePayslipEmailTemplate = payslipEmailTopic.EmailTemplate is { IsActive: true, IsDeleted: false }
+            ? payslipEmailTopic.EmailTemplate
+            : null;
+        var topicBlocker = GetPayrollPayslipEmailTopicBlocker(payslipEmailTopic);
         var recipients = new List<PayrollPayslipEmailRecipientDto>();
 
         foreach (var runEmployee in runEmployees)
@@ -4878,22 +5173,87 @@ public class PayrollService : IPayrollService
                 continue;
             }
 
-            var html = BuildPayslipEmailHtml(payslip, periodLabel, message);
-            var attachments = dto.AttachHtmlCopy
-                ? new List<WebEmailAttachment>
-                {
-                    new()
+            if (!string.IsNullOrWhiteSpace(topicBlocker))
+            {
+                result.Message = topicBlocker;
+                recipients.Add(result);
+                continue;
+            }
+
+            var printHtmlDocument = BuildPayslipPrintHtmlDocument(payslip);
+            var printInnerHtml = payslip.HtmlContent ?? BuildPayslipPrintInnerHtml(payslip);
+            var templateValues = BuildPayslipTemplateValues(
+                payslip,
+                run,
+                periodLabel,
+                message,
+                printInnerHtml,
+                printHtmlDocument);
+            var subjectTemplate = TrimOrNull(dto.Subject)
+                ?? TrimOrNull(activePayslipEmailTemplate?.Subject)
+                ?? defaultSubject;
+            var emailSubject = RenderNotificationTemplate(subjectTemplate, templateValues);
+            var html = BuildPayslipEmailHtml(activePayslipEmailTemplate, templateValues);
+            var textBody = activePayslipEmailTemplate == null
+                ? null
+                : TrimOrNull(RenderNotificationTemplate(activePayslipEmailTemplate.PlainTextBody ?? string.Empty, templateValues));
+            var attachmentFileName = BuildPayslipEmailFileName(payslip);
+            IReadOnlyList<NotificationTopicEmailAttachment> attachments = dto.AttachHtmlCopy
+                ?
+                [
+                    new NotificationTopicEmailAttachment
                     {
-                        FileName = BuildPayslipEmailFileName(payslip),
-                        Content = Encoding.UTF8.GetBytes(html),
-                        ContentType = "text/html"
+                        FileName = attachmentFileName,
+                        ContentType = "application/pdf",
+                        ContentBase64 = Convert.ToBase64String(BuildPayslipPdfAttachment(payslip))
                     }
-                }
+                ]
                 : [];
 
-            var sent = await _emailService.SendEmailWithAttachmentsAsync(email, subject, html, attachments, isHtml: true);
-            result.Sent = sent;
-            result.Message = sent ? "Sent" : "Email service reported a send failure.";
+            var topicData = BuildPayslipTopicData(templateValues, run.Id, runEmployee.Id, payslip, userId);
+            var metadata = new Dictionary<string, object>
+            {
+                ["runId"] = run.Id,
+                ["runNumber"] = run.RunNumber ?? string.Empty,
+                ["payrollRunEmployeeId"] = runEmployee.Id,
+                ["employeeId"] = payslip.EmployeeId,
+                ["employeeNumber"] = payslip.EmployeeNumber ?? string.Empty,
+                ["payslipNumber"] = payslip.Snapshot?.PayslipNumber ?? string.Empty,
+                ["requestedByUserId"] = userId?.ToString() ?? string.Empty,
+                ["message"] = message ?? string.Empty
+            };
+
+            try
+            {
+                await _notificationTopicPublisher.PublishAsync(new NotificationTopicEvent
+                {
+                    TenantId = tenantId,
+                    TopicKey = PayrollPayslipEmailTopicKey,
+                    NotificationType = "PayrollPayslipEmail",
+                    EntityType = PayrollPayslipEmailEntityType,
+                    EntityId = payslip.Snapshot?.Id ?? run.Id,
+                    TriggeredByUserId = userId,
+                    Data = topicData,
+                    Metadata = metadata,
+                    Email = new NotificationTopicEmailOptions
+                    {
+                        SubjectTemplateOverride = emailSubject,
+                        HtmlBodyTemplateOverride = html,
+                        TextBodyTemplateOverride = textBody,
+                        AttachmentSource = "PayrollPayslipPrintPreviewPdf",
+                        Attachments = attachments
+                    }
+                }, cancellationToken);
+
+                result.Sent = true;
+                result.Message = $"Queued via notification topic {PayrollPayslipEmailTopicKey}.";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish payslip email topic for payroll run {RunId}, employee {EmployeeId}", run.Id, payslip.EmployeeId);
+                result.Message = "Failed to queue via notification topic.";
+            }
+
             recipients.Add(result);
         }
 
@@ -4920,6 +5280,7 @@ public class PayrollService : IPayrollService
             ?? throw new KeyNotFoundException("Payroll run not found.");
 
         EnsureRunHasSavedOutput(run);
+        await EnsurePayrollRunWorkflowApprovedForFinalOutputAsync(tenantId, run, "posting payroll", cancellationToken);
 
         if (run.JournalLines.Any(e => e.Posted || e.JournalEntryId.HasValue))
         {
@@ -5201,6 +5562,172 @@ public class PayrollService : IPayrollService
         if (run.Status is PayrollRunStatus.Draft or PayrollRunStatus.RolledBack || run.Employees.Count == 0)
         {
             throw new InvalidOperationException("Calculate the payroll run before generating reports.");
+        }
+    }
+
+    private async Task SubmitPayrollRunWorkflowIfConfiguredAsync(
+        Guid tenantId,
+        PayrollRun run,
+        Guid? userId,
+        CancellationToken cancellationToken)
+    {
+        await EnsurePayrollRunWorkflowEntityTypeAsync(tenantId, cancellationToken);
+        if (!await IsPayrollRunWorkflowConfiguredAsync(tenantId, cancellationToken))
+        {
+            return;
+        }
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(PayrollRunWorkflowEntityType, run.Id);
+        ApplyPayrollRunWorkflowOutcome(run, workflowResult.Outcome, userId);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsurePayrollRunWorkflowApprovedForFinalOutputAsync(
+        Guid tenantId,
+        PayrollRun run,
+        string action,
+        CancellationToken cancellationToken)
+    {
+        if (!await IsPayrollRunWorkflowRequiredForRunAsync(tenantId, run, cancellationToken))
+        {
+            return;
+        }
+
+        if (run.Status is PayrollRunStatus.Approved or PayrollRunStatus.Closed)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Payroll run {run.RunNumber} must be approved through workflow before {action}.");
+    }
+
+    private async Task<bool> IsPayrollRunWorkflowConfiguredAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var entityTypeId = await GetPayrollRunWorkflowEntityTypeIdAsync(tenantId, cancellationToken);
+        if (!entityTypeId.HasValue)
+        {
+            return false;
+        }
+
+        return await _context.WorkflowDefinitions
+            .AsNoTracking()
+            .AnyAsync(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.IsActive &&
+                e.EntityTypeId == entityTypeId.Value,
+                cancellationToken);
+    }
+
+    private async Task<bool> IsPayrollRunWorkflowRequiredForRunAsync(Guid tenantId, PayrollRun run, CancellationToken cancellationToken)
+    {
+        var entityTypeId = await GetPayrollRunWorkflowEntityTypeIdAsync(tenantId, cancellationToken);
+        if (!entityTypeId.HasValue)
+        {
+            return false;
+        }
+
+        var hasActiveDefinition = await _context.WorkflowDefinitions
+            .AsNoTracking()
+            .AnyAsync(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.IsActive &&
+                e.EntityTypeId == entityTypeId.Value,
+                cancellationToken);
+
+        if (hasActiveDefinition)
+        {
+            return true;
+        }
+
+        return await _context.WorkflowInstances
+            .AsNoTracking()
+            .AnyAsync(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.EntityTypeId == entityTypeId.Value &&
+                e.EntityId == run.Id,
+                cancellationToken);
+    }
+
+    private async Task<Guid?> GetPayrollRunWorkflowEntityTypeIdAsync(Guid tenantId, CancellationToken cancellationToken)
+        => await _context.WorkflowEntityTypes
+            .AsNoTracking()
+            .Where(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.IsActive &&
+                (e.Code == PayrollRunWorkflowEntityCode ||
+                 e.Name == PayrollRunWorkflowEntityType ||
+                 e.Name == "Payroll Run"))
+            .Select(e => (Guid?)e.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    private async Task EnsurePayrollRunWorkflowEntityTypeAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var existing = await _context.WorkflowEntityTypes
+            .FirstOrDefaultAsync(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                (e.Code == PayrollRunWorkflowEntityCode ||
+                 e.Name == PayrollRunWorkflowEntityType ||
+                 e.Name == "Payroll Run"),
+                cancellationToken);
+
+        if (existing != null)
+        {
+            if (!existing.IsActive)
+            {
+                existing.IsActive = true;
+                existing.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            return;
+        }
+
+        _context.WorkflowEntityTypes.Add(new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = PayrollRunWorkflowEntityCode,
+            Name = PayrollRunWorkflowEntityType,
+            Description = "HR payroll run calculation, review, payslip generation, and posting approval.",
+            EntityClassName = typeof(PayrollRun).FullName,
+            IsActive = true,
+            DisplayOrder = 72,
+            Icon = "WalletCards",
+            ColorCode = "#0EA5E9",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "System"
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void ApplyPayrollRunWorkflowOutcome(PayrollRun run, WorkflowOutcome outcome, Guid? userId)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                run.Status = PayrollRunStatus.Approved;
+                run.ApprovedAt = DateTime.UtcNow;
+                run.ApprovedByUserId = userId;
+                break;
+            case WorkflowOutcome.Rejected:
+                run.Status = PayrollRunStatus.RolledBack;
+                run.ReviewedAt = null;
+                run.ReviewedByUserId = null;
+                run.ApprovedAt = null;
+                run.ApprovedByUserId = null;
+                break;
+            default:
+                run.Status = PayrollRunStatus.InReview;
+                run.ReviewedAt = DateTime.UtcNow;
+                run.ReviewedByUserId = userId;
+                run.ApprovedAt = null;
+                run.ApprovedByUserId = null;
+                break;
         }
     }
 
@@ -6121,12 +6648,14 @@ public class PayrollService : IPayrollService
                 .OrderBy(e => e.SequenceNo)
                 .ToList();
 
-            rows.AddRange(cashMethods.Select((method, index) => OracleRow(new Dictionary<string, object?>
+            var allocations = BuildPaymentAllocations(cashMethods, employee.NetIncome, employee.CurrencyCode);
+
+            rows.AddRange(allocations.Select((allocation, index) => OracleRow(new Dictionary<string, object?>
             {
                 ["rowNumber"] = rows.Count + index + 1,
                 ["employeeNumber"] = employee.EmployeeNumber,
                 ["employeeName"] = employee.EmployeeName,
-                ["amount"] = RoundMoney(ResolvePaymentMethodAmount(method, employee.NetIncome, cashMethods.Count, index))
+                ["amount"] = RoundMoney(allocation.Amount)
             })));
         }
 
@@ -6349,12 +6878,14 @@ public class PayrollService : IPayrollService
                 .OrderBy(e => e.SequenceNo)
                 .ToList();
 
-            rows.AddRange(cashMethods.Select((method, index) => OracleRow(new Dictionary<string, object?>
+            var allocations = BuildPaymentAllocations(cashMethods, bonusRow.NetBonus, bonusRow.Employee.CurrencyCode);
+
+            rows.AddRange(allocations.Select((allocation, index) => OracleRow(new Dictionary<string, object?>
             {
                 ["rowNumber"] = rows.Count + index + 1,
                 ["employeeNumber"] = bonusRow.Employee.EmployeeNumber,
                 ["employeeName"] = bonusRow.Employee.EmployeeName,
-                ["amount"] = RoundMoney(ResolvePaymentMethodAmount(method, bonusRow.NetBonus, cashMethods.Count, index))
+                ["amount"] = RoundMoney(allocation.Amount)
             })));
         }
 
@@ -6495,7 +7026,8 @@ public class PayrollService : IPayrollService
            transaction.TransactionType.Equals(EmployeePensionTransactionType, StringComparison.OrdinalIgnoreCase) ||
            transaction.TransactionType.Equals(LoanRepaymentTransactionType, StringComparison.OrdinalIgnoreCase) ||
            transaction.TransactionType.Equals(LoanInterestTransactionType, StringComparison.OrdinalIgnoreCase) ||
-           transaction.TransactionType.Equals(SalaryAdvanceTransactionType, StringComparison.OrdinalIgnoreCase);
+           transaction.TransactionType.Equals(SalaryAdvanceTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transaction.TransactionType.Equals(BackpayDeductionArrearsTransactionType, StringComparison.OrdinalIgnoreCase);
 
     private static decimal GetOracleDecimal(PayrollOracleReportRowDto row, string key)
         => row.Values.TryGetValue(key, out var value) && value is decimal amount ? amount : 0m;
@@ -7026,8 +7558,9 @@ public class PayrollService : IPayrollService
 
             if (payrollMethods.Count > 0)
             {
-                rows.AddRange(payrollMethods.Select((method, index) =>
+                rows.AddRange(BuildPaymentAllocations(payrollMethods, paymentAmount, employee.CurrencyCode).Select(allocation =>
                 {
+                    var method = allocation.Method;
                     var bankName = ResolvePaymentMethodBankName(method, context) ?? "BANK";
                     var branchName = ResolvePaymentMethodBankBranchName(method, context);
                     return new OracleBankPaymentRow(
@@ -7037,7 +7570,7 @@ public class PayrollService : IPayrollService
                         branchName,
                         method.AccountNumber,
                         string.IsNullOrWhiteSpace(method.CurrencyCode) ? employee.CurrencyCode : method.CurrencyCode,
-                        ResolvePaymentMethodAmount(method, paymentAmount, payrollMethods.Count, index),
+                        allocation.Amount,
                         employee);
                 }));
                 continue;
@@ -7803,7 +8336,7 @@ public class PayrollService : IPayrollService
             ? summary
             : null;
 
-        return new PayrollPayslipDto
+        var payslip = new PayrollPayslipDto
         {
             PayrollRunId = run.Id,
             PayrollRunEmployeeId = runEmployee.Id,
@@ -7846,6 +8379,9 @@ public class PayrollService : IPayrollService
             BankDetails = BuildBankDetails(context, profile, runEmployee, run.PayPeriodFrom, run.PayPeriodTo),
             Snapshot = snapshot == null ? null : ToDto(snapshot)
         };
+
+        payslip.HtmlContent = BuildPayslipPrintInnerHtml(payslip);
+        return payslip;
     }
 
     private static bool PayslipCategoryMatches(
@@ -7950,111 +8486,1282 @@ public class PayrollService : IPayrollService
         };
     }
 
-    private static string BuildPayslipEmailHtml(PayrollPayslipDto payslip, string periodLabel, string? message)
+    private async Task<EmailTemplate> EnsurePayrollPayslipEmailTemplateAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var template = await _context.EmailTemplates
+            .FirstOrDefaultAsync(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.Module == PayrollNotificationModule &&
+                e.Name == PayrollPayslipEmailTemplateName,
+                cancellationToken);
+
+        var variables = JsonSerializer.Serialize(PayrollPayslipTemplateVariables());
+        if (template == null)
+        {
+            template = new EmailTemplate
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Name = PayrollPayslipEmailTemplateName,
+                Module = PayrollNotificationModule,
+                Category = PayrollNotificationCategory,
+                TableName = "PayrollPayslipEmail",
+                Subject = "Payslip - {{pay_period}}",
+                HtmlBody = DefaultPayrollPayslipEmailHtmlTemplate(),
+                PlainTextBody = "Dear {{employee_name}}, your payslip for {{pay_period}} is attached.",
+                TemplateVariables = variables,
+                Description = "Payroll payslip email body. The full payslip is attached as a PDF generated from the payroll print preview layout.",
+                IsActive = true,
+                CreatedBy = "System"
+            };
+            _context.EmailTemplates.Add(template);
+            await _context.SaveChangesAsync(cancellationToken);
+            return await ResolvePayrollPayslipEmailTemplateAsync(tenantId, cancellationToken) ?? template;
+        }
+
+        var changed = false;
+        if (string.IsNullOrWhiteSpace(template.TemplateVariables))
+        {
+            template.TemplateVariables = variables;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(template.Category))
+        {
+            template.Category = PayrollNotificationCategory;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(template.TableName))
+        {
+            template.TableName = "PayrollPayslipEmail";
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(template.Description))
+        {
+            template.Description = "Payroll payslip email body. The full payslip is attached as a PDF generated from the payroll print preview layout.";
+            changed = true;
+        }
+
+        if (IsLegacyPayslipInlineTemplate(template.HtmlBody))
+        {
+            template.HtmlBody = DefaultPayrollPayslipEmailHtmlTemplate();
+            changed = true;
+        }
+
+        if (changed)
+        {
+            template.UpdatedAt = DateTime.UtcNow;
+            template.UpdatedBy = "System";
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        return await ResolvePayrollPayslipEmailTemplateAsync(tenantId, cancellationToken) ?? template;
+    }
+
+    private async Task<EmailTemplate?> ResolvePayrollPayslipEmailTemplateAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var templates = await _context.EmailTemplates
+            .Where(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.IsActive &&
+                e.Module == PayrollNotificationModule &&
+                e.TableName != null)
+            .OrderByDescending(e => e.UpdatedAt ?? e.CreatedAt)
+            .ThenByDescending(e => e.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return templates.FirstOrDefault(e =>
+            EntityTypeKey(e.TableName) == EntityTypeKey(PayrollPayslipEmailEntityType));
+    }
+
+    private static bool IsLegacyPayslipInlineTemplate(string? html)
+    {
+        var value = (html ?? string.Empty).Trim();
+        return value.Equals("{{payslip_print_html_document}}", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("{{payslip_print_html}}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string EntityTypeKey(string? value)
+        => new((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+
+    private async Task<NotificationTopic> EnsurePayrollPayslipEmailTopicAsync(
+        Guid tenantId,
+        Guid emailTemplateId,
+        Guid? userId,
+        CancellationToken cancellationToken)
+    {
+        var topic = await _context.NotificationTopics
+            .Include(e => e.Recipients)
+            .Include(e => e.EmailTemplate)
+            .FirstOrDefaultAsync(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.Key == PayrollPayslipEmailTopicKey,
+                cancellationToken);
+
+        var changed = false;
+        if (topic == null)
+        {
+            topic = new NotificationTopic
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Key = PayrollPayslipEmailTopicKey,
+                Name = "Payroll Payslip Email",
+                Description = "Queues employee payslip emails through the notification topic publisher.",
+                EntityType = PayrollPayslipEmailEntityType,
+                IsSystem = true,
+                IsRequired = false,
+                IsActive = true,
+                EnableInApp = false,
+                EnableEmail = true,
+                EnableSms = false,
+                InAppTitleTemplate = "Payslip - {{pay_period}}",
+                InAppBodyTemplate = "Your payslip for {{pay_period}} is ready.",
+                EmailTemplateId = emailTemplateId,
+                ActionUrlTemplate = "/hr/payroll?runId={{payroll_run_id}}",
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = userId,
+                CreatedBy = "System"
+            };
+
+            _context.NotificationTopics.Add(topic);
+            changed = true;
+        }
+        else
+        {
+            if (!topic.IsSystem)
+            {
+                topic.IsSystem = true;
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(topic.Name))
+            {
+                topic.Name = "Payroll Payslip Email";
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(topic.Description))
+            {
+                topic.Description = "Queues employee payslip emails through the notification topic publisher.";
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(topic.EntityType))
+            {
+                topic.EntityType = PayrollPayslipEmailEntityType;
+                changed = true;
+            }
+
+            if (topic.EmailTemplateId != emailTemplateId)
+            {
+                topic.EmailTemplateId = emailTemplateId;
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(topic.InAppTitleTemplate))
+            {
+                topic.InAppTitleTemplate = "Payslip - {{pay_period}}";
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(topic.InAppBodyTemplate))
+            {
+                topic.InAppBodyTemplate = "Your payslip for {{pay_period}} is ready.";
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(topic.ActionUrlTemplate))
+            {
+                topic.ActionUrlTemplate = "/hr/payroll?runId={{payroll_run_id}}";
+                changed = true;
+            }
+
+            if (changed)
+            {
+                topic.UpdatedAt = DateTime.UtcNow;
+                topic.UpdatedBy = "System";
+                topic.LastModifiedById = userId;
+            }
+        }
+
+        var existingRecipients = (topic.Recipients ?? new List<NotificationTopicRecipient>())
+            .Where(e => !e.IsDeleted)
+            .ToList();
+        var hasEmployeeEmailRecipient = existingRecipients.Any(e =>
+            e.IsSystem &&
+            string.Equals(e.RecipientKind, "EmailFromData", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(e.RecipientValue, "employee_email", StringComparison.OrdinalIgnoreCase));
+
+        if (!hasEmployeeEmailRecipient)
+        {
+            _context.NotificationTopicRecipients.Add(new NotificationTopicRecipient
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                TopicId = topic.Id,
+                RecipientKind = "EmailFromData",
+                RecipientValue = "employee_email",
+                IsSystem = true,
+                SendInApp = false,
+                SendEmail = true,
+                SendSms = false,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = userId,
+                CreatedBy = "System"
+            });
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        return await _context.NotificationTopics
+            .AsNoTracking()
+            .Include(e => e.Recipients)
+            .Include(e => e.EmailTemplate)
+            .FirstAsync(e =>
+                e.TenantId == tenantId &&
+                !e.IsDeleted &&
+                e.Key == PayrollPayslipEmailTopicKey,
+                cancellationToken);
+    }
+
+    private static string? GetPayrollPayslipEmailTopicBlocker(NotificationTopic topic)
+    {
+        if (!topic.IsActive)
+        {
+            return $"Notification topic {PayrollPayslipEmailTopicKey} is inactive.";
+        }
+
+        if (!topic.EnableEmail)
+        {
+            return $"Notification topic {PayrollPayslipEmailTopicKey} has email delivery disabled.";
+        }
+
+        var hasEmailRecipient = (topic.Recipients ?? new List<NotificationTopicRecipient>())
+            .Any(e => !e.IsDeleted && e.SendEmail);
+        if (!hasEmailRecipient)
+        {
+            return $"Notification topic {PayrollPayslipEmailTopicKey} has no email recipients.";
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> PayrollPayslipTemplateVariables()
+        =>
+        [
+            "employee_id",
+            "employee_number",
+            "employee_name",
+            "employee_email",
+            "department",
+            "section",
+            "position",
+            "pay_period",
+            "run_number",
+            "payslip_number",
+            "company_name",
+            "company_address",
+            "currency_code",
+            "gross_amount",
+            "total_earnings",
+            "total_deductions",
+            "net_salary",
+            "taxable_income",
+            "income_tax",
+            "normal_income_tax",
+            "bonus_income_tax",
+            "employee_contribution",
+            "employer_contribution",
+            "message",
+            "action_url"
+        ];
+
+    private static Dictionary<string, object> BuildPayslipTopicData(
+        IReadOnlyDictionary<string, string> templateValues,
+        Guid payrollRunId,
+        Guid payrollRunEmployeeId,
+        PayrollPayslipDto payslip,
+        Guid? userId)
+    {
+        var data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in templateValues)
+        {
+            data[key] = value ?? string.Empty;
+        }
+
+        var actionUrl = $"/hr/payroll?runId={payrollRunId}";
+        data["ActionUrl"] = actionUrl;
+        data["action_url"] = actionUrl;
+        data["payroll_run_id"] = payrollRunId.ToString();
+        data["payroll_run_employee_id"] = payrollRunEmployeeId.ToString();
+        data["payslip_snapshot_id"] = payslip.Snapshot?.Id.ToString() ?? string.Empty;
+        data["requested_by_user_id"] = userId?.ToString() ?? string.Empty;
+        data["EmployeeId"] = payslip.EmployeeId;
+
+        return data;
+    }
+
+    private static Dictionary<string, string> BuildPayslipTemplateValues(
+        PayrollPayslipDto payslip,
+        PayrollRun run,
+        string periodLabel,
+        string? message,
+        string printInnerHtml,
+        string printHtmlDocument)
     {
         var totalEarnings = payslip.Earnings.Sum(e => e.Amount);
         var totalDeductions = payslip.Deductions.Sum(e => e.Amount);
+        var bonusIncomeTax = payslip.BonusIncomeTax;
+        var normalIncomeTax = payslip.NormalIncomeTax == 0m
+            ? Math.Max(0, payslip.IncomeTax - bonusIncomeTax)
+            : payslip.NormalIncomeTax;
+
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["employee_id"] = payslip.EmployeeId.ToString(),
+            ["employee_number"] = payslip.EmployeeNumber ?? string.Empty,
+            ["employee_name"] = payslip.EmployeeName ?? string.Empty,
+            ["employee_email"] = payslip.EmployeeEmail ?? string.Empty,
+            ["department"] = payslip.DepartmentName ?? string.Empty,
+            ["section"] = payslip.SectionName ?? string.Empty,
+            ["position"] = payslip.PositionTitle ?? string.Empty,
+            ["pay_period"] = periodLabel,
+            ["run_number"] = run.RunNumber ?? string.Empty,
+            ["payslip_number"] = payslip.Snapshot?.PayslipNumber ?? string.Empty,
+            ["company_name"] = payslip.CompanyName ?? string.Empty,
+            ["company_address"] = payslip.CompanyAddress ?? string.Empty,
+            ["currency_code"] = payslip.CurrencyCode ?? string.Empty,
+            ["gross_amount"] = FormatEmailAmount(payslip.GrossIncome),
+            ["total_earnings"] = FormatEmailAmount(totalEarnings),
+            ["total_deductions"] = FormatEmailAmount(totalDeductions),
+            ["net_salary"] = FormatEmailAmount(payslip.NetIncome),
+            ["taxable_income"] = FormatEmailAmount(payslip.TaxableIncome),
+            ["income_tax"] = FormatEmailAmount(payslip.IncomeTax),
+            ["normal_income_tax"] = FormatEmailAmount(normalIncomeTax),
+            ["bonus_income_tax"] = FormatEmailAmount(bonusIncomeTax),
+            ["employee_contribution"] = FormatEmailAmount(payslip.EmployeeContribution),
+            ["employer_contribution"] = FormatEmailAmount(payslip.EmployerContribution),
+            ["message"] = message ?? string.Empty,
+            ["action_url"] = $"/hr/payroll?runId={run.Id}",
+            ["payslip_print_html"] = printInnerHtml,
+            ["payslip_print_html_document"] = printHtmlDocument
+        };
+    }
+
+    private static string BuildPayslipEmailHtml(
+        EmailTemplate? template,
+        IReadOnlyDictionary<string, string> values)
+    {
+        var body = string.IsNullOrWhiteSpace(template?.HtmlBody)
+            ? DefaultPayrollPayslipEmailHtmlTemplate()
+            : template!.HtmlBody;
+
+        return RenderNotificationTemplate(body, values);
+    }
+
+    private static string DefaultPayrollPayslipEmailHtmlTemplate()
+        => """
+           <p>Dear {{employee_name}},</p>
+           <p>Your payslip for {{pay_period}} is attached as a PDF.</p>
+           <p>Run: <strong>{{run_number}}</strong></p>
+           <p>Net salary: <strong>{{net_salary}}</strong> {{currency_code}}</p>
+           {{message}}
+           """;
+
+    private static string RenderNotificationTemplate(string template, IReadOnlyDictionary<string, string> values)
+    {
+        if (string.IsNullOrEmpty(template))
+        {
+            return string.Empty;
+        }
+
+        var rendered = template;
+        foreach (var (key, value) in values)
+        {
+            rendered = rendered.Replace("{{" + key + "}}", value ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return rendered;
+    }
+
+    private static string BuildPayslipPrintHtmlDocument(PayrollPayslipDto payslip)
+    {
         var builder = new StringBuilder();
-
-        builder.AppendLine("<!doctype html><html><head><meta charset=\"utf-8\"><style>");
-        builder.AppendLine("body{font-family:Arial,sans-serif;color:#111;line-height:1.4;margin:0;padding:24px;background:#f7f7f7}");
-        builder.AppendLine(".payslip{max-width:760px;margin:0 auto;background:#fff;border:1px solid #111;padding:24px}");
-        builder.AppendLine("h1,h2,h3{margin:0;text-align:center}.muted{color:#555}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 32px;margin:18px 0}");
-        builder.AppendLine("table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-bottom:1px solid #ddd;padding:6px;text-align:left}td.amount,th.amount{text-align:right}");
-        builder.AppendLine(".summary{margin-top:18px;border:1px solid #111;padding:12px}.message{margin:16px 0;padding:12px;background:#f3f4f6}");
-        builder.AppendLine("</style></head><body><div class=\"payslip\">");
-
-        if (!string.IsNullOrWhiteSpace(payslip.CompanyName))
-        {
-            builder.Append("<h2>").Append(Html(payslip.CompanyName)).AppendLine("</h2>");
-        }
-
-        if (!string.IsNullOrWhiteSpace(payslip.CompanyAddress))
-        {
-            builder.Append("<div style=\"text-align:center\">").Append(Html(payslip.CompanyAddress)).AppendLine("</div>");
-        }
-
-        if (!string.IsNullOrWhiteSpace(payslip.CompanyPhone))
-        {
-            builder.Append("<div style=\"text-align:center\">").Append(Html(payslip.CompanyPhone)).AppendLine("</div>");
-        }
-
-        builder.Append("<h1 style=\"margin-top:16px\">").Append(payslip.IsSeparateBonusRun ? "Bonus Slip" : "Payslip").AppendLine("</h1>");
-        builder.Append("<div class=\"muted\" style=\"text-align:center\">").Append(Html(periodLabel)).AppendLine("</div>");
-
-        if (!string.IsNullOrWhiteSpace(message))
-        {
-            builder.Append("<div class=\"message\">").Append(Html(message)).AppendLine("</div>");
-        }
-
-        builder.AppendLine("<div class=\"grid\">");
-        AppendEmailDetail(builder, "Employee No", payslip.EmployeeNumber);
-        AppendEmailDetail(builder, "Employee", payslip.EmployeeName);
-        AppendEmailDetail(builder, "Department", payslip.DepartmentName);
-        AppendEmailDetail(builder, "Position", payslip.PositionTitle);
-        AppendEmailDetail(builder, "Currency", payslip.CurrencyCode);
-        AppendEmailDetail(builder, "Run", payslip.RunNumber);
-        builder.AppendLine("</div>");
-
-        AppendPayslipEmailLines(builder, "Earnings", payslip.Earnings);
-        AppendPayslipEmailLines(builder, "Deductions", payslip.Deductions);
-
-        builder.AppendLine("<div class=\"summary\"><table>");
-        AppendAmountRow(builder, "Total Earnings", totalEarnings);
-        AppendAmountRow(builder, "Total Deductions", totalDeductions);
-        AppendAmountRow(builder, "Taxable Income", payslip.TaxableIncome);
-        AppendAmountRow(builder, "Income Tax", payslip.IncomeTax);
-        AppendAmountRow(builder, payslip.IsSeparateBonusRun ? "Net Bonus" : "Net Salary", payslip.NetIncome);
-        builder.AppendLine("</table></div>");
-
-        if (payslip.BankDetails.Count > 0)
-        {
-            builder.AppendLine("<h3 style=\"margin-top:18px\">Bank Details</h3><table><thead><tr><th>Bank</th><th>Account</th><th>Currency</th><th class=\"amount\">Amount</th></tr></thead><tbody>");
-            foreach (var bank in payslip.BankDetails)
-            {
-                builder.Append("<tr><td>").Append(Html(bank.BankName))
-                    .Append("</td><td>").Append(Html(bank.AccountNumber))
-                    .Append("</td><td>").Append(Html(bank.CurrencyCode))
-                    .Append("</td><td class=\"amount\">").Append(FormatEmailAmount(bank.Amount))
-                    .AppendLine("</td></tr>");
-            }
-            builder.AppendLine("</tbody></table>");
-        }
-
-        builder.AppendLine("</div></body></html>");
+        builder.AppendLine("<!doctype html><html><head><meta charset=\"utf-8\"><title>");
+        builder.Append(Html(payslip.IsSeparateBonusRun ? "Bonus Slip" : "Payslip"));
+        builder.AppendLine("</title><style>");
+        builder.AppendLine("body{margin:0;padding:0;background:#fff;color:#000}");
+        builder.AppendLine(".payroll-payslip-print-root{box-sizing:border-box;width:210mm;height:297mm;overflow:hidden;border:1px solid #000;background:#fff;padding:14mm 1mm 3mm 1mm;font-family:Arial,Helvetica,sans-serif;font-size:10.5px;line-height:1.15;color:#000}");
+        builder.AppendLine(".payroll-payslip-print-root *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}");
+        builder.AppendLine("@page{size:A4;margin:0}");
+        builder.AppendLine("</style></head><body><article class=\"payroll-payslip-print-root\">");
+        builder.Append(BuildPayslipPrintInnerHtml(payslip, includeStyle: true));
+        builder.AppendLine("</article></body></html>");
         return builder.ToString();
     }
 
-    private static void AppendPayslipEmailLines(StringBuilder builder, string title, IReadOnlyList<PayrollTransactionDto> lines)
+    private static string BuildPayslipPrintInnerHtml(PayrollPayslipDto payslip, bool includeStyle = true)
     {
-        builder.Append("<h3 style=\"margin-top:18px\">").Append(Html(title)).AppendLine("</h3>");
-        builder.AppendLine("<table><thead><tr><th>Description</th><th class=\"amount\">Amount</th></tr></thead><tbody>");
-        foreach (var line in lines.Where(e => e.Amount != 0))
+        var builder = new StringBuilder();
+        if (includeStyle)
         {
-            builder.Append("<tr><td>").Append(Html(line.Description ?? line.ComponentCode ?? line.TransactionType))
-                .Append("</td><td class=\"amount\">").Append(FormatEmailAmount(line.Amount))
-                .AppendLine("</td></tr>");
+            builder.AppendLine("<style>");
+            builder.AppendLine(PayslipPrintInnerCss());
+            builder.AppendLine("</style>");
         }
 
-        if (!lines.Any(e => e.Amount != 0))
+        builder.AppendLine("<div class=\"pps-root\">");
+        if (payslip.IsSeparateBonusRun)
         {
-            builder.AppendLine("<tr><td colspan=\"2\" class=\"muted\">No lines</td></tr>");
+            AppendBonusSlipHtml(builder, payslip);
+        }
+        else
+        {
+            AppendStandardPayslipHtml(builder, payslip);
+        }
+        builder.AppendLine("</div>");
+        return builder.ToString();
+    }
+
+    private static string PayslipPrintInnerCss()
+        => """
+           .pps-root{min-height:100%;display:flex;flex-direction:column;color:#000;font-size:10.5px;line-height:1.15}
+           .pps-fill{flex:1 1 auto}
+           .pps-center{text-align:center}
+           .pps-company{font-size:16px;font-weight:700}
+           .pps-title{margin-top:2.5mm;font-size:16px;font-weight:700}
+           .pps-underline{display:inline-flex;flex-direction:column;white-space:nowrap;line-height:1.08;vertical-align:bottom}
+           .pps-underline::after{content:"";display:block;border-top:1px solid #000;height:0;margin-top:2px;width:100%}
+           .pps-details{display:grid;grid-template-columns:1fr 1fr;column-gap:8mm;margin-top:7mm}
+           .pps-details-col{display:flex;flex-direction:column;gap:4px}
+           .pps-detail{display:grid;grid-template-columns:86px 5px minmax(0,1fr)}
+           .pps-detail-label{font-weight:700;text-align:right;white-space:nowrap}
+           .pps-detail-colon{font-weight:700;text-align:center}
+           .pps-detail-value{font-weight:500;white-space:nowrap;min-width:0}
+           .pps-lines{border-top:1px solid #000;margin-top:4mm;padding-top:1.5mm}
+           .pps-line-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:6mm}
+           .pps-table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:10.5px;line-height:1.15}
+           .pps-table th{font-weight:700;padding-bottom:1.5mm}
+           .pps-table td{font-weight:500;padding:3px 0;vertical-align:top}
+           .pps-item-head{width:32px;text-align:left}
+           .pps-line-title{text-align:center;font-size:15px;font-weight:400}
+           .pps-amount-head{width:64px;text-align:right}
+           .pps-line-label{white-space:nowrap;padding-right:8px}
+           .pps-amount{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+           .pps-summary{border:1px solid #000;margin:3.5mm auto 0 auto;padding:1.5mm 3mm;width:84mm;font-size:10.5px}
+           .pps-summary-title{text-align:center;font-size:12.5px;font-weight:700;margin-bottom:1.5mm}
+           .pps-summary-grid{display:grid;grid-template-columns:1fr 88px;row-gap:1mm}
+           .pps-bold{font-weight:700}
+           .pps-tax{margin-top:1.5mm;font-size:10.5px}
+           .pps-tax-title{text-align:center;font-size:14px;font-weight:400}
+           .pps-tax-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:4mm;margin-top:1mm}
+           .pps-tax-col{display:grid;grid-template-columns:max-content 4px 72px}
+           .pps-tax-col span{white-space:nowrap}
+           .pps-contrib{margin-top:3mm;font-size:9.5px;line-height:1.15}
+           .pps-contrib-title{text-align:center;font-size:13px;font-weight:400}
+           .pps-contrib table{border-collapse:collapse;table-layout:fixed;width:100%;margin-top:1mm}
+           .pps-contrib th{font-weight:700;vertical-align:bottom}
+           .pps-contrib td{padding:3px 0}
+           .pps-bank{border-top:1px solid #000;margin-top:2mm;padding-top:1.5mm;font-size:10px;line-height:1.15}
+           .pps-bank-title{text-align:center;font-size:13px;font-weight:400}
+           .pps-bank-grid{display:grid;grid-template-columns:74mm 34mm 23mm 24mm minmax(22mm,1fr);column-gap:2mm;margin-top:2mm}
+           .pps-bank-row{display:grid;grid-template-columns:74mm 34mm 23mm 24mm minmax(22mm,1fr);column-gap:2mm;margin-top:4px}
+           .pps-bank-grid span,.pps-bank-row span{white-space:nowrap}
+           .pps-footer{height:2mm;margin-top:auto}
+           .pps-bonus-title{margin-top:8mm;font-size:17px;font-weight:700}
+           .pps-bonus-details{margin:10mm auto 0 auto;width:150mm;display:flex;flex-direction:column;gap:2mm;font-size:12px}
+           .pps-bonus-lines{margin:8mm auto 0 auto;width:150mm;font-size:12px}
+           .pps-bonus-row{display:grid;grid-template-columns:1fr 38mm;padding:2mm 0}
+           .pps-border-bottom{border-bottom:1px solid #000}
+           .pps-border-top{border-top:1px solid #000}
+           """;
+
+    private static void AppendStandardPayslipHtml(StringBuilder builder, PayrollPayslipDto payslip)
+    {
+        var totalEarnings = payslip.Earnings.Sum(e => e.Amount);
+        var totalDeductions = payslip.Deductions.Sum(e => e.Amount);
+        var bonusIncomeTax = payslip.BonusIncomeTax;
+        var normalIncomeTax = payslip.NormalIncomeTax == 0m
+            ? Math.Max(0, payslip.IncomeTax - bonusIncomeTax)
+            : payslip.NormalIncomeTax;
+
+        builder.AppendLine("<div class=\"pps-fill\">");
+        AppendPayslipHeader(builder, payslip, "PAYSLIP", titleClass: "pps-title");
+
+        builder.AppendLine("<section class=\"pps-details\">");
+        builder.AppendLine("<div class=\"pps-details-col\">");
+        AppendPayslipDetail(builder, "Employee ID", payslip.EmployeeNumber);
+        AppendPayslipDetail(builder, "Name", payslip.EmployeeName);
+        AppendPayslipDetail(builder, "Department", payslip.DepartmentName);
+        AppendPayslipDetail(builder, "Section", payslip.SectionName);
+        AppendPayslipDetail(builder, "Positions", payslip.PositionTitle);
+        builder.AppendLine("<div style=\"padding-top:5px\">");
+        AppendPayslipDetail(builder, "Staff Category", payslip.StaffCategory);
+        builder.AppendLine("</div>");
+        builder.AppendLine("</div>");
+        builder.AppendLine("<div class=\"pps-details-col\">");
+        AppendPayslipDetail(builder, "Month", FormatPayslipMonth(payslip.PayPeriodTo));
+        AppendPayslipDetail(builder, "Currency Used", CurrencyLabel(payslip.CurrencyCode));
+        AppendPayslipDetail(builder, "Job Location", payslip.JobLocation);
+        AppendPayslipDetail(builder, "SSF Number", payslip.SsfNumber);
+        AppendPayslipDetail(builder, "Staff TIN", payslip.StaffTin);
+        builder.AppendLine("</div></section>");
+
+        builder.AppendLine("<section class=\"pps-lines\"><div class=\"pps-line-grid\">");
+        AppendPayLinesTable(builder, "EARNINGS", payslip.Earnings);
+        AppendPayLinesTable(builder, "DEDUCTIONS", payslip.Deductions);
+        builder.AppendLine("</div></section>");
+
+        builder.AppendLine("<section class=\"pps-summary\">");
+        builder.Append("<div class=\"pps-summary-title\">").Append(Underline($"SALARY SUMMARY ({CurrencyLabel(payslip.CurrencyCode)})")).AppendLine("</div>");
+        builder.AppendLine("<div class=\"pps-summary-grid\">");
+        AppendSummaryLine(builder, "Total Earnings :", totalEarnings, bold: false);
+        AppendSummaryLine(builder, "Total Deductions :", totalDeductions, bold: false);
+        AppendSummaryLine(builder, "Net Salary :", payslip.NetIncome, bold: true);
+        builder.AppendLine("</div></section>");
+
+        builder.AppendLine("<section class=\"pps-tax\">");
+        builder.Append("<div class=\"pps-tax-title\">").Append(Underline("TAX ANALYSIS")).AppendLine("</div>");
+        builder.AppendLine("<div class=\"pps-tax-grid\">");
+        builder.AppendLine("<div class=\"pps-tax-col\">");
+        AppendTaxLine(builder, "Taxable Earning", payslip.TaxableIncome, bold: false);
+        AppendTaxLine(builder, "Tax Relief", payslip.TaxRelief, bold: false);
+        builder.AppendLine("</div><div class=\"pps-tax-col\">");
+        AppendTaxLine(builder, "Income Tax (Normal)", normalIncomeTax, bold: false);
+        AppendTaxLine(builder, "Income Tax (Bonus)", bonusIncomeTax, bold: false);
+        AppendTaxLine(builder, "Income Tax (Total)", payslip.IncomeTax, bold: true);
+        builder.AppendLine("</div></div></section>");
+
+        AppendContributionStatementHtml(builder, payslip);
+        AppendBankDetailsHtml(builder, payslip);
+        builder.AppendLine("</div><footer class=\"pps-footer\"></footer>");
+    }
+
+    private static void AppendBonusSlipHtml(StringBuilder builder, PayrollPayslipDto payslip)
+    {
+        var bonusLines = payslip.Earnings
+            .Where(e => e.TransactionType.Equals(BonusTransactionType, StringComparison.OrdinalIgnoreCase) && e.Amount != 0)
+            .ToList();
+        var bonusAmount = bonusLines.Sum(e => e.Amount);
+        var bank = payslip.BankDetails.FirstOrDefault();
+        var description = string.Join(", ", bonusLines.Select(LineLabel).Where(e => !string.IsNullOrWhiteSpace(e)));
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            description = TrimOrNull(payslip.SeparateBonusCode) ?? "Bonus";
+        }
+
+        AppendPayslipHeader(builder, payslip, "Bonus Slip", titleClass: "pps-bonus-title");
+        builder.AppendLine("<section class=\"pps-bonus-details\">");
+        AppendPayslipDetail(builder, "Staff No", payslip.EmployeeNumber);
+        AppendPayslipDetail(builder, "Staff Name", payslip.EmployeeName);
+        AppendPayslipDetail(builder, "Bank", bank?.BankName);
+        AppendPayslipDetail(builder, "Acct No", bank?.AccountNumber);
+        builder.AppendLine("</section>");
+
+        builder.AppendLine("<section class=\"pps-bonus-lines\">");
+        builder.AppendLine("<div class=\"pps-bonus-row pps-border-bottom pps-bold\">");
+        builder.Append(Underline("Description")).Append("<span class=\"pps-amount\">").Append(Underline("Amount")).AppendLine("</span></div>");
+        AppendBonusLine(builder, description, bonusAmount, bold: false, borderTop: false);
+        AppendBonusLine(builder, "Income Tax", payslip.IncomeTax, bold: false, borderTop: false);
+        AppendBonusLine(builder, "Net Bonus", payslip.NetIncome, bold: true, borderTop: true);
+        builder.AppendLine("</section><footer class=\"pps-footer\"></footer>");
+    }
+
+    private static void AppendPayslipHeader(StringBuilder builder, PayrollPayslipDto payslip, string title, string titleClass)
+    {
+        builder.AppendLine("<header class=\"pps-center\">");
+        if (!string.IsNullOrWhiteSpace(payslip.CompanyName))
+        {
+            builder.Append("<div class=\"pps-company\">").Append(Html(payslip.CompanyName)).AppendLine("</div>");
+        }
+        if (!string.IsNullOrWhiteSpace(payslip.CompanyAddress))
+        {
+            builder.Append("<div>").Append(Html(payslip.CompanyAddress)).AppendLine("</div>");
+        }
+        if (!string.IsNullOrWhiteSpace(payslip.CompanyPhone))
+        {
+            builder.Append("<div>").Append(Html(payslip.CompanyPhone)).AppendLine("</div>");
+        }
+        builder.Append("<div class=\"").Append(titleClass).Append("\">").Append(Underline(title)).AppendLine("</div>");
+        builder.AppendLine("</header>");
+    }
+
+    private static void AppendPayslipDetail(StringBuilder builder, string label, string? value)
+    {
+        builder.Append("<div class=\"pps-detail\"><span class=\"pps-detail-label\">")
+            .Append(Html(label))
+            .Append("</span><span class=\"pps-detail-colon\">:</span><span class=\"pps-detail-value\">")
+            .Append(Html(value))
+            .AppendLine("</span></div>");
+    }
+
+    private static void AppendPayLinesTable(StringBuilder builder, string title, IReadOnlyList<PayrollTransactionDto> lines)
+    {
+        var visibleLines = lines
+            .Where(e => e.Amount != 0)
+            .OrderBy(LineOrder)
+            .ThenBy(LineLabel)
+            .ToList();
+
+        builder.AppendLine("<table class=\"pps-table\"><thead><tr>");
+        builder.Append("<th class=\"pps-item-head\">").Append(Underline("Item")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-line-title\">").Append(Underline(title)).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount-head\">").Append(Underline("Amount")).AppendLine("</th>");
+        builder.AppendLine("</tr></thead><tbody>");
+
+        foreach (var line in visibleLines)
+        {
+            builder.Append("<tr><td colspan=\"2\" class=\"pps-line-label\">")
+                .Append(Html(LineLabel(line)))
+                .Append("</td><td class=\"pps-amount\">")
+                .Append(FormatEmailAmount(line.Amount))
+                .AppendLine("</td></tr>");
         }
 
         builder.AppendLine("</tbody></table>");
     }
 
-    private static void AppendEmailDetail(StringBuilder builder, string label, string? value)
-        => builder.Append("<div><strong>").Append(Html(label)).Append(":</strong> ").Append(Html(value)).AppendLine("</div>");
+    private static void AppendSummaryLine(StringBuilder builder, string label, decimal amount, bool bold)
+    {
+        var css = bold ? " class=\"pps-bold\"" : string.Empty;
+        builder.Append("<span").Append(css).Append(">").Append(Html(label)).Append("</span><span class=\"pps-amount");
+        if (bold) builder.Append(" pps-bold");
+        builder.Append("\">").Append(FormatEmailAmount(amount)).AppendLine("</span>");
+    }
 
-    private static void AppendAmountRow(StringBuilder builder, string label, decimal amount)
-        => builder.Append("<tr><td><strong>").Append(Html(label)).Append("</strong></td><td class=\"amount\"><strong>")
-            .Append(FormatEmailAmount(amount)).AppendLine("</strong></td></tr>");
+    private static void AppendTaxLine(StringBuilder builder, string label, decimal amount, bool bold)
+    {
+        var boldClass = bold ? " pps-bold" : string.Empty;
+        builder.Append("<span class=\"").Append(boldClass.Trim()).Append("\">").Append(Html(label)).Append("</span><span>:</span><span class=\"pps-amount")
+            .Append(boldClass).Append("\">").Append(FormatEmailAmount(amount)).AppendLine("</span>");
+    }
+
+    private static void AppendContributionStatementHtml(StringBuilder builder, PayrollPayslipDto payslip)
+    {
+        var providentRows = payslip.Contributions.Where(e => e.IsProvidentFund).ToList();
+        var statutoryRows = payslip.Contributions.Where(e => !e.IsProvidentFund).ToList();
+        if (statutoryRows.Count == 0)
+        {
+            statutoryRows.Add(new PayrollPayslipContributionDto { Item = "SOCIAL SECURITY FUND" });
+        }
+
+        builder.AppendLine("<section class=\"pps-contrib\">");
+        builder.Append("<div class=\"pps-contrib-title\">").Append(Underline("CONTRIBUTION STATEMENT")).AppendLine("</div>");
+        builder.AppendLine("<table><thead><tr>");
+        builder.Append("<th style=\"width:30mm;text-align:left;font-style:italic\">").Append(Underline("Item")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Employee's Contr.")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Employer's Contr.")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Total Contri.")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Opening Bal.")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Total Withdrawal")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Grand Total")).AppendLine("</th>");
+        builder.AppendLine("</tr></thead><tbody>");
+        foreach (var line in providentRows)
+        {
+            builder.Append("<tr><td>").Append(Html(line.Item)).Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.EmployeeContribution))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.EmployerContribution))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.TotalContribution))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.OpeningBalance))
+                .Append("</td><td class=\"pps-amount\">").Append(line.TotalWithdrawal == 0 ? string.Empty : FormatEmailAmount(line.TotalWithdrawal))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.GrandTotal))
+                .AppendLine("</td></tr>");
+        }
+        builder.AppendLine("</tbody></table>");
+
+        builder.AppendLine("<table style=\"margin-top:1.5mm\"><thead><tr>");
+        builder.Append("<th style=\"width:42mm;text-align:left;font-style:italic\">").Append(Underline("Item")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Employee's Contr.")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Employer's Contr.")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("Total Contribution")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("1st Tier")).AppendLine("</th>");
+        builder.Append("<th class=\"pps-amount\">").Append(Underline("2nd Tier")).AppendLine("</th>");
+        builder.AppendLine("</tr></thead><tbody>");
+        foreach (var line in statutoryRows)
+        {
+            builder.Append("<tr><td>").Append(Html(line.Item)).Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.EmployeeContribution))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.EmployerContribution))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.TotalContribution))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.FirstTier))
+                .Append("</td><td class=\"pps-amount\">").Append(FormatEmailAmount(line.SecondTier))
+                .AppendLine("</td></tr>");
+        }
+        builder.AppendLine("</tbody></table></section>");
+    }
+
+    private static void AppendBankDetailsHtml(StringBuilder builder, PayrollPayslipDto payslip)
+    {
+        IReadOnlyList<PayrollPayslipBankDetailDto> rows = payslip.BankDetails.Count > 0
+            ? payslip.BankDetails
+            : new List<PayrollPayslipBankDetailDto>
+            {
+                new() { CurrencyCode = payslip.CurrencyCode, Amount = payslip.NetIncome }
+            };
+
+        builder.AppendLine("<section class=\"pps-bank\">");
+        builder.Append("<div class=\"pps-bank-title\">").Append(Underline("BANK DETAILS")).AppendLine("</div>");
+        builder.AppendLine("<div class=\"pps-bank-grid pps-bold\">");
+        builder.Append(Underline("Bank")).Append(Underline("Acct No")).Append(Underline("Currency")).Append(Underline("Exch. Rate")).Append("<span class=\"pps-amount\">").Append(Underline("Amount")).AppendLine("</span></div>");
+        foreach (var row in rows)
+        {
+            builder.Append("<div class=\"pps-bank-row\"><span>").Append(Html(row.BankName))
+                .Append("</span><span>").Append(Html(row.AccountNumber))
+                .Append("</span><span>").Append(Html(CurrencyLabel(row.CurrencyCode)))
+                .Append("</span><span>").Append(row.ExchangeRate.HasValue ? FormatEmailAmount(row.ExchangeRate.Value) : string.Empty)
+                .Append("</span><span class=\"pps-amount\">").Append(FormatEmailAmount(row.Amount))
+                .AppendLine("</span></div>");
+        }
+        builder.AppendLine("</section>");
+    }
+
+    private static void AppendBonusLine(StringBuilder builder, string label, decimal amount, bool bold, bool borderTop)
+    {
+        var classes = new List<string> { "pps-bonus-row" };
+        if (bold) classes.Add("pps-bold");
+        if (borderTop) classes.Add("pps-border-top");
+        builder.Append("<div class=\"").Append(string.Join(' ', classes)).Append("\"><span>")
+            .Append(Html(label))
+            .Append("</span><span class=\"pps-amount\">")
+            .Append(FormatEmailAmount(amount))
+            .AppendLine("</span></div>");
+    }
+
+    private static byte[] BuildPayslipPdfAttachment(PayrollPayslipDto payslip)
+    {
+        QuestPDF.Settings.License = LicenseType.Community;
+
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(0);
+                page.PageColor(Colors.White);
+                page.DefaultTextStyle(x => x.FontFamily("Arial").FontSize(8.4f).FontColor(Colors.Black));
+                page.Content()
+                    .Border(1)
+                    .PaddingTop(38)
+                    .PaddingHorizontal(6)
+                    .PaddingBottom(8)
+                    .Element(content =>
+                    {
+                        if (payslip.IsSeparateBonusRun)
+                        {
+                            ComposeBonusSlipPdf(content, payslip);
+                        }
+                        else
+                        {
+                            ComposeStandardPayslipPdf(content, payslip);
+                        }
+                    });
+            });
+        }).GeneratePdf();
+    }
+
+    private static void ComposeStandardPayslipPdf(IContainer container, PayrollPayslipDto payslip)
+    {
+        var totalEarnings = payslip.Earnings.Sum(e => e.Amount);
+        var totalDeductions = payslip.Deductions.Sum(e => e.Amount);
+        var bonusIncomeTax = payslip.BonusIncomeTax;
+        var normalIncomeTax = payslip.NormalIncomeTax == 0m
+            ? Math.Max(0, payslip.IncomeTax - bonusIncomeTax)
+            : payslip.NormalIncomeTax;
+
+        container.Column(column =>
+        {
+            column.Spacing(6);
+            column.Item().Element(c => ComposePayslipPdfHeader(c, payslip, "PAYSLIP", 16));
+
+            column.Item().PaddingTop(15).Row(row =>
+            {
+                row.RelativeItem().Column(left =>
+                {
+                    left.Spacing(2);
+                    left.Item().Element(c => ComposePayslipPdfDetail(c, "Employee ID", payslip.EmployeeNumber));
+                    left.Item().Element(c => ComposePayslipPdfDetail(c, "Name", payslip.EmployeeName));
+                    left.Item().Element(c => ComposePayslipPdfDetail(c, "Department", payslip.DepartmentName));
+                    left.Item().Element(c => ComposePayslipPdfDetail(c, "Section", payslip.SectionName));
+                    left.Item().Element(c => ComposePayslipPdfDetail(c, "Positions", payslip.PositionTitle));
+                    left.Item().PaddingTop(4).Element(c => ComposePayslipPdfDetail(c, "Staff Category", payslip.StaffCategory));
+                });
+
+                row.RelativeItem().Column(right =>
+                {
+                    right.Spacing(2);
+                    right.Item().Element(c => ComposePayslipPdfDetail(c, "Month", FormatPayslipMonth(payslip.PayPeriodTo)));
+                    right.Item().Element(c => ComposePayslipPdfDetail(c, "Currency Used", CurrencyLabel(payslip.CurrencyCode)));
+                    right.Item().Element(c => ComposePayslipPdfDetail(c, "Job Location", payslip.JobLocation));
+                    right.Item().Element(c => ComposePayslipPdfDetail(c, "SSF Number", payslip.SsfNumber));
+                    right.Item().Element(c => ComposePayslipPdfDetail(c, "Staff TIN", payslip.StaffTin));
+                });
+            });
+
+            column.Item().PaddingTop(8).LineHorizontal(1);
+            column.Item().Row(row =>
+            {
+                row.RelativeItem().Element(c => ComposePayslipLinesPdf(c, "EARNINGS", payslip.Earnings));
+                row.ConstantItem(18);
+                row.RelativeItem().Element(c => ComposePayslipLinesPdf(c, "DEDUCTIONS", payslip.Deductions));
+            });
+
+            column.Item().AlignCenter().Width(250).Border(1).Padding(6).Column(summary =>
+            {
+                summary.Spacing(3);
+                summary.Item().Element(c => ComposePdfUnderlinedText(c, $"SALARY SUMMARY ({CurrencyLabel(payslip.CurrencyCode)})", 9, bold: true));
+                summary.Item().Element(c => ComposePayslipPdfAmountLine(c, "Total Earnings :", totalEarnings, bold: false));
+                summary.Item().Element(c => ComposePayslipPdfAmountLine(c, "Total Deductions :", totalDeductions, bold: false));
+                summary.Item().Element(c => ComposePayslipPdfAmountLine(c, "Net Salary :", payslip.NetIncome, bold: true));
+            });
+
+            column.Item().Column(tax =>
+            {
+                tax.Spacing(3);
+                tax.Item().Element(c => ComposePdfUnderlinedText(c, "TAX ANALYSIS", 10, bold: false));
+                tax.Item().Row(row =>
+                {
+                    row.RelativeItem().Column(left =>
+                    {
+                        left.Spacing(2);
+                        left.Item().Element(c => ComposePayslipPdfCompactAmountLine(c, "Taxable Earning", payslip.TaxableIncome, bold: false, labelWidth: 82));
+                        left.Item().Element(c => ComposePayslipPdfCompactAmountLine(c, "Tax Relief", payslip.TaxRelief, bold: false, labelWidth: 82));
+                    });
+                    row.RelativeItem().Column(right =>
+                    {
+                        right.Spacing(2);
+                        right.Item().Element(c => ComposePayslipPdfCompactAmountLine(c, "Income Tax (Normal)", normalIncomeTax, bold: false, labelWidth: 96));
+                        right.Item().Element(c => ComposePayslipPdfCompactAmountLine(c, "Income Tax (Bonus)", bonusIncomeTax, bold: false, labelWidth: 96));
+                        right.Item().Element(c => ComposePayslipPdfCompactAmountLine(c, "Income Tax (Total)", payslip.IncomeTax, bold: true, labelWidth: 96));
+                    });
+                });
+            });
+
+            column.Item().Element(c => ComposeContributionStatementPdf(c, payslip));
+            column.Item().Element(c => ComposeBankDetailsPdf(c, payslip));
+        });
+    }
+
+    private static void ComposeBonusSlipPdf(IContainer container, PayrollPayslipDto payslip)
+    {
+        var bonusLines = payslip.Earnings
+            .Where(e => e.TransactionType.Equals(BonusTransactionType, StringComparison.OrdinalIgnoreCase) && e.Amount != 0)
+            .ToList();
+        var bonusAmount = bonusLines.Sum(e => e.Amount);
+        var bank = payslip.BankDetails.FirstOrDefault();
+        var description = string.Join(", ", bonusLines.Select(LineLabel).Where(e => !string.IsNullOrWhiteSpace(e)));
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            description = TrimOrNull(payslip.SeparateBonusCode) ?? "Bonus";
+        }
+
+        container.Column(column =>
+        {
+            column.Spacing(18);
+            column.Item().Element(c => ComposePayslipPdfHeader(c, payslip, "Bonus Slip", 17));
+            column.Item().AlignCenter().Width(430).Column(details =>
+            {
+                details.Spacing(6);
+                details.Item().Element(c => ComposePayslipPdfDetail(c, "Staff No", payslip.EmployeeNumber));
+                details.Item().Element(c => ComposePayslipPdfDetail(c, "Staff Name", payslip.EmployeeName));
+                details.Item().Element(c => ComposePayslipPdfDetail(c, "Bank", bank?.BankName));
+                details.Item().Element(c => ComposePayslipPdfDetail(c, "Acct No", bank?.AccountNumber));
+            });
+
+            column.Item().AlignCenter().Width(430).Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    columns.RelativeColumn();
+                    columns.ConstantColumn(110);
+                });
+
+                table.Header(header =>
+                {
+                    header.Cell().BorderBottom(1).PaddingVertical(4).Text("Description").Bold();
+                    header.Cell().BorderBottom(1).PaddingVertical(4).AlignRight().Text("Amount").Bold();
+                });
+
+                ComposeBonusPdfLine(table, description, bonusAmount, bold: false, borderTop: false);
+                ComposeBonusPdfLine(table, "Income Tax", payslip.IncomeTax, bold: false, borderTop: false);
+                ComposeBonusPdfLine(table, "Net Bonus", payslip.NetIncome, bold: true, borderTop: true);
+            });
+        });
+    }
+
+    private static void ComposePayslipPdfHeader(IContainer container, PayrollPayslipDto payslip, string title, int titleSize)
+    {
+        container.Column(column =>
+        {
+            column.Spacing(2);
+            if (!string.IsNullOrWhiteSpace(payslip.CompanyName))
+            {
+                column.Item().AlignCenter().Text(payslip.CompanyName).Bold().FontSize(15);
+            }
+            if (!string.IsNullOrWhiteSpace(payslip.CompanyAddress))
+            {
+                column.Item().AlignCenter().Text(payslip.CompanyAddress).FontSize(8);
+            }
+            if (!string.IsNullOrWhiteSpace(payslip.CompanyPhone))
+            {
+                column.Item().AlignCenter().Text(payslip.CompanyPhone).FontSize(8);
+            }
+            column.Item().PaddingTop(8).Element(c => ComposePdfUnderlinedText(c, title, titleSize, bold: true));
+        });
+    }
+
+    private static void ComposePayslipPdfDetail(IContainer container, string label, string? value)
+    {
+        container.Row(row =>
+        {
+            row.ConstantItem(92).AlignRight().Text(label).Bold();
+            row.ConstantItem(10).AlignCenter().Text(":").Bold();
+            row.RelativeItem().Text(value ?? string.Empty).SemiBold();
+        });
+    }
+
+    private static void ComposePayslipLinesPdf(IContainer container, string title, IReadOnlyList<PayrollTransactionDto> lines)
+    {
+        var visibleLines = lines
+            .Where(e => e.Amount != 0)
+            .OrderBy(LineOrder)
+            .ThenBy(LineLabel)
+            .ToList();
+
+        container.Column(column =>
+        {
+            column.Spacing(2);
+            column.Item().PaddingBottom(2).Row(header =>
+            {
+                header.ConstantItem(32).Element(c => ComposePdfUnderlinedText(c, "Item", 8.5f, bold: true, alignment: PdfUnderlineAlignment.Left));
+                header.RelativeItem().Element(c => ComposePdfUnderlinedText(c, title, 10.5f, bold: true));
+                header.ConstantItem(70).Element(c => ComposePdfUnderlinedText(c, "Amount", 8.5f, bold: true, alignment: PdfUnderlineAlignment.Right));
+            });
+
+            column.Item().Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    columns.RelativeColumn();
+                    columns.ConstantColumn(70);
+                });
+
+                foreach (var line in visibleLines)
+                {
+                    table.Cell().PaddingVertical(1).Text(LineLabel(line)).FontSize(8);
+                    table.Cell().PaddingVertical(1).AlignRight().Text(FormatEmailAmount(line.Amount)).FontSize(8);
+                }
+            });
+        });
+    }
+
+    private static void ComposePayslipPdfAmountLine(IContainer container, string label, decimal amount, bool bold)
+    {
+        container.Row(row =>
+        {
+            var labelCell = row.RelativeItem().Text(label);
+            var amountCell = row.ConstantItem(92).AlignRight().Text(FormatEmailAmount(amount));
+            if (bold)
+            {
+                labelCell.Bold();
+                amountCell.Bold();
+            }
+        });
+    }
+
+    private static void ComposePayslipPdfCompactAmountLine(IContainer container, string label, decimal amount, bool bold, float labelWidth)
+    {
+        container.Row(row =>
+        {
+            var labelCell = row.ConstantItem(labelWidth).Text(label);
+            var colonCell = row.ConstantItem(5).AlignCenter().Text(":");
+            var amountCell = row.ConstantItem(72).AlignRight().Text(FormatEmailAmount(amount));
+            if (bold)
+            {
+                labelCell.Bold();
+                colonCell.Bold();
+                amountCell.Bold();
+            }
+        });
+    }
+
+    private static void ComposeContributionStatementPdf(IContainer container, PayrollPayslipDto payslip)
+    {
+        var providentRows = payslip.Contributions.Where(e => e.IsProvidentFund).ToList();
+        var statutoryRows = payslip.Contributions.Where(e => !e.IsProvidentFund).ToList();
+        if (statutoryRows.Count == 0)
+        {
+            statutoryRows.Add(new PayrollPayslipContributionDto { Item = "SOCIAL SECURITY FUND" });
+        }
+
+        container.DefaultTextStyle(x => x.FontSize(6.7f)).Column(column =>
+        {
+            column.Spacing(4);
+            column.Item().Element(c => ComposePdfUnderlinedText(c, "CONTRIBUTION STATEMENT", 9, bold: false));
+            column.Item().Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    columns.RelativeColumn(1.45f);
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                });
+
+                table.Header(header =>
+                {
+                    ComposePdfHeaderCell(header, "Item", alignRight: false);
+                    ComposePdfHeaderCell(header, "Employee's Contr.", alignRight: true);
+                    ComposePdfHeaderCell(header, "Employer's Contr.", alignRight: true);
+                    ComposePdfHeaderCell(header, "Total Contri.", alignRight: true);
+                    ComposePdfHeaderCell(header, "Opening Bal.", alignRight: true);
+                    ComposePdfHeaderCell(header, "Total Withdrawal", alignRight: true);
+                    ComposePdfHeaderCell(header, "Grand Total", alignRight: true);
+                });
+
+                foreach (var line in providentRows)
+                {
+                    ComposePdfTextCell(table, line.Item, alignRight: false);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.EmployeeContribution), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.EmployerContribution), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.TotalContribution), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.OpeningBalance), alignRight: true);
+                    ComposePdfTextCell(table, line.TotalWithdrawal == 0 ? string.Empty : FormatEmailAmount(line.TotalWithdrawal), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.GrandTotal), alignRight: true);
+                }
+            });
+
+            column.Item().Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    columns.RelativeColumn(1.6f);
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                });
+
+                table.Header(header =>
+                {
+                    ComposePdfHeaderCell(header, "Item", alignRight: false);
+                    ComposePdfHeaderCell(header, "Employee's Contr.", alignRight: true);
+                    ComposePdfHeaderCell(header, "Employer's Contr.", alignRight: true);
+                    ComposePdfHeaderCell(header, "Total Contribution", alignRight: true);
+                    ComposePdfHeaderCell(header, "1st Tier", alignRight: true);
+                    ComposePdfHeaderCell(header, "2nd Tier", alignRight: true);
+                });
+
+                foreach (var line in statutoryRows)
+                {
+                    ComposePdfTextCell(table, line.Item, alignRight: false);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.EmployeeContribution), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.EmployerContribution), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.TotalContribution), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.FirstTier), alignRight: true);
+                    ComposePdfTextCell(table, FormatEmailAmount(line.SecondTier), alignRight: true);
+                }
+            });
+        });
+    }
+
+    private static void ComposeBankDetailsPdf(IContainer container, PayrollPayslipDto payslip)
+    {
+        IReadOnlyList<PayrollPayslipBankDetailDto> rows = payslip.BankDetails.Count > 0
+            ? payslip.BankDetails
+            : new List<PayrollPayslipBankDetailDto>
+            {
+                new() { CurrencyCode = payslip.CurrencyCode, Amount = payslip.NetIncome }
+            };
+
+        container.BorderTop(1).PaddingTop(4).DefaultTextStyle(x => x.FontSize(7.5f)).Column(column =>
+        {
+            column.Spacing(4);
+            column.Item().Element(c => ComposePdfUnderlinedText(c, "BANK DETAILS", 9, bold: false));
+            column.Item().Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    columns.RelativeColumn(2.4f);
+                    columns.RelativeColumn(1.3f);
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn(1.2f);
+                });
+
+                table.Header(header =>
+                {
+                    ComposePdfHeaderCell(header, "Bank", alignRight: false);
+                    ComposePdfHeaderCell(header, "Acct No", alignRight: false);
+                    ComposePdfHeaderCell(header, "Currency", alignRight: false);
+                    ComposePdfHeaderCell(header, "Exch. Rate", alignRight: false);
+                    ComposePdfHeaderCell(header, "Amount", alignRight: true);
+                });
+
+                foreach (var row in rows)
+                {
+                    ComposePdfTextCell(table, row.BankName, alignRight: false);
+                    ComposePdfTextCell(table, row.AccountNumber, alignRight: false);
+                    ComposePdfTextCell(table, CurrencyLabel(row.CurrencyCode), alignRight: false);
+                    ComposePdfTextCell(table, row.ExchangeRate.HasValue ? FormatEmailAmount(row.ExchangeRate.Value) : string.Empty, alignRight: false);
+                    ComposePdfTextCell(table, FormatEmailAmount(row.Amount), alignRight: true);
+                }
+            });
+        });
+    }
+
+    private static void ComposeBonusPdfLine(TableDescriptor table, string label, decimal amount, bool bold, bool borderTop)
+    {
+        var labelCell = table.Cell();
+        var amountCell = table.Cell();
+        var labelContainer = borderTop ? labelCell.BorderTop(1) : labelCell;
+        var amountContainer = borderTop ? amountCell.BorderTop(1) : amountCell;
+        var labelText = labelContainer.PaddingVertical(5).Text(label);
+        var amountText = amountContainer.PaddingVertical(5).AlignRight().Text(FormatEmailAmount(amount));
+        if (bold)
+        {
+            labelText.Bold();
+            amountText.Bold();
+        }
+    }
+
+    private static void ComposePdfUnderlinedText(
+        IContainer container,
+        string text,
+        float fontSize,
+        bool bold = false,
+        PdfUnderlineAlignment alignment = PdfUnderlineAlignment.Center)
+    {
+        var width = EstimatePdfUnderlineWidth(text, fontSize, bold);
+        var aligned = alignment switch
+        {
+            PdfUnderlineAlignment.Left => container.AlignLeft(),
+            PdfUnderlineAlignment.Right => container.AlignRight(),
+            _ => container.AlignCenter()
+        };
+
+        aligned.Width(width).Column(column =>
+        {
+            column.Spacing(1);
+            var line = column.Item().AlignCenter().Text(text).FontSize(fontSize);
+            if (bold)
+            {
+                line.Bold();
+            }
+
+            column.Item().LineHorizontal(0.65f);
+        });
+    }
+
+    private static float EstimatePdfUnderlineWidth(string text, float fontSize, bool bold)
+    {
+        var characterWidth = bold ? 0.82f : 0.76f;
+        var estimated = text.Length * fontSize * characterWidth;
+        return Math.Max(28, Math.Min(260, estimated));
+    }
+
+    private static void ComposePdfHeaderCell(TableCellDescriptor header, string text, bool alignRight)
+    {
+        var cell = header.Cell().BorderBottom(0.5f).PaddingBottom(2);
+        if (alignRight)
+        {
+            cell.AlignRight().Text(text).Bold();
+        }
+        else
+        {
+            cell.Text(text).Bold();
+        }
+    }
+
+    private enum PdfUnderlineAlignment
+    {
+        Left,
+        Center,
+        Right
+    }
+
+    private static void ComposePdfTextCell(TableDescriptor table, string? text, bool alignRight)
+    {
+        var cell = table.Cell().PaddingVertical(1);
+        if (alignRight)
+        {
+            cell.AlignRight().Text(text ?? string.Empty);
+        }
+        else
+        {
+            cell.Text(text ?? string.Empty);
+        }
+    }
+
+    private static string Underline(string value)
+        => $"<span class=\"pps-underline\">{Html(value)}</span>";
+
+    private static string CurrencyLabel(string? currency)
+    {
+        var code = string.IsNullOrWhiteSpace(currency) ? "GHS" : currency.Trim().ToUpperInvariant();
+        return code == "GHS" ? "GH\u00a2" : code;
+    }
+
+    private static string FormatPayslipMonth(DateTime value)
+        => value.ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+
+    private static string LineLabel(PayrollTransactionDto line)
+    {
+        var type = line.TransactionType;
+        if (type == BasicSalaryTransactionType) return "BASIC SALARY";
+        if (type == IncomeTaxTransactionType)
+        {
+            if ((line.ComponentCode?.Equals("BON", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (line.Description?.Contains("bonus", StringComparison.OrdinalIgnoreCase) ?? false))
+            {
+                return "INCOME TAX (BONUS)";
+            }
+
+            return "INCOME TAX - TOTAL";
+        }
+        if (type == LoanInterestTransactionType) return "LOAN INTEREST";
+        if (type == EmployeePensionTransactionType) return "SOCIAL SECURITY FUND";
+        if (type == SalaryAdvanceTransactionType) return "SALARY ADVANCE";
+        if (type == OvertimeTransactionType) return "OVERTIME";
+        if (type == PromotionBasicArrearsTransactionType) return "PROMOTION BASIC ARREARS";
+        if (type == PromotionAllowanceArrearsTransactionType) return "PROMOTION ALLOWANCE ARREARS";
+        if (type is PromotionEmployeeContributionArrearsTransactionType or PromotionEmployerContributionArrearsTransactionType or PromotionContributionArrearsTransactionType)
+        {
+            return "PROMOTION CONTRIBUTION ARREARS";
+        }
+
+        return (line.Description ?? line.ComponentCode ?? type).ToUpperInvariant();
+    }
+
+    private static int LineOrder(PayrollTransactionDto line)
+        => line.TransactionType switch
+        {
+            BasicSalaryTransactionType or IncomeTaxTransactionType => 0,
+            "Allowance" or "Benefit" or "Deduction" => 10,
+            "EmployeeContribution" or EmployeePensionTransactionType => 20,
+            "LoanRepayment" or LoanRepaymentTransactionType or LoanInterestTransactionType or SalaryAdvanceTransactionType => 30,
+            OvertimeTransactionType or PromotionBasicArrearsTransactionType or PromotionAllowanceArrearsTransactionType or PromotionEmployeeContributionArrearsTransactionType or PromotionEmployerContributionArrearsTransactionType or PromotionContributionArrearsTransactionType => 40,
+            _ => 50
+        };
 
     private static string BuildPayslipEmailFileName(PayrollPayslipDto payslip)
     {
         var employee = new string(payslip.EmployeeNumber.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-').ToArray());
-        return $"{(payslip.IsSeparateBonusRun ? "Bonus-Slip" : "Payslip")}-{employee}-{payslip.PayPeriod}.html";
+        return $"{(payslip.IsSeparateBonusRun ? "Bonus-Slip" : "Payslip")}-{employee}-{payslip.PayPeriod}.pdf";
     }
 
     private static string FormatEmailAmount(decimal amount)
@@ -8196,13 +9903,14 @@ public class PayrollService : IPayrollService
 
         if (payrollMethods.Count > 0)
         {
-            return payrollMethods
-                .Select((method, index) => new PayrollPayslipBankDetailDto
+            return BuildPaymentAllocations(payrollMethods, runEmployee.NetIncome, runEmployee.CurrencyCode)
+                .Select(allocation => new PayrollPayslipBankDetailDto
                 {
-                    BankName = BuildPaymentMethodBankName(method, context),
-                    AccountNumber = method.AccountNumber,
-                    CurrencyCode = string.IsNullOrWhiteSpace(method.CurrencyCode) ? runEmployee.CurrencyCode : method.CurrencyCode,
-                    Amount = ResolvePaymentMethodAmount(method, runEmployee.NetIncome, payrollMethods.Count, index)
+                    BankName = BuildPaymentMethodBankName(allocation.Method, context),
+                    AccountNumber = allocation.Method.AccountNumber,
+                    CurrencyCode = string.IsNullOrWhiteSpace(allocation.Method.CurrencyCode) ? runEmployee.CurrencyCode : allocation.Method.CurrencyCode,
+                    ExchangeRate = allocation.ExchangeRate,
+                    Amount = allocation.Amount
                 })
                 .ToList();
         }
@@ -8219,6 +9927,7 @@ public class PayrollService : IPayrollService
                 BankName = BuildEmployeeBankName(bank),
                 AccountNumber = bank.AccountNumber,
                 CurrencyCode = runEmployee.CurrencyCode,
+                ExchangeRate = null,
                 Amount = bank.AllocationPercentage > 0
                     ? Math.Round(runEmployee.NetIncome * (bank.AllocationPercentage / 100m), 2)
                     : bankDetails.Count == 1 || index == 0
@@ -8226,6 +9935,81 @@ public class PayrollService : IPayrollService
                         : 0m
             })
             .ToList();
+    }
+
+    private static IReadOnlyList<PayrollPaymentAllocation> BuildPaymentAllocations(
+        IReadOnlyList<PayrollPaymentMethod> methods,
+        decimal basePaymentAmount,
+        string baseCurrencyCode)
+    {
+        var orderedMethods = methods.OrderBy(e => e.SequenceNo).ToList();
+        if (orderedMethods.Count == 0)
+        {
+            return [];
+        }
+
+        var baseCurrency = NormalizeCurrency(baseCurrencyCode);
+        var allocations = new List<PayrollPaymentAllocation>();
+        var fixedMethods = orderedMethods.Where(IsFixedPaymentMethod).ToList();
+        var percentageMethods = orderedMethods.Where(e => !IsFixedPaymentMethod(e)).ToList();
+
+        foreach (var method in fixedMethods)
+        {
+            var amount = RoundMoney(method.Amount.GetValueOrDefault());
+            var exchangeRate = ResolvePaymentMethodExchangeRate(method);
+            var baseAmount = RoundMoney(amount * exchangeRate);
+            allocations.Add(new PayrollPaymentAllocation(method, amount, exchangeRate, baseAmount));
+        }
+
+        var fixedBaseTotal = allocations.Sum(e => e.BaseAmount);
+        var remainingBase = Math.Max(0m, RoundMoney(basePaymentAmount - fixedBaseTotal));
+
+        if (percentageMethods.Count > 0)
+        {
+            foreach (var method in percentageMethods)
+            {
+                var exchangeRate = ResolvePaymentMethodExchangeRate(method);
+                var baseAmount = RoundMoney(remainingBase * (method.PaymentPercent.GetValueOrDefault() / 100m));
+                var amount = ConvertBaseAmountToPaymentCurrency(method, baseAmount, baseCurrency, exchangeRate);
+                allocations.Add(new PayrollPaymentAllocation(method, amount, exchangeRate, baseAmount));
+            }
+
+            return allocations.OrderBy(e => e.Method.SequenceNo).ToList();
+        }
+
+        if (allocations.Count == 0)
+        {
+            var method = orderedMethods[0];
+            var exchangeRate = ResolvePaymentMethodExchangeRate(method);
+            var amount = ConvertBaseAmountToPaymentCurrency(method, basePaymentAmount, baseCurrency, exchangeRate);
+            allocations.Add(new PayrollPaymentAllocation(method, amount, exchangeRate, RoundMoney(basePaymentAmount)));
+        }
+
+        return allocations.OrderBy(e => e.Method.SequenceNo).ToList();
+    }
+
+    private static bool IsFixedPaymentMethod(PayrollPaymentMethod method)
+        => NormalizePaymentMode(method.PaymentMode, method.Amount, method.PaymentPercent) == PaymentModeFixedAmount;
+
+    private static decimal ResolvePaymentMethodExchangeRate(PayrollPaymentMethod method)
+    {
+        var exchangeRate = method.ExchangeRate ?? 1m;
+        return exchangeRate > 0m ? exchangeRate : 1m;
+    }
+
+    private static decimal ConvertBaseAmountToPaymentCurrency(
+        PayrollPaymentMethod method,
+        decimal baseAmount,
+        string baseCurrency,
+        decimal exchangeRate)
+    {
+        var paymentCurrency = NormalizeCurrency(method.CurrencyCode);
+        if (!paymentCurrency.Equals(baseCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            return RoundMoney(baseAmount / exchangeRate);
+        }
+
+        return RoundMoney(baseAmount);
     }
 
     private static IReadOnlyList<PayrollTransactionDto> BuildPayslipDeductions(IReadOnlyList<PayrollTransaction> transactions, PayrollRunEmployee runEmployee)
@@ -8421,21 +10205,6 @@ public class PayrollService : IPayrollService
     private static string? ResolveEmployeeBankBranchName(EmployeeBankDetail bank)
         => TrimOrNull(bank.Branch?.Name) ?? TrimOrNull(bank.BranchName) ?? TrimOrNull(bank.Branch?.Code);
 
-    private static decimal ResolvePaymentMethodAmount(PayrollPaymentMethod method, decimal netIncome, int methodCount, int index)
-    {
-        if (method.Amount.HasValue && method.Amount.Value > 0)
-        {
-            return method.Amount.Value;
-        }
-
-        if (method.PaymentPercent.HasValue && method.PaymentPercent.Value > 0)
-        {
-            return Math.Round(netIncome * (method.PaymentPercent.Value / 100m), 2);
-        }
-
-        return methodCount == 1 || index == 0 ? netIncome : 0m;
-    }
-
     private static bool IsPayslipEarning(PayrollTransaction transaction)
         => transaction.TransactionType is BasicSalaryTransactionType
             or "Allowance"
@@ -8455,7 +10224,8 @@ public class PayrollService : IPayrollService
             or SalaryAdvanceTransactionType
             or AbsenceTransactionType
             or PromotionEmployeeContributionArrearsTransactionType
-            or PromotionContributionArrearsTransactionType;
+            or PromotionContributionArrearsTransactionType
+            or BackpayDeductionArrearsTransactionType;
 
     private async Task<PayrollRun> GetMutableRunAsync(Guid tenantId, Guid runId, CancellationToken cancellationToken)
         => await _context.PayrollRuns.FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == runId, cancellationToken)
@@ -8629,7 +10399,10 @@ public class PayrollService : IPayrollService
         return resolved.Values.Where(e => e.Component.IsActive);
     }
 
-    private static decimal CalculateComponentAmount(ResolvedPayrollComponent componentLine, decimal basicSalary)
+    private static decimal CalculateComponentAmount(
+        ResolvedPayrollComponent componentLine,
+        decimal basicSalary,
+        decimal? percentageBase = null)
     {
         var component = componentLine.Component;
         var employeeOverride = componentLine.Override;
@@ -8639,7 +10412,7 @@ public class PayrollService : IPayrollService
         var rate = employeeOverride?.RateOverride ?? rule?.Amount ?? component.Rate;
 
         return calculationType == PayrollCalculationType.PercentageOfBasic
-            ? Math.Round(basicSalary * (rate == 0 ? amount : rate) / 100m, 2)
+            ? Math.Round((percentageBase ?? basicSalary) * (rate == 0 ? amount : rate) / 100m, 2)
             : Math.Round(amount, 2);
     }
 
@@ -8650,8 +10423,7 @@ public class PayrollService : IPayrollService
             return overrideValue;
         }
 
-        if (componentLine.Rule is { } rule &&
-            componentLine.Component.ComponentType is PayrollComponentType.Deduction or PayrollComponentType.EmployeeContribution)
+        if (componentLine.Rule is { } rule)
         {
             return rule.AfterTax;
         }
@@ -8935,12 +10707,14 @@ public class PayrollService : IPayrollService
 
     private static PayrollBonusCalculation CalculatePayrollBonuses(
         IReadOnlyList<PayrollBonusPolicy> policies,
+        IReadOnlyDictionary<string, IReadOnlyList<PayrollBonusRule>> rulesByBonusCode,
         IReadOnlyDictionary<string, IReadOnlyList<PayrollBonusException>> exceptionsByBonusCode,
         PayrollEmployeeProfile profile,
         decimal basicSalary,
         decimal annualBasicSalary,
         decimal previousYearBonus,
         DateTime payPeriodTo,
+        string runCurrencyCode,
         PayrollParameterSet? parameters)
     {
         if (policies.Count == 0 || basicSalary <= 0)
@@ -8958,11 +10732,23 @@ public class PayrollService : IPayrollService
 
         foreach (var policy in policies)
         {
+            rulesByBonusCode.TryGetValue(NormalizeMatchToken(policy.Code), out var policyRules);
             exceptionsByBonusCode.TryGetValue(NormalizeMatchToken(policy.Code), out var policyExceptions);
+            var matchingRule = FindMatchingBonusRule(policy, policyRules, profile);
             var matchingException = FindMatchingBonusException(policyExceptions, profile);
             var isException = matchingException != null;
 
-            if (!isException && !BonusPolicyAppliesToProfile(policy, profile))
+            if (!isException && matchingRule is { Applicable: false })
+            {
+                continue;
+            }
+
+            if (!isException && matchingRule == null && policyRules?.Count > 0)
+            {
+                continue;
+            }
+
+            if (!isException && matchingRule == null && !BonusPolicyAppliesToProfile(policy, profile))
             {
                 continue;
             }
@@ -8972,9 +10758,19 @@ public class PayrollService : IPayrollService
                 continue;
             }
 
-            var amount = matchingException == null
-                ? CalculateBonusAmount(policy.CalculationType, policy.Amount, basicSalary)
-                : CalculateBonusAmount(matchingException.CalculationType, matchingException.Amount, basicSalary);
+            if (!isException && !BonusEmployeeMeetsMinimumMonths(policy, profile, payPeriodTo))
+            {
+                continue;
+            }
+
+            var calculationType = matchingException?.CalculationType ?? matchingRule?.CalculationType ?? policy.CalculationType;
+            var configuredAmount = matchingException?.Amount ?? matchingRule?.Amount ?? policy.Amount;
+            if (matchingException != null && calculationType != PayrollCalculationType.PercentageOfBasic)
+            {
+                configuredAmount = ConvertBonusExceptionAmountToRunCurrency(matchingException, configuredAmount, runCurrencyCode, parameters);
+            }
+
+            var amount = CalculateBonusAmount(calculationType, configuredAmount, basicSalary);
             amount = ApplyBonusProration(policy, profile, amount, payPeriodTo);
             if (amount <= 0)
             {
@@ -8985,24 +10781,25 @@ public class PayrollService : IPayrollService
             var split = CalculateBonusTaxSplit(policy, amount, annualBasicSalary, runningPreviousBonus, parameters, taxable);
             var code = NormalizeCode(policy.Code);
             var name = string.IsNullOrWhiteSpace(policy.Name) ? code : policy.Name.Trim();
+            var detailDescription = matchingRule == null ? name : BuildBonusRuleDescription(name, matchingRule);
 
             if (split.NonTaxableAmount > 0)
             {
-                lines.Add(new PayrollBonusLine(code, $"{name} (non-taxable)", split.NonTaxableAmount, false, false));
+                lines.Add(new PayrollBonusLine(code, $"{detailDescription} (non-taxable)", split.NonTaxableAmount, false, false));
             }
 
             if (split.SeparateTaxableAmount > 0)
             {
-                lines.Add(new PayrollBonusLine(code, $"{name} (separate bonus tax)", split.SeparateTaxableAmount, true, true));
+                lines.Add(new PayrollBonusLine(code, $"{detailDescription} (separate bonus tax)", split.SeparateTaxableAmount, true, true));
             }
 
             if (split.TaxableBonusAmount > 0)
             {
                 var description = policy.SeparateTax || parameters?.SeparateBonusTax == true
-                    ? $"{name} (tax table excess)"
+                    ? $"{detailDescription} (tax table excess)"
                     : isException
-                        ? $"{name} (employee exception)"
-                        : name;
+                        ? $"{detailDescription} (employee exception)"
+                        : detailDescription;
                 lines.Add(new PayrollBonusLine(code, description, split.TaxableBonusAmount, true, false));
             }
 
@@ -9086,6 +10883,55 @@ public class PayrollService : IPayrollService
         return Math.Round(amount * Math.Max(0, completedMonths) / 12m, 2);
     }
 
+    private static bool BonusEmployeeMeetsMinimumMonths(PayrollBonusPolicy policy, PayrollEmployeeProfile profile, DateTime payPeriodTo)
+    {
+        var minimumMonths = policy.MinimumMonths.GetValueOrDefault();
+        if (minimumMonths <= 0)
+        {
+            return true;
+        }
+
+        if (!profile.Employee.DateEmployed.HasValue)
+        {
+            return false;
+        }
+
+        var employedDate = profile.Employee.DateEmployed.Value.ToDateTime(TimeOnly.MinValue);
+        return CompletedMonthsBetween(employedDate, payPeriodTo.Date) >= minimumMonths;
+    }
+
+    private static decimal ConvertBonusExceptionAmountToRunCurrency(
+        PayrollBonusException exception,
+        decimal amount,
+        string runCurrencyCode,
+        PayrollParameterSet? parameters)
+    {
+        if (amount == 0m)
+        {
+            return 0m;
+        }
+
+        var sourceCurrency = NormalizeOptionalCurrency(exception.CurrencyCode);
+        if (sourceCurrency == null)
+        {
+            return Math.Round(amount, 2);
+        }
+
+        var targetCurrency = NormalizeCurrency(runCurrencyCode);
+        if (sourceCurrency.Equals(targetCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            return Math.Round(amount, 2);
+        }
+
+        var exchangeRate = parameters?.ExchangeRate ?? 1m;
+        if (exchangeRate <= 0m)
+        {
+            exchangeRate = 1m;
+        }
+
+        return Math.Round(amount * exchangeRate, 2);
+    }
+
     private static int CompletedMonthsBetween(DateTime from, DateTime to)
     {
         if (from.Date > to.Date)
@@ -9156,6 +11002,52 @@ public class PayrollService : IPayrollService
         return BuildBonusProfileTokens(profile).Contains(category);
     }
 
+    private static PayrollBonusRule? FindMatchingBonusRule(
+        PayrollBonusPolicy policy,
+        IReadOnlyList<PayrollBonusRule>? rules,
+        PayrollEmployeeProfile profile)
+    {
+        if (rules == null || rules.Count == 0)
+        {
+            return null;
+        }
+
+        var categoryType = NormalizeBonusCategoryType(policy.Category);
+        var tokens = IsTypedBonusCategory(categoryType)
+            ? EmployeeCategoryTokens(profile, categoryType).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : BuildBonusProfileTokens(profile);
+        return rules.FirstOrDefault(e =>
+            !IsAllBonusCategory(e.GroupCode) &&
+            tokens.Contains(NormalizeMatchToken(e.GroupCode)))
+            ?? rules.FirstOrDefault(e => IsAllBonusCategory(e.GroupCode));
+    }
+
+    private static string NormalizeBonusCategoryType(string? category)
+    {
+        var normalized = NormalizeMatchToken(category).Replace(" ", string.Empty, StringComparison.OrdinalIgnoreCase);
+        return normalized switch
+        {
+            "" => "ALL",
+            "ALL" or "ALLSTAFF" or "ANY" or "*" => "ALL",
+            "POSITION" => "POS",
+            "DEPARTMENT" => "DEP",
+            "STAFFCATEGORY" => "CAT",
+            "RANK" or "RANKS" => "RAN",
+            _ => normalized
+        };
+    }
+
+    private static bool IsTypedBonusCategory(string categoryType)
+        => categoryType is "POS" or "DEP" or "CAT" or "JOB" or "RAN" or "GRA" or "SEC" or "LOC";
+
+    private static string BuildBonusRuleDescription(string policyName, PayrollBonusRule rule)
+    {
+        var groupCode = NormalizeMatchToken(rule.GroupCode);
+        return string.IsNullOrWhiteSpace(groupCode) || IsAllBonusCategory(groupCode)
+            ? policyName
+            : $"{policyName} ({rule.GroupCode.Trim()})";
+    }
+
     private static PayrollBonusException? FindMatchingBonusException(
         IReadOnlyList<PayrollBonusException>? exceptions,
         PayrollEmployeeProfile profile)
@@ -9215,7 +11107,406 @@ public class PayrollService : IPayrollService
     {
         var normalized = NormalizeMatchToken(value);
         return string.IsNullOrWhiteSpace(normalized) ||
-               normalized is "ALL" or "ANY" or "*";
+               normalized is "ALL" or "ALLSTAFF" or "ALL STAFF" or "ANY" or "*";
+    }
+
+    private static PayrollPromotionArrearsCalculation CalculateSetupBackpayArrears(
+        IReadOnlyList<PayrollBackpayPolicy> policies,
+        IReadOnlyDictionary<string, IReadOnlyList<PayrollBackpayRule>> rulesByOperation,
+        IReadOnlyDictionary<string, IReadOnlyList<PayrollBackpayException>> exceptionsByOperation,
+        IReadOnlyList<PayrollRunEmployee> historicalRunEmployees,
+        PayrollEmployeeProfile profile,
+        IReadOnlyList<PayrollTaxBand> taxBands,
+        PayrollPensionScheme? pensionScheme,
+        PayrollParameterSet? parameters,
+        DateTime runPeriodFrom)
+    {
+        if (policies.Count == 0 || historicalRunEmployees.Count == 0)
+        {
+            return PayrollPromotionArrearsCalculation.Empty;
+        }
+
+        var basicAmount = 0m;
+        var allowanceAmount = 0m;
+        var employeeContributionAmount = 0m;
+        var employerContributionAmount = 0m;
+        var otherContributionAmount = 0m;
+        var otherEmployerContributionAmount = 0m;
+        var deductionAmount = 0m;
+        var taxableIncomeAmount = 0m;
+        var taxAmount = 0m;
+        var netAmount = 0m;
+
+        foreach (var policy in policies)
+        {
+            if (!BackpayPolicyServiceApplies(policy, profile, runPeriodFrom))
+            {
+                continue;
+            }
+
+            var operation = NormalizeBackpayOperation(policy.OperationType);
+            rulesByOperation.TryGetValue(operation, out var operationRules);
+            exceptionsByOperation.TryGetValue(operation, out var operationExceptions);
+
+            var matchingException = FindMatchingBackpayException(operationExceptions, profile);
+            if (matchingException is { Applicable: false })
+            {
+                continue;
+            }
+
+            var matchingRule = FindMatchingBackpayRule(policy, operationRules, profile);
+            if (matchingRule is { Applicable: false })
+            {
+                continue;
+            }
+
+            var hasRulesForPolicy = operationRules?.Any(e => BackpayRuleBelongsToPolicy(policy, e)) == true;
+            if (matchingException == null && matchingRule == null && hasRulesForPolicy)
+            {
+                continue;
+            }
+
+            if (matchingException == null && matchingRule == null && !BackpayPolicyAppliesToProfile(policy, profile))
+            {
+                continue;
+            }
+
+            var calculationType = matchingException?.CalculationType ?? matchingRule?.CalculationType ?? policy.CalculationType;
+            var configuredAmount = matchingException?.Amount ?? matchingRule?.Amount ?? policy.Amount;
+            if (configuredAmount <= 0)
+            {
+                continue;
+            }
+
+            foreach (var previous in SelectBackpayHistory(policy, historicalRunEmployees, runPeriodFrom))
+            {
+                var periodBackpayAmount = CalculateBonusAmount(calculationType, configuredAmount, previous.BasicSalary);
+                if (periodBackpayAmount <= 0)
+                {
+                    continue;
+                }
+
+                var increaseRate = ResolveBackpayIncreaseRate(calculationType, configuredAmount, previous.BasicSalary);
+                var transactionDeltas = operation == "IncreaseSalary"
+                    ? CalculateBackpayTransactionDeltas(previous.Transactions, increaseRate)
+                    : PayrollBackpayTransactionDeltas.Empty;
+                var contribution = policy.ApplySsf
+                    ? CalculatePensionDifference(profile, previous.BasicSalary, previous.BasicSalary + periodBackpayAmount, pensionScheme, parameters)
+                    : new PayrollPensionCalculation(0m, 0m);
+                var taxableIncrement = policy.ApplyTax
+                    ? Math.Max(0,
+                        periodBackpayAmount +
+                        transactionDeltas.TaxableAllowanceAmount +
+                        transactionDeltas.TaxableBenefitAmount +
+                        transactionDeltas.EmployerTaxableAmount -
+                        contribution.EmployeeContribution -
+                        transactionDeltas.NonTaxableContributionAmount -
+                        transactionDeltas.NonTaxableDeductionAmount)
+                    : 0m;
+                var previousTax = CalculatePromotionComparableIncomeTax(previous);
+                var adjustedTax = policy.ApplyTax && profile.PayTax
+                    ? CalculateIncomeTax(taxBands, previous.TaxableIncome + taxableIncrement)
+                    : previousTax;
+                var periodTaxAmount = Math.Max(0, adjustedTax - previousTax);
+
+                basicAmount += periodBackpayAmount;
+                allowanceAmount += transactionDeltas.AllowanceAmount;
+                employeeContributionAmount += contribution.EmployeeContribution;
+                employerContributionAmount += contribution.EmployerContribution;
+                otherContributionAmount += transactionDeltas.ContributionAmount;
+                otherEmployerContributionAmount += transactionDeltas.EmployerContributionAmount;
+                deductionAmount += transactionDeltas.DeductionAmount;
+                taxableIncomeAmount += taxableIncrement;
+                taxAmount += periodTaxAmount;
+                netAmount += periodBackpayAmount +
+                             transactionDeltas.AllowanceAmount -
+                             contribution.EmployeeContribution -
+                             transactionDeltas.ContributionAmount -
+                             transactionDeltas.DeductionAmount -
+                             periodTaxAmount;
+            }
+        }
+
+        return netAmount <= 0
+            ? PayrollPromotionArrearsCalculation.Empty
+            : new PayrollPromotionArrearsCalculation(
+                Math.Round(basicAmount, 2),
+                Math.Round(allowanceAmount, 2),
+                Math.Round(employeeContributionAmount, 2),
+                Math.Round(employerContributionAmount, 2),
+                Math.Round(otherContributionAmount, 2),
+                Math.Round(otherEmployerContributionAmount, 2),
+                Math.Round(deductionAmount, 2),
+                Math.Round(taxableIncomeAmount, 2),
+                Math.Round(taxAmount, 2),
+                Math.Round(netAmount, 2));
+    }
+
+    private static decimal ResolveBackpayIncreaseRate(
+        PayrollCalculationType calculationType,
+        decimal configuredAmount,
+        decimal previousBasicSalary)
+    {
+        if (previousBasicSalary <= 0m || configuredAmount <= 0m)
+        {
+            return 0m;
+        }
+
+        return calculationType == PayrollCalculationType.PercentageOfBasic
+            ? configuredAmount
+            : Math.Round(configuredAmount * 100m / previousBasicSalary, 6);
+    }
+
+    private static PayrollBackpayTransactionDeltas CalculateBackpayTransactionDeltas(
+        IEnumerable<PayrollTransaction> transactions,
+        decimal salaryIncreaseRate)
+    {
+        if (salaryIncreaseRate <= 0m)
+        {
+            return PayrollBackpayTransactionDeltas.Empty;
+        }
+
+        var allowanceAmount = 0m;
+        var taxableAllowanceAmount = 0m;
+        var taxableBenefitAmount = 0m;
+        var contributionAmount = 0m;
+        var employerContributionAmount = 0m;
+        var employerTaxableAmount = 0m;
+        var nonTaxableContributionAmount = 0m;
+        var deductionAmount = 0m;
+        var nonTaxableDeductionAmount = 0m;
+
+        foreach (var transaction in transactions.Where(BackpayTransactionFollowsSalaryIncrease))
+        {
+            var amount = Math.Round(Math.Abs(transaction.Amount) * salaryIncreaseRate / 100m, 2);
+            var employerAmount = Math.Round(Math.Abs(transaction.EmployerAmount ?? transaction.Amount) * salaryIncreaseRate / 100m, 2);
+            if (amount <= 0m && employerAmount <= 0m)
+            {
+                continue;
+            }
+
+            if (transaction.TransactionType.Equals(PayrollComponentType.Allowance.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                allowanceAmount += amount;
+                if (transaction.Taxable)
+                {
+                    taxableAllowanceAmount += amount;
+                }
+
+                continue;
+            }
+
+            if (transaction.TransactionType.Equals(PayrollComponentType.Benefit.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                if (transaction.Taxable)
+                {
+                    taxableBenefitAmount += amount;
+                }
+
+                continue;
+            }
+
+            if (transaction.TransactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                contributionAmount += amount;
+                employerContributionAmount += transaction.EmployerAmount.HasValue ? employerAmount : 0m;
+                if (!transaction.Taxable)
+                {
+                    nonTaxableContributionAmount += amount;
+                }
+
+                if (transaction.EmployerTaxable)
+                {
+                    employerTaxableAmount += transaction.EmployerAmount.HasValue ? employerAmount : 0m;
+                }
+
+                continue;
+            }
+
+            if (transaction.TransactionType.Equals(PayrollComponentType.EmployerContribution.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                employerContributionAmount += employerAmount;
+                if (transaction.EmployerTaxable)
+                {
+                    employerTaxableAmount += employerAmount;
+                }
+
+                continue;
+            }
+
+            if (transaction.TransactionType.Equals(PayrollComponentType.Deduction.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                deductionAmount += amount;
+                if (!transaction.Taxable)
+                {
+                    nonTaxableDeductionAmount += amount;
+                }
+            }
+        }
+
+        return new PayrollBackpayTransactionDeltas(
+            Math.Round(allowanceAmount, 2),
+            Math.Round(taxableAllowanceAmount, 2),
+            Math.Round(taxableBenefitAmount, 2),
+            Math.Round(contributionAmount, 2),
+            Math.Round(employerContributionAmount, 2),
+            Math.Round(employerTaxableAmount, 2),
+            Math.Round(nonTaxableContributionAmount, 2),
+            Math.Round(deductionAmount, 2),
+            Math.Round(nonTaxableDeductionAmount, 2));
+    }
+
+    private static bool BackpayTransactionFollowsSalaryIncrease(PayrollTransaction transaction)
+    {
+        if (transaction.PayrollComponent == null)
+        {
+            return true;
+        }
+
+        return transaction.PayrollComponent.CalculationType == PayrollCalculationType.PercentageOfBasic;
+    }
+
+    private static IReadOnlyList<PayrollRunEmployee> SelectBackpayHistory(
+        PayrollBackpayPolicy policy,
+        IReadOnlyList<PayrollRunEmployee> historicalRunEmployees,
+        DateTime runPeriodFrom)
+    {
+        var startDate = ResolveBackpayHistoryStart(policy, runPeriodFrom);
+        var months = Math.Max(0, policy.NumberOfMonths.GetValueOrDefault());
+        var endDate = policy.EffectiveDate.HasValue && months > 0
+            ? policy.EffectiveDate.Value.Date.AddMonths(months)
+            : runPeriodFrom.Date;
+        var selectedHistory = historicalRunEmployees
+            .Where(e => e.PayrollRun.PayPeriodFrom.Date >= startDate &&
+                        e.PayrollRun.PayPeriodFrom.Date < runPeriodFrom.Date &&
+                        e.PayrollRun.PayPeriodFrom.Date < endDate)
+            .OrderByDescending(e => e.PayrollRun.PayPeriod)
+            .ToList();
+
+        if (!policy.EffectiveDate.HasValue && months > 0)
+        {
+            selectedHistory = selectedHistory.Take(months).ToList();
+        }
+
+        return selectedHistory;
+    }
+
+    private static DateTime ResolveBackpayHistoryStart(PayrollBackpayPolicy policy, DateTime runPeriodFrom)
+    {
+        if (policy.EffectiveDate.HasValue)
+        {
+            return policy.EffectiveDate.Value.Date;
+        }
+
+        var months = Math.Max(1, policy.NumberOfMonths.GetValueOrDefault(1));
+        return runPeriodFrom.Date.AddMonths(-months);
+    }
+
+    private static bool BackpayPolicyServiceApplies(PayrollBackpayPolicy policy, PayrollEmployeeProfile profile, DateTime runPeriodFrom)
+    {
+        if (!policy.MinimumServiceDate.HasValue && !policy.MinimumServiceValue.HasValue)
+        {
+            return true;
+        }
+
+        if (!profile.Employee.DateEmployed.HasValue)
+        {
+            return false;
+        }
+
+        var employedDate = profile.Employee.DateEmployed.Value.ToDateTime(TimeOnly.MinValue);
+        if (policy.MinimumServiceDate.HasValue && employedDate.Date > policy.MinimumServiceDate.Value.Date)
+        {
+            return false;
+        }
+
+        var serviceValue = policy.MinimumServiceValue.GetValueOrDefault();
+        if (serviceValue <= 0)
+        {
+            return true;
+        }
+
+        var completedMonths = CompletedMonthsBetween(employedDate, runPeriodFrom.Date);
+        var serviceMode = NormalizeMatchToken(policy.MinimumServiceMode);
+        var requiredMonths = serviceMode.Contains("YEAR", StringComparison.OrdinalIgnoreCase)
+            ? serviceValue * 12m
+            : serviceValue;
+        return completedMonths >= requiredMonths;
+    }
+
+    private static bool BackpayPolicyAppliesToProfile(PayrollBackpayPolicy policy, PayrollEmployeeProfile profile)
+    {
+        if (IsAllBonusCategory(policy.CategoryType))
+        {
+            return true;
+        }
+
+        return NormalizeBackpayCategory(policy.CategoryType) == "All Staff" ||
+               BuildBonusProfileTokens(profile).Contains(NormalizeMatchToken(policy.CategoryType));
+    }
+
+    private static PayrollBackpayRule? FindMatchingBackpayRule(
+        PayrollBackpayPolicy policy,
+        IReadOnlyList<PayrollBackpayRule>? rules,
+        PayrollEmployeeProfile profile)
+    {
+        if (rules == null || rules.Count == 0)
+        {
+            return null;
+        }
+
+        var tokens = BuildBonusProfileTokens(profile);
+        return rules.FirstOrDefault(e =>
+        {
+            if (!BackpayRuleBelongsToPolicy(policy, e))
+            {
+                return false;
+            }
+
+            var categoryCode = NormalizeMatchToken(e.CategoryCode);
+            var categoryName = NormalizeMatchToken(e.CategoryName);
+            return !IsAllBonusCategory(categoryCode) &&
+                   (tokens.Contains(categoryCode) ||
+                    (!string.IsNullOrWhiteSpace(categoryName) && tokens.Contains(categoryName)));
+        })
+            ?? rules.FirstOrDefault(e =>
+                BackpayRuleBelongsToPolicy(policy, e) &&
+                IsAllBonusCategory(e.CategoryCode));
+    }
+
+    private static bool BackpayRuleBelongsToPolicy(PayrollBackpayPolicy policy, PayrollBackpayRule rule)
+        => string.Equals(NormalizeBackpayOperation(policy.OperationType), NormalizeBackpayOperation(rule.OperationType), StringComparison.OrdinalIgnoreCase) &&
+           (NormalizeBackpayCategory(policy.CategoryType) == "All Staff" ||
+            string.Equals(NormalizeBackpayCategory(policy.CategoryType), NormalizeBackpayCategory(rule.CategoryType), StringComparison.OrdinalIgnoreCase));
+
+    private static PayrollBackpayException? FindMatchingBackpayException(
+        IReadOnlyList<PayrollBackpayException>? exceptions,
+        PayrollEmployeeProfile profile)
+    {
+        if (exceptions == null || exceptions.Count == 0)
+        {
+            return null;
+        }
+
+        return exceptions.FirstOrDefault(e =>
+            (e.EmployeeProfileId.HasValue && e.EmployeeProfileId.Value == profile.Id) ||
+            e.EmployeeNumber.Equals(profile.EmployeeNumber, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrWhiteSpace(profile.LegacyEmployeeNumber) &&
+             e.EmployeeNumber.Equals(profile.LegacyEmployeeNumber, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static PayrollPensionCalculation CalculatePensionDifference(
+        PayrollEmployeeProfile profile,
+        decimal previousBasicSalary,
+        decimal adjustedBasicSalary,
+        PayrollPensionScheme? pensionScheme,
+        PayrollParameterSet? parameters)
+    {
+        var previousContribution = CalculatePension(profile, previousBasicSalary, pensionScheme, parameters);
+        var adjustedContribution = CalculatePension(profile, adjustedBasicSalary, pensionScheme, parameters);
+        return new PayrollPensionCalculation(
+            Math.Max(0, adjustedContribution.EmployeeContribution - previousContribution.EmployeeContribution),
+            Math.Max(0, adjustedContribution.EmployerContribution - previousContribution.EmployerContribution));
     }
 
     private static string NormalizeMatchToken(string? value)
@@ -9395,16 +11686,46 @@ public class PayrollService : IPayrollService
             return new PayrollOvertimeCalculation(0, overtimePolicy?.Taxable ?? false, false, 0, 0, 0);
         }
 
+        var normalWorkingHours = overtimePolicy?.NormalWorkingHours > 0 ? overtimePolicy.NormalWorkingHours : 8m;
         var monthDays = parameters?.MonthDays > 0 ? parameters.MonthDays : 30;
-        var hourlyRate = monthDays > 0
-            ? originalBasicSalary / (8m * monthDays)
+        var hourlyRate = normalWorkingHours > 0 && monthDays > 0
+            ? originalBasicSalary / (normalWorkingHours * monthDays)
             : 0m;
 
         var amount = Math.Round(totalUnits * hourlyRate, 2);
+        amount = ApplyOvertimeMaximum(amount, totalUnits, hourlyRate, originalBasicSalary, overtimePolicy);
         var taxable = overtimePolicy?.Taxable ?? false;
         return amount <= 0
             ? new PayrollOvertimeCalculation(0, taxable, false, 0, 0, 0)
             : new PayrollOvertimeCalculation(amount, taxable, false, taxable ? amount : 0m, 0, 0);
+    }
+
+    private static decimal ApplyOvertimeMaximum(
+        decimal amount,
+        decimal weightedHours,
+        decimal hourlyRate,
+        decimal originalBasicSalary,
+        PayrollOvertimePolicy? overtimePolicy)
+    {
+        var maximum = overtimePolicy?.MaxOvertimeAmount ?? 0m;
+        if (maximum <= 0m)
+        {
+            return amount;
+        }
+
+        var maximumType = (overtimePolicy?.MaxOvertimeType ?? string.Empty).Trim().ToUpperInvariant();
+        if (maximumType == "H")
+        {
+            return Math.Round(Math.Min(weightedHours, maximum) * hourlyRate, 2);
+        }
+
+        var maximumAmount = overtimePolicy?.MaxOvertimeIsPercent == true
+            ? Math.Round(originalBasicSalary * maximum / 100m, 2)
+            : maximum;
+
+        return maximumAmount > 0m
+            ? Math.Round(Math.Min(amount, maximumAmount), 2)
+            : amount;
     }
 
     private static PayrollOvertimeCalculation CalculateOvertimeTaxTreatment(
@@ -9542,11 +11863,12 @@ public class PayrollService : IPayrollService
         decimal currentAllowanceAmount,
         PayrollContributionArrearsSplit currentContributionSplit,
         decimal currentTaxableIncome,
-        decimal currentIncomeTax)
+        decimal currentIncomeTax,
+        PayrollParameterSet? parameters)
     {
         var eligibleHistory = historicalRunEmployees
             .Where(e => e.PayrollRun.PayPeriod < promotionEntry.PayPeriod &&
-                        e.PayrollRun.PayPeriodFrom.Date >= promotionEntry.EffectiveDate.Date)
+                        e.PayrollRun.PayPeriodTo.Date >= promotionEntry.EffectiveDate.Date)
             .ToList();
 
         if (eligibleHistory.Count == 0)
@@ -9566,16 +11888,17 @@ public class PayrollService : IPayrollService
 
         foreach (var previous in eligibleHistory)
         {
+            var prorationFactor = CalculatePromotionArrearsProrationFactor(promotionEntry, previous.PayrollRun, parameters);
             var previousAllowance = previous.TaxableAllowances + previous.NonTaxableAllowances;
             var previousContributionSplit = BuildContributionArrearsSplit(previous.Transactions);
-            var diffBasic = currentBasicSalary - previous.BasicSalary;
-            var diffAllowance = currentAllowanceAmount - previousAllowance;
-            var diffEmployeeSsf = currentContributionSplit.EmployeeSsfAmount - previousContributionSplit.EmployeeSsfAmount;
-            var diffEmployerSsf = currentContributionSplit.EmployerSsfAmount - previousContributionSplit.EmployerSsfAmount;
-            var diffOtherContribution = currentContributionSplit.OtherEmployeeContributionAmount - previousContributionSplit.OtherEmployeeContributionAmount;
-            var diffOtherEmployerContribution = currentContributionSplit.OtherEmployerContributionAmount - previousContributionSplit.OtherEmployerContributionAmount;
-            var diffTaxableIncome = currentTaxableIncome - previous.TaxableIncome;
-            var diffTax = currentIncomeTax - CalculatePromotionComparableIncomeTax(previous);
+            var diffBasic = (currentBasicSalary - previous.BasicSalary) * prorationFactor;
+            var diffAllowance = (currentAllowanceAmount - previousAllowance) * prorationFactor;
+            var diffEmployeeSsf = (currentContributionSplit.EmployeeSsfAmount - previousContributionSplit.EmployeeSsfAmount) * prorationFactor;
+            var diffEmployerSsf = (currentContributionSplit.EmployerSsfAmount - previousContributionSplit.EmployerSsfAmount) * prorationFactor;
+            var diffOtherContribution = (currentContributionSplit.OtherEmployeeContributionAmount - previousContributionSplit.OtherEmployeeContributionAmount) * prorationFactor;
+            var diffOtherEmployerContribution = (currentContributionSplit.OtherEmployerContributionAmount - previousContributionSplit.OtherEmployerContributionAmount) * prorationFactor;
+            var diffTaxableIncome = (currentTaxableIncome - previous.TaxableIncome) * prorationFactor;
+            var diffTax = (currentIncomeTax - CalculatePromotionComparableIncomeTax(previous)) * prorationFactor;
             var diffNet = diffBasic + diffAllowance - diffEmployeeSsf - diffOtherContribution - diffTax;
 
             if (diffNet <= 0)
@@ -9601,9 +11924,36 @@ public class PayrollService : IPayrollService
             Math.Round(employerContributionAmount, 2),
             Math.Round(otherContributionAmount, 2),
             Math.Round(otherEmployerContributionAmount, 2),
+            0m,
             Math.Round(taxableIncomeAmount, 2),
             Math.Round(taxAmount, 2),
             Math.Round(netAmount, 2));
+    }
+
+    private static decimal CalculatePromotionArrearsProrationFactor(
+        PayrollPromotionArrearsEntry promotionEntry,
+        PayrollRun previousRun,
+        PayrollParameterSet? parameters)
+    {
+        var effectiveDate = promotionEntry.EffectiveDate.Date;
+        if (effectiveDate <= previousRun.PayPeriodFrom.Date || effectiveDate > previousRun.PayPeriodTo.Date)
+        {
+            return 1m;
+        }
+
+        var monthDays = parameters?.MonthDays > 0 ? parameters.MonthDays : 30;
+        if (monthDays <= 0)
+        {
+            return 1m;
+        }
+
+        var workingDays = promotionEntry.WorkingDays.GetValueOrDefault();
+        if (workingDays <= 0m)
+        {
+            workingDays = Math.Max(0, (previousRun.PayPeriodTo.Date - effectiveDate).Days + 1);
+        }
+
+        return Math.Clamp(workingDays / monthDays, 0m, 1m);
     }
 
     private static void ApplyPromotionArrearsTransactions(
@@ -9612,38 +11962,45 @@ public class PayrollService : IPayrollService
         PayrollRunEmployee runEmployee,
         PayrollEmployeeProfile profile,
         ICollection<PayrollTransaction> transactions,
-        PayrollPromotionArrearsCalculation arrears)
+        PayrollPromotionArrearsCalculation arrears,
+        string descriptionPrefix = "Promotion")
     {
+        var prefix = string.IsNullOrWhiteSpace(descriptionPrefix) ? "Promotion" : descriptionPrefix.Trim();
         if (arrears.BasicAmount > 0)
         {
-            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionBasicArrearsTransactionType, "Promotion basic arrears", arrears.BasicAmount, taxable: true, componentCode: PromotionBasicArrearsTransactionType));
+            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionBasicArrearsTransactionType, $"{prefix} basic arrears", arrears.BasicAmount, taxable: true, componentCode: PromotionBasicArrearsTransactionType));
         }
 
         if (arrears.AllowanceAmount > 0)
         {
-            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionAllowanceArrearsTransactionType, "Promotion allowance arrears", arrears.AllowanceAmount, taxable: true, componentCode: PromotionAllowanceArrearsTransactionType));
+            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionAllowanceArrearsTransactionType, $"{prefix} allowance arrears", arrears.AllowanceAmount, taxable: true, componentCode: PromotionAllowanceArrearsTransactionType));
         }
 
         if (arrears.EmployeeContributionAmount > 0)
         {
-            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionEmployeeContributionArrearsTransactionType, "Promotion employee contribution arrears", arrears.EmployeeContributionAmount, taxable: false, componentCode: PromotionEmployeeContributionArrearsTransactionType));
+            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionEmployeeContributionArrearsTransactionType, $"{prefix} employee contribution arrears", arrears.EmployeeContributionAmount, taxable: false, componentCode: PromotionEmployeeContributionArrearsTransactionType));
         }
 
         if (arrears.OtherContributionAmount > 0)
         {
-            var transaction = CreateTransaction(tenantId, run, runEmployee, profile, PromotionContributionArrearsTransactionType, "Promotion contribution arrears", arrears.OtherContributionAmount, taxable: true, componentCode: PromotionContributionArrearsTransactionType);
+            var transaction = CreateTransaction(tenantId, run, runEmployee, profile, PromotionContributionArrearsTransactionType, $"{prefix} contribution arrears", arrears.OtherContributionAmount, taxable: true, componentCode: PromotionContributionArrearsTransactionType);
             transaction.EmployerAmount = arrears.OtherEmployerContributionAmount;
             transactions.Add(transaction);
         }
 
+        if (arrears.DeductionAmount > 0)
+        {
+            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, BackpayDeductionArrearsTransactionType, $"{prefix} deduction arrears", arrears.DeductionAmount, taxable: false, componentCode: BackpayDeductionArrearsTransactionType));
+        }
+
         if (arrears.EmployerContributionAmount > 0)
         {
-            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionEmployerContributionArrearsTransactionType, "Promotion employer contribution arrears", arrears.EmployerContributionAmount, taxable: false, employerAmount: arrears.EmployerContributionAmount, componentCode: PromotionEmployerContributionArrearsTransactionType));
+            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, PromotionEmployerContributionArrearsTransactionType, $"{prefix} employer contribution arrears", arrears.EmployerContributionAmount, taxable: false, employerAmount: arrears.EmployerContributionAmount, componentCode: PromotionEmployerContributionArrearsTransactionType));
         }
 
         if (arrears.TaxAmount > 0)
         {
-            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, IncomeTaxTransactionType, "Promotion arrears tax", arrears.TaxAmount, taxable: false, componentCode: "ARR"));
+            transactions.Add(CreateTransaction(tenantId, run, runEmployee, profile, IncomeTaxTransactionType, $"{prefix} arrears tax", arrears.TaxAmount, taxable: false, componentCode: "ARR"));
         }
     }
 
@@ -9822,6 +12179,25 @@ public class PayrollService : IPayrollService
     {
         if (dto.Count == 0)
         {
+            if (profile.PaymentMethods.Count == 0)
+            {
+                var defaultMethod = new PayrollPaymentMethod
+                {
+                    TenantId = tenantId,
+                    EmployeeProfile = profile,
+                    PaymentType = "Bank",
+                    PaymentMode = PaymentModePercentage,
+                    PaymentPercent = 100m,
+                    Amount = null,
+                    CurrencyCode = NormalizeCurrency(profile.CurrencyCode),
+                    ExchangeRate = 1m,
+                    SequenceNo = 1,
+                    IsActive = true
+                };
+                profile.PaymentMethods.Add(defaultMethod);
+                profile.DefaultPaymentMethod = defaultMethod;
+            }
+
             return;
         }
 
@@ -9831,18 +12207,54 @@ public class PayrollService : IPayrollService
             _context.PayrollPaymentMethods.Remove(existing);
         }
 
-        foreach (var item in dto)
+        var normalizedRows = dto
+            .Select((item, index) => new
+            {
+                Item = item,
+                PaymentMode = NormalizePaymentMode(item.PaymentMode, item.Amount, item.PaymentPercent),
+                SequenceNo = item.SequenceNo > 0 ? item.SequenceNo : index + 1
+            })
+            .ToList();
+
+        foreach (var row in normalizedRows.Where(e => e.Item.IsActive))
         {
+            if (row.PaymentMode == PaymentModeFixedAmount && (!row.Item.Amount.HasValue || row.Item.Amount.Value <= 0m))
+            {
+                throw new InvalidOperationException("Fixed amount payment rows require an amount greater than zero.");
+            }
+
+            if (row.PaymentMode == PaymentModePercentage && (!row.Item.PaymentPercent.HasValue || row.Item.PaymentPercent.Value <= 0m))
+            {
+                throw new InvalidOperationException("Percentage payment rows require a percentage greater than zero.");
+            }
+        }
+
+        var activePercentageTotal = normalizedRows
+            .Where(e => e.Item.IsActive && e.PaymentMode == PaymentModePercentage)
+            .Sum(e => e.Item.PaymentPercent ?? 0m);
+
+        if (Math.Round(activePercentageTotal, 4) != 100m)
+        {
+            throw new InvalidOperationException("Active percentage payment rows must total 100% after fixed amount rows.");
+        }
+
+        foreach (var normalized in normalizedRows)
+        {
+            var item = normalized.Item;
             var method = profile.PaymentMethods.FirstOrDefault(e => e.Id == item.Id)
                 ?? new PayrollPaymentMethod { TenantId = tenantId, EmployeeProfile = profile };
             method.PaymentType = string.IsNullOrWhiteSpace(item.PaymentType) ? "Bank" : item.PaymentType.Trim();
-            method.PaymentPercent = item.PaymentPercent;
-            method.Amount = item.Amount;
+            method.PaymentMode = normalized.PaymentMode;
+            method.PaymentPercent = normalized.PaymentMode == PaymentModePercentage ? item.PaymentPercent : null;
+            method.Amount = normalized.PaymentMode == PaymentModeFixedAmount ? item.Amount : null;
             method.BankCode = TrimOrNull(item.BankCode);
             method.BankBranchCode = TrimOrNull(item.BankBranchCode);
             method.AccountNumber = TrimOrNull(item.AccountNumber);
+            method.ChequeNumber = TrimOrNull(item.ChequeNumber);
+            method.ChequeBankCode = TrimOrNull(item.ChequeBankCode);
             method.CurrencyCode = NormalizeCurrency(item.CurrencyCode);
-            method.SequenceNo = item.SequenceNo;
+            method.ExchangeRate = item.ExchangeRate.HasValue && item.ExchangeRate.Value > 0 ? item.ExchangeRate.Value : 1m;
+            method.SequenceNo = normalized.SequenceNo;
             method.StartDate = item.StartDate?.Date;
             method.EndDate = item.EndDate?.Date;
             method.IsActive = item.IsActive;
@@ -10191,6 +12603,28 @@ public class PayrollService : IPayrollService
     private static string? NormalizeOptionalCurrency(string? currency)
         => string.IsNullOrWhiteSpace(currency) ? null : currency.Trim().ToUpperInvariant();
 
+    private static string NormalizePaymentMode(string? paymentMode, decimal? amount = null, decimal? paymentPercent = null)
+    {
+        var normalized = paymentMode?.Trim().Replace(" ", string.Empty, StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(normalized, PaymentModeFixedAmount, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "Amount", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "A", StringComparison.OrdinalIgnoreCase))
+        {
+            return PaymentModeFixedAmount;
+        }
+
+        if (string.Equals(normalized, PaymentModePercentage, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "Percent", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "P", StringComparison.OrdinalIgnoreCase))
+        {
+            return PaymentModePercentage;
+        }
+
+        return amount.HasValue && amount.Value > 0m && (!paymentPercent.HasValue || paymentPercent.Value <= 0m)
+            ? PaymentModeFixedAmount
+            : PaymentModePercentage;
+    }
+
     private static string NormalizeDebitCredit(string? debitCredit)
     {
         var value = debitCredit?.Trim().ToUpperInvariant();
@@ -10423,6 +12857,7 @@ public class PayrollService : IPayrollService
             or PromotionEmployeeContributionArrearsTransactionType
             or PromotionEmployerContributionArrearsTransactionType
             or PromotionContributionArrearsTransactionType
+            or BackpayDeductionArrearsTransactionType
             ? "CR"
             : "DR";
 
@@ -11250,12 +13685,16 @@ public class PayrollService : IPayrollService
         {
             Id = entity.Id,
             PaymentType = entity.PaymentType,
+            PaymentMode = NormalizePaymentMode(entity.PaymentMode, entity.Amount, entity.PaymentPercent),
             PaymentPercent = entity.PaymentPercent,
             Amount = entity.Amount,
             BankCode = entity.BankCode,
             BankBranchCode = entity.BankBranchCode,
             AccountNumber = entity.AccountNumber,
+            ChequeNumber = entity.ChequeNumber,
+            ChequeBankCode = entity.ChequeBankCode,
             CurrencyCode = entity.CurrencyCode,
+            ExchangeRate = entity.ExchangeRate,
             SequenceNo = entity.SequenceNo,
             StartDate = entity.StartDate,
             EndDate = entity.EndDate,
@@ -11562,6 +14001,11 @@ public class PayrollService : IPayrollService
         string CurrencyCode,
         decimal Amount,
         PayrollRunEmployee Employee);
+    private sealed record PayrollPaymentAllocation(
+        PayrollPaymentMethod Method,
+        decimal Amount,
+        decimal ExchangeRate,
+        decimal BaseAmount);
 
     private sealed record PayrollPayslipBuildContext(
         Tenant? Tenant,
@@ -11608,6 +14052,20 @@ public class PayrollService : IPayrollService
         decimal OtherEmployeeContributionAmount,
         decimal OtherEmployerContributionAmount);
 
+    private sealed record PayrollBackpayTransactionDeltas(
+        decimal AllowanceAmount,
+        decimal TaxableAllowanceAmount,
+        decimal TaxableBenefitAmount,
+        decimal ContributionAmount,
+        decimal EmployerContributionAmount,
+        decimal EmployerTaxableAmount,
+        decimal NonTaxableContributionAmount,
+        decimal DeductionAmount,
+        decimal NonTaxableDeductionAmount)
+    {
+        public static PayrollBackpayTransactionDeltas Empty { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+
     private sealed record PayrollPromotionArrearsCalculation(
         decimal BasicAmount,
         decimal AllowanceAmount,
@@ -11615,10 +14073,11 @@ public class PayrollService : IPayrollService
         decimal EmployerContributionAmount,
         decimal OtherContributionAmount,
         decimal OtherEmployerContributionAmount,
+        decimal DeductionAmount,
         decimal TaxableIncomeAmount,
         decimal TaxAmount,
         decimal NetAmount)
     {
-        public static PayrollPromotionArrearsCalculation Empty { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        public static PayrollPromotionArrearsCalculation Empty { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 }

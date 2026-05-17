@@ -61,13 +61,24 @@ public class WorkflowInstanceRepository : GenericRepository<WorkflowInstance>, I
     /// </summary>
     public async Task<WorkflowInstance?> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        return await _dbSet
+        var instance = await _dbSet
             .Include(wi => wi.WorkflowDefinition)
             .ThenInclude(wd => wd.Steps)
+            .Include(wi => wi.EntityType)
+            .Include(wi => wi.CurrentStep)
             .Include(wi => wi.StepInstances)
             .ThenInclude(si => si.WorkflowStep)
+            .Include(wi => wi.StepInstances)
+            .ThenInclude(si => si.AssignedTo)
             .Include(wi => wi.ActivityLogs)
             .FirstOrDefaultAsync(wi => wi.Id == id && !wi.IsDeleted, cancellationToken);
+
+        if (instance != null)
+        {
+            await PopulateWorkflowStepsIncludingDeletedAsync(instance, cancellationToken);
+        }
+
+        return instance;
     }
 
     /// <summary>
@@ -96,6 +107,42 @@ public class WorkflowInstanceRepository : GenericRepository<WorkflowInstance>, I
             .Where(wi => wi.TenantId == tenantId && wi.StartedById == userId && !wi.IsDeleted)
             .OrderByDescending(wi => wi.CreatedAt)
             .ToListAsync(cancellationToken);
+    }
+
+    private async Task PopulateWorkflowStepsIncludingDeletedAsync(
+        WorkflowInstance instance,
+        CancellationToken cancellationToken = default)
+    {
+        if (instance.CurrentStep == null && instance.CurrentStepId.HasValue)
+        {
+            instance.CurrentStep = await _context.WorkflowSteps
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(step => step.Id == instance.CurrentStepId.Value, cancellationToken);
+        }
+
+        var missingStepIds = instance.StepInstances
+            .Where(stepInstance => stepInstance.WorkflowStep == null)
+            .Select(stepInstance => stepInstance.WorkflowStepId)
+            .Distinct()
+            .ToList();
+
+        if (missingStepIds.Count == 0)
+        {
+            return;
+        }
+
+        var stepsById = await _context.WorkflowSteps
+            .IgnoreQueryFilters()
+            .Where(step => missingStepIds.Contains(step.Id))
+            .ToDictionaryAsync(step => step.Id, cancellationToken);
+
+        foreach (var stepInstance in instance.StepInstances.Where(stepInstance => stepInstance.WorkflowStep == null))
+        {
+            if (stepsById.TryGetValue(stepInstance.WorkflowStepId, out var step))
+            {
+                stepInstance.WorkflowStep = step;
+            }
+        }
     }
 
     #endregion

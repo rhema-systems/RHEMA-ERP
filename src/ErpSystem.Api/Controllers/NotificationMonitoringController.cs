@@ -265,8 +265,8 @@ public class NotificationMonitoringController : ControllerBase
                 var emailDto = new ErpSystem.Core.Interfaces.Common.EmailDto
                 {
                     To = n.EmailAddress,
-                    Subject = n.Title ?? string.Empty,
-                    Body = n.Message ?? string.Empty,
+                    Subject = emailPayload?.Subject ?? n.Title ?? string.Empty,
+                    Body = emailPayload?.BodyHtml ?? n.Message ?? string.Empty,
                     IsHtml = emailPayload?.IsHtml ?? true,
                     Attachments = emailPayload?.Attachments?.Select(a => new ErpSystem.Core.Interfaces.Common.EmailAttachmentDto
                     {
@@ -815,6 +815,9 @@ public class AdminMessageQueueItemDetailDto
 public class EmailPayload
 {
     public bool IsHtml { get; set; } = true;
+    public string? Subject { get; set; }
+    public string? BodyHtml { get; set; }
+    public string? TextBody { get; set; }
     public List<EmailPayloadAttachment>? Attachments { get; set; }
 }
 

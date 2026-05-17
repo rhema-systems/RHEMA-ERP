@@ -85,6 +85,10 @@ const tenantSchema = z.object({
   contactEmail: z.string().optional(),
   contactPhone: z.string().optional(),
   address: z.string().optional(),
+  baseCurrency: z.string().optional(),
+  baseCurrencyName: z.string().optional(),
+  currencySymbol: z.string().optional(),
+  currencyDecimalPlaces: z.number().optional(),
   
   // Subscription (optional for form)
   subscriptionStartDate: z.string().optional(),
@@ -189,6 +193,10 @@ export default function TenantManagementPage() {
       contactEmail: '',
       contactPhone: '',
       address: '',
+      baseCurrency: 'GHS',
+      baseCurrencyName: 'Ghana Cedi',
+      currencySymbol: 'GH\u00a2',
+      currencyDecimalPlaces: 2,
       
       // Subscription
       subscriptionStartDate: '',
@@ -331,6 +339,10 @@ export default function TenantManagementPage() {
           contactEmail: tenantData.contactEmail,
           contactPhone: tenantData.contactPhone,
           address: tenantData.address,
+          baseCurrency: tenantData.baseCurrency,
+          baseCurrencyName: tenantData.baseCurrencyName,
+          currencySymbol: tenantData.currencySymbol,
+          currencyDecimalPlaces: tenantData.currencyDecimalPlaces,
           
           // Subscription
           subscriptionStartDate: tenantData.subscriptionStartDate ? new Date(tenantData.subscriptionStartDate) : undefined,
@@ -376,6 +388,10 @@ export default function TenantManagementPage() {
           contactEmail: tenantData.contactEmail,
           contactPhone: tenantData.contactPhone,
           address: tenantData.address,
+          baseCurrency: tenantData.baseCurrency,
+          baseCurrencyName: tenantData.baseCurrencyName,
+          currencySymbol: tenantData.currencySymbol,
+          currencyDecimalPlaces: tenantData.currencyDecimalPlaces,
           
           // Subscription
           subscriptionStartDate: tenantData.subscriptionStartDate ? new Date(tenantData.subscriptionStartDate) : undefined,
@@ -469,6 +485,10 @@ export default function TenantManagementPage() {
       contactEmail: tenant.contactEmail || '',
       contactPhone: tenant.contactPhone || '',
       address: tenant.address || '',
+      baseCurrency: tenant.baseCurrency || 'GHS',
+      baseCurrencyName: tenant.baseCurrencyName || '',
+      currencySymbol: tenant.currencySymbol || '',
+      currencyDecimalPlaces: tenant.currencyDecimalPlaces || 2,
       
       // Subscription
       subscriptionStartDate: tenant.subscriptionStartDate ? new Date(tenant.subscriptionStartDate).toISOString().slice(0, 16) : '',
@@ -669,6 +689,10 @@ export default function TenantManagementPage() {
       contactEmail: formValues.contactEmail || '',
       contactPhone: formValues.contactPhone || '',
       address: formValues.address || '',
+      baseCurrency: (formValues.baseCurrency || 'GHS').toUpperCase(),
+      baseCurrencyName: formValues.baseCurrencyName || '',
+      currencySymbol: formValues.currencySymbol || '',
+      currencyDecimalPlaces: Number(formValues.currencyDecimalPlaces) || 2,
       
       // Subscription - handle date conversion properly
       subscriptionStartDate: formValues.subscriptionStartDate ? new Date(formValues.subscriptionStartDate).toISOString() : undefined,
@@ -777,9 +801,9 @@ export default function TenantManagementPage() {
     <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Tenant Management</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Tenant & Company Settings</h1>
             <p className="text-muted-foreground">
-              Manage multi-tenant organizations and their configurations
+              Manage enterprise company identity, tenant access, and payroll header settings
             </p>
           </div>
         </div>
@@ -794,7 +818,7 @@ export default function TenantManagementPage() {
 
         <DataTable
           title="Tenants"
-          description="Manage tenant organizations and their settings"
+          description="Manage enterprise tenant organizations and company profile settings"
           data={tenants}
           columns={columns}
           loading={isLoading}
@@ -826,8 +850,9 @@ export default function TenantManagementPage() {
             <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col h-full">
               <Tabs defaultValue="basic" className="flex flex-col flex-1 overflow-hidden">
-                <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
+                <TabsList className="grid w-full grid-cols-6 flex-shrink-0">
                   <TabsTrigger value="basic">Basic</TabsTrigger>
+                  <TabsTrigger value="company">Company</TabsTrigger>
                   <TabsTrigger value="settings">Settings</TabsTrigger>
                   <TabsTrigger value="branding">Branding</TabsTrigger>
                   <TabsTrigger value="ldap">LDAP</TabsTrigger>
@@ -936,6 +961,155 @@ export default function TenantManagementPage() {
                     )}
                   />
                 </TabsContent>
+
+                  {/* Company Settings Tab */}
+                  <TabsContent value="company" className="space-y-6 mt-0">
+                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.6fr)] gap-6">
+                      <div className="space-y-5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="contactEmail"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Company Email</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="payroll@company.com" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="contactPhone"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Company Phone</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="+233 00 000 0000" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="domain"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Company Domain</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="company.com" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="baseCurrency"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Base Currency</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    maxLength={3}
+                                    placeholder="GHS"
+                                    {...field}
+                                    onChange={(event) => field.onChange(event.target.value.toUpperCase())}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={form.control}
+                          name="address"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Company Address</FormLabel>
+                              <FormControl>
+                                <Textarea placeholder="Postal and physical address used on payroll documents" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="baseCurrencyName"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Currency Name</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Ghana Cedi" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="currencySymbol"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Currency Symbol</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="GHS" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="currencyDecimalPlaces"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Decimal Places</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    max="6"
+                                    {...field}
+                                    onChange={(event) => field.onChange(Number(event.target.value))}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border bg-muted/30 p-4">
+                        <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                          <Building className="h-4 w-4" />
+                          Payroll Header Preview
+                        </div>
+                        <div className="rounded-md border bg-background px-4 py-5 text-center text-sm">
+                          <div className="font-semibold">{form.watch('name') || 'Company Name'}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{form.watch('address') || 'Company address'}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{form.watch('contactPhone') || 'Company phone'}</div>
+                          <div className="mt-3 text-sm font-semibold underline">PAYSLIP</div>
+                        </div>
+                      </div>
+                    </div>
+                  </TabsContent>
 
                   {/* Settings Tab */}
                   <TabsContent value="settings" className="space-y-6 mt-0">

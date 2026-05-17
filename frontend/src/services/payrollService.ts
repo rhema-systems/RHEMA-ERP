@@ -294,6 +294,8 @@ export interface PayrollPromotionArrearsBulkSave {
     employeeProfileId?: string;
     employeeNumber: string;
     effectiveDate?: string | null;
+    workingDays?: number | null;
+    basicSalary?: number | null;
     isSelected: boolean;
   }>;
 }
@@ -415,6 +417,12 @@ export interface PayrollBonusRule {
   amount: number;
   applicable: boolean;
   legacyCompanyCode?: string | null;
+}
+
+export interface PayrollBonusRuleBulkSave {
+  bonusCode: string;
+  legacyCompanyCode?: string | null;
+  rules: PayrollBonusRule[];
 }
 
 export interface PayrollBonusException {
@@ -997,6 +1005,27 @@ export interface PayrollSalaryBasis {
   isActive: boolean;
 }
 
+export type PayrollPaymentMode = 'Percentage' | 'FixedAmount';
+
+export interface PayrollPaymentMethod {
+  id?: string;
+  paymentType: string;
+  paymentMode: PayrollPaymentMode | string;
+  paymentPercent?: number | null;
+  amount?: number | null;
+  bankCode?: string | null;
+  bankBranchCode?: string | null;
+  accountNumber?: string | null;
+  chequeNumber?: string | null;
+  chequeBankCode?: string | null;
+  currencyCode: string;
+  exchangeRate?: number | null;
+  sequenceNo: number;
+  startDate?: string | null;
+  endDate?: string | null;
+  isActive: boolean;
+}
+
 export interface PayrollLoanSchedule {
   id: string;
   payrollLoanId: string;
@@ -1090,7 +1119,7 @@ export interface PayrollEmployeeProfile {
   tinNumber?: string | null;
   currencyCode: string;
   salaryBasis?: PayrollSalaryBasis | null;
-  paymentMethods: any[];
+  paymentMethods: PayrollPaymentMethod[];
   employeeComponents: any[];
   loans: PayrollLoan[];
 }
@@ -1358,6 +1387,7 @@ export interface PayrollPayslip {
   deductions: PayrollTransaction[];
   contributions: PayrollPayslipContribution[];
   bankDetails: PayrollPayslipBankDetail[];
+  htmlContent?: string | null;
   snapshot?: PayrollPayslipSnapshot | null;
 }
 
@@ -1508,6 +1538,8 @@ export const payrollService = {
     apiRequest<PayrollBonusPolicy>('/hr/payroll/setup/bonus-policies', { method: 'POST', body: JSON.stringify(payload) }),
   upsertBonusRule: (payload: PayrollBonusRule) =>
     apiRequest<PayrollBonusRule>('/hr/payroll/setup/bonus-rules', { method: 'POST', body: JSON.stringify(payload) }),
+  saveBonusRules: (payload: PayrollBonusRuleBulkSave) =>
+    apiRequest<PayrollBonusRule[]>('/hr/payroll/setup/bonus-rules/bulk', { method: 'POST', body: JSON.stringify(payload) }),
   getBonusExceptions: (params: { bonusCode?: string } = {}) =>
     apiRequest<PayrollBonusException[]>(`/hr/payroll/setup/bonus-exceptions${buildQuery(params)}`),
   saveBonusExceptions: (payload: PayrollBonusExceptionBulkSave) =>
@@ -1586,6 +1618,8 @@ export const payrollService = {
     apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/submit-review`, { method: 'POST', body: JSON.stringify({ notes }) }),
   approveRun: (runId: string, notes?: string) =>
     apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/approve`, { method: 'POST', body: JSON.stringify({ notes }) }),
+  rejectRun: (runId: string, notes?: string) =>
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
   closeRun: (runId: string, notes?: string) =>
     apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/close`, { method: 'POST', body: JSON.stringify({ notes }) }),
   rollbackRun: (runId: string, notes?: string) =>

@@ -94,8 +94,9 @@ export function WorkflowApprovalActions({
   const [canCurrentUserApprove, setCanCurrentUserApprove] = React.useState<boolean | undefined>(undefined);
   const [summaryPendingApprovers, setSummaryPendingApprovers] = React.useState<WorkflowPendingApproverDto[]>([]);
 
-  const effectiveStepName = currentStepName || workflowSummary?.currentStepName || summaryStepName;
-  const effectivePendingApprovers = workflowSummary?.pendingApprovers ?? summaryPendingApprovers;
+  const hasActiveSummary = workflowSummary?.hasActiveInstance === true;
+  const effectiveStepName = currentStepName || (hasActiveSummary ? workflowSummary?.currentStepName : undefined) || summaryStepName;
+  const effectivePendingApprovers = hasActiveSummary ? (workflowSummary?.pendingApprovers ?? []) : summaryPendingApprovers;
   const pendingApproversText = formatPendingApprovers(effectivePendingApprovers);
 
   const defaultCanSubmit = status === 'Draft';
@@ -105,7 +106,7 @@ export function WorkflowApprovalActions({
   const approveRejectEnabledByStatus = (canApproveReject ?? defaultCanApproveReject) && !!onApprove && !!onReject;
 
   const effectiveCanApproveFlag =
-    workflowSummary?.canCurrentUserApprove ?? canCurrentUserApprove;
+    hasActiveSummary ? workflowSummary?.canCurrentUserApprove : canCurrentUserApprove;
 
   const effectiveCanApprove =
     effectiveCanApproveFlag === undefined ? approveRejectEnabledByStatus : approveRejectEnabledByStatus && effectiveCanApproveFlag;

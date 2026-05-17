@@ -534,19 +534,56 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
         if (topic.EnableEmail && emailAddresses.Count > 0)
         {
+            var emailOptions = evt.Email;
             var (subject, htmlBody) = BuildEmail(topic, data, fallbackSubject: title, fallbackBody: message);
+            if (!string.IsNullOrWhiteSpace(emailOptions?.SubjectTemplateOverride))
+            {
+                var subjectOverride = RenderTemplate(emailOptions.SubjectTemplateOverride, data);
+                if (!string.IsNullOrWhiteSpace(subjectOverride))
+                {
+                    subject = subjectOverride;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(emailOptions?.HtmlBodyTemplateOverride))
+            {
+                var bodyOverride = RenderTemplate(emailOptions.HtmlBodyTemplateOverride, data);
+                if (!string.IsNullOrWhiteSpace(bodyOverride))
+                {
+                    htmlBody = bodyOverride;
+                }
+            }
+
+            string? textBody = null;
+            if (!string.IsNullOrWhiteSpace(emailOptions?.TextBodyTemplateOverride))
+            {
+                textBody = RenderTemplate(emailOptions.TextBodyTemplateOverride, data);
+            }
+
             var emailPayload = new
             {
                 email = new
                 {
                     isHtml = true,
-                    attachmentsOmitted = true,
-                    attachments = Array.Empty<object>()
+                    subject,
+                    bodyHtml = htmlBody,
+                    textBody,
+                    templateId = topic.EmailTemplateId,
+                    templateName = topic.EmailTemplate?.Name,
+                    attachmentSource = emailOptions?.AttachmentSource,
+                    attachmentsOmitted = false,
+                    attachments = emailOptions?.Attachments?.Select(a => new
+                    {
+                        fileName = a.FileName,
+                        contentType = a.ContentType,
+                        contentBase64 = a.ContentBase64
+                    }).ToList() ?? []
                 },
                 topic = new
                 {
                     key = topic.Key
-                }
+                },
+                metadata = evt.Metadata ?? new Dictionary<string, object>()
             };
 
             var additional = JsonSerializer.Serialize(emailPayload);
@@ -558,7 +595,7 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                     Id = Guid.NewGuid(),
                     TenantId = evt.TenantId,
                     RecipientId = Guid.Empty,
-                    NotificationType = "Email",
+                    NotificationType = string.IsNullOrWhiteSpace(evt.NotificationType) ? "Email" : evt.NotificationType,
                     Title = subject,
                     Message = htmlBody,
                     Priority = "Normal",

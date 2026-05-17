@@ -457,21 +457,62 @@ public class WorkflowEngine : IWorkflowEngine
             ?? throw new InvalidOperationException($"Workflow instance {workflowInstanceId} not found");
 
         var steps = instance.StepInstances?.OrderBy(si => si.CreatedDate).ToList() ?? new List<WorkflowStepInstance>();
+        var currentStep = ResolveCurrentStep(instance, steps);
+        var currentStepDefinition = ResolveCurrentStepDefinition(instance, currentStep, steps);
         var totalSteps = instance.WorkflowDefinition?.Steps?.Count ?? steps.Count;
         var completedSteps = steps.Count(si => si.Status == WorkflowStepInstanceStatus.Completed);
 
         var approvals = await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId);
         var pendingApprovals = approvals.Where(a => a.StepInstance.WorkflowInstanceId == instance.Id).ToList();
+        var currentStepPendingApprovals = currentStep == null
+            ? pendingApprovals
+            : pendingApprovals.Where(a => a.StepInstanceId == currentStep.Id).ToList();
+
+        if (!currentStepPendingApprovals.Any() && currentStep?.WorkflowStep?.StepType == WorkflowStepType.Approval)
+        {
+            await EnsureApprovalsForStepAsync(currentStep.Id);
+            approvals = await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId);
+            pendingApprovals = approvals.Where(a => a.StepInstance.WorkflowInstanceId == instance.Id).ToList();
+        }
+
+        var pendingApprovalStatuses = pendingApprovals.Select(a => new WorkflowApprovalStatusDto
+        {
+            ApprovalId = a.Id,
+            StepName = a.StepInstance.WorkflowStep?.Name ?? "Approval",
+            ApproverId = a.ApproverId ?? Guid.Empty,
+            ApproverName = a.Approver?.UserName ?? a.ApproverRole ?? "Unassigned",
+            ApproverRole = a.ApproverRole,
+            Status = a.Status,
+            RequestedDate = a.RequestedDate,
+            DueDate = a.DueDate,
+            IsOverdue = a.DueDate.HasValue && a.DueDate.Value < DateTime.UtcNow && a.Status == WorkflowApprovalStatus.Pending
+        }).ToList();
+
+        if (pendingApprovalStatuses.Count == 0 && currentStepDefinition?.StepType == WorkflowStepType.Approval)
+        {
+            pendingApprovalStatuses = BuildConfiguredPendingApprovalStatuses(currentStepDefinition, currentStep);
+        }
+
+        var pendingApproverNamesByStepInstanceId = pendingApprovals
+            .GroupBy(a => a.StepInstanceId)
+            .ToDictionary(
+                g => g.Key,
+                g => FormatApproverList(g
+                    .Select(a => a.Approver?.UserName ?? a.ApproverRole ?? "Unassigned")
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)));
 
         return new WorkflowStatusDto
         {
             WorkflowInstanceId = instance.Id,
             WorkflowName = instance.WorkflowDefinition?.Name ?? "Workflow",
             EntityId = instance.EntityId,
-            EntityType = instance.EntityType?.Name ?? "Unknown",
+            EntityType = instance.EntityType?.Name ?? instance.EntityType?.Code ?? "Unknown",
             Status = instance.Status,
             StartedDate = instance.StartedDate ?? instance.CreatedDate,
             CompletedDate = instance.CompletedDate,
+            CurrentStepName = currentStepDefinition?.Name,
+            CurrentStepInstanceId = currentStep?.Id,
             Progress = new WorkflowProgressDto
             {
                 TotalSteps = totalSteps,
@@ -484,22 +525,178 @@ public class WorkflowEngine : IWorkflowEngine
                 StepName = si.WorkflowStep?.Name ?? "Step",
                 Status = si.Status,
                 AssignedToId = si.AssignedToId,
+                AssignedToName = si.AssignedTo?.UserName
+                    ?? (pendingApproverNamesByStepInstanceId.TryGetValue(si.Id, out var pendingApprovers)
+                        ? pendingApprovers
+                        : null),
                 StartedDate = si.StartedDate,
                 CompletedDate = si.CompletedDate,
                 DueDate = si.DueDate,
                 IsOverdue = si.DueDate.HasValue && si.DueDate.Value < DateTime.UtcNow && si.Status == WorkflowStepInstanceStatus.Pending
             }).ToList(),
-            PendingApprovals = pendingApprovals.Select(a => new WorkflowApprovalStatusDto
+            PendingApprovals = pendingApprovalStatuses
+        };
+    }
+
+    private static WorkflowStepInstance? ResolveCurrentStep(WorkflowInstance instance, List<WorkflowStepInstance> steps)
+    {
+        if (!steps.Any())
+        {
+            return null;
+        }
+
+        if (instance.CurrentStepId.HasValue)
+        {
+            var currentStepByDefinition = steps
+                .Where(si =>
+                    si.WorkflowStepId == instance.CurrentStepId.Value &&
+                    (si.Status == WorkflowStepInstanceStatus.Pending || si.Status == WorkflowStepInstanceStatus.InProgress))
+                .OrderByDescending(si => si.CreatedDate)
+                .FirstOrDefault();
+
+            if (currentStepByDefinition != null)
             {
-                ApprovalId = a.Id,
-                StepName = a.StepInstance.WorkflowStep?.Name ?? "Approval",
-                ApproverId = a.ApproverId ?? Guid.Empty,
-                ApproverName = a.Approver?.UserName ?? a.ApproverRole ?? "Unassigned",
-                Status = a.Status,
-                RequestedDate = a.RequestedDate,
-                DueDate = a.DueDate,
-                IsOverdue = a.DueDate.HasValue && a.DueDate.Value < DateTime.UtcNow && a.Status == WorkflowApprovalStatus.Pending
-            }).ToList()
+                return currentStepByDefinition;
+            }
+        }
+
+        return steps
+            .Where(si => si.Status == WorkflowStepInstanceStatus.InProgress)
+            .OrderByDescending(si => si.CreatedDate)
+            .FirstOrDefault()
+            ?? steps
+                .Where(si => si.Status == WorkflowStepInstanceStatus.Pending)
+                .OrderByDescending(si => si.CreatedDate)
+                .FirstOrDefault();
+    }
+
+    private static WorkflowStep? ResolveCurrentStepDefinition(
+        WorkflowInstance instance,
+        WorkflowStepInstance? currentStep,
+        List<WorkflowStepInstance> steps)
+    {
+        if (currentStep?.WorkflowStep != null)
+        {
+            return currentStep.WorkflowStep;
+        }
+
+        if (instance.CurrentStep != null)
+        {
+            return instance.CurrentStep;
+        }
+
+        if (instance.CurrentStepId.HasValue)
+        {
+            var byCurrentStepId = instance.WorkflowDefinition?.Steps
+                .FirstOrDefault(step => step.Id == instance.CurrentStepId.Value);
+
+            if (byCurrentStepId != null)
+            {
+                return byCurrentStepId;
+            }
+        }
+
+        return steps
+            .Select(stepInstance => stepInstance.WorkflowStep)
+            .Where(step => step != null)
+            .OrderBy(step => step!.Order)
+            .FirstOrDefault()
+            ?? instance.WorkflowDefinition?.Steps
+                .Where(step => !step.IsEndStep)
+                .OrderBy(step => step.Order)
+                .FirstOrDefault();
+    }
+
+    private static List<WorkflowApprovalStatusDto> BuildConfiguredPendingApprovalStatuses(
+        WorkflowStep stepDefinition,
+        WorkflowStepInstance? stepInstance)
+    {
+        var labels = GetConfiguredApproverLabels(stepDefinition);
+        if (labels.Count == 0)
+        {
+            return new List<WorkflowApprovalStatusDto>();
+        }
+
+        var requestedDate = stepInstance?.StartedDate ?? stepInstance?.CreatedDate ?? DateTime.UtcNow;
+
+        return labels
+            .Select(label =>
+            {
+                var dueDate = stepInstance?.DueDate;
+                return new WorkflowApprovalStatusDto
+                {
+                    ApprovalId = Guid.Empty,
+                    StepName = stepDefinition.Name,
+                    ApproverId = Guid.Empty,
+                    ApproverName = label,
+                    ApproverRole = label,
+                    Status = WorkflowApprovalStatus.Pending,
+                    RequestedDate = requestedDate,
+                    DueDate = dueDate,
+                    IsOverdue = dueDate.HasValue && dueDate.Value < DateTime.UtcNow
+                };
+            })
+            .ToList();
+    }
+
+    private static List<string> GetConfiguredApproverLabels(WorkflowStep stepDefinition)
+    {
+        var labels = new List<string>();
+
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
+        var rules = config?.ApprovalConfig?.ApproverRules;
+        if (rules != null)
+        {
+            foreach (var rule in rules.OrderByDescending(rule => rule.Priority))
+            {
+                switch (rule.AssignmentType)
+                {
+                    case WorkflowAssignmentType.Role:
+                        if (!string.IsNullOrWhiteSpace(rule.Role))
+                        {
+                            labels.Add(rule.Role);
+                        }
+                        break;
+                    case WorkflowAssignmentType.User:
+                        if (rule.UserId.HasValue)
+                        {
+                            labels.Add(rule.UserId.Value.ToString());
+                        }
+                        break;
+                    case WorkflowAssignmentType.Dynamic:
+                        if (!string.IsNullOrWhiteSpace(rule.DynamicExpression))
+                        {
+                            labels.Add(rule.DynamicExpression);
+                        }
+                        break;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(stepDefinition.RequiredRole))
+        {
+            labels.Add(stepDefinition.RequiredRole);
+        }
+
+        return labels
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? FormatApproverList(IEnumerable<string> approverNames)
+    {
+        var names = approverNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return names.Count switch
+        {
+            0 => null,
+            1 => names[0],
+            2 => string.Join(", ", names),
+            _ => $"{string.Join(", ", names.Take(2))} +{names.Count - 2}"
         };
     }
 
@@ -523,16 +720,12 @@ public class WorkflowEngine : IWorkflowEngine
         var existingApprovals = (await _workflowApprovalRepository.GetByStepInstanceAsync(stepInstance.Id)).ToList();
         if (existingApprovals.Count > 0)
         {
-            return;
-        }
-
-        var config = DeserializeStepConfig(stepDefinition.Configuration);
-        if (config?.ApprovalConfig == null)
-        {
+            await EnsureStepAssignedToDirectApproverAsync(stepInstance, existingApprovals);
             return;
         }
 
         var context = MergeDataContext(instance, dataContext);
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
         await CreateApprovalsAsync(instance, stepInstance, stepDefinition, config, context);
     }
 
@@ -906,13 +1099,19 @@ public class WorkflowEngine : IWorkflowEngine
         WorkflowStepConfigurationDto? config,
         Dictionary<string, object> context)
     {
-        var approvalConfig = config?.ApprovalConfig;
-        if (approvalConfig == null)
+        var approvers = config?.ApprovalConfig == null
+            ? new List<(Guid? UserId, string? Role)>()
+            : await ResolveApproversAsync(config.ApprovalConfig, context, stepInstance);
+
+        if (approvers.Count == 0 && !string.IsNullOrWhiteSpace(stepDefinition.RequiredRole))
         {
-            return;
+            approvers.Add((null, stepDefinition.RequiredRole));
         }
 
-        var approvers = await ResolveApproversAsync(approvalConfig, context, stepInstance);
+        var directAssigneeId = approvers
+            .Select(approver => approver.UserId)
+            .FirstOrDefault(userId => userId.HasValue);
+
         foreach (var approver in approvers)
         {
             var approval = new WorkflowApproval
@@ -946,6 +1145,38 @@ public class WorkflowEngine : IWorkflowEngine
                 await _notificationService.SendApprovalRequestNotificationAsync(approval.Id);
             }
         }
+
+        if (!stepInstance.AssignedToId.HasValue && directAssigneeId.HasValue)
+        {
+            stepInstance.AssignedToId = directAssigneeId.Value;
+            await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+            await _workflowStepInstanceRepository.SaveChangesAsync();
+        }
+    }
+
+    private async Task EnsureStepAssignedToDirectApproverAsync(
+        WorkflowStepInstance stepInstance,
+        IReadOnlyCollection<WorkflowApproval> approvals)
+    {
+        if (stepInstance.AssignedToId.HasValue)
+        {
+            return;
+        }
+
+        var directAssigneeId = approvals
+            .Where(approval => approval.Status == WorkflowApprovalStatus.Pending && approval.ApproverId.HasValue)
+            .OrderBy(approval => approval.RequestedDate)
+            .Select(approval => approval.ApproverId!.Value)
+            .FirstOrDefault();
+
+        if (directAssigneeId == Guid.Empty)
+        {
+            return;
+        }
+
+        stepInstance.AssignedToId = directAssigneeId;
+        await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+        await _workflowStepInstanceRepository.SaveChangesAsync();
     }
 
     private async Task<List<(Guid? UserId, string? Role)>> ResolveApproversAsync(

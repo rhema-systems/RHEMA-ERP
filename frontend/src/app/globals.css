@@ -175,4 +175,53 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+}
+
+.payroll-payslip-print-root,
+.payroll-payslip-print-root * {
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body.printing-payroll-payslip > * {
+    visibility: hidden;
+  }
+
+  body.printing-payroll-payslip .payroll-payslip-print-root,
+  body.printing-payroll-payslip .payroll-payslip-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-payroll-payslip .payroll-payslip-print-root {
+    position: fixed;
+    inset: 3mm auto auto 2mm;
+    box-sizing: border-box;
+    width: 204mm;
+    height: 291mm;
+    min-height: 291mm;
+    max-width: none;
+    overflow: hidden;
+    box-shadow: none;
+  }
+
+  body.printing-payroll-payslip .payroll-payslip-no-print {
+    display: none !important;
+  }
 }

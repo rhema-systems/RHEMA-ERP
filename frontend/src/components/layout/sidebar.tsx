@@ -229,6 +229,7 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Run Desk', href: '/hr/payroll#runs', icon: CalendarClock },
           { title: 'Employee Profiles', href: '/hr/payroll/employee-profiles', icon: Users },
+          { title: 'Bonus Exceptions', href: '/hr/payroll/bonus-exceptions', icon: Award },
           { title: 'Salary Advance', href: '/hr/payroll/salary-advance', icon: DollarSign },
           { title: 'Loan Transaction', href: '/hr/payroll/loan-transaction', icon: CreditCard },
           { title: 'Loan Transaction Amendment', href: '/hr/payroll/loan-transaction-amendment', icon: RotateCcw },

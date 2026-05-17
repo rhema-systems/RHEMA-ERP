@@ -164,6 +164,10 @@ export interface TenantDto {
   welcomeMessage?: string;
   defaultPriority?: number;
   enableAutoSelection?: boolean;
+  baseCurrency?: string;
+  baseCurrencyName?: string;
+  currencySymbol?: string;
+  currencyDecimalPlaces?: number;
 }
 
 export interface RefreshTokenRequest {

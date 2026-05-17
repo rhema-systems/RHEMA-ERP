@@ -50,6 +50,9 @@ public class WorkflowApprovalRepository : GenericRepository<WorkflowApproval>, I
             .Include(a => a.ProcessedBy)
             .Include(a => a.StepInstance)
             .ThenInclude(si => si.WorkflowStep)
+            .Include(a => a.StepInstance)
+            .ThenInclude(si => si.WorkflowInstance)
+            .ThenInclude(wi => wi.WorkflowDefinition)
             .Where(a => a.Status == status && a.TenantId == tenantId && !a.IsDeleted)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync(cancellationToken);

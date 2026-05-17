@@ -194,6 +194,12 @@ public class PayrollController : ControllerBase
     public Task<ActionResult<PayrollBonusRuleDto>> UpsertBonusRule([FromBody] UpsertPayrollBonusRuleDto dto, CancellationToken cancellationToken)
         => Handle(() => _payrollService.UpsertBonusRuleAsync(GetTenantId(), dto, cancellationToken));
 
+    [HttpPost("setup/bonus-rules/bulk")]
+    public Task<ActionResult<IReadOnlyList<PayrollBonusRuleDto>>> SaveBonusRules(
+        [FromBody] PayrollBonusRuleBulkSaveDto dto,
+        CancellationToken cancellationToken)
+        => Handle(() => _payrollService.SaveBonusRulesAsync(GetTenantId(), dto, cancellationToken));
+
     [HttpGet("setup/bonus-exceptions")]
     public async Task<ActionResult<IReadOnlyList<PayrollBonusExceptionDto>>> GetBonusExceptions(
         [FromQuery] string? bonusCode,
@@ -375,6 +381,10 @@ public class PayrollController : ControllerBase
     [HttpPost("runs/{runId:guid}/approve")]
     public Task<ActionResult<PayrollRunDto>> ApproveRun(Guid runId, [FromBody] PayrollRunActionDto? dto, CancellationToken cancellationToken)
         => Handle(() => _payrollService.ApproveRunAsync(GetTenantId(), runId, GetUserId(), dto ?? new PayrollRunActionDto(), cancellationToken));
+
+    [HttpPost("runs/{runId:guid}/reject")]
+    public Task<ActionResult<PayrollRunDto>> RejectRun(Guid runId, [FromBody] PayrollRunActionDto? dto, CancellationToken cancellationToken)
+        => Handle(() => _payrollService.RejectRunAsync(GetTenantId(), runId, GetUserId(), dto ?? new PayrollRunActionDto(), cancellationToken));
 
     [HttpPost("runs/{runId:guid}/close")]
     public Task<ActionResult<PayrollRunDto>> CloseRun(Guid runId, [FromBody] PayrollRunActionDto? dto, CancellationToken cancellationToken)

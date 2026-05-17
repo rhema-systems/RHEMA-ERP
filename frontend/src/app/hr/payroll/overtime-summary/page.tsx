@@ -404,12 +404,12 @@ export default function OvertimeSummaryPage() {
                   columns={[
                     { header: 'Employee No', value: (row) => row.employeeNumber },
                     { header: 'Employee Name', value: (row) => row.employeeName },
-                    { header: 'Absent', value: (row) => row.absentDays },
-                    { header: 'Normal', value: (row) => row.normalDays },
-                    { header: 'Week Day', value: (row) => row.weekdayDays },
-                    { header: 'Holiday', value: (row) => row.holidayDays },
-                    { header: 'Saturday', value: (row) => row.saturdayDays },
-                    { header: 'Sunday', value: (row) => row.sundayDays },
+                    { header: 'Absent Hrs', value: (row) => row.absentDays },
+                    { header: 'Normal Hrs', value: (row) => row.normalDays },
+                    { header: 'Week Day Hrs', value: (row) => row.weekdayDays },
+                    { header: 'Holiday Hrs', value: (row) => row.holidayDays },
+                    { header: 'Saturday Hrs', value: (row) => row.saturdayDays },
+                    { header: 'Sunday Hrs', value: (row) => row.sundayDays },
                   ]}
                 />
                 <Button type="button" size="sm" onClick={openEmployeePicker} disabled={Boolean(busy)}>
@@ -433,12 +433,12 @@ export default function OvertimeSummaryPage() {
                     </th>
                     <th className="px-3 py-2 text-left">Employee No</th>
                     <th className="px-3 py-2 text-left">Employee Name</th>
-                    <th className="w-24 px-3 py-2 text-right">Absent</th>
-                    <th className="w-24 px-3 py-2 text-right">Normal</th>
-                    <th className="w-24 px-3 py-2 text-right">Week Day</th>
-                    <th className="w-24 px-3 py-2 text-right">Holiday</th>
-                    <th className="w-24 px-3 py-2 text-right">Saturday</th>
-                    <th className="w-24 px-3 py-2 text-right">Sunday</th>
+                    <th className="w-24 px-3 py-2 text-right">Absent Hrs</th>
+                    <th className="w-24 px-3 py-2 text-right">Normal Hrs</th>
+                    <th className="w-24 px-3 py-2 text-right">Week Day Hrs</th>
+                    <th className="w-24 px-3 py-2 text-right">Holiday Hrs</th>
+                    <th className="w-24 px-3 py-2 text-right">Saturday Hrs</th>
+                    <th className="w-24 px-3 py-2 text-right">Sunday Hrs</th>
                     <th className="w-12 px-3 py-2" aria-label="Remove" />
                   </tr>
                 </thead>

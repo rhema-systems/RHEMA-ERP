@@ -333,6 +333,8 @@ public class WorkflowStatusDto
     public WorkflowInstanceStatus Status { get; set; }
     public DateTime StartedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
+    public string? CurrentStepName { get; set; }
+    public Guid? CurrentStepInstanceId { get; set; }
     public WorkflowProgressDto Progress { get; set; } = null!;
     public List<WorkflowStepStatusDto> Steps { get; set; } = new();
     public List<WorkflowApprovalStatusDto> PendingApprovals { get; set; } = new();
@@ -374,6 +376,7 @@ public class WorkflowApprovalStatusDto
     public string StepName { get; set; } = string.Empty;
     public Guid ApproverId { get; set; }
     public string ApproverName { get; set; } = string.Empty;
+    public string? ApproverRole { get; set; }
     public WorkflowApprovalStatus Status { get; set; }
     public DateTime RequestedDate { get; set; }
     public DateTime? DueDate { get; set; }

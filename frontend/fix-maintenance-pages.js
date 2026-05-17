@@ -1,4 +1,4 @@
-/* eslint-disable */
+ 
 // Script to batch fix maintenance pages with proper API integration
 /* eslint-disable @typescript-eslint/no-require-imports */
 

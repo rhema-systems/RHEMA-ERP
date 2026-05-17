@@ -32,7 +32,11 @@ public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition
     public async Task<WorkflowDefinition?> GetByNameAsync(string name, Guid tenantId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
-            .FirstOrDefaultAsync(wd => wd.Name == name && wd.TenantId == tenantId && !wd.IsDeleted, cancellationToken);
+            .Where(wd => wd.Name == name && wd.TenantId == tenantId && !wd.IsDeleted)
+            .OrderByDescending(wd => wd.IsActive)
+            .ThenByDescending(wd => wd.Version)
+            .ThenByDescending(wd => wd.UpdatedAt ?? wd.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     /// <summary>
@@ -45,6 +49,7 @@ public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition
             .ThenInclude(s => s.OutgoingTransitions)
             .Include(wd => wd.Steps)
             .ThenInclude(s => s.IncomingTransitions)
+            .Include(wd => wd.Instances)
             .Include(wd => wd.EntityType)
             .FirstOrDefaultAsync(wd => wd.Id == id && !wd.IsDeleted, cancellationToken);
     }

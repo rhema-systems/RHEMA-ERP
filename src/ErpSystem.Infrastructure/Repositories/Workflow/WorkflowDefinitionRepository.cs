@@ -29,6 +29,9 @@ public class WorkflowDefinitionRepository : Repository<WorkflowDefinition>, IWor
             .Include(wd => wd.Steps)
                 .ThenInclude(s => s.OutgoingTransitions)
             .Include(wd => wd.EntityType)
+            .OrderByDescending(wd => wd.IsActive)
+            .ThenByDescending(wd => wd.Version)
+            .ThenByDescending(wd => wd.UpdatedAt ?? wd.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -42,6 +45,7 @@ public class WorkflowDefinitionRepository : Repository<WorkflowDefinition>, IWor
             .Include(wd => wd.Steps)
                 .ThenInclude(s => s.IncomingTransitions)
                     .ThenInclude(t => t.FromStep)
+            .Include(wd => wd.Instances)
             .Include(wd => wd.EntityType)
             .FirstOrDefaultAsync(cancellationToken);
     }

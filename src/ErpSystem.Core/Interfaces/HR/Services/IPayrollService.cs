@@ -47,6 +47,7 @@ public interface IPayrollService
     Task<PayrollLoanPolicyDto> UpsertLoanPolicyAsync(Guid tenantId, UpsertPayrollLoanPolicyDto dto, CancellationToken cancellationToken = default);
     Task<PayrollBonusPolicyDto> UpsertBonusPolicyAsync(Guid tenantId, UpsertPayrollBonusPolicyDto dto, CancellationToken cancellationToken = default);
     Task<PayrollBonusRuleDto> UpsertBonusRuleAsync(Guid tenantId, UpsertPayrollBonusRuleDto dto, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PayrollBonusRuleDto>> SaveBonusRulesAsync(Guid tenantId, PayrollBonusRuleBulkSaveDto dto, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PayrollBonusExceptionDto>> GetBonusExceptionsAsync(Guid tenantId, string? bonusCode = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PayrollBonusExceptionDto>> SaveBonusExceptionsAsync(Guid tenantId, PayrollBonusExceptionBulkSaveDto dto, CancellationToken cancellationToken = default);
     Task<PayrollBackpayPolicyDto> UpsertBackpayPolicyAsync(Guid tenantId, UpsertPayrollBackpayPolicyDto dto, CancellationToken cancellationToken = default);
@@ -82,6 +83,7 @@ public interface IPayrollService
     Task<PayrollRunDto> CalculateRunAsync(Guid tenantId, Guid runId, Guid? userId, CancellationToken cancellationToken = default);
     Task<PayrollRunDto> SubmitRunForReviewAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
     Task<PayrollRunDto> ApproveRunAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
+    Task<PayrollRunDto> RejectRunAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
     Task<PayrollRunDto> CloseRunAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
     Task<PayrollRunDto> RollbackRunAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
     Task<PayrollSummaryReportDto> GetRunSummaryReportAsync(Guid tenantId, Guid runId, Guid? userId, bool createSnapshot = false, CancellationToken cancellationToken = default);

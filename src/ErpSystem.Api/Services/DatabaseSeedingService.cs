@@ -5147,9 +5147,8 @@ namespace ErpSystem.Web.Services
                 return;
             }
 
-            // Only create test users if they don't exist - don't update existing users
-            // Ensure these accounts exist and remain usable on every Development seed run.
-            // (CreateTestUserAsync is idempotent and will update existing users as needed.)
+            // Ensure seeded accounts exist and remain usable on every Development seed run.
+            // Preserve existing contact details so local/admin edits are not undone by startup seeding.
             await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
                 "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.Local);
 
@@ -5709,10 +5708,23 @@ namespace ErpSystem.Web.Services
             var existingUser = await _userManager.FindByNameAsync(username);
             if (existingUser != null)
             {
-                // Ensure tenant, profile fields, and active status are correct
+                // Keep the seeded account usable without forcing an edited email back to the seed default.
                 var needsUpdate = false;
                 if (existingUser.TenantId != tenantId) { existingUser.TenantId = tenantId; needsUpdate = true; }
-                if (existingUser.Email != email) { existingUser.Email = email; needsUpdate = true; }
+                if (string.IsNullOrWhiteSpace(existingUser.Email))
+                {
+                    existingUser.Email = email;
+                    needsUpdate = true;
+                }
+                else
+                {
+                    var normalizedEmail = _userManager.NormalizeEmail(existingUser.Email);
+                    if (!string.Equals(existingUser.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
+                    {
+                        existingUser.NormalizedEmail = normalizedEmail;
+                        needsUpdate = true;
+                    }
+                }
                 if (existingUser.FirstName != firstName) { existingUser.FirstName = firstName; needsUpdate = true; }
                 if (existingUser.LastName != lastName) { existingUser.LastName = lastName; needsUpdate = true; }
                 if (!existingUser.EmailConfirmed) { existingUser.EmailConfirmed = true; needsUpdate = true; }

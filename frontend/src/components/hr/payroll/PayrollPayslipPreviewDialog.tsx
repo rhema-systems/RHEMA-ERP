@@ -608,7 +608,9 @@ export function PayrollPayslipPreviewDialog({ open, payslip, onOpenChange }: Pay
             <article ref={pageRef} className="payroll-payslip-print-root mx-auto h-[297mm] w-[210mm] overflow-hidden border border-black bg-white px-[1mm] pb-[3mm] pt-[14mm] text-[10.5px] leading-tight text-black shadow-sm">
               <div ref={frameRef} className="h-full overflow-hidden">
                 <div ref={contentRef} className="flex min-h-full flex-col" style={fittedContentStyle}>
-                  {payslip.isSeparateBonusRun ? (
+                  {payslip.htmlContent ? (
+                    <div className="contents" dangerouslySetInnerHTML={{ __html: payslip.htmlContent }} />
+                  ) : payslip.isSeparateBonusRun ? (
                     <BonusSlip payslip={payslip} />
                   ) : (
                   <>
