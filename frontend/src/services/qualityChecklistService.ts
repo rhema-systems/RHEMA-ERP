@@ -18,8 +18,11 @@ export interface QualityChecklist {
   name: string;
   description?: string;
   workOrderType: string;
+  workOrderTypeId?: string;
   assetCategory: string;
+  assetCategoryId?: string;
   maintenanceType?: string;
+  maintenanceTypeId?: string;
   isMandatory: boolean;
   isActive: boolean;
   minimumPassingScore: number;

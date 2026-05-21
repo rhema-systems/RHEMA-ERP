@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Workflow;
@@ -22,6 +24,8 @@ namespace ErpSystem.Api.Controllers;
 [Authorize]
 public class WorkflowController : ControllerBase
 {
+    private static readonly JsonSerializerOptions WorkflowJsonOptions = CreateWorkflowJsonOptions();
+
     private readonly IWorkflowEngine _workflowEngine;
     private readonly IWorkflowService _workflowService;
     private readonly IWorkflowDefinitionService _workflowDefinitionService;
@@ -38,6 +42,7 @@ public class WorkflowController : ControllerBase
     private readonly ErpSystem.Data.ApplicationDbContext _db;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IAppEventBus _appEventBus;
+    private readonly IFileStorageService _fileStorageService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<WorkflowController> _logger;
 
@@ -58,6 +63,7 @@ public class WorkflowController : ControllerBase
         ErpSystem.Data.ApplicationDbContext db,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IAppEventBus appEventBus,
+        IFileStorageService fileStorageService,
         ICurrentUserService currentUserService,
         ILogger<WorkflowController> logger)
     {
@@ -77,6 +83,7 @@ public class WorkflowController : ControllerBase
         _db = db;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _appEventBus = appEventBus;
+        _fileStorageService = fileStorageService;
         _currentUserService = currentUserService;
         _logger = logger;
     }
@@ -786,6 +793,12 @@ public class WorkflowController : ControllerBase
                 .ToList();
 
             var canApprove = await _workflowService.CanUserApproveAsync(entityType, entityId, currentUserId.Value);
+            var currentStepChecklist = await GetStepChecklistAsync(currentStepInstanceId, HttpContext.RequestAborted);
+            var currentStepInstance = await GetStepInstanceForSummaryAsync(currentStepInstanceId, HttpContext.RequestAborted);
+            var currentStepType = currentStepInstance?.WorkflowStep?.StepType;
+            var currentStepTaskConfig = GetTaskConfigFromStepConfiguration(currentStepInstance?.WorkflowStep?.Configuration);
+            var currentStepTaskAttachments = GetWorkflowTaskAttachments(currentStepInstance?.ResultData);
+            var canComplete = currentStepInstance != null && CanCurrentUserCompleteWorkflowTask(currentStepInstance, currentUserId.Value);
 
             var summary = new WorkflowEntitySummaryDto
             {
@@ -797,8 +810,13 @@ public class WorkflowController : ControllerBase
                 Status = status.Status,
                 CurrentStepName = currentStepName,
                 CurrentStepInstanceId = currentStepInstanceId,
+                CurrentStepType = currentStepType,
                 CanCurrentUserApprove = canApprove,
-                PendingApprovers = pendingApprovalsForCurrentStep
+                CanCurrentUserComplete = canComplete,
+                PendingApprovers = pendingApprovalsForCurrentStep,
+                CurrentStepChecklist = currentStepChecklist,
+                CurrentStepTaskConfig = currentStepTaskConfig,
+                CurrentStepTaskAttachments = currentStepTaskAttachments
             };
 
             return Ok(new
@@ -945,6 +963,12 @@ public class WorkflowController : ControllerBase
                     .ToList();
 
                 var canApprove = await _workflowService.CanUserApproveAsync(canonicalEntityType, requestedEntityId, currentUserId.Value);
+                var currentStepChecklist = await GetStepChecklistAsync(currentStepInstanceId, HttpContext.RequestAborted);
+                var currentStepInstance = await GetStepInstanceForSummaryAsync(currentStepInstanceId, HttpContext.RequestAborted);
+                var currentStepType = currentStepInstance?.WorkflowStep?.StepType;
+                var currentStepTaskConfig = GetTaskConfigFromStepConfiguration(currentStepInstance?.WorkflowStep?.Configuration);
+                var currentStepTaskAttachments = GetWorkflowTaskAttachments(currentStepInstance?.ResultData);
+                var canComplete = currentStepInstance != null && CanCurrentUserCompleteWorkflowTask(currentStepInstance, currentUserId.Value);
 
                 return new WorkflowEntitySummaryDto
                 {
@@ -956,8 +980,13 @@ public class WorkflowController : ControllerBase
                     Status = status.Status,
                     CurrentStepName = currentStepName,
                     CurrentStepInstanceId = currentStepInstanceId,
+                    CurrentStepType = currentStepType,
                     CanCurrentUserApprove = canApprove,
-                    PendingApprovers = pendingApprovalsForCurrentStep
+                    CanCurrentUserComplete = canComplete,
+                    PendingApprovers = pendingApprovalsForCurrentStep,
+                    CurrentStepChecklist = currentStepChecklist,
+                    CurrentStepTaskConfig = currentStepTaskConfig,
+                    CurrentStepTaskAttachments = currentStepTaskAttachments
                 };
             }
 
@@ -1077,6 +1106,9 @@ public class WorkflowController : ControllerBase
                     AssignedToId = step.AssignedToId,
                     AssignedToName = step.AssignedTo?.UserName,
                     Comments = step.Comments,
+                    Checklist = GetChecklistFromStepConfiguration(step.WorkflowStep?.Configuration),
+                    TaskConfig = GetTaskConfigFromStepConfiguration(step.WorkflowStep?.Configuration),
+                    TaskAttachments = GetWorkflowTaskAttachments(step.ResultData),
                     Approvals = approvalAudits
                 });
             }
@@ -1536,10 +1568,204 @@ public class WorkflowController : ControllerBase
                 data = result
             });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "User is not authorized to process workflow step {StepInstanceId}", id);
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invalid workflow step processing request for {StepInstanceId}", id);
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing workflow step {StepInstanceId}", id);
             return StatusCode(500, "An error occurred while processing workflow step");
+        }
+    }
+
+    [HttpGet("steps/{id:guid}/attachments")]
+    public async Task<ActionResult<IEnumerable<WorkflowTaskAttachmentDto>>> GetStepAttachments(Guid id)
+    {
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var stepInstance = await _db.WorkflowStepInstances
+                .AsNoTracking()
+                .Include(si => si.WorkflowStep)
+                .FirstOrDefaultAsync(si => si.Id == id && si.TenantId == tenantId && !si.IsDeleted);
+
+            if (stepInstance == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(new
+            {
+                success = true,
+                data = GetWorkflowTaskAttachments(stepInstance.ResultData)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving workflow task attachments for step {StepInstanceId}", id);
+            return StatusCode(500, "An error occurred while retrieving workflow task attachments");
+        }
+    }
+
+    [HttpGet("steps/{id:guid}/attachments/{attachmentId}/download")]
+    public async Task<IActionResult> DownloadStepAttachment(Guid id, string attachmentId)
+    {
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var stepInstance = await _db.WorkflowStepInstances
+                .AsNoTracking()
+                .Include(si => si.WorkflowStep)
+                .FirstOrDefaultAsync(si => si.Id == id && si.TenantId == tenantId && !si.IsDeleted);
+
+            if (stepInstance == null)
+            {
+                return NotFound();
+            }
+
+            var attachment = GetWorkflowTaskAttachments(stepInstance.ResultData)
+                .FirstOrDefault(a => string.Equals(a.Id, attachmentId, StringComparison.OrdinalIgnoreCase));
+
+            if (attachment == null || string.IsNullOrWhiteSpace(attachment.FilePath))
+            {
+                return NotFound(new { message = "Workflow task attachment was not found" });
+            }
+
+            var fileId = Guid.TryParse(attachment.Id, out var parsedFileId)
+                ? parsedFileId
+                : Guid.Empty;
+            var stream = await _fileStorageService.DownloadFileAsync(attachment.FilePath, fileId);
+            var contentType = string.IsNullOrWhiteSpace(attachment.ContentType)
+                ? "application/octet-stream"
+                : attachment.ContentType;
+            var fileName = string.IsNullOrWhiteSpace(attachment.FileName)
+                ? "workflow-document"
+                : attachment.FileName;
+
+            return File(stream, contentType, fileName);
+        }
+        catch (FileNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Workflow task attachment file was not found for step {StepInstanceId}, attachment {AttachmentId}", id, attachmentId);
+            return NotFound(new { message = "Workflow task attachment file was not found" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading workflow task attachment {AttachmentId} for step {StepInstanceId}", attachmentId, id);
+            return StatusCode(500, "An error occurred while downloading workflow task attachment");
+        }
+    }
+
+    [HttpPost("steps/{id:guid}/attachments")]
+    [RequestSizeLimit(26214400)] // 25MB
+    public async Task<ActionResult<WorkflowTaskAttachmentDto>> UploadStepAttachment(
+        Guid id,
+        [FromForm] IFormFile file,
+        [FromForm] string? requirementKey = null,
+        [FromForm] string? documentName = null)
+    {
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var stepInstance = await _db.WorkflowStepInstances
+                .Include(si => si.WorkflowStep)
+                .FirstOrDefaultAsync(si => si.Id == id && si.TenantId == tenantId && !si.IsDeleted);
+
+            if (stepInstance == null)
+            {
+                return NotFound();
+            }
+
+            if (!CanCurrentUserCompleteWorkflowTask(stepInstance, currentUserId.Value))
+            {
+                return Forbid();
+            }
+
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file provided" });
+            }
+
+            var allowedExtensions = new[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".txt" };
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(extension))
+            {
+                return BadRequest(new { message = $"File type '{extension}' is not allowed" });
+            }
+
+            const long maxFileSizeBytes = 25 * 1024 * 1024;
+            if (file.Length > maxFileSizeBytes)
+            {
+                return BadRequest(new { message = "File size exceeds maximum allowed size of 25MB" });
+            }
+
+            var safeRequirementKey = string.IsNullOrWhiteSpace(requirementKey)
+                ? "task-document"
+                : requirementKey.Trim();
+            var filePath = $"workflow/{tenantId:N}/{id:N}";
+            using var stream = file.OpenReadStream();
+            var uploadedPath = await _fileStorageService.UploadFileAsync(stream, file.FileName, filePath);
+
+            if (string.IsNullOrWhiteSpace(uploadedPath))
+            {
+                return StatusCode(500, "Failed to upload workflow task attachment");
+            }
+
+            var attachment = new WorkflowTaskAttachmentDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                RequirementKey = safeRequirementKey,
+                DocumentName = string.IsNullOrWhiteSpace(documentName) ? null : documentName.Trim(),
+                FileName = file.FileName,
+                FilePath = uploadedPath,
+                ContentType = file.ContentType,
+                FileSizeBytes = file.Length,
+                UploadedAt = DateTime.UtcNow,
+                UploadedById = currentUserId.Value,
+                UploadedByName = _currentUserService.UserName
+            };
+
+            stepInstance.ResultData = BuildStepResultDataWithTaskAttachment(stepInstance.ResultData, attachment);
+            stepInstance.UpdatedAt = DateTime.UtcNow;
+            stepInstance.UpdatedBy = _currentUserService.UserName ?? "System";
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                data = attachment
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading workflow task attachment for step {StepInstanceId}", id);
+            return StatusCode(500, "An error occurred while uploading workflow task attachment");
         }
     }
 
@@ -1611,6 +1837,70 @@ public class WorkflowController : ControllerBase
     }
 
     /// <summary>
+    /// Saves the checklist responses for the current approver before an approval step is completed.
+    /// </summary>
+    [HttpPost("steps/{id:guid}/checklist-responses")]
+    public async Task<ActionResult> SaveStepChecklistResponses(Guid id, [FromBody] SaveWorkflowChecklistResponsesRequest request)
+    {
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var stepInstance = await _db.WorkflowStepInstances
+                .Include(si => si.WorkflowStep)
+                .FirstOrDefaultAsync(si => si.Id == id && si.TenantId == tenantId && !si.IsDeleted);
+
+            if (stepInstance == null)
+            {
+                return NotFound();
+            }
+
+            var approvals = await _db.WorkflowApprovals
+                .Where(a => a.StepInstanceId == id && a.Status == WorkflowApprovalStatus.Pending && !a.IsDeleted)
+                .ToListAsync();
+
+            var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var canAct = approvals.Any(a =>
+                (a.ApproverId.HasValue && a.ApproverId.Value == currentUserId.Value) ||
+                (!string.IsNullOrWhiteSpace(a.ApproverRole) && roleSet.Contains(a.ApproverRole)));
+
+            if (!canAct)
+            {
+                return Forbid();
+            }
+
+            var checklist = GetChecklistFromStepConfiguration(stepInstance.WorkflowStep?.Configuration);
+            var responses = request?.Responses ?? new List<WorkflowApprovalChecklistResponseDto>();
+            var validationErrors = ValidateApprovalChecklistResponses(checklist, responses);
+            if (validationErrors.Any())
+            {
+                return BadRequest(string.Join(" ", validationErrors));
+            }
+
+            stepInstance.ResultData = BuildStepResultDataWithChecklistResponses(stepInstance.ResultData, responses);
+            stepInstance.UpdatedAt = DateTime.UtcNow;
+            stepInstance.UpdatedBy = _currentUserService.UserName ?? "System";
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving checklist responses for workflow step {StepInstanceId}", id);
+            return StatusCode(500, "An error occurred while saving checklist responses");
+        }
+    }
+
+    /// <summary>
     /// Processes an approval decision
     /// </summary>
     [HttpPost("approvals/{id:guid}/process")]
@@ -1649,7 +1939,11 @@ public class WorkflowController : ControllerBase
             };
 
             // Progress the workflow via the engine (this records the approval + advances the step when satisfied).
-            await _workflowEngine.ProcessStepAsync(approval.StepInstanceId, currentUserId.Value, stepAction, comments: request.Comments);
+            var resultData = request.ChecklistResponses?.Any() == true
+                ? new { approvalChecklistResponses = request.ChecklistResponses }
+                : null;
+
+            await _workflowEngine.ProcessStepAsync(approval.StepInstanceId, currentUserId.Value, stepAction, resultData, request.Comments);
 
             await TryApplyPostApprovalIntegrationAsync(approval.StepInstanceId, currentUserId.Value, request, HttpContext.RequestAborted);
 
@@ -1992,6 +2286,269 @@ public class WorkflowController : ControllerBase
         return $"{approverId}|{role}|{name}";
     }
 
+    private async Task<WorkflowStepInstance?> GetStepInstanceForSummaryAsync(Guid? stepInstanceId, CancellationToken cancellationToken)
+    {
+        if (!stepInstanceId.HasValue || stepInstanceId.Value == Guid.Empty)
+        {
+            return null;
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        return await _db.WorkflowStepInstances
+            .AsNoTracking()
+            .Include(si => si.WorkflowStep)
+            .FirstOrDefaultAsync(si => si.Id == stepInstanceId.Value && si.TenantId == tenantId && !si.IsDeleted, cancellationToken);
+    }
+
+    private async Task<List<WorkflowQualityCheckDto>> GetStepChecklistAsync(Guid? stepInstanceId, CancellationToken cancellationToken)
+    {
+        if (!stepInstanceId.HasValue || stepInstanceId.Value == Guid.Empty)
+        {
+            return new List<WorkflowQualityCheckDto>();
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var stepInstance = await _db.WorkflowStepInstances
+            .AsNoTracking()
+            .Include(si => si.WorkflowStep)
+            .FirstOrDefaultAsync(si => si.Id == stepInstanceId.Value && si.TenantId == tenantId && !si.IsDeleted, cancellationToken);
+
+        return GetChecklistFromStepConfiguration(stepInstance?.WorkflowStep?.Configuration);
+    }
+
+    private bool CanCurrentUserCompleteWorkflowTask(WorkflowStepInstance stepInstance, Guid currentUserId)
+    {
+        if (stepInstance.WorkflowStep?.StepType != WorkflowStepType.Manual)
+        {
+            return false;
+        }
+
+        if (stepInstance.Status != WorkflowStepInstanceStatus.Pending &&
+            stepInstance.Status != WorkflowStepInstanceStatus.InProgress)
+        {
+            return false;
+        }
+
+        if (stepInstance.AssignedToId.HasValue && stepInstance.AssignedToId.Value == currentUserId)
+        {
+            return true;
+        }
+
+        var config = DeserializeStepConfiguration(stepInstance.WorkflowStep?.Configuration);
+        var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(stepInstance.WorkflowStep?.RequiredRole) &&
+            roleSet.Contains(stepInstance.WorkflowStep.RequiredRole))
+        {
+            return true;
+        }
+
+        var assignedRoles = config?.AssignmentRules?
+            .Where(rule => rule.AssignmentType == WorkflowAssignmentType.Role && !string.IsNullOrWhiteSpace(rule.Role))
+            .Select(rule => rule.Role!)
+            .ToList() ?? new List<string>();
+
+        return assignedRoles.Any(roleSet.Contains);
+    }
+
+    private static WorkflowStepConfigurationDto? DeserializeStepConfiguration(string? configurationJson)
+    {
+        if (string.IsNullOrWhiteSpace(configurationJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, WorkflowJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static WorkflowTaskConfigDto? GetTaskConfigFromStepConfiguration(string? configurationJson)
+    {
+        var taskConfig = DeserializeStepConfiguration(configurationJson)?.TaskConfig;
+        if (taskConfig == null)
+        {
+            return null;
+        }
+
+        var taskActionType = string.IsNullOrWhiteSpace(taskConfig.TaskActionType)
+            ? "general"
+            : taskConfig.TaskActionType.Trim();
+
+        return new WorkflowTaskConfigDto
+        {
+            TaskActionType = taskActionType,
+            DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName) ? null : taskConfig.DocumentName.Trim(),
+            RequiresDocument = taskConfig.RequiresDocument || taskActionType.Equals("document", StringComparison.OrdinalIgnoreCase),
+            DocumentRequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey) ? null : taskConfig.DocumentRequirementKey.Trim(),
+            Instructions = string.IsNullOrWhiteSpace(taskConfig.Instructions) ? null : taskConfig.Instructions.Trim()
+        };
+    }
+
+    private static List<WorkflowQualityCheckDto> GetChecklistFromStepConfiguration(string? configurationJson)
+    {
+        if (string.IsNullOrWhiteSpace(configurationJson))
+        {
+            return new List<WorkflowQualityCheckDto>();
+        }
+
+        try
+        {
+            var config = JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, WorkflowJsonOptions);
+            return config?.QualityConfig?.QualityChecks?
+                .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+                .Select((item, index) => new WorkflowQualityCheckDto
+                {
+                    Id = string.IsNullOrWhiteSpace(item.Id) ? $"check-{index + 1}" : item.Id,
+                    Name = item.Name.Trim(),
+                    Description = item.Description?.Trim() ?? string.Empty,
+                    IsRequired = item.IsRequired,
+                    ApplicabilityCondition = item.ApplicabilityCondition,
+                    ExpectedValue = item.ExpectedValue,
+                    ValidationExpression = item.ValidationExpression
+                })
+                .ToList() ?? new List<WorkflowQualityCheckDto>();
+        }
+        catch
+        {
+            return new List<WorkflowQualityCheckDto>();
+        }
+    }
+
+    private static List<string> ValidateApprovalChecklistResponses(
+        IReadOnlyCollection<WorkflowQualityCheckDto> checklist,
+        IReadOnlyCollection<WorkflowApprovalChecklistResponseDto> responses)
+    {
+        var errors = new List<string>();
+        if (checklist.Count == 0)
+        {
+            return errors;
+        }
+
+        var responseLookup = responses
+            .Where(response => !string.IsNullOrWhiteSpace(response.Id) || !string.IsNullOrWhiteSpace(response.Name))
+            .GroupBy(response => NormalizeChecklistKey(response.Id, response.Name), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in checklist.Where(item => item.IsRequired))
+        {
+            var key = NormalizeChecklistKey(item.Id, item.Name);
+            if (!responseLookup.TryGetValue(key, out var response) || !response.IsSatisfied)
+            {
+                errors.Add($"Required checklist item '{item.Name}' must be satisfied before approval.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static string NormalizeChecklistKey(string? id, string? name)
+    {
+        return !string.IsNullOrWhiteSpace(id)
+            ? id.Trim()
+            : (name ?? string.Empty).Trim();
+    }
+
+    private static string BuildStepResultDataWithChecklistResponses(
+        string? existingResultData,
+        List<WorkflowApprovalChecklistResponseDto> responses)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(existingResultData))
+        {
+            try
+            {
+                var existing = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existingResultData, WorkflowJsonOptions);
+                if (existing != null)
+                {
+                    foreach (var item in existing)
+                    {
+                        payload[item.Key] = item.Value.Clone();
+                    }
+                }
+            }
+            catch
+            {
+                // Keep malformed legacy result data from blocking checklist capture.
+            }
+        }
+
+        payload["approvalChecklistResponses"] = responses;
+        return JsonSerializer.Serialize(payload, WorkflowJsonOptions);
+    }
+
+    private static List<WorkflowTaskAttachmentDto> GetWorkflowTaskAttachments(string? resultData)
+    {
+        if (string.IsNullOrWhiteSpace(resultData))
+        {
+            return new List<WorkflowTaskAttachmentDto>();
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(resultData, WorkflowJsonOptions);
+            if (payload == null ||
+                !payload.TryGetValue("workflowTaskAttachments", out var attachmentsElement) ||
+                attachmentsElement.ValueKind != JsonValueKind.Array)
+            {
+                return new List<WorkflowTaskAttachmentDto>();
+            }
+
+            return JsonSerializer.Deserialize<List<WorkflowTaskAttachmentDto>>(
+                attachmentsElement.GetRawText(),
+                WorkflowJsonOptions) ?? new List<WorkflowTaskAttachmentDto>();
+        }
+        catch
+        {
+            return new List<WorkflowTaskAttachmentDto>();
+        }
+    }
+
+    private static string BuildStepResultDataWithTaskAttachment(
+        string? existingResultData,
+        WorkflowTaskAttachmentDto attachment)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(existingResultData))
+        {
+            try
+            {
+                var existing = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existingResultData, WorkflowJsonOptions);
+                if (existing != null)
+                {
+                    foreach (var item in existing)
+                    {
+                        payload[item.Key] = item.Value.Clone();
+                    }
+                }
+            }
+            catch
+            {
+                // Keep malformed legacy result data from blocking document capture.
+            }
+        }
+
+        var attachments = GetWorkflowTaskAttachments(existingResultData);
+        attachments.Add(attachment);
+        payload["workflowTaskAttachments"] = attachments;
+        return JsonSerializer.Serialize(payload, WorkflowJsonOptions);
+    }
+
+    private static JsonSerializerOptions CreateWorkflowJsonOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
+
     #endregion
 }
 
@@ -2057,6 +2614,12 @@ public class ProcessApprovalRequest
 {
     public ErpSystem.Core.Enums.WorkflowApprovalAction Action { get; set; }
     public string? Comments { get; set; }
+    public List<WorkflowApprovalChecklistResponseDto>? ChecklistResponses { get; set; }
+}
+
+public class SaveWorkflowChecklistResponsesRequest
+{
+    public List<WorkflowApprovalChecklistResponseDto> Responses { get; set; } = new();
 }
 
 #endregion

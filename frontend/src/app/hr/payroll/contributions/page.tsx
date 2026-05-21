@@ -1,7 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  FormEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   ArrowLeft,
   CreditCard,
@@ -17,7 +24,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
 import {
   PayrollCodeSetup,
@@ -62,43 +76,78 @@ function dateInRange(value: string, from?: string | null, to?: string | null) {
   return Boolean(value && (!from || value >= from) && (!to || value <= to));
 }
 
-function transactionDateForPeriod(from?: string | null, to?: string | null, currentValue = today) {
+function transactionDateForPeriod(
+  from?: string | null,
+  to?: string | null,
+  currentValue = today
+) {
   const start = dateValue(from);
   const end = dateValue(to);
-  return dateInRange(currentValue, start, end) ? currentValue : start || end || currentValue;
+  return dateInRange(currentValue, start, end)
+    ? currentValue
+    : start || end || currentValue;
 }
 
 function formatPayrollPeriodLabel(parameters: PayrollParameterSet | null) {
-  const source = dateValue(parameters?.currentPeriodTo) || dateValue(parameters?.currentPeriodFrom);
+  const source =
+    dateValue(parameters?.currentPeriodTo) ||
+    dateValue(parameters?.currentPeriodFrom);
   if (!source) {
     return 'Not configured';
   }
 
   const [year, month] = source.split('-').map(Number);
   return year && month
-    ? new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
+    ? new Intl.DateTimeFormat('en-US', {
+        month: 'long',
+        year: 'numeric',
+      }).format(new Date(year, month - 1, 1))
     : 'Not configured';
 }
 
 function money(value: number | null | undefined, currency = 'GHS') {
-  return new Intl.NumberFormat('en-GH', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value ?? 0);
+  return new Intl.NumberFormat('en-GH', {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value ?? 0);
 }
 
-function contributionKey(option: Pick<ContributionOption, 'codeType' | 'code'>) {
+function contributionKey(
+  option: Pick<ContributionOption, 'codeType' | 'code'>
+) {
   return `${option.codeType}::${option.code}`;
 }
 
 function findContributionCodeType(setup: PayrollCodeSetup) {
-  return setup.codeTypes.find((type) => CONTRIBUTION_CODE_TYPE_ALIASES.includes(normalize(type.codeType))) ??
-    setup.codeTypes.find((type) => normalize(type.description).includes('CONTRIBUTION'));
+  return (
+    setup.codeTypes.find((type) =>
+      CONTRIBUTION_CODE_TYPE_ALIASES.includes(normalize(type.codeType))
+    ) ??
+    setup.codeTypes.find((type) =>
+      normalize(type.description).includes('CONTRIBUTION')
+    )
+  );
 }
 
-function contributionOptionsFromSetup(setup: PayrollCodeSetup, preferredCodeType?: string | null) {
-  const targetCodeType = normalize(preferredCodeType) || normalize(findContributionCodeType(setup)?.codeType);
+function contributionOptionsFromSetup(
+  setup: PayrollCodeSetup,
+  preferredCodeType?: string | null
+) {
+  const targetCodeType =
+    normalize(preferredCodeType) ||
+    normalize(findContributionCodeType(setup)?.codeType);
   return setup.codeValues
-    .filter((value) => !value.blocked && (!targetCodeType || normalize(value.codeType) === targetCodeType))
+    .filter(
+      (value) =>
+        !value.blocked &&
+        (!targetCodeType || normalize(value.codeType) === targetCodeType)
+    )
     .map((value) => ({
-      key: contributionKey({ codeType: value.codeType, code: value.actualCode }),
+      key: contributionKey({
+        codeType: value.codeType,
+        code: value.actualCode,
+      }),
       codeType: value.codeType,
       code: value.actualCode,
       name: value.description,
@@ -106,13 +155,7 @@ function contributionOptionsFromSetup(setup: PayrollCodeSetup, preferredCodeType
     .sort((first, second) => first.name.localeCompare(second.name));
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground">{label}</Label>
@@ -123,20 +166,32 @@ function Field({
 
 export default function ContributionsPage() {
   const { toast } = useToast();
-  const [activeParameters, setActiveParameters] = useState<PayrollParameterSet | null>(null);
-  const [codeSetup, setCodeSetup] = useState<PayrollCodeSetup>({ codeTypes: [], codeValues: [] });
+  const [activeParameters, setActiveParameters] =
+    useState<PayrollParameterSet | null>(null);
+  const [codeSetup, setCodeSetup] = useState<PayrollCodeSetup>({
+    codeTypes: [],
+    codeValues: [],
+  });
   const [profiles, setProfiles] = useState<PayrollEmployeeProfile[]>([]);
-  const [transactions, setTransactions] = useState<PayrollContributionTransaction[]>([]);
+  const [transactions, setTransactions] = useState<
+    PayrollContributionTransaction[]
+  >([]);
   const [form, setForm] = useState(defaultForm);
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const contributionOptions = useMemo(() => contributionOptionsFromSetup(codeSetup), [codeSetup]);
+  const contributionOptions = useMemo(
+    () => contributionOptionsFromSetup(codeSetup),
+    [codeSetup]
+  );
   const selectedContribution = useMemo(
-    () => contributionOptions.find((option) => option.key === form.contributionKey) ?? null,
-    [contributionOptions, form.contributionKey],
+    () =>
+      contributionOptions.find(
+        (option) => option.key === form.contributionKey
+      ) ?? null,
+    [contributionOptions, form.contributionKey]
   );
   const currency = activeParameters?.baseCurrency || 'GHS';
   const currentPeriodFrom = dateValue(activeParameters?.currentPeriodFrom);
@@ -149,9 +204,10 @@ export default function ContributionsPage() {
       return activeProfiles;
     }
 
-    return activeProfiles.filter((profile) =>
-      profile.employeeNumber.toLowerCase().includes(term) ||
-      profile.employeeName.toLowerCase().includes(term),
+    return activeProfiles.filter(
+      (profile) =>
+        profile.employeeNumber.toLowerCase().includes(term) ||
+        profile.employeeName.toLowerCase().includes(term)
     );
   }, [employeeSearch, profiles]);
 
@@ -159,18 +215,26 @@ export default function ContributionsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [setup, profileList, allCodes, transactionList] = await Promise.all([
-        payrollService.getSetupSummary(),
-        payrollService.getEmployeeProfiles(),
-        payrollService.getCodeSetup(),
-        payrollService.getContributionTransactions(),
-      ]);
+      const [setup, profileList, allCodes, transactionList] = await Promise.all(
+        [
+          payrollService.getSetupSummary(),
+          payrollService.getEmployeeProfiles(),
+          payrollService.getCodeSetup(),
+          payrollService.getContributionTransactions(),
+        ]
+      );
       const contributionCodeType = findContributionCodeType(allCodes);
       const scopedCodes = contributionCodeType
         ? await payrollService.getCodeSetup(contributionCodeType.codeType)
         : allCodes;
-      const options = contributionOptionsFromSetup(scopedCodes, contributionCodeType?.codeType);
-      const periodDate = transactionDateForPeriod(setup.activeParameters?.currentPeriodFrom, setup.activeParameters?.currentPeriodTo);
+      const options = contributionOptionsFromSetup(
+        scopedCodes,
+        contributionCodeType?.codeType
+      );
+      const periodDate = transactionDateForPeriod(
+        setup.activeParameters?.currentPeriodFrom,
+        setup.activeParameters?.currentPeriodTo
+      );
 
       setActiveParameters(setup.activeParameters ?? null);
       setProfiles(profileList);
@@ -179,12 +243,18 @@ export default function ContributionsPage() {
       setForm((current) => ({
         ...current,
         contributionKey: current.contributionKey || options[0]?.key || '',
-        effectiveDate: dateInRange(current.effectiveDate, dateValue(setup.activeParameters?.currentPeriodFrom), dateValue(setup.activeParameters?.currentPeriodTo))
+        effectiveDate: dateInRange(
+          current.effectiveDate,
+          dateValue(setup.activeParameters?.currentPeriodFrom),
+          dateValue(setup.activeParameters?.currentPeriodTo)
+        )
           ? current.effectiveDate
           : periodDate,
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load contributions.');
+      setError(
+        err instanceof Error ? err.message : 'Unable to load contributions.'
+      );
     } finally {
       setLoading(false);
     }
@@ -216,7 +286,12 @@ export default function ContributionsPage() {
       employeeName: transaction.employeeName,
       contributionKey: nextContributionKey,
       transactionType: transaction.transactionType,
-      effectiveDate: dateValue(transaction.effectiveDate) || transactionDateForPeriod(activeParameters?.currentPeriodFrom, activeParameters?.currentPeriodTo),
+      effectiveDate:
+        dateValue(transaction.effectiveDate) ||
+        transactionDateForPeriod(
+          activeParameters?.currentPeriodFrom,
+          activeParameters?.currentPeriodTo
+        ),
       amount: transaction.amount,
     });
     setEmployeeSearch(transaction.employeeNumber);
@@ -226,7 +301,10 @@ export default function ContributionsPage() {
     setForm({
       ...defaultForm,
       contributionKey: contributionOptions[0]?.key || '',
-      effectiveDate: transactionDateForPeriod(parameters?.currentPeriodFrom, parameters?.currentPeriodTo),
+      effectiveDate: transactionDateForPeriod(
+        parameters?.currentPeriodFrom,
+        parameters?.currentPeriodTo
+      ),
     });
     setEmployeeSearch('');
   };
@@ -261,11 +339,19 @@ export default function ContributionsPage() {
       setActiveParameters(setup.activeParameters ?? null);
       setTransactions(transactionList);
       resetForm(setup.activeParameters ?? null);
-      toast({ title: 'Contribution saved', description: `${form.employeeNumber} updated.` });
+      toast({
+        title: 'Contribution saved',
+        description: `${form.employeeNumber} updated.`,
+      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to save contribution.';
+      const message =
+        err instanceof Error ? err.message : 'Unable to save contribution.';
       setError(message);
-      toast({ title: 'Contribution error', description: message, variant: 'destructive' });
+      toast({
+        title: 'Contribution error',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setBusy(false);
     }
@@ -290,16 +376,22 @@ export default function ContributionsPage() {
               Payroll
             </Link>
           </Button>
-          <h1 className="text-2xl font-semibold tracking-normal">Contribution Transactions</h1>
+          <h1 className="text-2xl font-semibold tracking-normal">
+            Contribution Transactions
+          </h1>
         </div>
         <div className="grid min-w-[280px] gap-3 rounded-md border bg-muted/40 p-3 text-sm sm:grid-cols-[1fr_auto] xl:min-w-[420px]">
           <div>
             <div className="text-xs text-muted-foreground">Payroll Period</div>
-            <div className="font-semibold">{formatPayrollPeriodLabel(activeParameters)}</div>
+            <div className="font-semibold">
+              {formatPayrollPeriodLabel(activeParameters)}
+            </div>
           </div>
           <div className="sm:text-right">
             <div className="text-xs text-muted-foreground">Period No</div>
-            <div className="font-semibold">{activeParameters?.currentPayPeriod || '-'}</div>
+            <div className="font-semibold">
+              {activeParameters?.currentPayPeriod || '-'}
+            </div>
           </div>
         </div>
       </div>
@@ -325,7 +417,11 @@ export default function ContributionsPage() {
                 value={employeeSearch}
                 onChange={(event) => setEmployeeSearch(event.target.value)}
               />
-              <Button type="button" variant="outline" onClick={() => void loadWorkspace()}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void loadWorkspace()}
+              >
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
@@ -336,7 +432,9 @@ export default function ContributionsPage() {
                     className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                     value={form.employeeProfileId}
                     onChange={(event) => {
-                      const profile = profiles.find((item) => item.id === event.target.value);
+                      const profile = profiles.find(
+                        (item) => item.id === event.target.value
+                      );
                       if (profile) {
                         chooseProfile(profile);
                       }
@@ -344,7 +442,12 @@ export default function ContributionsPage() {
                   >
                     <option value="">Select employee</option>
                     {filteredProfiles.map((profile) => (
-                      <option key={profile.id || profile.employeeNumber} value={profile.id}>{profile.employeeNumber}</option>
+                      <option
+                        key={profile.id || profile.employeeNumber}
+                        value={profile.id}
+                      >
+                        {profile.employeeNumber}
+                      </option>
                     ))}
                   </select>
                 </Field>
@@ -356,11 +459,18 @@ export default function ContributionsPage() {
                 <select
                   className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   value={form.contributionKey}
-                  onChange={(event) => setForm((current) => ({ ...current, contributionKey: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      contributionKey: event.target.value,
+                    }))
+                  }
                 >
                   <option value="">Select contribution</option>
                   {contributionOptions.map((option) => (
-                    <option key={option.key} value={option.key}>{option.name}</option>
+                    <option key={option.key} value={option.key}>
+                      {option.code} - {option.name}
+                    </option>
                   ))}
                 </select>
               </Field>
@@ -371,14 +481,25 @@ export default function ContributionsPage() {
                     min={currentPeriodFrom || undefined}
                     max={currentPeriodTo || undefined}
                     value={form.effectiveDate}
-                    onChange={(event) => setForm((current) => ({ ...current, effectiveDate: event.target.value }))}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        effectiveDate: event.target.value,
+                      }))
+                    }
                   />
                 </Field>
                 <Field label="Transaction Type">
                   <select
                     className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                     value={form.transactionType}
-                    onChange={(event) => setForm((current) => ({ ...current, transactionType: event.target.value as ContributionTransactionType }))}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        transactionType: event.target
+                          .value as ContributionTransactionType,
+                      }))
+                    }
                   >
                     <option value="Withdrawal">Withdrawal</option>
                     <option value="Interest">Interest</option>
@@ -391,15 +512,36 @@ export default function ContributionsPage() {
                   min="0"
                   step="0.01"
                   value={form.amount}
-                  onChange={(event) => setForm((current) => ({ ...current, amount: Number(event.target.value) }))}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      amount: Number(event.target.value),
+                    }))
+                  }
                 />
               </Field>
               <div className="flex gap-2">
-                <Button type="submit" disabled={!form.employeeProfileId || !selectedContribution || form.amount <= 0 || busy}>
-                  {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button
+                  type="submit"
+                  disabled={
+                    !form.employeeProfileId ||
+                    !selectedContribution ||
+                    form.amount <= 0 ||
+                    busy
+                  }
+                >
+                  {busy ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
                   Save
                 </Button>
-                <Button type="button" variant="outline" onClick={() => resetForm()}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => resetForm()}
+                >
                   Clear
                 </Button>
               </div>
@@ -420,50 +562,86 @@ export default function ContributionsPage() {
                 columns={[
                   { header: 'Employee No', value: (row) => row.employeeNumber },
                   { header: 'Employee Name', value: (row) => row.employeeName },
-                  { header: 'Contribution', value: (row) => row.contributionName },
-                  { header: 'Effective Date', value: (row) => dateValue(row.effectiveDate) },
-                  { header: 'Transaction Type', value: (row) => row.transactionType },
+                  {
+                    header: 'Code Type',
+                    value: (row) => row.contributionCodeType,
+                  },
+                  {
+                    header: 'Contribution Code',
+                    value: (row) => row.contributionCode,
+                  },
+                  {
+                    header: 'Contribution',
+                    value: (row) => row.contributionName,
+                  },
+                  {
+                    header: 'Effective Date',
+                    value: (row) => dateValue(row.effectiveDate),
+                  },
+                  {
+                    header: 'Transaction Type',
+                    value: (row) => row.transactionType,
+                  },
                   { header: 'Amount', value: (row) => row.amount },
                 ]}
               />
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee No</TableHead>
-                  <TableHead>Employee Name</TableHead>
-                  <TableHead>Contribution</TableHead>
-                  <TableHead>Effective Date</TableHead>
-                  <TableHead>Transaction Type</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="w-12" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.map((transaction) => (
-                  <TableRow key={transaction.id} className="cursor-pointer" onClick={() => editTransaction(transaction)}>
-                    <TableCell className="font-medium">{transaction.employeeNumber}</TableCell>
-                    <TableCell>{transaction.employeeName}</TableCell>
-                    <TableCell>{transaction.contributionName}</TableCell>
-                    <TableCell>{dateValue(transaction.effectiveDate)}</TableCell>
-                    <TableCell>{transaction.transactionType}</TableCell>
-                    <TableCell className="text-right">{money(transaction.amount, currency)}</TableCell>
-                    <TableCell>
-                      <Edit3 className="h-4 w-4 text-muted-foreground" />
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {transactions.length === 0 && (
+            <div className="overflow-x-auto">
+              <Table className="min-w-[960px]">
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">
-                      No contribution transactions saved.
-                    </TableCell>
+                    <TableHead>Employee No</TableHead>
+                    <TableHead>Employee Name</TableHead>
+                    <TableHead>Code Type</TableHead>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Contribution</TableHead>
+                    <TableHead>Effective Date</TableHead>
+                    <TableHead>Transaction Type</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="w-12" />
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {transactions.map((transaction) => (
+                    <TableRow
+                      key={transaction.id}
+                      className="cursor-pointer"
+                      onClick={() => editTransaction(transaction)}
+                    >
+                      <TableCell className="font-medium">
+                        {transaction.employeeNumber}
+                      </TableCell>
+                      <TableCell>{transaction.employeeName}</TableCell>
+                      <TableCell>{transaction.contributionCodeType}</TableCell>
+                      <TableCell>{transaction.contributionCode}</TableCell>
+                      <TableCell>{transaction.contributionName}</TableCell>
+                      <TableCell>
+                        {dateValue(transaction.effectiveDate)}
+                      </TableCell>
+                      <TableCell>{transaction.transactionType}</TableCell>
+                      <TableCell className="text-right">
+                        {money(transaction.amount, currency)}
+                      </TableCell>
+                      <TableCell>
+                        <Edit3 className="h-4 w-4 text-muted-foreground" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {transactions.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={9}
+                        className="py-6 text-center text-sm text-muted-foreground"
+                      >
+                        No contribution transactions saved.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       </div>

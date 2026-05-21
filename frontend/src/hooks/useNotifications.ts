@@ -68,7 +68,10 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
 
     // Ensure SignalR is connected (safe no-op if already connected)
     // If no token is available (logged-out pages), connect() will throw; ignore.
-    if (!connectAttemptedRef.current && typeof window !== 'undefined') {
+    if (!connectAttemptedRef.current &&
+        typeof window !== 'undefined' &&
+        !signalRService.isConnected &&
+        !signalRService.isConnecting) {
       connectAttemptedRef.current = true;
       signalRService.connect().catch(() => {
         // swallow - connection will succeed once a token exists (e.g., after login)

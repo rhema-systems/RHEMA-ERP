@@ -174,6 +174,8 @@ export interface WorkOrder {
   actualCompletionDate?: string;
   estimatedHours: number;
   actualHours?: number;
+  billingType?: 'Maintenance' | 'Repairs' | string;
+  fixedAmount?: number;
   estimatedCost: number;
   actualCost?: number;
   completionNotes?: string;

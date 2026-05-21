@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatFleetDateTime } from '@/lib/date-format';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 const TYRE_POSITIONS = [
   { value: 'FrontLeft', label: 'Front Left' },
@@ -23,6 +24,7 @@ const TYRE_POSITIONS = [
 const TYRE_POSITION_VALUES = new Set(TYRE_POSITIONS.map((p) => p.value));
 
 export default function FleetTyresPage() {
+  const { currencyCode, formatMoney } = useMaintenanceCurrency();
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [vehicleId, setVehicleId] = React.useState<string>('none');
   const [items, setItems] = React.useState<FleetTyreDto[]>([]);
@@ -95,7 +97,7 @@ export default function FleetTyresPage() {
       position: '',
       treadDepthMm: '',
       costAmount: '',
-      currencyCode: '',
+      currencyCode,
       status: 'Installed',
       notes: '',
     });
@@ -111,7 +113,7 @@ export default function FleetTyresPage() {
       position: t.position ?? '',
       treadDepthMm: t.treadDepthMm?.toString() ?? '',
       costAmount: '',
-      currencyCode: '',
+      currencyCode,
       status: t.status,
       notes: t.notes ?? '',
     });
@@ -148,7 +150,7 @@ export default function FleetTyresPage() {
       installedAtUtc: undefined,
       status: form.status,
       costAmount: parsedCost,
-      currencyCode: form.currencyCode || undefined,
+      currencyCode: form.currencyCode || currencyCode,
       notes: form.notes || undefined,
     };
     try {
@@ -378,7 +380,7 @@ export default function FleetTyresPage() {
             </div>
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Input value={form.currencyCode} onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+              <Input value={form.currencyCode || currencyCode} disabled />
             </div>
             <div className="space-y-2 md:col-span-3">
               <Label>Notes</Label>
@@ -443,7 +445,7 @@ export default function FleetTyresPage() {
                         </td>
                         <td className="py-2 px-3 whitespace-nowrap">{e.treadDepthMm ?? '—'}</td>
                         <td className="py-2 px-3 whitespace-nowrap">
-                          {e.costAmount ? `${e.costAmount.toLocaleString()}${e.currencyCode ? ` ${e.currencyCode}` : ''}` : '—'}
+                          {e.costAmount ? formatMoney(e.costAmount) : '—'}
                         </td>
                         <td className="py-2 px-3">
                           <div className="max-w-[420px] whitespace-pre-wrap break-words">{e.notes || '—'}</div>

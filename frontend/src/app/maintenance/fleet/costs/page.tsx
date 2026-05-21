@@ -12,8 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { formatFleetDateTime } from '@/lib/date-format';
 import { useSearchParams } from 'next/navigation';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 export default function FleetCostsPage() {
+  const { currencyCode, formatMoney } = useMaintenanceCurrency();
   const searchParams = useSearchParams();
   const vehicleAssetIdFilter = searchParams?.get('vehicleAssetId') ?? undefined;
   const initialTripId = searchParams?.get('fleetTripId') ?? undefined;
@@ -86,11 +88,11 @@ export default function FleetCostsPage() {
         fleetTripId: tripId,
         costType: form.costType,
         amount,
-        currencyCode: form.currencyCode || undefined,
+        currencyCode: form.currencyCode || currencyCode,
         notes: form.notes || undefined,
       });
       setOpen(false);
-      setForm({ costType: 'Other', amount: '', currencyCode: '', notes: '' });
+      setForm({ costType: 'Other', amount: '', currencyCode: currencyCode, notes: '' });
       await load();
     } catch (e: any) {
       alert(e?.message || 'Failed to create cost entry');
@@ -180,7 +182,7 @@ export default function FleetCostsPage() {
                         )}
                       </td>
                       <td className="py-2">
-                        {c.amount.toLocaleString()} {c.currencyCode ?? ''}
+                        {formatMoney(c.amount)}
                       </td>
                       <td className="py-2 max-w-[520px] truncate" title={c.notes ?? ''}>
                         {c.notes ?? '—'}
@@ -262,7 +264,7 @@ export default function FleetCostsPage() {
             </div>
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Input value={form.currencyCode} onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+              <Input value={form.currencyCode || currencyCode} disabled />
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label>Notes</Label>

@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -620,7 +621,7 @@ public class WorkOrder : TenantEntity
     public string MaintenanceLocation { get; set; } = "Internal"; // Internal, External, Onsite, Offsite
 
     /// <summary>
-    /// ID of the user (ApplicationUser) assigned as technician for this work order
+    /// ID of the HR employee assigned as technician for this work order
     /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
@@ -938,6 +939,7 @@ public class JobCard : TenantEntity
 
     // Request details
     public Guid RequestedById { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
     public DateTime RequestedDate { get; set; } = DateTime.UtcNow;
     public DateTime? RequiredCompletionDate { get; set; }
 
@@ -1098,6 +1100,7 @@ public class JobCard : TenantEntity
     public virtual MaintenanceAsset Asset { get; set; } = null!;
     public virtual MaintenanceType MaintenanceType { get; set; } = null!;
     public virtual PriorityLevel PriorityLevel { get; set; } = null!;
+    public virtual BusinessPartner? CustomerBusinessPartner { get; set; }
     public virtual Employee RequestedBy { get; set; } = null!;
     public virtual Employee? PreferredTechnician { get; set; }
     public virtual TechnicianTeam? PreferredTeam { get; set; }
@@ -1776,7 +1779,7 @@ public class TechnicianTeamMember : TenantEntity
 
     // Navigation properties
     public virtual TechnicianTeam Team { get; set; } = null!;
-    // TechnicianId now references ApplicationUser (Users table) instead of Employee
+    public virtual Employee Technician { get; set; } = null!;
 }
 
 public class TechnicianSkill : TenantEntity

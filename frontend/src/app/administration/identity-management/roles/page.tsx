@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { DashboardLayout } from '../../../../components/layout/dashboard-layout';
 import { DataTable, Column } from '../../../../components/admin/data-table';
 import { Button } from '../../../../components/ui/button';
 import { Badge } from '../../../../components/ui/badge';
@@ -24,7 +23,6 @@ import {
   FormMessage,
 } from '../../../../components/ui/form';
 import { Input } from '../../../../components/ui/input';
-import { Switch } from '../../../../components/ui/switch';
 import { Textarea } from '../../../../components/ui/textarea';
 import { Checkbox } from '../../../../components/ui/checkbox';
 import { useForm, FormProvider } from 'react-hook-form';
@@ -32,13 +30,34 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { adminApiService, Role } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
-import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench } from 'lucide-react';
+import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2 } from 'lucide-react';
+
+const PROTECTED_SYSTEM_ROLE_NAMES = new Set([
+  'superadmin',
+  'tenantadmin',
+  'manager',
+  'employee',
+  'readonly',
+  'externaluser',
+  'helpdeskagent',
+  'helpdesksupervisor',
+  'helpdeskmanager',
+]);
+
+const normalizeRoleName = (roleName?: string | null) => roleName?.trim().toLowerCase() ?? '';
+const isProtectedRoleName = (roleName?: string | null) => PROTECTED_SYSTEM_ROLE_NAMES.has(normalizeRoleName(roleName));
+const isProtectedSystemRole = (role?: Pick<Role, 'name' | 'isSystemRole'> | null) =>
+  Boolean(role?.isSystemRole || isProtectedRoleName(role?.name));
 
 const roleSchema = z.object({
-  name: z.string().min(2, 'Role name must be at least 2 characters'),
+  name: z.string()
+    .trim()
+    .min(2, 'Role name must be at least 2 characters')
+    .refine((name) => !isProtectedRoleName(name), {
+      message: 'This name is reserved for a protected system role',
+    }),
   description: z.string().optional(),
   permissions: z.array(z.string()).min(1, 'At least one permission is required'),
-  isSystemRole: z.boolean(),
 });
 
 type RoleFormData = z.infer<typeof roleSchema>;
@@ -139,7 +158,6 @@ export default function RolesPage() {
       name: '',
       description: '',
       permissions: [],
-      isSystemRole: false,
     },
   });
 
@@ -204,10 +222,10 @@ export default function RolesPage() {
   };
 
   const handleEdit = (role: Role) => {
-    if (role.isSystemRole) {
+    if (isProtectedSystemRole(role)) {
       toast({
         title: 'Error',
-        description: 'Cannot edit system roles',
+        description: 'Protected system roles cannot be edited',
         variant: 'destructive',
       });
       return;
@@ -217,16 +235,15 @@ export default function RolesPage() {
       name: role.name,
       description: role.description || '',
       permissions: role.permissions,
-      isSystemRole: role.isSystemRole,
     });
     setIsDialogOpen(true);
   };
 
   const handleDelete = (role: Role) => {
-    if (role.isSystemRole) {
+    if (isProtectedSystemRole(role)) {
       toast({
         title: 'Error',
-        description: 'Cannot delete system roles',
+        description: 'Protected system roles cannot be deleted',
         variant: 'destructive',
       });
       return;
@@ -247,9 +264,9 @@ export default function RolesPage() {
         <div className="flex items-center gap-2">
           <Shield className="h-4 w-4 text-muted-foreground" />
           <span className="font-medium">{name}</span>
-          {role.isSystemRole && (
+          {isProtectedSystemRole(role) && (
             <Badge variant="outline" className="text-xs">
-              System
+              Locked
             </Badge>
           )}
         </div>
@@ -316,8 +333,43 @@ export default function RolesPage() {
           loading={isLoading}
           searchPlaceholder="Search roles..."
           onAdd={handleAdd}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
+          customActions={(role) => (
+            isProtectedSystemRole(role) ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                disabled
+                title="Protected system role"
+              >
+                <LockKeyhole className="h-4 w-4" />
+              </Button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  title="Edit role"
+                  onClick={() => handleEdit(role)}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                  title="Delete role"
+                  onClick={() => handleDelete(role)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            )
+          )}
         />
 
         {/* Add/Edit Role Dialog */}
@@ -336,7 +388,7 @@ export default function RolesPage() {
 
             <FormProvider {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <FormField
                     control={form.control}
                     name="name"
@@ -347,27 +399,6 @@ export default function RolesPage() {
                           <Input placeholder="Enter role name" {...field} />
                         </FormControl>
                         <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="isSystemRole"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                        <div className="space-y-0.5">
-                          <FormLabel className="text-base">System Role</FormLabel>
-                          <FormDescription>
-                            System roles cannot be deleted
-                          </FormDescription>
-                        </div>
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
                       </FormItem>
                     )}
                   />

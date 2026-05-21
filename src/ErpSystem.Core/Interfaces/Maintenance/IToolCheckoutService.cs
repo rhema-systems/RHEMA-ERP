@@ -15,7 +15,7 @@ public interface IToolCheckoutService
     /// <summary>
     /// Return a checked-out tool
     /// </summary>
-    Task<ToolReturnResult> ReturnToolAsync(Guid checkoutId, Guid returnedByUserId, ReturnToolDto dto);
+    Task<ToolReturnResult> ReturnToolAsync(Guid checkoutId, Guid returnedByEmployeeId, ReturnToolDto dto);
 
     /// <summary>
     /// Get active checkouts for an employee or all active checkouts

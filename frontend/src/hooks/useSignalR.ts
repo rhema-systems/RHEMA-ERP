@@ -26,6 +26,8 @@ export function useSignalR(options: UseSignalROptions = {}) {
   );
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const isConnectingRef = useRef(false);
+  const autoConnectAttemptedRef = useRef(false);
   
   // Use refs to store the latest callback references
   const dashboardUpdateRef = useRef(onDashboardUpdate);
@@ -46,10 +48,11 @@ export function useSignalR(options: UseSignalROptions = {}) {
   }, [onUserSessionUpdate]);
 
   const connect = useCallback(async () => {
-    if (isConnecting || signalRService.isConnected) {
+    if (isConnectingRef.current || signalRService.isConnected || signalRService.isConnecting) {
       return;
     }
 
+    isConnectingRef.current = true;
     setIsConnecting(true);
     setError(null);
 
@@ -60,9 +63,10 @@ export function useSignalR(options: UseSignalROptions = {}) {
       setError(errorMessage);
       console.error('SignalR connection error:', err);
     } finally {
+      isConnectingRef.current = false;
       setIsConnecting(false);
     }
-  }, [isConnecting]);
+  }, []);
 
   const disconnect = useCallback(async () => {
     try {
@@ -131,7 +135,11 @@ export function useSignalR(options: UseSignalROptions = {}) {
     }
 
     // Auto-connect if enabled
-    if (autoConnect && !signalRService.isConnected && !isConnecting) {
+    if (autoConnect &&
+        !autoConnectAttemptedRef.current &&
+        !signalRService.isConnected &&
+        !signalRService.isConnecting) {
+      autoConnectAttemptedRef.current = true;
       connect();
     }
 
@@ -142,7 +150,7 @@ export function useSignalR(options: UseSignalROptions = {}) {
       unsubscribeNotifications?.();
       unsubscribeUserSessions?.();
     };
-  }, [autoConnect, connect, isConnecting]);
+  }, [autoConnect, connect]);
 
   // Cleanup on unmount
   useEffect(() => {

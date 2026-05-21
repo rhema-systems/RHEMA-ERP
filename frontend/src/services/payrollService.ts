@@ -1,4 +1,5 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 type QueryValue = string | number | boolean | null | undefined;
 
@@ -22,7 +23,10 @@ function buildQuery(params: Record<string, QueryValue>) {
   return value ? `?${value}` : '';
 }
 
-async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
   const token = getToken();
   const headers = new Headers(options.headers);
   headers.set('Content-Type', 'application/json');
@@ -38,7 +42,11 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.message || payload?.error || `Payroll API request failed with ${response.status}`);
+    throw new Error(
+      payload?.message ||
+        payload?.error ||
+        `Payroll API request failed with ${response.status}`
+    );
   }
 
   if (response.status === 204) {
@@ -56,7 +64,13 @@ export type PayrollComponentType =
   | 'EmployerContribution';
 
 export type PayrollCalculationType = 'FixedAmount' | 'PercentageOfBasic';
-export type PayrollRunStatus = 'Draft' | 'Calculated' | 'InReview' | 'Approved' | 'Closed' | 'RolledBack';
+export type PayrollRunStatus =
+  | 'Draft'
+  | 'Calculated'
+  | 'InReview'
+  | 'Approved'
+  | 'Closed'
+  | 'RolledBack';
 
 export interface PayrollParameterSet {
   id?: string;
@@ -565,12 +579,15 @@ export interface PayrollLoanPolicy {
 
 export interface PayrollJournalMapping {
   id?: string;
+  sequenceNo: number;
   transactionType: string;
   componentCode?: string | null;
+  shortDescription?: string | null;
   description: string;
   debitCredit: 'DR' | 'CR';
   accountCode: string;
   accountType?: string | null;
+  legacyCompanyCode?: string | null;
   isActive: boolean;
 }
 
@@ -1094,6 +1111,8 @@ export interface PayrollLoanRepaymentRequest {
   employeeNumber: string;
   facilityNumber: string;
   repaymentAmount: number;
+  principalAmount?: number | null;
+  interestAmount?: number | null;
   actualRepaymentDate?: string | null;
 }
 
@@ -1167,7 +1186,7 @@ export interface PayrollJournalLine {
   id: string;
   sequenceNo: number;
   transactionType: string;
-  debitCredit: 'DR' | 'CR';
+  debitCredit: 'DR' | 'CR' | string;
   accountCode: string;
   description: string;
   amount: number;
@@ -1408,6 +1427,30 @@ export interface PayrollJournalPosting {
   lines: PayrollJournalLine[];
 }
 
+export interface PayrollJournalPreview {
+  payrollRunId: string;
+  runNumber: string;
+  journalNumber: string;
+  runStatus: PayrollRunStatus;
+  currencyCode: string;
+  employeeCount: number;
+  grossAmount: number;
+  netAmount: number;
+  totalDebit: number;
+  totalCredit: number;
+  difference: number;
+  lineCount: number;
+  unmappedLineCount: number;
+  invalidLineCount: number;
+  generatedForPreview: boolean;
+  isBalanced: boolean;
+  alreadyPosted: boolean;
+  canPost: boolean;
+  blocker?: string | null;
+  missingAccountCodes: string[];
+  lines: PayrollJournalLine[];
+}
+
 export interface PayrollPayslipEmailResult {
   payrollRunId: string;
   runNumber: string;
@@ -1461,135 +1504,374 @@ export interface PagedResult<T> {
   pageSize: number;
 }
 
-export const buildPayrollBudgetAnalysis = (payload: PayrollBudgetAnalysisRequest) =>
-  apiRequest<PayrollBudgetAnalysis>('/hr/payroll/setup/budget-analysis', { method: 'POST', body: JSON.stringify(payload) });
+export const buildPayrollBudgetAnalysis = (
+  payload: PayrollBudgetAnalysisRequest
+) =>
+  apiRequest<PayrollBudgetAnalysis>('/hr/payroll/setup/budget-analysis', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
-export const savePayrollBudgetAnalysis = (payload: PayrollBudgetAnalysisRequest) =>
-  apiRequest<PayrollBudgetAnalysis>('/hr/payroll/setup/budget-analysis/save', { method: 'POST', body: JSON.stringify(payload) });
+export const savePayrollBudgetAnalysis = (
+  payload: PayrollBudgetAnalysisRequest
+) =>
+  apiRequest<PayrollBudgetAnalysis>('/hr/payroll/setup/budget-analysis/save', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
 export const payrollService = {
-  getLegacyMenu: () => apiRequest<PayrollLegacyMenuItem[]>('/hr/payroll/legacy-menu'),
-  getSetupSummary: () => apiRequest<PayrollSetupSummary>('/hr/payroll/setup-summary'),
+  getLegacyMenu: () =>
+    apiRequest<PayrollLegacyMenuItem[]>('/hr/payroll/legacy-menu'),
+  getSetupSummary: () =>
+    apiRequest<PayrollSetupSummary>('/hr/payroll/setup-summary'),
   buildBudgetAnalysis: buildPayrollBudgetAnalysis,
   saveBudgetAnalysis: savePayrollBudgetAnalysis,
   getCodeSetup: (codeType?: string) =>
-    apiRequest<PayrollCodeSetup>(`/hr/payroll/setup/codes${buildQuery({ codeType })}`),
+    apiRequest<PayrollCodeSetup>(
+      `/hr/payroll/setup/codes${buildQuery({ codeType })}`
+    ),
   upsertCodeType: (payload: PayrollCodeType) =>
-    apiRequest<PayrollCodeType>('/hr/payroll/setup/code-types', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollCodeType>('/hr/payroll/setup/code-types', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertCodeValue: (payload: PayrollCodeValue) =>
-    apiRequest<PayrollCodeValue>('/hr/payroll/setup/code-values', { method: 'POST', body: JSON.stringify(payload) }),
-  getHolidaySetup: () => apiRequest<PayrollHolidaySetup>('/hr/payroll/setup/holidays'),
+    apiRequest<PayrollCodeValue>('/hr/payroll/setup/code-values', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getHolidaySetup: () =>
+    apiRequest<PayrollHolidaySetup>('/hr/payroll/setup/holidays'),
   upsertHoliday: (payload: PayrollHoliday) =>
-    apiRequest<PayrollHoliday>('/hr/payroll/setup/holidays', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollHoliday>('/hr/payroll/setup/holidays', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertNonWorkingDay: (payload: PayrollNonWorkingDay) =>
-    apiRequest<PayrollNonWorkingDay>('/hr/payroll/setup/non-working-days', { method: 'POST', body: JSON.stringify(payload) }),
-  getExchangeRates: () => apiRequest<PayrollExchangeRate[]>('/hr/payroll/setup/exchange-rates'),
+    apiRequest<PayrollNonWorkingDay>('/hr/payroll/setup/non-working-days', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getExchangeRates: () =>
+    apiRequest<PayrollExchangeRate[]>('/hr/payroll/setup/exchange-rates'),
   upsertExchangeRate: (payload: PayrollExchangeRate) =>
-    apiRequest<PayrollExchangeRate>('/hr/payroll/setup/exchange-rates', { method: 'POST', body: JSON.stringify(payload) }),
-  getBankBranches: () => apiRequest<PayrollBankBranch[]>('/hr/payroll/setup/bank-branches'),
+    apiRequest<PayrollExchangeRate>('/hr/payroll/setup/exchange-rates', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getBankBranches: () =>
+    apiRequest<PayrollBankBranch[]>('/hr/payroll/setup/bank-branches'),
   upsertBankBranch: (payload: PayrollBankBranch) =>
-    apiRequest<PayrollBankBranch>('/hr/payroll/setup/bank-branches', { method: 'POST', body: JSON.stringify(payload) }),
-  getLeaveSetup: () => apiRequest<PayrollLeaveSetupCollection>('/hr/payroll/setup/leave'),
+    apiRequest<PayrollBankBranch>('/hr/payroll/setup/bank-branches', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getLeaveSetup: () =>
+    apiRequest<PayrollLeaveSetupCollection>('/hr/payroll/setup/leave'),
   upsertLeaveSetup: (payload: PayrollLeaveSetup) =>
-    apiRequest<PayrollLeaveSetup>('/hr/payroll/setup/leave', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollLeaveSetup>('/hr/payroll/setup/leave', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertLeaveSetupDetail: (payload: PayrollLeaveSetupDetail) =>
-    apiRequest<PayrollLeaveSetupDetail>('/hr/payroll/setup/leave-details', { method: 'POST', body: JSON.stringify(payload) }),
-  getOvertimeSetup: () => apiRequest<PayrollOvertimeSetup>('/hr/payroll/setup/overtime'),
+    apiRequest<PayrollLeaveSetupDetail>('/hr/payroll/setup/leave-details', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getOvertimeSetup: () =>
+    apiRequest<PayrollOvertimeSetup>('/hr/payroll/setup/overtime'),
   upsertOvertimePolicy: (payload: PayrollOvertimePolicy) =>
-    apiRequest<PayrollOvertimePolicy>('/hr/payroll/setup/overtime-policies', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollOvertimePolicy>('/hr/payroll/setup/overtime-policies', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertOvertimeRange: (payload: PayrollOvertimeRange) =>
-    apiRequest<PayrollOvertimeRange>('/hr/payroll/setup/overtime-ranges', { method: 'POST', body: JSON.stringify(payload) }),
-  getLegacyMenuUsers: () => apiRequest<PayrollLegacyMenuUser[]>('/hr/payroll/setup/menu-users'),
+    apiRequest<PayrollOvertimeRange>('/hr/payroll/setup/overtime-ranges', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getLegacyMenuUsers: () =>
+    apiRequest<PayrollLegacyMenuUser[]>('/hr/payroll/setup/menu-users'),
   upsertLegacyMenuUser: (payload: PayrollLegacyMenuUser) =>
-    apiRequest<PayrollLegacyMenuUser>('/hr/payroll/setup/menu-users', { method: 'POST', body: JSON.stringify(payload) }),
-  getMenuSecurity: () => apiRequest<PayrollLegacyMenuSecurity[]>('/hr/payroll/setup/menu-security'),
+    apiRequest<PayrollLegacyMenuUser>('/hr/payroll/setup/menu-users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getMenuSecurity: () =>
+    apiRequest<PayrollLegacyMenuSecurity[]>('/hr/payroll/setup/menu-security'),
   upsertMenuSecurity: (payload: PayrollLegacyMenuSecurity) =>
-    apiRequest<PayrollLegacyMenuSecurity>('/hr/payroll/setup/menu-security', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollLegacyMenuSecurity>('/hr/payroll/setup/menu-security', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   changeLegacyMenuUserPassword: (payload: PayrollLegacyPasswordChange) =>
-    apiRequest<PayrollLegacyMenuUser>('/hr/payroll/setup/menu-users/change-password', { method: 'POST', body: JSON.stringify(payload) }),
-  getCompanySetup: () => apiRequest<PayrollCompanySetup>('/hr/payroll/setup/company'),
+    apiRequest<PayrollLegacyMenuUser>(
+      '/hr/payroll/setup/menu-users/change-password',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  getCompanySetup: () =>
+    apiRequest<PayrollCompanySetup>('/hr/payroll/setup/company'),
   upsertCompanyProfile: (payload: PayrollCompanyProfile) =>
-    apiRequest<PayrollCompanyProfile>('/hr/payroll/setup/company-profiles', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollCompanyProfile>('/hr/payroll/setup/company-profiles', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertBusinessUnit: (payload: PayrollBusinessUnit) =>
-    apiRequest<PayrollBusinessUnit>('/hr/payroll/setup/business-units', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBusinessUnit>('/hr/payroll/setup/business-units', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertCompanyBanker: (payload: PayrollCompanyBanker) =>
-    apiRequest<PayrollCompanyBanker>('/hr/payroll/setup/company-bankers', { method: 'POST', body: JSON.stringify(payload) }),
-  getGradeSetup: () => apiRequest<PayrollGradeSetup>('/hr/payroll/setup/grades'),
+    apiRequest<PayrollCompanyBanker>('/hr/payroll/setup/company-bankers', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getGradeSetup: () =>
+    apiRequest<PayrollGradeSetup>('/hr/payroll/setup/grades'),
   upsertGrade: (payload: PayrollGrade) =>
-    apiRequest<PayrollGrade>('/hr/payroll/setup/grades', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollGrade>('/hr/payroll/setup/grades', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertGradeNotch: (payload: PayrollGradeNotch) =>
-    apiRequest<PayrollGradeNotch>('/hr/payroll/setup/grade-notches', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollGradeNotch>('/hr/payroll/setup/grade-notches', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getTaxTable: () => apiRequest<PayrollTaxTable>('/hr/payroll/setup/tax-table'),
   upsertParameters: (payload: PayrollParameterSet) =>
-    apiRequest<PayrollParameterSet>('/hr/payroll/setup/parameters', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollParameterSet>('/hr/payroll/setup/parameters', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertComponent: (payload: PayrollComponent) =>
-    apiRequest<PayrollComponent>('/hr/payroll/setup/components', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollComponent>('/hr/payroll/setup/components', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertComponentRule: (payload: PayrollComponentRule) =>
-    apiRequest<PayrollComponentRule>('/hr/payroll/setup/component-rules', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollComponentRule>('/hr/payroll/setup/component-rules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertTaxBand: (payload: PayrollTaxBand) =>
-    apiRequest<PayrollTaxBand>('/hr/payroll/setup/tax-bands', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollTaxBand>('/hr/payroll/setup/tax-bands', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertTaxRelief: (payload: PayrollTaxRelief) =>
-    apiRequest<PayrollTaxRelief>('/hr/payroll/setup/tax-reliefs', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollTaxRelief>('/hr/payroll/setup/tax-reliefs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertPensionScheme: (payload: PayrollPensionScheme) =>
-    apiRequest<PayrollPensionScheme>('/hr/payroll/setup/pension-schemes', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollPensionScheme>('/hr/payroll/setup/pension-schemes', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertLoanPolicy: (payload: PayrollLoanPolicy) =>
-    apiRequest<PayrollLoanPolicy>('/hr/payroll/setup/loan-policies', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollLoanPolicy>('/hr/payroll/setup/loan-policies', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertBonusPolicy: (payload: PayrollBonusPolicy) =>
-    apiRequest<PayrollBonusPolicy>('/hr/payroll/setup/bonus-policies', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBonusPolicy>('/hr/payroll/setup/bonus-policies', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertBonusRule: (payload: PayrollBonusRule) =>
-    apiRequest<PayrollBonusRule>('/hr/payroll/setup/bonus-rules', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBonusRule>('/hr/payroll/setup/bonus-rules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   saveBonusRules: (payload: PayrollBonusRuleBulkSave) =>
-    apiRequest<PayrollBonusRule[]>('/hr/payroll/setup/bonus-rules/bulk', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBonusRule[]>('/hr/payroll/setup/bonus-rules/bulk', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getBonusExceptions: (params: { bonusCode?: string } = {}) =>
-    apiRequest<PayrollBonusException[]>(`/hr/payroll/setup/bonus-exceptions${buildQuery(params)}`),
+    apiRequest<PayrollBonusException[]>(
+      `/hr/payroll/setup/bonus-exceptions${buildQuery(params)}`
+    ),
   saveBonusExceptions: (payload: PayrollBonusExceptionBulkSave) =>
-    apiRequest<PayrollBonusException[]>('/hr/payroll/setup/bonus-exceptions/bulk', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBonusException[]>(
+      '/hr/payroll/setup/bonus-exceptions/bulk',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
   upsertBackpayPolicy: (payload: PayrollBackpayPolicy) =>
-    apiRequest<PayrollBackpayPolicy>('/hr/payroll/setup/backpay-policies', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBackpayPolicy>('/hr/payroll/setup/backpay-policies', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertBackpayRule: (payload: PayrollBackpayRule) =>
-    apiRequest<PayrollBackpayRule>('/hr/payroll/setup/backpay-rules', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBackpayRule>('/hr/payroll/setup/backpay-rules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   upsertBackpayException: (payload: PayrollBackpayException) =>
-    apiRequest<PayrollBackpayException>('/hr/payroll/setup/backpay-exceptions', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollBackpayException>(
+      '/hr/payroll/setup/backpay-exceptions',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
   upsertJournalMapping: (payload: PayrollJournalMapping) =>
-    apiRequest<PayrollJournalMapping>('/hr/payroll/setup/journal-mappings', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollJournalMapping>('/hr/payroll/setup/journal-mappings', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  seedOracleJournalMappings: (legacyCompanyCode?: string) =>
+    apiRequest<PayrollJournalMapping[]>(
+      `/hr/payroll/setup/journal-mappings/oracle-defaults${buildQuery({
+        legacyCompanyCode,
+      })}`,
+      { method: 'POST' }
+    ),
   getEmployeeProfiles: (searchTerm?: string) =>
-    apiRequest<PayrollEmployeeProfile[]>(`/hr/payroll/employee-profiles${buildQuery({ searchTerm })}`),
-  upsertEmployeeProfile: (payload: Partial<PayrollEmployeeProfile> & { employeeId: string; employeeNumber: string }) =>
-    apiRequest<PayrollEmployeeProfile>('/hr/payroll/employee-profiles', { method: 'POST', body: JSON.stringify(payload) }),
-  getLoans: (params: { employeeNumber?: string; includeInactive?: boolean } = {}) =>
-    apiRequest<PayrollLoan[]>(`/hr/payroll/loans${buildQuery(params)}`),
-  upsertLoan: (payload: Partial<PayrollLoan> & { employeeProfileId?: string; employeeNumber: string; facilityNumber?: string; dateGranted: string; amountGranted: number; monthlyRepaymentAmount: number }) =>
-    apiRequest<PayrollLoan>('/hr/payroll/loans', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollEmployeeProfile[]>(
+      `/hr/payroll/employee-profiles${buildQuery({ searchTerm })}`
+    ),
+  upsertEmployeeProfile: (
+    payload: Partial<PayrollEmployeeProfile> & {
+      employeeId: string;
+      employeeNumber: string;
+    }
+  ) =>
+    apiRequest<PayrollEmployeeProfile>('/hr/payroll/employee-profiles', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getLoans: (
+    params: { employeeNumber?: string; includeInactive?: boolean } = {}
+  ) => apiRequest<PayrollLoan[]>(`/hr/payroll/loans${buildQuery(params)}`),
+  upsertLoan: (
+    payload: Partial<PayrollLoan> & {
+      employeeProfileId?: string;
+      employeeNumber: string;
+      facilityNumber?: string;
+      dateGranted: string;
+      amountGranted: number;
+      monthlyRepaymentAmount: number;
+    }
+  ) =>
+    apiRequest<PayrollLoan>('/hr/payroll/loans', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   postLoanRepayment: (payload: PayrollLoanRepaymentRequest) =>
-    apiRequest<PayrollLoanRepayment>('/hr/payroll/loans/repayments', { method: 'POST', body: JSON.stringify(payload) }),
-  getSalaryAdvances: (params: { fromDate?: string; toDate?: string; employeeNumber?: string } = {}) =>
-    apiRequest<PayrollSalaryAdvance[]>(`/hr/payroll/salary-advances${buildQuery(params)}`),
-  upsertSalaryAdvance: (payload: Partial<PayrollSalaryAdvance> & { employeeProfileId?: string; employeeNumber: string; advanceDate: string; advanceAmount: number }) =>
-    apiRequest<PayrollSalaryAdvance>('/hr/payroll/salary-advances', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollLoanRepayment>('/hr/payroll/loans/repayments', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getSalaryAdvances: (
+    params: { fromDate?: string; toDate?: string; employeeNumber?: string } = {}
+  ) =>
+    apiRequest<PayrollSalaryAdvance[]>(
+      `/hr/payroll/salary-advances${buildQuery(params)}`
+    ),
+  upsertSalaryAdvance: (
+    payload: Partial<PayrollSalaryAdvance> & {
+      employeeProfileId?: string;
+      employeeNumber: string;
+      advanceDate: string;
+      advanceAmount: number;
+    }
+  ) =>
+    apiRequest<PayrollSalaryAdvance>('/hr/payroll/salary-advances', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getEmployeeTaxReliefs: (params: { reliefCode?: string } = {}) =>
-    apiRequest<PayrollEmployeeTaxRelief[]>(`/hr/payroll/tax-reliefs${buildQuery(params)}`),
+    apiRequest<PayrollEmployeeTaxRelief[]>(
+      `/hr/payroll/tax-reliefs${buildQuery(params)}`
+    ),
   saveEmployeeTaxReliefs: (payload: PayrollEmployeeTaxReliefBulkSave) =>
-    apiRequest<PayrollEmployeeTaxRelief[]>('/hr/payroll/tax-reliefs/bulk', { method: 'POST', body: JSON.stringify(payload) }),
-  getEmployeeComponentExceptions: (params: { payrollComponentId?: string; componentCode?: string; componentType?: PayrollComponentType } = {}) =>
-    apiRequest<PayrollEmployeeComponentException[]>(`/hr/payroll/component-exceptions${buildQuery(params)}`),
-  saveEmployeeComponentExceptions: (payload: PayrollEmployeeComponentExceptionBulkSave) =>
-    apiRequest<PayrollEmployeeComponentException[]>('/hr/payroll/component-exceptions/bulk', { method: 'POST', body: JSON.stringify(payload) }),
-  getPromotionArrears: (params: { employeeNumber?: string; includeInactive?: boolean } = {}) =>
-    apiRequest<PayrollPromotionArrearsEntry[]>(`/hr/payroll/promotion-arrears${buildQuery(params)}`),
+    apiRequest<PayrollEmployeeTaxRelief[]>('/hr/payroll/tax-reliefs/bulk', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getEmployeeComponentExceptions: (
+    params: {
+      payrollComponentId?: string;
+      componentCode?: string;
+      componentType?: PayrollComponentType;
+    } = {}
+  ) =>
+    apiRequest<PayrollEmployeeComponentException[]>(
+      `/hr/payroll/component-exceptions${buildQuery(params)}`
+    ),
+  saveEmployeeComponentExceptions: (
+    payload: PayrollEmployeeComponentExceptionBulkSave
+  ) =>
+    apiRequest<PayrollEmployeeComponentException[]>(
+      '/hr/payroll/component-exceptions/bulk',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  getPromotionArrears: (
+    params: { employeeNumber?: string; includeInactive?: boolean } = {}
+  ) =>
+    apiRequest<PayrollPromotionArrearsEntry[]>(
+      `/hr/payroll/promotion-arrears${buildQuery(params)}`
+    ),
   savePromotionArrears: (payload: PayrollPromotionArrearsBulkSave) =>
-    apiRequest<PayrollPromotionArrearsEntry[]>('/hr/payroll/promotion-arrears/bulk', { method: 'POST', body: JSON.stringify(payload) }),
-  getOvertimeSummaries: (params: { employeeNumber?: string; includeInactive?: boolean } = {}) =>
-    apiRequest<PayrollOvertimeSummaryEntry[]>(`/hr/payroll/overtime-summaries${buildQuery(params)}`),
+    apiRequest<PayrollPromotionArrearsEntry[]>(
+      '/hr/payroll/promotion-arrears/bulk',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  getOvertimeSummaries: (
+    params: { employeeNumber?: string; includeInactive?: boolean } = {}
+  ) =>
+    apiRequest<PayrollOvertimeSummaryEntry[]>(
+      `/hr/payroll/overtime-summaries${buildQuery(params)}`
+    ),
   saveOvertimeSummaries: (payload: PayrollOvertimeSummaryBulkSave) =>
-    apiRequest<PayrollOvertimeSummaryEntry[]>('/hr/payroll/overtime-summaries/bulk', { method: 'POST', body: JSON.stringify(payload) }),
-  getContributionOpeningBalances: (params: { contributionCode?: string; contributionCodeType?: string; includeInactive?: boolean } = {}) =>
-    apiRequest<PayrollContributionOpeningBalance[]>(`/hr/payroll/contribution-opening-balances${buildQuery(params)}`),
-  saveContributionOpeningBalances: (payload: PayrollContributionOpeningBalanceBulkSave) =>
-    apiRequest<PayrollContributionOpeningBalance[]>('/hr/payroll/contribution-opening-balances/bulk', { method: 'POST', body: JSON.stringify(payload) }),
-  getContributionTransactions: (params: { employeeNumber?: string; contributionCode?: string; contributionCodeType?: string; includeInactive?: boolean } = {}) =>
-    apiRequest<PayrollContributionTransaction[]>(`/hr/payroll/contribution-transactions${buildQuery(params)}`),
-  upsertContributionTransaction: (payload: Partial<PayrollContributionTransaction> & { employeeProfileId?: string; employeeNumber: string; contributionCodeType: string; contributionCode: string; contributionName: string; transactionType: 'Withdrawal' | 'Interest'; effectiveDate: string; amount: number }) =>
-    apiRequest<PayrollContributionTransaction>('/hr/payroll/contribution-transactions', { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollOvertimeSummaryEntry[]>(
+      '/hr/payroll/overtime-summaries/bulk',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  getContributionOpeningBalances: (
+    params: {
+      contributionCode?: string;
+      contributionCodeType?: string;
+      includeInactive?: boolean;
+    } = {}
+  ) =>
+    apiRequest<PayrollContributionOpeningBalance[]>(
+      `/hr/payroll/contribution-opening-balances${buildQuery(params)}`
+    ),
+  saveContributionOpeningBalances: (
+    payload: PayrollContributionOpeningBalanceBulkSave
+  ) =>
+    apiRequest<PayrollContributionOpeningBalance[]>(
+      '/hr/payroll/contribution-opening-balances/bulk',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  getContributionTransactions: (
+    params: {
+      employeeNumber?: string;
+      contributionCode?: string;
+      contributionCodeType?: string;
+      includeInactive?: boolean;
+    } = {}
+  ) =>
+    apiRequest<PayrollContributionTransaction[]>(
+      `/hr/payroll/contribution-transactions${buildQuery(params)}`
+    ),
+  upsertContributionTransaction: (
+    payload: Partial<PayrollContributionTransaction> & {
+      employeeProfileId?: string;
+      employeeNumber: string;
+      contributionCodeType: string;
+      contributionCode: string;
+      contributionName: string;
+      transactionType: 'Withdrawal' | 'Interest';
+      effectiveDate: string;
+      amount: number;
+    }
+  ) =>
+    apiRequest<PayrollContributionTransaction>(
+      '/hr/payroll/contribution-transactions',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
   importEmployeeReconciliation: (payload: {
     sourceName: string;
     rows: Array<{
@@ -1599,9 +1881,14 @@ export const payrollService = {
       legacyFullName?: string | null;
       department?: string | null;
     }>;
-  }) => apiRequest<PayrollImportBatch>('/hr/payroll/imports/employee-reconciliation', { method: 'POST', body: JSON.stringify(payload) }),
+  }) =>
+    apiRequest<PayrollImportBatch>(
+      '/hr/payroll/imports/employee-reconciliation',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
   getRuns: () => apiRequest<PayrollRun[]>('/hr/payroll/runs'),
-  getRun: (runId: string) => apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}`),
+  getRun: (runId: string) =>
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}`),
   createRun: (payload: {
     payPeriod: number;
     payPeriodFrom: string;
@@ -1612,41 +1899,95 @@ export const payrollService = {
     separateBonusCode?: string | null;
     notes?: string | null;
   }) =>
-    apiRequest<PayrollRun>('/hr/payroll/runs', { method: 'POST', body: JSON.stringify(payload) }),
-  calculateRun: (runId: string) => apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/calculate`, { method: 'POST', body: JSON.stringify({}) }),
+    apiRequest<PayrollRun>('/hr/payroll/runs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  calculateRun: (runId: string) =>
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/calculate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   submitRun: (runId: string, notes?: string) =>
-    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/submit-review`, { method: 'POST', body: JSON.stringify({ notes }) }),
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/submit-review`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
   approveRun: (runId: string, notes?: string) =>
-    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/approve`, { method: 'POST', body: JSON.stringify({ notes }) }),
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
   rejectRun: (runId: string, notes?: string) =>
-    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
   closeRun: (runId: string, notes?: string) =>
-    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/close`, { method: 'POST', body: JSON.stringify({ notes }) }),
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
   rollbackRun: (runId: string, notes?: string) =>
-    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/rollback`, { method: 'POST', body: JSON.stringify({ notes }) }),
+    apiRequest<PayrollRun>(`/hr/payroll/runs/${runId}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
   getRunSummary: (runId: string, createSnapshot = false) =>
-    apiRequest<PayrollSummaryReport>(`/hr/payroll/runs/${runId}/summary${buildQuery({ createSnapshot })}`),
+    apiRequest<PayrollSummaryReport>(
+      `/hr/payroll/runs/${runId}/summary${buildQuery({ createSnapshot })}`
+    ),
   getOracleRunReport: (runId: string, payload: PayrollOracleReportRequest) =>
-    apiRequest<PayrollOracleReport>(`/hr/payroll/runs/${runId}/oracle-report`, { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollOracleReport>(`/hr/payroll/runs/${runId}/oracle-report`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getPayslips: (runId: string, filters?: string | PayrollPayslipFilters) => {
-    const query = typeof filters === 'string'
-      ? { employeeId: filters }
-      : {
-          employeeId: filters?.employeeId,
-          categoryType: filters?.categoryType,
-          categoryValue: filters?.categoryValue,
-        };
-    return apiRequest<PayrollPayslip[]>(`/hr/payroll/runs/${runId}/payslips${buildQuery(query)}`);
+    const query =
+      typeof filters === 'string'
+        ? { employeeId: filters }
+        : {
+            employeeId: filters?.employeeId,
+            categoryType: filters?.categoryType,
+            categoryValue: filters?.categoryValue,
+          };
+    return apiRequest<PayrollPayslip[]>(
+      `/hr/payroll/runs/${runId}/payslips${buildQuery(query)}`
+    );
   },
   generatePayslipSnapshots: (runId: string) =>
-    apiRequest<PayrollPayslipSnapshot[]>(`/hr/payroll/runs/${runId}/payslips/snapshots`, { method: 'POST', body: JSON.stringify({}) }),
-  emailPayslips: (runId: string, payload: { employeeIds?: string[]; subject?: string | null; message?: string | null; attachHtmlCopy?: boolean } = {}) =>
-    apiRequest<PayrollPayslipEmailResult>(`/hr/payroll/runs/${runId}/payslips/email`, { method: 'POST', body: JSON.stringify(payload) }),
+    apiRequest<PayrollPayslipSnapshot[]>(
+      `/hr/payroll/runs/${runId}/payslips/snapshots`,
+      { method: 'POST', body: JSON.stringify({}) }
+    ),
+  emailPayslips: (
+    runId: string,
+    payload: {
+      employeeIds?: string[];
+      subject?: string | null;
+      message?: string | null;
+      attachHtmlCopy?: boolean;
+    } = {}
+  ) =>
+    apiRequest<PayrollPayslipEmailResult>(
+      `/hr/payroll/runs/${runId}/payslips/email`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  getJournalPreview: (runId: string) =>
+    apiRequest<PayrollJournalPreview>(
+      `/hr/payroll/runs/${runId}/journal-preview`
+    ),
   postJournal: (runId: string, notes?: string) =>
-    apiRequest<PayrollJournalPosting>(`/hr/payroll/runs/${runId}/post-journal`, { method: 'POST', body: JSON.stringify({ notes }) }),
+    apiRequest<PayrollJournalPosting>(
+      `/hr/payroll/runs/${runId}/post-journal`,
+      { method: 'POST', body: JSON.stringify({ notes }) }
+    ),
   searchEmployees: (searchTerm: string) =>
-    apiRequest<PagedResult<HrEmployee>>(`/hr/employees/paged?page=1&pageSize=20`, {
-      method: 'POST',
-      body: JSON.stringify({ searchTerm, isActive: true }),
-    }),
+    apiRequest<PagedResult<HrEmployee>>(
+      `/hr/employees/paged?page=1&pageSize=20`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ searchTerm, isActive: true }),
+      }
+    ),
 };

@@ -16,7 +16,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { TenderAward } from '@/components/procurement/tenders/TenderAward';
 import { AnswerClarificationDialog } from '@/components/procurement/tenders/AnswerClarificationDialog';
 import TenderEvaluators from '@/components/procurement/tenders/TenderEvaluators';
@@ -369,10 +369,7 @@ export default function TenderDetailPage() {
             <Shield className="h-4 w-4 mr-2" />
             Verification
           </TabsTrigger>
-          <TabsTrigger value="approvals">
-            <CheckCircle2 className="h-4 w-4 mr-2" />
-            Approvals
-          </TabsTrigger>
+          <WorkflowTabTrigger value="approvals" />
         </TabsList>
 
         {/* Overview Tab */}
@@ -1165,9 +1162,28 @@ export default function TenderDetailPage() {
         </TabsContent>
 
         {/* Approvals Tab */}
-        <TabsContent value="approvals" className="space-y-4">
-          <WorkflowApprovalHistoryPanel entityType="Tender" entityId={tenderId} />
-        </TabsContent>
+        <WorkflowTabContent
+          value="approvals"
+          entityType="Tender"
+          entityId={tenderId}
+          entityLabel="Tender"
+          entityNumber={tender.tenderNumber}
+          status={tender.status}
+          currentStepName={tender.currentWorkflowStepName}
+          canSubmit={tender.status === 'Draft'}
+          canApproveReject={tender.status === 'Submitted'}
+          onSubmit={async () => {
+            await tenderService.submitTenderForApproval(tender.id);
+          }}
+          onApprove={async (comments) => {
+            await tenderService.approveTender(tender.id, comments || undefined);
+          }}
+          onReject={async (comments) => {
+            await tenderService.rejectTender(tender.id, comments);
+          }}
+          onAfterAction={loadTenderDetails}
+          onOpenWorkflows={() => router.push('/administration/workflow')}
+        />
       </Tabs>
 
       {/* Publish Tender Confirmation Dialog */}

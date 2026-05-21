@@ -26,6 +26,11 @@ public class CreateJobCardDto
     [Required]
     public Guid PriorityLevelId { get; set; }
 
+    public Guid? CustomerBusinessPartnerId { get; set; }
+
+    [MaxLength(20)]
+    public string? WorkOrderBillingType { get; set; }
+
     [MaxLength(20)]
     public string MaintenanceLocation { get; set; } = "Internal";
 
@@ -87,6 +92,11 @@ public class UpdateJobCardDto
     [Required]
     public Guid PriorityLevelId { get; set; }
 
+    public Guid? CustomerBusinessPartnerId { get; set; }
+
+    [MaxLength(20)]
+    public string? WorkOrderBillingType { get; set; }
+
     [MaxLength(20)]
     public string MaintenanceLocation { get; set; } = "Internal";
 
@@ -131,6 +141,9 @@ public class JobCardListDto
     public Guid PriorityLevelId { get; set; }
     public string Priority { get; set; } = string.Empty;
     public string PriorityColor { get; set; } = string.Empty;
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? CustomerBusinessPartnerName { get; set; }
+    public string WorkOrderBillingType { get; set; } = "Repairs";
     public string JobCardStatus { get; set; } = string.Empty;
     public string ApprovalStatus { get; set; } = string.Empty;
     public string RequestedBy { get; set; } = string.Empty;
@@ -173,6 +186,11 @@ public class JobCardDto
     public int PriorityLevel { get; set; }
 
     public string MaintenanceLocation { get; set; } = string.Empty;
+
+    // Customer for AR billing
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? CustomerBusinessPartnerName { get; set; }
+    public string WorkOrderBillingType { get; set; } = "Repairs";
 
     // Request Information
     public Guid RequestedById { get; set; }
@@ -296,6 +314,16 @@ public class JobCardDocumentDto
 }
 
 /// <summary>
+/// DTO for downloading job card documents/attachments
+/// </summary>
+public class JobCardDocumentDownloadDto
+{
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "application/octet-stream";
+    public Stream Content { get; set; } = Stream.Null;
+}
+
+/// <summary>
 /// DTO for job card comments
 /// </summary>
 public class JobCardCommentDto
@@ -372,7 +400,7 @@ public class JobCardApprovalActionDto
     /// Work order billing type: "Maintenance" uses fixed amount, "Repairs" uses itemized costs
     /// </summary>
     [MaxLength(20)]
-    public string BillingType { get; set; } = "Repairs";
+    public string? BillingType { get; set; }
 }
 
 /// <summary>

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
@@ -16,13 +17,15 @@ namespace ErpSystem.Core.Services.Maintenance;
 /// </summary>
 public class JobCardService : IJobCardService
 {
+    private const string WorkOrderBillingTypeField = "workOrderBillingType";
+
     private readonly IJobCardRepository _jobCardRepository;
     private readonly IWorkOrderService _workOrderService;
     private readonly IMaintenanceAssetRepository _assetRepository;
     private readonly IMaintenanceTypeRepository _maintenanceTypeRepository;
     private readonly ErpSystem.Core.Interfaces.HR.IEmployeeRepository _employeeRepository;
     private readonly ICurrentUserService _currentUserService;
-    private readonly IFileUploadService _fileUploadService;
+    private readonly IFileStorageService _fileStorageService;
     private readonly IMaintenanceNotificationService _maintenanceNotificationService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -38,7 +41,7 @@ public class JobCardService : IJobCardService
         IMaintenanceTypeRepository maintenanceTypeRepository,
         ErpSystem.Core.Interfaces.HR.IEmployeeRepository employeeRepository,
         ICurrentUserService currentUserService,
-        IFileUploadService fileUploadService,
+        IFileStorageService fileStorageService,
         IMaintenanceNotificationService maintenanceNotificationService,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
@@ -53,7 +56,7 @@ public class JobCardService : IJobCardService
         _maintenanceTypeRepository = maintenanceTypeRepository;
         _employeeRepository = employeeRepository;
         _currentUserService = currentUserService;
-        _fileUploadService = fileUploadService;
+        _fileStorageService = fileStorageService;
         _maintenanceNotificationService = maintenanceNotificationService;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
@@ -61,6 +64,79 @@ public class JobCardService : IJobCardService
         _unitOfWork = unitOfWork;
         _logger = logger;
         _appEventBus = appEventBus;
+    }
+
+    private static string NormalizeWorkOrderBillingType(string? value)
+    {
+        return string.Equals(value, "Maintenance", StringComparison.OrdinalIgnoreCase)
+            ? "Maintenance"
+            : "Repairs";
+    }
+
+    private static string? GetStoredWorkOrderBillingType(string? customFieldValues)
+    {
+        if (string.IsNullOrWhiteSpace(customFieldValues))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(customFieldValues);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            if (document.RootElement.TryGetProperty(WorkOrderBillingTypeField, out var billingType) &&
+                billingType.ValueKind == JsonValueKind.String)
+            {
+                return NormalizeWorkOrderBillingType(billingType.GetString());
+            }
+
+            if (document.RootElement.TryGetProperty("billingType", out var legacyBillingType) &&
+                legacyBillingType.ValueKind == JsonValueKind.String)
+            {
+                return NormalizeWorkOrderBillingType(legacyBillingType.GetString());
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static string ResolveWorkOrderBillingType(string? requestedBillingType, string? customFieldValues)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedBillingType))
+        {
+            return NormalizeWorkOrderBillingType(requestedBillingType);
+        }
+
+        return GetStoredWorkOrderBillingType(customFieldValues) ?? "Repairs";
+    }
+
+    private static string? SerializeCustomFields(
+        Dictionary<string, object>? customFieldValues,
+        string? workOrderBillingType)
+    {
+        var fields = customFieldValues != null
+            ? new Dictionary<string, object>(customFieldValues, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        var effectiveBillingType = workOrderBillingType;
+        if (string.IsNullOrWhiteSpace(effectiveBillingType) &&
+            fields.TryGetValue(WorkOrderBillingTypeField, out var storedBillingType) &&
+            storedBillingType != null)
+        {
+            effectiveBillingType = storedBillingType.ToString();
+        }
+
+        fields[WorkOrderBillingTypeField] = NormalizeWorkOrderBillingType(effectiveBillingType);
+
+        return fields.Count == 0 ? null : JsonSerializer.Serialize(fields);
     }
 
     public async Task<PagedResult<JobCardListDto>> GetJobCardsPagedAsync(JobCardFilterDto filter)
@@ -136,6 +212,7 @@ public class JobCardService : IJobCardService
 
             // Generate job card number
             var jobCardNumber = await GenerateJobCardNumberAsync();
+            await ValidateCustomerBusinessPartnerAsync(createDto.CustomerBusinessPartnerId, tenantId);
 
             var jobCard = new JobCard
             {
@@ -147,6 +224,7 @@ public class JobCardService : IJobCardService
                 AssetId = createDto.AssetId,
                 MaintenanceTypeId = createDto.MaintenanceTypeId,
                 PriorityLevelId = createDto.PriorityLevelId,
+                CustomerBusinessPartnerId = createDto.CustomerBusinessPartnerId,
                 MaintenanceLocation = createDto.MaintenanceLocation,
                 RequestedById = currentEmployeeId.Value,
                 RequestedDate = DateTime.UtcNow,
@@ -163,8 +241,7 @@ public class JobCardService : IJobCardService
                 SafetyRequirements = createDto.SafetyRequirements,
                 JobCardStatus = "Draft",
                 ApprovalStatus = "NotStarted",
-                CustomFieldValues = createDto.CustomFieldValues != null ?
-                    JsonSerializer.Serialize(createDto.CustomFieldValues) : null,
+                CustomFieldValues = SerializeCustomFields(createDto.CustomFieldValues, createDto.WorkOrderBillingType),
                 TenantId = tenantId,
                 CreatedAt = DateTime.UtcNow,
                 CreatedById = currentEmployeeId.Value
@@ -250,6 +327,8 @@ public class JobCardService : IJobCardService
             existingJobCard.ProblemDescription = updateDto.ProblemDescription;
             existingJobCard.MaintenanceTypeId = updateDto.MaintenanceTypeId;
             existingJobCard.PriorityLevelId = updateDto.PriorityLevelId;
+            await ValidateCustomerBusinessPartnerAsync(updateDto.CustomerBusinessPartnerId, existingJobCard.TenantId);
+            existingJobCard.CustomerBusinessPartnerId = updateDto.CustomerBusinessPartnerId;
             existingJobCard.MaintenanceLocation = updateDto.MaintenanceLocation ?? "Internal";
             existingJobCard.RequiredCompletionDate = updateDto.RequiredCompletionDate;
             existingJobCard.EstimatedHours = updateDto.EstimatedHours;
@@ -262,8 +341,7 @@ public class JobCardService : IJobCardService
             existingJobCard.RequiresSafetyPermit = updateDto.RequiresSafetyPermit;
             existingJobCard.SpecialInstructions = updateDto.SpecialInstructions;
             existingJobCard.SafetyRequirements = updateDto.SafetyRequirements;
-            existingJobCard.CustomFieldValues = updateDto.CustomFieldValues != null ?
-                JsonSerializer.Serialize(updateDto.CustomFieldValues) : null;
+            existingJobCard.CustomFieldValues = SerializeCustomFields(updateDto.CustomFieldValues, updateDto.WorkOrderBillingType);
             existingJobCard.UpdatedAt = DateTime.UtcNow;
             var currentUserIdString = _currentUserService.UserId;
             existingJobCard.UpdatedBy = currentUserIdString ?? "Unknown";
@@ -321,6 +399,40 @@ public class JobCardService : IJobCardService
         {
             _logger.LogError(ex, "Error deleting job card {JobCardId}", id);
             throw;
+        }
+    }
+
+    private async Task ValidateCustomerBusinessPartnerAsync(Guid? customerBusinessPartnerId, Guid tenantId)
+    {
+        if (!customerBusinessPartnerId.HasValue)
+        {
+            return;
+        }
+
+        var partner = await _unitOfWork.Repository<BusinessPartner>()
+            .FirstOrDefaultAsync(bp => bp.Id == customerBusinessPartnerId.Value
+                && bp.TenantId == tenantId
+                && !bp.IsDeleted);
+
+        if (partner == null)
+        {
+            throw new ArgumentException($"Customer business partner with ID {customerBusinessPartnerId.Value} not found");
+        }
+
+        var isCustomer =
+            string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(partner.PartnerType, "Both", StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(partner.CustomerType) ||
+            !string.IsNullOrWhiteSpace(partner.CustomerAccountNumber);
+
+        if (!isCustomer)
+        {
+            throw new InvalidOperationException($"Business partner {partner.PartnerName} is not configured as a customer");
+        }
+
+        if (!partner.IsActive || partner.IsBlacklisted)
+        {
+            throw new InvalidOperationException($"Business partner {partner.PartnerName} is not available for customer billing");
         }
     }
 
@@ -432,20 +544,25 @@ public class JobCardService : IJobCardService
                 throw new UnauthorizedAccessException("User not authenticated");
             }
 
+            if (!Guid.TryParse(currentUserIdString, out var currentUserId))
+            {
+                throw new UnauthorizedAccessException("Current user identifier is invalid");
+            }
+
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
             {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
             }
 
-            var canApprove = await _workflowIntegrationService.CanUserApproveAsync("JobCard", id, currentEmployeeId.Value);
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync("JobCard", id, currentUserId);
             if (!canApprove && approvalDto.Action.ToLower() != "requestchanges")
                 throw new UnauthorizedAccessException("User does not have permission to approve this job card");
 
             var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
                 "JobCard",
                 id,
-                currentEmployeeId.Value,
+                currentUserId,
                 approvalDto.Action,
                 approvalDto.Comments);
 
@@ -544,7 +661,7 @@ public class JobCardService : IJobCardService
         }
 
         // Automatically generate work order from approved job card with billing type
-        await GenerateWorkOrderAsync(jobCard.Id, approvalDto.BillingType ?? "Repairs");
+        await GenerateWorkOrderAsync(jobCard.Id, ResolveWorkOrderBillingType(approvalDto.BillingType, jobCard.CustomFieldValues));
 
         // Notify requestor
         await _maintenanceNotificationService.NotifyJobCardApprovedAsync(jobCard.Id);
@@ -653,7 +770,7 @@ public class JobCardService : IJobCardService
         await _maintenanceNotificationService.NotifyJobCardChangesRequestedAsync(jobCard.Id, approvalDto.Comments);
     }
 
-    public async Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string billingType = "Repairs")
+    public async Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string? billingType = null)
     {
         try
         {
@@ -668,6 +785,8 @@ public class JobCardService : IJobCardService
                 throw new InvalidOperationException("Work order has already been generated from this job card");
             }
 
+            var resolvedBillingType = ResolveWorkOrderBillingType(billingType, jobCard.CustomFieldValues);
+
             // Get default work order type based on maintenance type or use a standard one
             _logger.LogDebug("Getting default work order type for maintenance type {MaintenanceTypeId}", jobCard.MaintenanceTypeId);
             var defaultWorkOrderTypeId = await GetDefaultWorkOrderTypeIdAsync(jobCard.MaintenanceTypeId);
@@ -675,7 +794,7 @@ public class JobCardService : IJobCardService
 
             // Get the maintenance type to retrieve fixed amount for Maintenance billing type
             decimal fixedAmount = 0;
-            if (billingType == "Maintenance")
+            if (resolvedBillingType == "Maintenance")
             {
                 var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(jobCard.MaintenanceTypeId);
                 if (maintenanceType != null)
@@ -686,7 +805,7 @@ public class JobCardService : IJobCardService
             }
 
             // Create work order from job card
-            _logger.LogDebug("Creating work order DTO for job card {JobCardId} with billing type {BillingType}", jobCardId, billingType);
+            _logger.LogDebug("Creating work order DTO for job card {JobCardId} with billing type {BillingType}", jobCardId, resolvedBillingType);
             var createWorkOrderDto = new CreateWorkOrderDto
             {
                 Title = jobCard.Title,
@@ -705,7 +824,7 @@ public class JobCardService : IJobCardService
                 RequiresPermit = jobCard.RequiresSafetyPermit,
                 RequiresLockout = jobCard.RequiresShutdown,
                 JobCardId = jobCardId, // Link the work order to the job card
-                BillingType = billingType,
+                BillingType = resolvedBillingType,
                 FixedAmount = fixedAmount
             };
 
@@ -899,8 +1018,6 @@ public class JobCardService : IJobCardService
 
     public async Task<JobCardDocumentDto> UploadDocumentAsync(Guid jobCardId, Stream fileStream, string fileName, string documentType)
     {
-        var uploadResult = await _fileUploadService.UploadFileAsync(fileStream, fileName, "jobcards", jobCardId.ToString());
-
         var currentUserIdString = _currentUserService.UserId;
         if (string.IsNullOrEmpty(currentUserIdString))
         {
@@ -914,17 +1031,21 @@ public class JobCardService : IJobCardService
         }
 
         var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Tenant not found");
+        var folderPath = $"maintenance/jobcards/{tenantId}/{jobCardId}";
+        var filePath = await _fileStorageService.UploadFileAsync(fileStream, fileName, folderPath);
 
         var document = new JobCardDocument
         {
             Id = Guid.NewGuid(),
             JobCardId = jobCardId,
             FileName = fileName,
-            FilePath = uploadResult.FilePath,
-            ContentType = uploadResult.ContentType,
-            FileSize = uploadResult.FileSize,
+            FilePath = filePath,
+            ContentType = ResolveContentType(fileName),
+            FileSize = fileStream.CanSeek ? fileStream.Length : 0,
             DocumentType = documentType,
             TenantId = tenantId,
+            UploadedById = currentEmployeeId.Value,
+            UploadedDate = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = currentUserIdString
         };
@@ -949,13 +1070,43 @@ public class JobCardService : IJobCardService
 
     public async Task DeleteDocumentAsync(Guid jobCardId, Guid documentId)
     {
+        var document = await _jobCardRepository.GetDocumentAsync(jobCardId, documentId);
+        if (document == null)
+        {
+            return;
+        }
+
         await _jobCardRepository.DeleteDocumentAsync(documentId);
         await _unitOfWork.SaveChangesAsync();
+
+        if (!string.IsNullOrWhiteSpace(document.FilePath))
+        {
+            await _fileStorageService.DeleteFileAsync(document.FilePath);
+        }
     }
 
     public async Task<List<JobCardDocumentDto>> GetDocumentsAsync(Guid id)
     {
         return await _jobCardRepository.GetDocumentsAsync(id);
+    }
+
+    public async Task<JobCardDocumentDownloadDto> DownloadDocumentAsync(Guid jobCardId, Guid documentId)
+    {
+        var document = await _jobCardRepository.GetDocumentAsync(jobCardId, documentId)
+            ?? throw new FileNotFoundException("Document not found");
+
+        if (string.IsNullOrWhiteSpace(document.FilePath) || !await _fileStorageService.FileExistsAsync(document.FilePath))
+        {
+            throw new FileNotFoundException($"Stored file not found for document {documentId}");
+        }
+
+        var content = await _fileStorageService.DownloadFileAsync(document.FilePath, document.Id);
+        return new JobCardDocumentDownloadDto
+        {
+            FileName = document.FileName,
+            ContentType = document.ContentType ?? ResolveContentType(document.FileName),
+            Content = content
+        };
     }
 
     public async Task<JobCardDto> CompleteJobCardAsync(Guid id, CompleteJobCardDto completeDto)
@@ -1302,5 +1453,23 @@ public class JobCardService : IJobCardService
             _logger.LogError(ex, "Error getting default work order type for maintenance type {MaintenanceTypeId}", maintenanceTypeId);
             throw;
         }
+    }
+
+    private static string ResolveContentType(string fileName)
+    {
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".txt" => "text/plain",
+            ".csv" => "text/csv",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _ => "application/octet-stream"
+        };
     }
 }

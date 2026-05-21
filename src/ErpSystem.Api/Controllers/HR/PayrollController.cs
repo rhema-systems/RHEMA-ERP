@@ -228,6 +228,12 @@ public class PayrollController : ControllerBase
     public Task<ActionResult<PayrollJournalMappingDto>> UpsertJournalMapping([FromBody] UpsertPayrollJournalMappingDto dto, CancellationToken cancellationToken)
         => Handle(() => _payrollService.UpsertJournalMappingAsync(GetTenantId(), dto, cancellationToken));
 
+    [HttpPost("setup/journal-mappings/oracle-defaults")]
+    public Task<ActionResult<IReadOnlyList<PayrollJournalMappingDto>>> SeedOracleJournalMappings(
+        [FromQuery] string? legacyCompanyCode,
+        CancellationToken cancellationToken)
+        => Handle(() => _payrollService.SeedOracleJournalMappingsAsync(GetTenantId(), legacyCompanyCode, cancellationToken));
+
     [HttpGet("employee-profiles")]
     public async Task<ActionResult<IReadOnlyList<PayrollEmployeeProfileDto>>> GetEmployeeProfiles([FromQuery] string? searchTerm, CancellationToken cancellationToken)
         => Ok(await _payrollService.GetEmployeeProfilesAsync(GetTenantId(), searchTerm, cancellationToken));
@@ -409,6 +415,10 @@ public class PayrollController : ControllerBase
     [HttpPost("runs/{runId:guid}/payslips/email")]
     public Task<ActionResult<PayrollPayslipEmailResultDto>> EmailPayslips(Guid runId, [FromBody] PayrollPayslipEmailRequestDto? dto, CancellationToken cancellationToken)
         => Handle(() => _payrollService.EmailPayslipsAsync(GetTenantId(), runId, GetUserId(), dto ?? new PayrollPayslipEmailRequestDto(), cancellationToken));
+
+    [HttpGet("runs/{runId:guid}/journal-preview")]
+    public Task<ActionResult<PayrollJournalPreviewDto>> GetPayrollJournalPreview(Guid runId, CancellationToken cancellationToken)
+        => Handle(() => _payrollService.GetPayrollJournalPreviewAsync(GetTenantId(), runId, cancellationToken));
 
     [HttpPost("runs/{runId:guid}/post-journal")]
     public Task<ActionResult<PayrollJournalPostingDto>> PostPayrollJournal(Guid runId, [FromBody] PayrollRunActionDto? dto, CancellationToken cancellationToken)

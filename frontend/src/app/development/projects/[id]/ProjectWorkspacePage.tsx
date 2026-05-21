@@ -17,8 +17,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { IssueRequisitionDialog } from '@/components/inventory/IssueRequisitionDialog';
 import { ReturnRequisitionDialog } from '@/components/inventory/ReturnRequisitionDialog';
 import { RequisitionDialog } from '@/components/inventory/RequisitionDialog';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import { getProjectWorkspaceTabs, PROJECT_WORKSPACE_TAB_LABELS, type ProjectWorkspaceTab } from './projectWorkspaceTabs';
 import { ProjectAccessTab } from './components/ProjectAccessTab';
 import { ProjectAnalysisTab } from './components/ProjectAnalysisTab';
@@ -755,8 +753,6 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
   const [materialIssueRequisitionId, setMaterialIssueRequisitionId] = useState<string | null>(null);
   const [materialReturnDialogOpen, setMaterialReturnDialogOpen] = useState(false);
   const [materialReturnRequisitionId, setMaterialReturnRequisitionId] = useState<string | null>(null);
-  const [showProjectApprovalHistory, setShowProjectApprovalHistory] = useState(false);
-  const [showClosureApprovalHistory, setShowClosureApprovalHistory] = useState(false);
   const [expandedBudgetRevisionHistoryId, setExpandedBudgetRevisionHistoryId] = useState<string | null>(null);
   const [expandedDeliverableHistoryId, setExpandedDeliverableHistoryId] = useState<string | null>(null);
   const [followThroughBusyKey, setFollowThroughBusyKey] = useState<string | null>(null);
@@ -3489,8 +3485,6 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             forecastVersion={forecastVersion}
             setForecastVersion={setForecastVersion}
             forecastVersions={forecastVersions}
-            showProjectApprovalHistory={showProjectApprovalHistory}
-            setShowProjectApprovalHistory={setShowProjectApprovalHistory}
             expandedBudgetRevisionHistoryId={expandedBudgetRevisionHistoryId}
             setExpandedBudgetRevisionHistoryId={setExpandedBudgetRevisionHistoryId}
             boolValue={boolValue}
@@ -3979,8 +3973,6 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             closure={closure}
             setClosure={setClosure}
             closureRecord={closureRecord}
-            showClosureApprovalHistory={showClosureApprovalHistory}
-            setShowClosureApprovalHistory={setShowClosureApprovalHistory}
             currentUserId={currentUserId}
             activeUsers={activeUsers}
             formatUserLabel={formatUserLabel}

@@ -30,6 +30,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { useAuth } from '../../hooks/use-auth';
+import { getExternalPortalPath, isExternalPortalUser } from '../../lib/auth-routing';
 import { cn } from '../../lib/utils';
 import { authService } from '../../services/auth';
 import { dashboardService } from '../../services/dashboard';
@@ -92,23 +93,25 @@ const sumBy = <T,>(items: T[], selector: (item: T) => number) =>
 export default function Dashboard() {
   const router = useRouter();
   const { user } = useAuth();
+  const storedUser = authService.getStoredUser();
+  const effectiveUser = user ?? storedUser;
+  const shouldRouteToExternalPortal = isExternalPortalUser(effectiveUser);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const storedUser = authService.getStoredUser();
-    if (storedUser?.roles?.includes('ExternalUser')) {
-      router.push('/external-portal');
+    if (shouldRouteToExternalPortal) {
+      router.push(getExternalPortalPath());
     }
-  }, [router]);
+  }, [router, shouldRouteToExternalPortal]);
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['enterprise-dashboard'],
     queryFn: () => dashboardService.getEnterpriseDashboard(),
+    enabled: !shouldRouteToExternalPortal,
     staleTime: 60_000,
   });
 
-  const storedUser = authService.getStoredUser();
   const displayName = user?.firstName || storedUser?.firstName || user?.username || storedUser?.username || 'User';
 
   if (isLoading || !data) {

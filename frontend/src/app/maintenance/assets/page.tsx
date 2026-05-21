@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 import { useRouter } from 'next/navigation';
 import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 import AssetVehicleFleetTabs from '@/components/maintenance/AssetVehicleFleetTabs';
@@ -122,6 +123,7 @@ const createEmptyAssetForm = (category = ''): AssetFormState => ({
 function AssetsPageContent() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
   const { toast } = useToast();
+  const { assetValueLabel, formatMoney } = useMaintenanceCurrency();
   const searchParams = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
@@ -1031,7 +1033,7 @@ function AssetsPageContent() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="value">Asset Value ($)</Label>
+                  <Label htmlFor="value">{assetValueLabel}</Label>
                   <Input
                     id="value"
                     type="number"
@@ -1264,7 +1266,7 @@ function AssetsPageContent() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-value">Asset Value ($)</Label>
+                  <Label htmlFor="edit-value">{assetValueLabel}</Label>
                   <Input
                     id="edit-value"
                     type="number"
@@ -1592,7 +1594,7 @@ function AssetsPageContent() {
                       <Label className="text-sm font-medium text-muted-foreground">Asset Value</Label>
                       <p className="text-sm">
                         {selectedAsset.currentValue
-                          ? `$${selectedAsset.currentValue.toLocaleString()}`
+                          ? formatMoney(selectedAsset.currentValue)
                           : 'N/A'
                         }
                       </p>
@@ -1711,7 +1713,7 @@ function AssetsPageContent() {
                           </div>
                           <div className="text-right">
                             <Badge variant="outline" className="mb-1">{record.status}</Badge>
-                            <p className="text-sm font-medium">${record.cost}</p>
+                            <p className="text-sm font-medium">{formatMoney(record.cost)}</p>
                           </div>
                         </div>
                       </div>

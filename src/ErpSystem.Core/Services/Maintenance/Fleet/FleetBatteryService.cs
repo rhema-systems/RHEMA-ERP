@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -22,6 +23,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
         if (fleetBatteryId == Guid.Empty) return Array.Empty<FleetBatteryEventDto>();
 
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
         var repo = _unitOfWork.Repository<FleetBatteryEvent>();
 
         var items = await repo.GetQueryable(e => e.TenantId == tenantId && e.FleetBatteryId == fleetBatteryId && !e.IsDeleted)
@@ -38,7 +40,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
                 FromStatus = e.FromStatus,
                 ToStatus = e.ToStatus,
                 CostAmount = e.CostAmount,
-                CurrencyCode = e.CurrencyCode,
+                CurrencyCode = e.CurrencyCode == null || e.CurrencyCode == string.Empty ? baseCurrencyCode : e.CurrencyCode,
                 Notes = e.Notes,
                 CreatedAt = e.CreatedAt,
                 CreatedByUserId = e.CreatedById,
@@ -168,6 +170,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
         var tenantId = _currentUserProvider.TenantId;
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode);
 
         var status = string.IsNullOrWhiteSpace(dto.Status) ? "Installed" : dto.Status.Trim();
         var position = string.IsNullOrWhiteSpace(dto.Position) ? null : dto.Position.Trim();
@@ -208,7 +211,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
             FromStatus = null,
             ToStatus = entity.Status,
             CostAmount = (dto.CostAmount.HasValue && dto.CostAmount.Value > 0) ? Math.Round(dto.CostAmount.Value, 2, MidpointRounding.AwayFromZero) : null,
-            CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
+            CurrencyCode = currencyCode,
             Notes = entity.Notes,
             CreatedAt = now,
             CreatedById = userId,
@@ -229,6 +232,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
         var tenantId = _currentUserProvider.TenantId;
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode);
 
         var repo = _unitOfWork.Repository<FleetBattery>();
         var entity = await repo.FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == id && !b.IsDeleted)
@@ -285,7 +289,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
                 FromStatus = fromStatus,
                 ToStatus = entity.Status,
                 CostAmount = hasCost ? Math.Round(dto.CostAmount!.Value, 2, MidpointRounding.AwayFromZero) : null,
-                CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
+                CurrencyCode = currencyCode,
                 Notes = entity.Notes,
                 CreatedAt = now,
                 CreatedById = userId,

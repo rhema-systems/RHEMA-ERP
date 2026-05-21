@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 import { maintenanceApiService } from '@/services/maintenanceApiService';
@@ -63,6 +64,7 @@ function normalizeIncidentDto(input: CreateFleetIncidentDto): CreateFleetInciden
 
 export default function FleetIncidentsPage() {
   const { toast } = useToast();
+  const { currencyCode } = useMaintenanceCurrency();
 
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [employees, setEmployees] = React.useState<EmployeeDto[]>([]);
@@ -174,7 +176,7 @@ export default function FleetIncidentsPage() {
       damageAssessment: null,
       estimatedRepairCost: null,
       actualRepairCost: null,
-      currencyCode: null,
+      currencyCode,
       insuranceCompany: null,
       policyNumber: null,
       claimNumber: null,
@@ -202,7 +204,7 @@ export default function FleetIncidentsPage() {
       damageAssessment: i.damageAssessment || null,
       estimatedRepairCost: i.estimatedRepairCost ?? null,
       actualRepairCost: i.actualRepairCost ?? null,
-      currencyCode: i.currencyCode || null,
+      currencyCode: i.currencyCode || currencyCode,
       insuranceCompany: i.insuranceCompany || null,
       policyNumber: i.policyNumber || null,
       claimNumber: i.claimNumber || null,
@@ -217,7 +219,7 @@ export default function FleetIncidentsPage() {
   const save = async () => {
     try {
       if (!form.vehicleAssetId) throw new Error('Vehicle is required');
-      const dto = normalizeIncidentDto(form);
+      const dto = normalizeIncidentDto({ ...form, currencyCode: form.currencyCode || currencyCode });
       if (!dto.title) throw new Error('Title is required');
 
       if (!editing) {
@@ -520,7 +522,7 @@ export default function FleetIncidentsPage() {
 
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Input value={form.currencyCode || ''} onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="e.g. USD" />
+              <Input value={form.currencyCode || currencyCode} disabled />
             </div>
 
             <div className="space-y-2 md:col-span-3">
@@ -712,4 +714,3 @@ export default function FleetIncidentsPage() {
     </div>
   );
 }
-

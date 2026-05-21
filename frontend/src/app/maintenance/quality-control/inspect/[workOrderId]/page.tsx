@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CheckCircle, XCircle, AlertTriangle, ArrowLeft, FileText } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, ArrowLeft, FileText, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
 import maintenanceApiService from '@/services/maintenanceApiService';
@@ -74,10 +74,31 @@ export default function InspectionExecutionPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [correctiveActions, setCorrectiveActions] = useState('');
   const [severity, setSeverity] = useState('Medium');
+  const [inspectionAction, setInspectionAction] = useState<'complete' | 'reject' | null>(null);
+  const [actionCompleted, setActionCompleted] = useState(false);
 
   useEffect(() => {
     loadInspectionData();
   }, [workOrderId]);
+
+  useEffect(() => {
+    const itemCount = inspectionData?.checklist?.items?.length ?? 0;
+    if (itemCount === 0) {
+      if (currentItemIndex !== 0) {
+        setCurrentItemIndex(0);
+      }
+      return;
+    }
+
+    if (currentItemIndex < 0) {
+      setCurrentItemIndex(0);
+      return;
+    }
+
+    if (currentItemIndex >= itemCount) {
+      setCurrentItemIndex(itemCount - 1);
+    }
+  }, [inspectionData?.checklist?.items?.length, currentItemIndex]);
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('authToken');
@@ -124,6 +145,16 @@ export default function InspectionExecutionPage() {
   const handleItemResult = async (itemIndex: number, result: 'Pass' | 'Fail' | 'N/A', notes?: string) => {
     if (!inspectionData) return;
 
+    const checklistItems = inspectionData.checklist?.items ?? [];
+    if (itemIndex < 0 || itemIndex >= checklistItems.length) {
+      toast({
+        title: "Checklist item unavailable",
+        description: "This inspection does not have a checklist item at the selected position.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     const itemId = `item-${itemIndex}`;
     const newResult: ItemResult = { itemId, result, notes };
     
@@ -149,7 +180,7 @@ export default function InspectionExecutionPage() {
       });
 
       // Auto-advance to next item
-      if (itemIndex < inspectionData.checklist.items.length - 1) {
+      if (itemIndex < checklistItems.length - 1) {
         setCurrentItemIndex(itemIndex + 1);
       }
     } catch (error) {
@@ -163,9 +194,10 @@ export default function InspectionExecutionPage() {
   };
 
   const handleComplete = async () => {
-    if (!inspectionData) return;
+    if (!inspectionData || inspectionAction) return;
 
     try {
+      setInspectionAction('complete');
       const response = await axios.post(`${API_URL}/maintenance/quality-control/complete-inspection`, {
         qualityCheckId: inspectionData.inspection.id,
         notes: generalNotes
@@ -184,6 +216,7 @@ export default function InspectionExecutionPage() {
       });
 
       setShowCompleteDialog(false);
+      setActionCompleted(true);
 
       // If passed, attempt to complete the work order via the standard completion flow
       if (response.data.overallResult === 'Pass') {
@@ -224,6 +257,8 @@ export default function InspectionExecutionPage() {
         description: "Failed to complete inspection",
         variant: "destructive"
       });
+    } finally {
+      setInspectionAction(null);
     }
   };
 
@@ -271,7 +306,7 @@ export default function InspectionExecutionPage() {
   };
 
   const handleReject = async () => {
-    if (!inspectionData || !rejectionReason.trim()) {
+    if (!inspectionData || inspectionAction || !rejectionReason.trim()) {
       toast({
         title: "Validation Error",
         description: "Please provide rejection reason",
@@ -281,6 +316,7 @@ export default function InspectionExecutionPage() {
     }
 
     try {
+      setInspectionAction('reject');
       await axios.post(`${API_URL}/maintenance/quality-control/reject-for-rework`, {
         qualityCheckId: inspectionData.inspection.id,
         rejectionReason,
@@ -295,6 +331,8 @@ export default function InspectionExecutionPage() {
         description: "Rework has been created",
       });
 
+      setShowRejectDialog(false);
+      setActionCompleted(true);
       router.push('/maintenance/quality-control');
     } catch (error) {
       console.error('Error rejecting inspection:', error);
@@ -303,6 +341,8 @@ export default function InspectionExecutionPage() {
         description: "Failed to reject work order",
         variant: "destructive"
       });
+    } finally {
+      setInspectionAction(null);
     }
   };
 
@@ -315,12 +355,22 @@ export default function InspectionExecutionPage() {
   }
 
   const { workOrder, checklist, inspection } = inspectionData;
-  const currentItem = checklist.items[currentItemIndex];
-  const itemId = `item-${currentItemIndex}`;
-  const currentResult = itemResults.get(itemId);
-  const progress = (itemResults.size / checklist.items.length) * 100;
+  const checklistItems = Array.isArray(checklist?.items) ? checklist.items : [];
+  const safeCurrentItemIndex = checklistItems.length > 0
+    ? Math.min(Math.max(currentItemIndex, 0), checklistItems.length - 1)
+    : 0;
+  const currentItem = checklistItems[safeCurrentItemIndex] ?? null;
+  const itemId = `item-${safeCurrentItemIndex}`;
+  const currentResult = currentItem ? itemResults.get(itemId) : undefined;
+  const completedItemCount = checklistItems.filter((_, index) => itemResults.has(`item-${index}`)).length;
+  const progress = checklistItems.length > 0 ? (completedItemCount / checklistItems.length) * 100 : 0;
   const passedCount = Array.from(itemResults.values()).filter(r => r.result === 'Pass').length;
   const failedCount = Array.from(itemResults.values()).filter(r => r.result === 'Fail').length;
+  const normalizedInspectionStatus = String(inspection.status || '').replace(/[\s_-]+/g, '').toLowerCase();
+  const inspectionActionRunning = inspectionAction !== null;
+  const inspectionFinished =
+    actionCompleted ||
+    ['completed', 'complete', 'passed', 'pass', 'failed', 'fail', 'rejected', 'rework', 'rejectedforrework'].includes(normalizedInspectionStatus);
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -369,7 +419,7 @@ export default function InspectionExecutionPage() {
         <CardContent className="pt-6">
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
-              <span>Progress: {itemResults.size} / {checklist.items.length} items</span>
+              <span>Progress: {completedItemCount} / {checklistItems.length} items</span>
               <span className="font-medium">{progress.toFixed(0)}%</span>
             </div>
             <Progress value={progress} />
@@ -384,63 +434,81 @@ export default function InspectionExecutionPage() {
       {/* Current Item */}
       <Card>
         <CardHeader>
-          <CardTitle>Item {currentItemIndex + 1} of {checklist.items.length}</CardTitle>
+          <CardTitle>
+            {currentItem ? `Item ${safeCurrentItemIndex + 1} of ${checklistItems.length}` : 'Checklist Items'}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <h3 className="font-semibold text-lg">{currentItem.item}</h3>
-            <p className="text-muted-foreground">{currentItem.description}</p>
-            <Badge variant="outline" className="mt-2">Weight: {currentItem.weight}</Badge>
-          </div>
+          {currentItem ? (
+            <>
+              <div>
+                <h3 className="font-semibold text-lg">{currentItem.item}</h3>
+                <p className="text-muted-foreground">{currentItem.description}</p>
+                <Badge variant="outline" className="mt-2">Weight: {currentItem.weight}</Badge>
+              </div>
 
-          {currentResult && (
-            <div className="p-3 bg-muted rounded">
-              <p className="text-sm font-medium">Current Result: {currentResult.result}</p>
-              {currentResult.notes && <p className="text-sm text-muted-foreground">Notes: {currentResult.notes}</p>}
+              {currentResult && (
+                <div className="p-3 bg-muted rounded">
+                  <p className="text-sm font-medium">Current Result: {currentResult.result}</p>
+                  {currentResult.notes && <p className="text-sm text-muted-foreground">Notes: {currentResult.notes}</p>}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => handleItemResult(safeCurrentItemIndex, 'Pass')}
+                  className="flex-1 bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  Pass
+                </Button>
+                <Button
+                  onClick={() => handleItemResult(safeCurrentItemIndex, 'Fail')}
+                  className="flex-1 bg-red-600 hover:bg-red-700"
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
+                  Fail
+                </Button>
+                <Button
+                  onClick={() => handleItemResult(safeCurrentItemIndex, 'N/A')}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  N/A
+                </Button>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentItemIndex(Math.max(0, safeCurrentItemIndex - 1))}
+                  disabled={safeCurrentItemIndex === 0}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentItemIndex(Math.min(checklistItems.length - 1, safeCurrentItemIndex + 1))}
+                  disabled={safeCurrentItemIndex === checklistItems.length - 1}
+                  className="flex-1"
+                >
+                  Next
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5" />
+                <div>
+                  <p className="font-medium">No checklist items are configured for this inspection.</p>
+                  <p className="text-sm">
+                    Add checklist items to the selected quality checklist before executing this inspection.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
-
-          <div className="flex gap-2">
-            <Button 
-              onClick={() => handleItemResult(currentItemIndex, 'Pass')}
-              className="flex-1 bg-green-600 hover:bg-green-700"
-            >
-              <CheckCircle className="mr-2 h-4 w-4" />
-              Pass
-            </Button>
-            <Button 
-              onClick={() => handleItemResult(currentItemIndex, 'Fail')}
-              className="flex-1 bg-red-600 hover:bg-red-700"
-            >
-              <XCircle className="mr-2 h-4 w-4" />
-              Fail
-            </Button>
-            <Button 
-              onClick={() => handleItemResult(currentItemIndex, 'N/A')}
-              variant="outline"
-              className="flex-1"
-            >
-              N/A
-            </Button>
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentItemIndex(Math.max(0, currentItemIndex - 1))}
-              disabled={currentItemIndex === 0}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setCurrentItemIndex(Math.min(checklist.items.length - 1, currentItemIndex + 1))}
-              disabled={currentItemIndex === checklist.items.length - 1}
-              className="flex-1"
-            >
-              Next
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
@@ -460,23 +528,43 @@ export default function InspectionExecutionPage() {
       </Card>
 
       {/* Actions */}
-      <div className="flex gap-4">
-        <Button
-          onClick={() => setShowCompleteDialog(true)}
-          disabled={itemResults.size < checklist.items.length}
-          className="flex-1"
-        >
-          Complete Inspection
-        </Button>
-        <Button
-          onClick={() => setShowRejectDialog(true)}
-          variant="destructive"
-          className="flex-1"
-        >
-          <AlertTriangle className="mr-2 h-4 w-4" />
-          Reject for Rework
-        </Button>
-      </div>
+      {inspectionActionRunning ? (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="flex items-center gap-3 py-4 text-blue-950">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <div>
+              <p className="font-medium">
+                {inspectionAction === 'complete' ? 'Completing inspection...' : 'Submitting rework rejection...'}
+              </p>
+              <p className="text-sm">Please wait while the inspection result is saved.</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : inspectionFinished ? (
+        <div className="flex justify-end">
+          <Button variant="outline" onClick={() => router.push('/maintenance/quality-control')}>
+            Close
+          </Button>
+        </div>
+      ) : (
+        <div className="flex gap-4">
+          <Button
+            onClick={() => setShowCompleteDialog(true)}
+            disabled={checklistItems.length === 0 || completedItemCount < checklistItems.length}
+            className="flex-1"
+          >
+            Complete Inspection
+          </Button>
+          <Button
+            onClick={() => setShowRejectDialog(true)}
+            variant="destructive"
+            className="flex-1"
+          >
+            <AlertTriangle className="mr-2 h-4 w-4" />
+            Reject for Rework
+          </Button>
+        </div>
+      )}
 
       {/* Complete Dialog */}
       <Dialog open={showCompleteDialog} onOpenChange={setShowCompleteDialog}>
@@ -488,8 +576,11 @@ export default function InspectionExecutionPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCompleteDialog(false)}>Cancel</Button>
-            <Button onClick={handleComplete}>Complete</Button>
+            <Button variant="outline" onClick={() => setShowCompleteDialog(false)} disabled={inspectionActionRunning}>Cancel</Button>
+            <Button onClick={handleComplete} disabled={inspectionActionRunning}>
+              {inspectionAction === 'complete' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Complete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -538,8 +629,11 @@ export default function InspectionExecutionPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRejectDialog(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleReject}>Reject</Button>
+            <Button variant="outline" onClick={() => setShowRejectDialog(false)} disabled={inspectionActionRunning}>Cancel</Button>
+            <Button variant="destructive" onClick={handleReject} disabled={inspectionActionRunning}>
+              {inspectionAction === 'reject' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Reject
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

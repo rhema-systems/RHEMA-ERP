@@ -1140,6 +1140,7 @@ public class MaintenanceTypeDto
     public string Icon { get; set; } = string.Empty;
     public string Frequency { get; set; } = string.Empty;
     public string SkillLevel { get; set; } = string.Empty;
+    public decimal FixedAmount { get; set; }
     public string SafetyRequirements { get; set; } = string.Empty;
     public string ToolsRequired { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
@@ -1184,6 +1185,9 @@ public class CreateMaintenanceTypeDto
 
     [StringLength(50)]
     public string SkillLevel { get; set; } = "Basic";
+
+    [Range(0, double.MaxValue)]
+    public decimal FixedAmount { get; set; } = 0;
 
     [StringLength(1000)]
     public string SafetyRequirements { get; set; } = string.Empty;
@@ -2446,6 +2450,8 @@ public class WorkOrderListDto
     public DateTime? ActualStartDate { get; set; }
     public DateTime? ActualEndDate { get; set; }
     public DateTime? ActualCompletionDate { get; set; }
+    public string BillingType { get; set; } = string.Empty;
+    public decimal FixedAmount { get; set; }
     public decimal EstimatedCost { get; set; }
     public decimal ActualCost { get; set; }
     public double EstimatedHours { get; set; }
@@ -4242,6 +4248,8 @@ public class CreateMaintenanceStaffScheduleDto
 
 public class UpdateMaintenanceStaffScheduleDto
 {
+    public Guid? TechnicianId { get; set; }
+
     public DateTime? StartDateTime { get; set; }
     public DateTime? EndDateTime { get; set; }
 

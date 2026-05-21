@@ -25,6 +25,10 @@ import {
   getRedirectTargetFromSearchParams,
   resolveRedirectTarget,
 } from '../../lib/auth-redirect';
+import {
+  getExternalPortalPath,
+  isExternalPortalUser,
+} from '../../lib/auth-routing';
 
 const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
@@ -170,9 +174,8 @@ function LoginFormWithSearchParams() {
   });
 
   const redirectAfterLogin = useCallback(async (response: LoginResponse) => {
-    // After successful login, check authentication provider
     if (response.token) {
-      const isExternalUser = response.user?.roles?.includes('ExternalUser') ?? false;
+      const isExternalUser = isExternalPortalUser(response.user);
 
       // External portal users should land in the portal, while internal users continue to tenant selection.
       if (isExternalUser) {
@@ -201,9 +204,9 @@ function LoginFormWithSearchParams() {
           if (preferredTenantCode) {
             await tenantService.selectTenant(preferredTenantCode, false);
 
-            const host = typeof window !== 'undefined' ? window.location.hostname : '';
-            const isSupportHost = host.toLowerCase().startsWith('support.');
-            router.push(resolveRedirectTarget(redirectTarget, isSupportHost ? '/' : '/external-portal'));
+            router.push(
+              resolveRedirectTarget(redirectTarget, getExternalPortalPath())
+            );
             return;
           }
         } catch {

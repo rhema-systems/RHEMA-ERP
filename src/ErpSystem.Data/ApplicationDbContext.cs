@@ -2360,6 +2360,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(e => new { e.TenantId, e.TransactionType, e.ComponentCode });
             entity.HasIndex(e => new { e.TenantId, e.AccountCode });
+            entity.HasIndex(e => new { e.TenantId, e.LegacyCompanyCode, e.SequenceNo });
         });
 
         builder.Entity<PayrollCodeType>(entity =>
@@ -3291,7 +3292,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(tt => tt.Members)
                 .HasForeignKey(ttm => ttm.TeamId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // TechnicianId now references ApplicationUser (Users table) instead of Employee
+
+            entity.HasOne(ttm => ttm.Technician)
+                .WithMany()
+                .HasForeignKey(ttm => ttm.TechnicianId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // Configure TechnicianSkill entity
@@ -3319,6 +3324,53 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(ts => ts.UserSkills)
                 .HasForeignKey(uts => uts.SkillId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Tool checkouts are employee-driven because work order scheduling uses HR Employee IDs.
+        builder.Entity<ToolCheckout>(entity =>
+        {
+            entity.HasIndex(tc => tc.ToolId);
+            entity.HasIndex(tc => tc.CheckedOutById);
+            entity.HasIndex(tc => tc.CheckedInById);
+            entity.HasIndex(tc => tc.WorkOrderId);
+            entity.HasIndex(tc => tc.JobCardId);
+
+            entity.HasOne(tc => tc.CheckedOutBy)
+                .WithMany()
+                .HasForeignKey(tc => tc.CheckedOutById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(tc => tc.CheckedInBy)
+                .WithMany()
+                .HasForeignKey(tc => tc.CheckedInById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(tc => tc.WorkOrder)
+                .WithMany()
+                .HasForeignKey(tc => tc.WorkOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(tc => tc.JobCard)
+                .WithMany()
+                .HasForeignKey(tc => tc.JobCardId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<WorkOrderTool>(entity =>
+        {
+            entity.HasIndex(wot => wot.WorkOrderId);
+            entity.HasIndex(wot => wot.ToolId);
+            entity.HasIndex(wot => wot.CheckoutId);
+
+            entity.HasOne(wot => wot.WorkOrder)
+                .WithMany(wo => wo.Tools)
+                .HasForeignKey(wot => wot.WorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(wot => wot.Checkout)
+                .WithMany()
+                .HasForeignKey(wot => wot.CheckoutId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // Configure AssetDowntime entity
@@ -3498,6 +3550,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(jc => jc.MaintenanceTypeId);
             entity.HasIndex(jc => jc.PriorityLevelId);
             entity.HasIndex(jc => jc.RequestedById);
+            entity.HasIndex(jc => jc.CustomerBusinessPartnerId);
             entity.HasIndex(jc => jc.JobCardStatus);
             entity.HasIndex(jc => jc.ApprovalStatus);
             entity.HasIndex(jc => jc.RequestedDate);
@@ -3521,6 +3574,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(jc => jc.RequestedBy)
                 .WithMany()
                 .HasForeignKey(jc => jc.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(jc => jc.CustomerBusinessPartner)
+                .WithMany()
+                .HasForeignKey(jc => jc.CustomerBusinessPartnerId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasOne(jc => jc.PreferredTechnician)

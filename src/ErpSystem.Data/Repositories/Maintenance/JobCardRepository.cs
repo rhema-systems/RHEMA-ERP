@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
@@ -8,11 +9,67 @@ namespace ErpSystem.Data.Repositories.Maintenance;
 
 public class JobCardRepository : IJobCardRepository
 {
+    private const string WorkOrderBillingTypeField = "workOrderBillingType";
+
     private readonly ApplicationDbContext _context;
 
     public JobCardRepository(ApplicationDbContext context)
     {
         _context = context;
+    }
+
+    private static string GetWorkOrderBillingType(string? customFieldValues)
+    {
+        if (string.IsNullOrWhiteSpace(customFieldValues))
+        {
+            return "Repairs";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(customFieldValues);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return "Repairs";
+            }
+
+            if (document.RootElement.TryGetProperty(WorkOrderBillingTypeField, out var billingType) &&
+                billingType.ValueKind == JsonValueKind.String &&
+                string.Equals(billingType.GetString(), "Maintenance", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Maintenance";
+            }
+
+            if (document.RootElement.TryGetProperty("billingType", out var legacyBillingType) &&
+                legacyBillingType.ValueKind == JsonValueKind.String &&
+                string.Equals(legacyBillingType.GetString(), "Maintenance", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Maintenance";
+            }
+        }
+        catch (JsonException)
+        {
+            return "Repairs";
+        }
+
+        return "Repairs";
+    }
+
+    private static Dictionary<string, object>? DeserializeCustomFields(string? customFieldValues)
+    {
+        if (string.IsNullOrWhiteSpace(customFieldValues))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(customFieldValues);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public async Task<ErpSystem.Core.DTOs.Maintenance.PagedResult<JobCardListDto>> GetPagedAsync(JobCardFilterDto filter)
@@ -108,6 +165,7 @@ public class JobCardRepository : IJobCardRepository
             .Include(j => j.MaintenanceType)
             .Include(j => j.PriorityLevel)
             .Include(j => j.RequestedBy)
+            .Include(j => j.CustomerBusinessPartner)
             .OrderByDescending(j => j.CreatedAt)
             .Skip(skip)
             .Take(pageSize)
@@ -126,6 +184,13 @@ public class JobCardRepository : IJobCardRepository
                 PriorityLevelId = j.PriorityLevelId,
                 Priority = j.PriorityLevel != null ? j.PriorityLevel.Name : "Medium",
                 PriorityColor = j.PriorityLevel != null ? j.PriorityLevel.Color : "#FFA500",
+                CustomerBusinessPartnerId = j.CustomerBusinessPartnerId,
+                CustomerBusinessPartnerName = j.CustomerBusinessPartner != null ? j.CustomerBusinessPartner.PartnerName : null,
+                WorkOrderBillingType = j.CustomFieldValues != null &&
+                    (j.CustomFieldValues.Contains("\"workOrderBillingType\":\"Maintenance\"") ||
+                     j.CustomFieldValues.Contains("\"billingType\":\"Maintenance\""))
+                    ? "Maintenance"
+                    : "Repairs",
                 JobCardStatus = j.JobCardStatus,
                 ApprovalStatus = j.ApprovalStatus,
                 RequestedBy = j.RequestedBy != null ? j.RequestedBy.FullName : "Unknown",
@@ -168,6 +233,10 @@ public class JobCardRepository : IJobCardRepository
 
         var priorityLevel = await _context.PriorityLevels
             .FirstOrDefaultAsync(p => p.Id == jobCard.PriorityLevelId);
+
+        var customerBusinessPartner = jobCard.CustomerBusinessPartnerId.HasValue
+            ? await _context.BusinessPartners.FirstOrDefaultAsync(bp => bp.Id == jobCard.CustomerBusinessPartnerId.Value)
+            : null;
 
         var requestedBy = await _context.Employees
             .FirstOrDefaultAsync(e => e.Id == jobCard.RequestedById);
@@ -235,6 +304,9 @@ public class JobCardRepository : IJobCardRepository
             PriorityLevel = priorityLevel?.Level ?? 2,
 
             MaintenanceLocation = jobCard.MaintenanceLocation ?? "Internal",
+            CustomerBusinessPartnerId = jobCard.CustomerBusinessPartnerId,
+            CustomerBusinessPartnerName = customerBusinessPartner?.PartnerName,
+            WorkOrderBillingType = GetWorkOrderBillingType(jobCard.CustomFieldValues),
 
             // Request Information
             RequestedById = jobCard.RequestedById,
@@ -330,6 +402,8 @@ public class JobCardRepository : IJobCardRepository
                 Comments = a.Comments,
                 IsRequired = a.IsRequired
             }).ToList(),
+
+            CustomFieldValues = DeserializeCustomFields(jobCard.CustomFieldValues),
 
             // Metadata
             CreatedAt = jobCard.CreatedAt,
@@ -449,7 +523,31 @@ public class JobCardRepository : IJobCardRepository
         }
     }
 
-    public Task<List<JobCardDocumentDto>> GetDocumentsAsync(Guid jobCardId) => Task.FromResult(new List<JobCardDocumentDto>());
+    public async Task<List<JobCardDocumentDto>> GetDocumentsAsync(Guid jobCardId)
+    {
+        return await _context.JobCardDocuments
+            .Where(d => d.JobCardId == jobCardId && !d.IsDeleted)
+            .Include(d => d.UploadedBy)
+            .OrderByDescending(d => d.UploadedDate)
+            .Select(d => new JobCardDocumentDto
+            {
+                Id = d.Id,
+                FileName = d.FileName,
+                FilePath = d.FilePath,
+                ContentType = d.ContentType,
+                FileSize = d.FileSize,
+                DocumentType = d.DocumentType,
+                UploadedAt = d.UploadedDate,
+                UploadedBy = d.UploadedBy != null ? d.UploadedBy.FullName : "Unknown"
+            })
+            .ToListAsync();
+    }
+
+    public async Task<JobCardDocument?> GetDocumentAsync(Guid jobCardId, Guid documentId)
+    {
+        return await _context.JobCardDocuments
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.JobCardId == jobCardId && !d.IsDeleted);
+    }
 
     public async Task AddCertificateAsync(JobCardCertificate certificate) => await _context.JobCardCertificates.AddAsync(certificate);
 

@@ -241,7 +241,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
   const instanceViews = useMemo<WorkflowInstanceView[]>(() => {
     return instances.map(instance => {
       const steps = instance.steps || [];
-      const approvals = instance.pendingApprovals || [];
+      const status = toUiStatus(instance.status);
+      const rawApprovals = instance.pendingApprovals || [];
+      const approvals = status === 'completed' || status === 'cancelled' || status === 'failed'
+        ? []
+        : rawApprovals;
       const currentStep = getCurrentStep(steps);
       const startedAt = instance.startedDate ? new Date(instance.startedDate).toISOString() : '';
       const completedAt = instance.completedDate ? new Date(instance.completedDate).toISOString() : undefined;
@@ -252,7 +256,7 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
         workflowName: instance.workflowName,
         entityType: instance.entityType || 'Workflow',
         entityId: instance.entityId || instance.workflowInstanceId,
-        status: toUiStatus(instance.status),
+        status,
         currentStepId: instance.currentStepInstanceId || currentStep?.stepInstanceId || '',
         currentStepName: instance.currentStepName || currentStep?.stepName || 'No current step',
         startedAt,

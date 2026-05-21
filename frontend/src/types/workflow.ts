@@ -105,6 +105,7 @@ export interface WorkflowStepConfigurationDto {
   approvalConfig?: WorkflowApprovalConfigDto;
   qualityConfig?: WorkflowQualityConfigDto;
   notificationConfig?: WorkflowNotificationConfigDto;
+  taskConfig?: WorkflowTaskConfigDto;
   escalationRules?: WorkflowEscalationRuleDto[];
   formFields?: WorkflowFormFieldDto[];
   skipCondition?: WorkflowConditionDto;
@@ -142,12 +143,41 @@ export interface WorkflowQualityConfigDto {
 }
 
 export interface WorkflowQualityCheckDto {
+  id?: string;
   name: string;
   description: string;
   isRequired: boolean;
   applicabilityCondition?: WorkflowConditionDto;
   expectedValue?: any;
   validationExpression?: string;
+}
+
+export interface WorkflowApprovalChecklistResponseDto {
+  id?: string;
+  name: string;
+  isSatisfied: boolean;
+  notes?: string;
+}
+
+export interface WorkflowTaskConfigDto {
+  taskActionType: string;
+  documentName?: string;
+  requiresDocument: boolean;
+  documentRequirementKey?: string;
+  instructions?: string;
+}
+
+export interface WorkflowTaskAttachmentDto {
+  id: string;
+  requirementKey?: string;
+  documentName?: string;
+  fileName: string;
+  filePath: string;
+  contentType: string;
+  fileSizeBytes: number;
+  uploadedAt: string;
+  uploadedById: string;
+  uploadedByName?: string;
 }
 
 export interface WorkflowNotificationConfigDto {
@@ -242,8 +272,13 @@ export interface WorkflowEntitySummaryDto {
   status?: WorkflowInstanceStatus;
   currentStepName?: string;
   currentStepInstanceId?: string;
+  currentStepType?: WorkflowStepType;
   canCurrentUserApprove: boolean;
+  canCurrentUserComplete?: boolean;
   pendingApprovers: WorkflowPendingApproverDto[];
+  currentStepChecklist?: WorkflowQualityCheckDto[];
+  currentStepTaskConfig?: WorkflowTaskConfigDto;
+  currentStepTaskAttachments?: WorkflowTaskAttachmentDto[];
 }
 
 export interface WorkflowApprovalAuditDto {
@@ -269,6 +304,9 @@ export interface WorkflowStepAuditDto {
   assignedToId?: string;
   assignedToName?: string;
   comments?: string;
+  checklist?: WorkflowQualityCheckDto[];
+  taskConfig?: WorkflowTaskConfigDto;
+  taskAttachments?: WorkflowTaskAttachmentDto[];
   approvals: WorkflowApprovalAuditDto[];
 }
 
@@ -402,6 +440,7 @@ export interface AssignStepRequest {
 export interface ProcessApprovalRequest {
   action: WorkflowApprovalAction;
   comments?: string;
+  checklistResponses?: WorkflowApprovalChecklistResponseDto[];
 }
 
 // Workflow Entities (for responses)

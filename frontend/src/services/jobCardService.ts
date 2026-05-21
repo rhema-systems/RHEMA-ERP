@@ -17,6 +17,9 @@ export interface JobCard {
   priorityLevelId: string;
   priority: string;
   priorityColor: string;
+  customerBusinessPartnerId?: string;
+  customerBusinessPartnerName?: string;
+  workOrderBillingType?: 'Maintenance' | 'Repairs';
   jobCardStatus: string;
   approvalStatus: string;
   requestedById: string;
@@ -104,6 +107,8 @@ export interface CreateJobCardRequest {
   assetId: string;
   maintenanceTypeId: string;
   priorityLevelId: string;
+  customerBusinessPartnerId?: string;
+  workOrderBillingType?: 'Maintenance' | 'Repairs';
   maintenanceLocation?: string;
   requiredCompletionDate?: string;
   estimatedHours?: number;
@@ -125,6 +130,8 @@ export interface UpdateJobCardRequest {
   problemDescription?: string;
   maintenanceTypeId: string;
   priorityLevelId: string;
+  customerBusinessPartnerId?: string;
+  workOrderBillingType?: 'Maintenance' | 'Repairs';
   maintenanceLocation?: string;
   requiredCompletionDate?: string;
   estimatedHours?: number;
@@ -397,6 +404,15 @@ class JobCardService {
   async getDocuments(id: string): Promise<JobCardDocument[]> {
     const response = await axios.get(`${API_URL}/maintenance/job-cards/${id}/documents`, {
       headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  // Download document
+  async downloadDocument(id: string, documentId: string): Promise<Blob> {
+    const response = await axios.get(`${API_URL}/maintenance/job-cards/${id}/documents/${documentId}/download`, {
+      headers: this.getAuthHeaders(),
+      responseType: 'blob'
     });
     return response.data;
   }

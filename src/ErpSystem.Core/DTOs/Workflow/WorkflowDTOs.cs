@@ -85,6 +85,11 @@ public class WorkflowStepConfigurationDto
     public WorkflowNotificationConfigDto? NotificationConfig { get; set; }
 
     /// <summary>
+    /// Manual task configuration for task/document steps
+    /// </summary>
+    public WorkflowTaskConfigDto? TaskConfig { get; set; }
+
+    /// <summary>
     /// Escalation rules
     /// </summary>
     public List<WorkflowEscalationRuleDto>? EscalationRules { get; set; }
@@ -224,12 +229,44 @@ public class WorkflowQualityConfigDto
 /// </summary>
 public class WorkflowQualityCheckDto
 {
+    public string? Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public bool IsRequired { get; set; } = true;
     public WorkflowConditionDto? ApplicabilityCondition { get; set; }
     public object? ExpectedValue { get; set; }
     public string? ValidationExpression { get; set; }
+}
+
+public class WorkflowApprovalChecklistResponseDto
+{
+    public string? Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public bool IsSatisfied { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class WorkflowTaskConfigDto
+{
+    public string TaskActionType { get; set; } = "general";
+    public string? DocumentName { get; set; }
+    public bool RequiresDocument { get; set; }
+    public string? DocumentRequirementKey { get; set; }
+    public string? Instructions { get; set; }
+}
+
+public class WorkflowTaskAttachmentDto
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string? RequirementKey { get; set; }
+    public string? DocumentName { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    public Guid UploadedById { get; set; }
+    public string? UploadedByName { get; set; }
 }
 
 /// <summary>
@@ -398,9 +435,14 @@ public class WorkflowEntitySummaryDto
 
     public string? CurrentStepName { get; set; }
     public Guid? CurrentStepInstanceId { get; set; }
+    public WorkflowStepType? CurrentStepType { get; set; }
 
     public bool CanCurrentUserApprove { get; set; }
+    public bool CanCurrentUserComplete { get; set; }
     public List<WorkflowPendingApproverDto> PendingApprovers { get; set; } = new();
+    public List<WorkflowQualityCheckDto> CurrentStepChecklist { get; set; } = new();
+    public WorkflowTaskConfigDto? CurrentStepTaskConfig { get; set; }
+    public List<WorkflowTaskAttachmentDto> CurrentStepTaskAttachments { get; set; } = new();
 }
 
 /// <summary>
@@ -451,6 +493,9 @@ public class WorkflowStepAuditDto
     public Guid? AssignedToId { get; set; }
     public string? AssignedToName { get; set; }
     public string? Comments { get; set; }
+    public List<WorkflowQualityCheckDto> Checklist { get; set; } = new();
+    public WorkflowTaskConfigDto? TaskConfig { get; set; }
+    public List<WorkflowTaskAttachmentDto> TaskAttachments { get; set; } = new();
 
     public List<WorkflowApprovalAuditDto> Approvals { get; set; } = new();
 }

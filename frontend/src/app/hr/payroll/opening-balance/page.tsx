@@ -1,7 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  FormEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   ArrowLeft,
   Database,
@@ -76,40 +83,72 @@ function dateBeforeCurrentPeriod(parameters: PayrollParameterSet | null) {
 }
 
 function formatPayrollPeriodLabel(parameters: PayrollParameterSet | null) {
-  const source = dateValue(parameters?.currentPeriodTo) || dateValue(parameters?.currentPeriodFrom);
+  const source =
+    dateValue(parameters?.currentPeriodTo) ||
+    dateValue(parameters?.currentPeriodFrom);
   if (!source) {
     return 'Not configured';
   }
 
   const [year, month] = source.split('-').map(Number);
   return year && month
-    ? new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
+    ? new Intl.DateTimeFormat('en-US', {
+        month: 'long',
+        year: 'numeric',
+      }).format(new Date(year, month - 1, 1))
     : 'Not configured';
 }
 
 function money(value: number | null | undefined, currency = 'GHS') {
-  return new Intl.NumberFormat('en-GH', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value ?? 0);
+  return new Intl.NumberFormat('en-GH', {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value ?? 0);
 }
 
-function sortProfiles(first: PayrollEmployeeProfile, second: PayrollEmployeeProfile) {
+function sortProfiles(
+  first: PayrollEmployeeProfile,
+  second: PayrollEmployeeProfile
+) {
   return first.employeeNumber.localeCompare(second.employeeNumber);
 }
 
-function contributionKey(option: Pick<ContributionOption, 'codeType' | 'code'>) {
+function contributionKey(
+  option: Pick<ContributionOption, 'codeType' | 'code'>
+) {
   return `${option.codeType}::${option.code}`;
 }
 
 function findContributionCodeType(setup: PayrollCodeSetup) {
-  return setup.codeTypes.find((type) => CONTRIBUTION_CODE_TYPE_ALIASES.includes(normalize(type.codeType))) ??
-    setup.codeTypes.find((type) => normalize(type.description).includes('CONTRIBUTION'));
+  return (
+    setup.codeTypes.find((type) =>
+      CONTRIBUTION_CODE_TYPE_ALIASES.includes(normalize(type.codeType))
+    ) ??
+    setup.codeTypes.find((type) =>
+      normalize(type.description).includes('CONTRIBUTION')
+    )
+  );
 }
 
-function contributionOptionsFromSetup(setup: PayrollCodeSetup, preferredCodeType?: string | null) {
-  const targetCodeType = normalize(preferredCodeType) || normalize(findContributionCodeType(setup)?.codeType);
+function contributionOptionsFromSetup(
+  setup: PayrollCodeSetup,
+  preferredCodeType?: string | null
+) {
+  const targetCodeType =
+    normalize(preferredCodeType) ||
+    normalize(findContributionCodeType(setup)?.codeType);
   return setup.codeValues
-    .filter((value) => !value.blocked && (!targetCodeType || normalize(value.codeType) === targetCodeType))
+    .filter(
+      (value) =>
+        !value.blocked &&
+        (!targetCodeType || normalize(value.codeType) === targetCodeType)
+    )
     .map((value) => ({
-      key: contributionKey({ codeType: value.codeType, code: value.actualCode }),
+      key: contributionKey({
+        codeType: value.codeType,
+        code: value.actualCode,
+      }),
       codeType: value.codeType,
       code: value.actualCode,
       name: value.description,
@@ -120,7 +159,9 @@ function contributionOptionsFromSetup(setup: PayrollCodeSetup, preferredCodeType
 function buildRows(entries: PayrollContributionOpeningBalance[]) {
   return entries
     .slice()
-    .sort((first, second) => first.employeeNumber.localeCompare(second.employeeNumber))
+    .sort((first, second) =>
+      first.employeeNumber.localeCompare(second.employeeNumber)
+    )
     .map((entry) => ({
       id: entry.id,
       employeeProfileId: entry.employeeProfileId,
@@ -132,13 +173,7 @@ function buildRows(entries: PayrollContributionOpeningBalance[]) {
     }));
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
@@ -149,15 +184,21 @@ function Field({
 
 export default function OpeningBalancePage() {
   const { toast } = useToast();
-  const [activeParameters, setActiveParameters] = useState<PayrollParameterSet | null>(null);
-  const [codeSetup, setCodeSetup] = useState<PayrollCodeSetup>({ codeTypes: [], codeValues: [] });
+  const [activeParameters, setActiveParameters] =
+    useState<PayrollParameterSet | null>(null);
+  const [codeSetup, setCodeSetup] = useState<PayrollCodeSetup>({
+    codeTypes: [],
+    codeValues: [],
+  });
   const [profiles, setProfiles] = useState<PayrollEmployeeProfile[]>([]);
   const [selectedContributionKey, setSelectedContributionKey] = useState('');
   const [rows, setRows] = useState<OpeningBalanceRow[]>([]);
   const [removedRows, setRemovedRows] = useState<OpeningBalanceRow[]>([]);
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<OpeningBalanceRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<OpeningBalanceRow | null>(
+    null
+  );
   const [gridDirty, setGridDirty] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
   const [pickerSelectedIds, setPickerSelectedIds] = useState<string[]>([]);
@@ -165,17 +206,30 @@ export default function OpeningBalancePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const contributionOptions = useMemo(() => contributionOptionsFromSetup(codeSetup), [codeSetup]);
+  const contributionOptions = useMemo(
+    () => contributionOptionsFromSetup(codeSetup),
+    [codeSetup]
+  );
   const selectedContribution = useMemo(
-    () => contributionOptions.find((option) => option.key === selectedContributionKey) ?? null,
-    [contributionOptions, selectedContributionKey],
+    () =>
+      contributionOptions.find(
+        (option) => option.key === selectedContributionKey
+      ) ?? null,
+    [contributionOptions, selectedContributionKey]
   );
   const activeProfiles = useMemo(
-    () => profiles.filter((profile) => profile.payrollActive).sort(sortProfiles),
-    [profiles],
+    () =>
+      profiles.filter((profile) => profile.payrollActive).sort(sortProfiles),
+    [profiles]
   );
-  const pickerSelectedSet = useMemo(() => new Set(pickerSelectedIds), [pickerSelectedIds]);
-  const defaultBalanceAsAt = useMemo(() => dateBeforeCurrentPeriod(activeParameters), [activeParameters]);
+  const pickerSelectedSet = useMemo(
+    () => new Set(pickerSelectedIds),
+    [pickerSelectedIds]
+  );
+  const defaultBalanceAsAt = useMemo(
+    () => dateBeforeCurrentPeriod(activeParameters),
+    [activeParameters]
+  );
   const currency = activeParameters?.baseCurrency || 'GHS';
 
   const filteredRows = useMemo(() => {
@@ -184,9 +238,10 @@ export default function OpeningBalancePage() {
       return rows;
     }
 
-    return rows.filter((row) =>
-      row.employeeNumber.toLowerCase().includes(term) ||
-      row.employeeName.toLowerCase().includes(term),
+    return rows.filter(
+      (row) =>
+        row.employeeNumber.toLowerCase().includes(term) ||
+        row.employeeName.toLowerCase().includes(term)
     );
   }, [employeeSearch, rows]);
 
@@ -196,17 +251,19 @@ export default function OpeningBalancePage() {
       return activeProfiles;
     }
 
-    return activeProfiles.filter((profile) =>
-      profile.employeeNumber.toLowerCase().includes(term) ||
-      profile.employeeName.toLowerCase().includes(term),
+    return activeProfiles.filter(
+      (profile) =>
+        profile.employeeNumber.toLowerCase().includes(term) ||
+        profile.employeeName.toLowerCase().includes(term)
     );
   }, [activeProfiles, pickerSearch]);
 
   const selectablePickerIds = useMemo(
     () => activeProfiles.map((profile) => profile.id || '').filter(Boolean),
-    [activeProfiles],
+    [activeProfiles]
   );
-  const allPickerProfilesSelected = selectablePickerIds.length > 0 &&
+  const allPickerProfilesSelected =
+    selectablePickerIds.length > 0 &&
     selectablePickerIds.every((id) => pickerSelectedSet.has(id));
   const pickerSelectAllState = allPickerProfilesSelected
     ? true
@@ -214,31 +271,38 @@ export default function OpeningBalancePage() {
       ? 'indeterminate'
       : false;
 
-  const loadBalances = useCallback(async (contribution: ContributionOption | null) => {
-    if (!contribution) {
-      setRows([]);
-      setRemovedRows([]);
-      setGridDirty(false);
-      return;
-    }
+  const loadBalances = useCallback(
+    async (contribution: ContributionOption | null) => {
+      if (!contribution) {
+        setRows([]);
+        setRemovedRows([]);
+        setGridDirty(false);
+        return;
+      }
 
-    setBusy('load-balances');
-    setError(null);
-    try {
-      const saved = await payrollService.getContributionOpeningBalances({
-        contributionCodeType: contribution.codeType,
-        contributionCode: contribution.code,
-      });
-      setRows(buildRows(saved));
-      setRemovedRows([]);
-      setGridDirty(false);
-      setEmployeeSearch('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load opening balances.');
-    } finally {
-      setBusy(null);
-    }
-  }, []);
+      setBusy('load-balances');
+      setError(null);
+      try {
+        const saved = await payrollService.getContributionOpeningBalances({
+          contributionCodeType: contribution.codeType,
+          contributionCode: contribution.code,
+        });
+        setRows(buildRows(saved));
+        setRemovedRows([]);
+        setGridDirty(false);
+        setEmployeeSearch('');
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to load opening balances.'
+        );
+      } finally {
+        setBusy(null);
+      }
+    },
+    []
+  );
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
@@ -253,7 +317,10 @@ export default function OpeningBalancePage() {
       const scopedCodes = contributionCodeType
         ? await payrollService.getCodeSetup(contributionCodeType.codeType)
         : allCodes;
-      const options = contributionOptionsFromSetup(scopedCodes, contributionCodeType?.codeType);
+      const options = contributionOptionsFromSetup(
+        scopedCodes,
+        contributionCodeType?.codeType
+      );
       const nextContribution = options[0] ?? null;
 
       setActiveParameters(setup.activeParameters ?? null);
@@ -273,7 +340,9 @@ export default function OpeningBalancePage() {
       setRemovedRows([]);
       setGridDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load opening balance.');
+      setError(
+        err instanceof Error ? err.message : 'Unable to load opening balance.'
+      );
     } finally {
       setLoading(false);
     }
@@ -285,23 +354,32 @@ export default function OpeningBalancePage() {
 
   const selectContribution = (key: string) => {
     setSelectedContributionKey(key);
-    const contribution = contributionOptions.find((option) => option.key === key) ?? null;
+    const contribution =
+      contributionOptions.find((option) => option.key === key) ?? null;
     void loadBalances(contribution);
   };
 
-  const createRowFromProfile = useCallback((profile: PayrollEmployeeProfile): OpeningBalanceRow => ({
-    employeeProfileId: profile.id || '',
-    employeeNumber: profile.employeeNumber,
-    employeeName: profile.employeeName,
-    openingBalance: 0,
-    balanceAsAt: defaultBalanceAsAt,
-    selected: true,
-  }), [defaultBalanceAsAt]);
+  const createRowFromProfile = useCallback(
+    (profile: PayrollEmployeeProfile): OpeningBalanceRow => ({
+      employeeProfileId: profile.id || '',
+      employeeNumber: profile.employeeNumber,
+      employeeName: profile.employeeName,
+      openingBalance: 0,
+      balanceAsAt: defaultBalanceAsAt,
+      selected: true,
+    }),
+    [defaultBalanceAsAt]
+  );
 
-  const updateRow = (employeeProfileId: string, patch: Partial<OpeningBalanceRow>) => {
+  const updateRow = (
+    employeeProfileId: string,
+    patch: Partial<OpeningBalanceRow>
+  ) => {
     setGridDirty(true);
     setRows((current) =>
-      current.map((row) => row.employeeProfileId === employeeProfileId ? { ...row, ...patch } : row),
+      current.map((row) =>
+        row.employeeProfileId === employeeProfileId ? { ...row, ...patch } : row
+      )
     );
   };
 
@@ -311,10 +389,15 @@ export default function OpeningBalancePage() {
     setEmployeePickerOpen(true);
   };
 
-  const togglePickerProfile = (employeeProfileId: string, selected: boolean) => {
+  const togglePickerProfile = (
+    employeeProfileId: string,
+    selected: boolean
+  ) => {
     setPickerSelectedIds((current) => {
       if (selected) {
-        return current.includes(employeeProfileId) ? current : [...current, employeeProfileId];
+        return current.includes(employeeProfileId)
+          ? current
+          : [...current, employeeProfileId];
       }
 
       return current.filter((id) => id !== employeeProfileId);
@@ -322,7 +405,9 @@ export default function OpeningBalancePage() {
   };
 
   const setVisiblePickerSelection = (selected: boolean) => {
-    const visibleIds = new Set(filteredPickerProfiles.map((profile) => profile.id || '').filter(Boolean));
+    const visibleIds = new Set(
+      filteredPickerProfiles.map((profile) => profile.id || '').filter(Boolean)
+    );
     setPickerSelectedIds((current) => {
       if (selected) {
         return Array.from(new Set([...current, ...visibleIds]));
@@ -334,30 +419,51 @@ export default function OpeningBalancePage() {
 
   const setAllPickerSelection = (selected: boolean) => {
     setPickerSelectedIds((current) =>
-      selected
-        ? Array.from(new Set([...current, ...selectablePickerIds]))
-        : [],
+      selected ? Array.from(new Set([...current, ...selectablePickerIds])) : []
     );
   };
 
   const addPickerEmployees = () => {
     setGridDirty(true);
     const selectedIds = new Set(pickerSelectedIds);
-    const existingRowsByProfile = new Map(rows.map((row) => [row.employeeProfileId, row]));
-    const activeProfileIds = new Set(activeProfiles.map((profile) => profile.id || '').filter(Boolean));
-    const retainedRows = rows.filter((row) => selectedIds.has(row.employeeProfileId) && !activeProfileIds.has(row.employeeProfileId));
-    const rowsToRemove = rows.filter((row) => !selectedIds.has(row.employeeProfileId));
+    const existingRowsByProfile = new Map(
+      rows.map((row) => [row.employeeProfileId, row])
+    );
+    const activeProfileIds = new Set(
+      activeProfiles.map((profile) => profile.id || '').filter(Boolean)
+    );
+    const retainedRows = rows.filter(
+      (row) =>
+        selectedIds.has(row.employeeProfileId) &&
+        !activeProfileIds.has(row.employeeProfileId)
+    );
+    const rowsToRemove = rows.filter(
+      (row) => !selectedIds.has(row.employeeProfileId)
+    );
     const nextRows = activeProfiles
       .filter((profile) => selectedIds.has(profile.id || ''))
-      .map((profile) => existingRowsByProfile.get(profile.id || '') ?? createRowFromProfile(profile));
+      .map(
+        (profile) =>
+          existingRowsByProfile.get(profile.id || '') ??
+          createRowFromProfile(profile)
+      );
 
     setRows([...retainedRows, ...nextRows]);
     setRemovedRows((current) => {
-      const removedByProfile = new Map(current.map((row) => [row.employeeProfileId, row]));
+      const removedByProfile = new Map(
+        current.map((row) => [row.employeeProfileId, row])
+      );
       rowsToRemove
         .filter((row) => row.id)
-        .forEach((row) => removedByProfile.set(row.employeeProfileId, { ...row, selected: false }));
-      selectedIds.forEach((employeeProfileId) => removedByProfile.delete(employeeProfileId));
+        .forEach((row) =>
+          removedByProfile.set(row.employeeProfileId, {
+            ...row,
+            selected: false,
+          })
+        );
+      selectedIds.forEach((employeeProfileId) =>
+        removedByProfile.delete(employeeProfileId)
+      );
       return Array.from(removedByProfile.values());
     });
     setEmployeeSearch('');
@@ -366,12 +472,14 @@ export default function OpeningBalancePage() {
 
   const removeRow = (row: OpeningBalanceRow) => {
     setGridDirty(true);
-    setRows((current) => current.filter((item) => item.employeeProfileId !== row.employeeProfileId));
+    setRows((current) =>
+      current.filter((item) => item.employeeProfileId !== row.employeeProfileId)
+    );
     if (row.id) {
       setRemovedRows((current) =>
         current.some((item) => item.employeeProfileId === row.employeeProfileId)
           ? current
-          : [...current, { ...row, selected: false }],
+          : [...current, { ...row, selected: false }]
       );
     }
   };
@@ -419,11 +527,19 @@ export default function OpeningBalancePage() {
       setRows(buildRows(saved));
       setRemovedRows([]);
       setGridDirty(false);
-      toast({ title: 'Opening balance saved', description: `${saved.length} employee record${saved.length === 1 ? '' : 's'} active.` });
+      toast({
+        title: 'Opening balance saved',
+        description: `${saved.length} employee record${saved.length === 1 ? '' : 's'} active.`,
+      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to save opening balance.';
+      const message =
+        err instanceof Error ? err.message : 'Unable to save opening balance.';
       setError(message);
-      toast({ title: 'Opening balance error', description: message, variant: 'destructive' });
+      toast({
+        title: 'Opening balance error',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setBusy(null);
     }
@@ -448,16 +564,22 @@ export default function OpeningBalancePage() {
               Payroll
             </Link>
           </Button>
-          <h1 className="text-2xl font-semibold tracking-normal">Opening Balance</h1>
+          <h1 className="text-2xl font-semibold tracking-normal">
+            Opening Balance
+          </h1>
         </div>
         <div className="grid min-w-[280px] gap-3 rounded-md border bg-muted/40 p-3 text-sm sm:grid-cols-[1fr_auto] xl:min-w-[420px]">
           <div>
             <div className="text-xs text-muted-foreground">Payroll Period</div>
-            <div className="font-semibold">{formatPayrollPeriodLabel(activeParameters)}</div>
+            <div className="font-semibold">
+              {formatPayrollPeriodLabel(activeParameters)}
+            </div>
           </div>
           <div className="sm:text-right">
             <div className="text-xs text-muted-foreground">Period No</div>
-            <div className="font-semibold">{activeParameters?.currentPayPeriod || '-'}</div>
+            <div className="font-semibold">
+              {activeParameters?.currentPayPeriod || '-'}
+            </div>
           </div>
         </div>
       </div>
@@ -481,7 +603,9 @@ export default function OpeningBalancePage() {
                   >
                     <option value="">Select contribution</option>
                     {contributionOptions.map((option) => (
-                      <option key={option.key} value={option.key}>{option.name}</option>
+                      <option key={option.key} value={option.key}>
+                        {option.code} - {option.name}
+                      </option>
                     ))}
                   </select>
                 </Field>
@@ -491,7 +615,9 @@ export default function OpeningBalancePage() {
                     <Input
                       className="h-9 pl-9"
                       value={employeeSearch}
-                      onChange={(event) => setEmployeeSearch(event.target.value)}
+                      onChange={(event) =>
+                        setEmployeeSearch(event.target.value)
+                      }
                       placeholder="Employee no or name"
                     />
                   </div>
@@ -503,7 +629,13 @@ export default function OpeningBalancePage() {
                 </Field>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => void loadWorkspace()} disabled={Boolean(busy)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadWorkspace()}
+                  disabled={Boolean(busy)}
+                >
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Refresh
                 </Button>
@@ -511,15 +643,43 @@ export default function OpeningBalancePage() {
                   rows={filteredRows}
                   fileName={`opening-balance-${selectedContribution?.code || 'employees'}`}
                   columns={[
-                    { header: 'Employee No', value: (row) => row.employeeNumber },
-                    { header: 'Employee Name', value: (row) => row.employeeName },
-                    { header: 'Contribution', value: () => selectedContribution?.name },
-                    { header: 'Opening Balance', value: (row) => row.openingBalance },
-                    { header: 'Balance As At', value: (row) => row.balanceAsAt },
+                    {
+                      header: 'Employee No',
+                      value: (row) => row.employeeNumber,
+                    },
+                    {
+                      header: 'Employee Name',
+                      value: (row) => row.employeeName,
+                    },
+                    {
+                      header: 'Code Type',
+                      value: () => selectedContribution?.codeType,
+                    },
+                    {
+                      header: 'Contribution Code',
+                      value: () => selectedContribution?.code,
+                    },
+                    {
+                      header: 'Contribution',
+                      value: () => selectedContribution?.name,
+                    },
+                    {
+                      header: 'Opening Balance',
+                      value: (row) => row.openingBalance,
+                    },
+                    {
+                      header: 'Balance As At',
+                      value: (row) => row.balanceAsAt,
+                    },
                   ]}
                   disabled={!selectedContribution}
                 />
-                <Button type="button" size="sm" onClick={openEmployeePicker} disabled={Boolean(busy) || !selectedContribution}>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={openEmployeePicker}
+                  disabled={Boolean(busy) || !selectedContribution}
+                >
                   <UserPlus className="mr-2 h-4 w-4" />
                   Add Employee
                 </Button>
@@ -529,7 +689,11 @@ export default function OpeningBalancePage() {
                   variant={gridDirty ? 'warning' : 'default'}
                   disabled={busy === 'save' || !selectedContribution}
                 >
-                  {busy === 'save' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  {busy === 'save' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
                   Save
                 </Button>
               </div>
@@ -545,7 +709,9 @@ export default function OpeningBalancePage() {
                     </th>
                     <th className="px-3 py-2 text-left">Employee No</th>
                     <th className="px-3 py-2 text-left">Employee Name</th>
-                    <th className="w-44 px-3 py-2 text-right">Opening Balance</th>
+                    <th className="w-44 px-3 py-2 text-right">
+                      Opening Balance
+                    </th>
                     <th className="w-44 px-3 py-2 text-left">Balance As At</th>
                     <th className="w-12 px-3 py-2" aria-label="Remove" />
                   </tr>
@@ -553,7 +719,10 @@ export default function OpeningBalancePage() {
                 <tbody>
                   {filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                      <td
+                        colSpan={6}
+                        className="px-3 py-8 text-center text-sm text-muted-foreground"
+                      >
                         No employees selected.
                       </td>
                     </tr>
@@ -563,7 +732,9 @@ export default function OpeningBalancePage() {
                         <td className="px-3 py-2">
                           <Checkbox checked disabled />
                         </td>
-                        <td className="px-3 py-2 font-medium">{row.employeeNumber}</td>
+                        <td className="px-3 py-2 font-medium">
+                          {row.employeeNumber}
+                        </td>
                         <td className="px-3 py-2">{row.employeeName}</td>
                         <td className="px-3 py-2">
                           <Input
@@ -572,7 +743,11 @@ export default function OpeningBalancePage() {
                             step="0.01"
                             className="h-8 text-right"
                             value={row.openingBalance}
-                            onChange={(event) => updateRow(row.employeeProfileId, { openingBalance: Number(event.target.value) })}
+                            onChange={(event) =>
+                              updateRow(row.employeeProfileId, {
+                                openingBalance: Number(event.target.value),
+                              })
+                            }
                           />
                         </td>
                         <td className="px-3 py-2">
@@ -580,7 +755,11 @@ export default function OpeningBalancePage() {
                             type="date"
                             className="h-8"
                             value={row.balanceAsAt}
-                            onChange={(event) => updateRow(row.employeeProfileId, { balanceAsAt: event.target.value })}
+                            onChange={(event) =>
+                              updateRow(row.employeeProfileId, {
+                                balanceAsAt: event.target.value,
+                              })
+                            }
                           />
                         </td>
                         <td className="px-3 py-2 text-center">
@@ -602,7 +781,14 @@ export default function OpeningBalancePage() {
               </table>
             </div>
             <div className="mt-3 text-right text-sm font-medium">
-              Total {money(rows.reduce((sum, row) => sum + Number(row.openingBalance || 0), 0), currency)}
+              Total{' '}
+              {money(
+                rows.reduce(
+                  (sum, row) => sum + Number(row.openingBalance || 0),
+                  0
+                ),
+                currency
+              )}
             </div>
           </CardContent>
         </Card>
@@ -657,7 +843,10 @@ export default function OpeningBalancePage() {
                   variant="outline"
                   size="sm"
                   onClick={() => setAllPickerSelection(true)}
-                  disabled={selectablePickerIds.length === 0 || allPickerProfilesSelected}
+                  disabled={
+                    selectablePickerIds.length === 0 ||
+                    allPickerProfilesSelected
+                  }
                 >
                   Select All
                 </Button>
@@ -670,10 +859,22 @@ export default function OpeningBalancePage() {
                 >
                   Clear All
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => setVisiblePickerSelection(true)} disabled={filteredPickerProfiles.length === 0}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setVisiblePickerSelection(true)}
+                  disabled={filteredPickerProfiles.length === 0}
+                >
                   Select Visible
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => setVisiblePickerSelection(false)} disabled={filteredPickerProfiles.length === 0}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setVisiblePickerSelection(false)}
+                  disabled={filteredPickerProfiles.length === 0}
+                >
                   Clear Visible
                 </Button>
               </div>
@@ -687,7 +888,9 @@ export default function OpeningBalancePage() {
                       <Checkbox
                         aria-label="Select all employees"
                         checked={pickerSelectAllState}
-                        onCheckedChange={(checked) => setAllPickerSelection(checked === true)}
+                        onCheckedChange={(checked) =>
+                          setAllPickerSelection(checked === true)
+                        }
                         disabled={selectablePickerIds.length === 0}
                       />
                     </th>
@@ -698,7 +901,10 @@ export default function OpeningBalancePage() {
                 <tbody>
                   {filteredPickerProfiles.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                      <td
+                        colSpan={3}
+                        className="px-3 py-8 text-center text-sm text-muted-foreground"
+                      >
                         No employees found.
                       </td>
                     </tr>
@@ -706,15 +912,22 @@ export default function OpeningBalancePage() {
                     filteredPickerProfiles.map((profile) => {
                       const profileId = profile.id || '';
                       return (
-                        <tr key={profileId || profile.employeeNumber} className="border-t">
+                        <tr
+                          key={profileId || profile.employeeNumber}
+                          className="border-t"
+                        >
                           <td className="px-3 py-2">
                             <Checkbox
                               checked={pickerSelectedSet.has(profileId)}
-                              onCheckedChange={(value) => togglePickerProfile(profileId, value === true)}
+                              onCheckedChange={(value) =>
+                                togglePickerProfile(profileId, value === true)
+                              }
                               disabled={!profileId}
                             />
                           </td>
-                          <td className="px-3 py-2 font-medium">{profile.employeeNumber}</td>
+                          <td className="px-3 py-2 font-medium">
+                            {profile.employeeNumber}
+                          </td>
                           <td className="px-3 py-2">{profile.employeeName}</td>
                         </tr>
                       );
@@ -726,7 +939,11 @@ export default function OpeningBalancePage() {
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEmployeePickerOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEmployeePickerOpen(false)}
+            >
               Cancel
             </Button>
             <Button type="button" onClick={addPickerEmployees}>

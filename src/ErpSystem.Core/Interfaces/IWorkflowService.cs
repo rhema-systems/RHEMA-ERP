@@ -11,12 +11,14 @@ public interface IWorkflowService
     Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId);
 
     /// <summary>
-    /// Checks if a user can approve a specific workflow step
+    /// Checks if a user can approve a specific workflow step.
+    /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
     /// </summary>
     Task<bool> CanUserApproveAsync(string entityType, Guid entityId, Guid userId);
 
     /// <summary>
-    /// Processes an approval step
+    /// Processes an approval step.
+    /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
     /// </summary>
     Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> ProcessApprovalStepAsync(string entityType, Guid entityId, Guid userId, string action, string? comments = null);
 

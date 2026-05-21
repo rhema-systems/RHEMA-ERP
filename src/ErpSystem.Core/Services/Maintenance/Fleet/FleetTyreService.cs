@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -22,6 +23,7 @@ public sealed class FleetTyreService : IFleetTyreService
         if (fleetTyreId == Guid.Empty) return Array.Empty<FleetTyreEventDto>();
 
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
         var repo = _unitOfWork.Repository<FleetTyreEvent>();
 
         var items = await repo.GetQueryable(e => e.TenantId == tenantId && e.FleetTyreId == fleetTyreId && !e.IsDeleted)
@@ -39,7 +41,7 @@ public sealed class FleetTyreService : IFleetTyreService
                 ToStatus = e.ToStatus,
                 TreadDepthMm = e.TreadDepthMm,
                 CostAmount = e.CostAmount,
-                CurrencyCode = e.CurrencyCode,
+                CurrencyCode = e.CurrencyCode == null || e.CurrencyCode == string.Empty ? baseCurrencyCode : e.CurrencyCode,
                 Notes = e.Notes,
                 CreatedAt = e.CreatedAt,
                 CreatedByUserId = e.CreatedById,
@@ -124,6 +126,7 @@ public sealed class FleetTyreService : IFleetTyreService
         var tenantId = _currentUserProvider.TenantId;
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode);
 
         var status = string.IsNullOrWhiteSpace(dto.Status) ? "Installed" : dto.Status.Trim();
         var position = string.IsNullOrWhiteSpace(dto.Position) ? null : dto.Position.Trim();
@@ -166,7 +169,7 @@ public sealed class FleetTyreService : IFleetTyreService
             ToStatus = entity.Status,
             TreadDepthMm = entity.TreadDepthMm,
             CostAmount = (dto.CostAmount.HasValue && dto.CostAmount.Value > 0) ? Math.Round(dto.CostAmount.Value, 2, MidpointRounding.AwayFromZero) : null,
-            CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
+            CurrencyCode = currencyCode,
             Notes = entity.Notes,
             CreatedAt = now,
             CreatedById = userId,
@@ -188,6 +191,7 @@ public sealed class FleetTyreService : IFleetTyreService
         var tenantId = _currentUserProvider.TenantId;
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode);
 
         var repo = _unitOfWork.Repository<FleetTyre>();
         var entity = await repo.FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Id == id && !t.IsDeleted)
@@ -249,7 +253,7 @@ public sealed class FleetTyreService : IFleetTyreService
                 ToStatus = entity.Status,
                 TreadDepthMm = entity.TreadDepthMm,
                 CostAmount = hasCost ? Math.Round(dto.CostAmount!.Value, 2, MidpointRounding.AwayFromZero) : null,
-                CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
+                CurrencyCode = currencyCode,
                 Notes = entity.Notes,
                 CreatedAt = now,
                 CreatedById = userId,

@@ -193,13 +193,13 @@ public class ToolCheckoutController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            // Use current application user (Users table) as the person performing the return
-            if (string.IsNullOrEmpty(_currentUserService.UserId) || !Guid.TryParse(_currentUserService.UserId, out var userId))
+            // Tool checkouts are employee-driven, matching work order technician schedules.
+            if (!_currentUserService.EmployeeId.HasValue || _currentUserService.EmployeeId.Value == Guid.Empty)
             {
-                return BadRequest("Current user is not linked to an application user");
+                return BadRequest("Current user is not linked to an employee record");
             }
 
-            var result = await _toolCheckoutService.ReturnToolAsync(checkoutId, userId, dto);
+            var result = await _toolCheckoutService.ReturnToolAsync(checkoutId, _currentUserService.EmployeeId.Value, dto);
             return Ok(result);
         }
         catch (ArgumentException ex)

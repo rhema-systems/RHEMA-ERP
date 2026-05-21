@@ -291,6 +291,13 @@ public class WorkflowEngine : IWorkflowEngine
             return await ProcessApprovalStepAsync(instance, stepInstance, stepDefinition, userId, action, resultData, comments);
         }
 
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
+        if (stepDefinition.StepType == WorkflowStepType.Manual &&
+            !CanCurrentUserActOnManualStep(stepInstance, stepDefinition, config, userId))
+        {
+            throw new UnauthorizedAccessException("User does not have permission to complete this workflow task.");
+        }
+
         if (action == WorkflowStepAction.RequestInformation)
         {
             stepInstance.Status = WorkflowStepInstanceStatus.InProgress;
@@ -352,6 +359,28 @@ public class WorkflowEngine : IWorkflowEngine
                 CurrentStepId = stepDefinition.Id,
                 Message = "Workflow rejected"
             };
+        }
+
+        if (action == WorkflowStepAction.Complete)
+        {
+            var taskRequirementErrors = ValidateTaskCompletionRequirements(config, stepInstance.ResultData);
+            if (taskRequirementErrors.Count > 0)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = stepDefinition.Id,
+                    Errors = taskRequirementErrors.Select(message => new WorkflowExecutionError
+                    {
+                        Code = "TaskRequirementNotSatisfied",
+                        Message = message,
+                        StepId = stepDefinition.Id
+                    }).ToList(),
+                    Message = string.Join(" ", taskRequirementErrors)
+                };
+            }
         }
 
         stepInstance.Status = WorkflowStepInstanceStatus.Completed;
@@ -461,17 +490,23 @@ public class WorkflowEngine : IWorkflowEngine
         var currentStepDefinition = ResolveCurrentStepDefinition(instance, currentStep, steps);
         var totalSteps = instance.WorkflowDefinition?.Steps?.Count ?? steps.Count;
         var completedSteps = steps.Count(si => si.Status == WorkflowStepInstanceStatus.Completed);
+        var isTerminalInstance =
+            instance.Status == WorkflowInstanceStatus.Completed ||
+            instance.Status == WorkflowInstanceStatus.Cancelled ||
+            instance.Status == WorkflowInstanceStatus.Failed;
 
-        var approvals = await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId);
+        var approvals = isTerminalInstance
+            ? new List<WorkflowApproval>()
+            : (await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId)).ToList();
         var pendingApprovals = approvals.Where(a => a.StepInstance.WorkflowInstanceId == instance.Id).ToList();
         var currentStepPendingApprovals = currentStep == null
             ? pendingApprovals
             : pendingApprovals.Where(a => a.StepInstanceId == currentStep.Id).ToList();
 
-        if (!currentStepPendingApprovals.Any() && currentStep?.WorkflowStep?.StepType == WorkflowStepType.Approval)
+        if (!isTerminalInstance && !currentStepPendingApprovals.Any() && currentStep?.WorkflowStep?.StepType == WorkflowStepType.Approval)
         {
             await EnsureApprovalsForStepAsync(currentStep.Id);
-            approvals = await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId);
+            approvals = (await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId)).ToList();
             pendingApprovals = approvals.Where(a => a.StepInstance.WorkflowInstanceId == instance.Id).ToList();
         }
 
@@ -488,7 +523,7 @@ public class WorkflowEngine : IWorkflowEngine
             IsOverdue = a.DueDate.HasValue && a.DueDate.Value < DateTime.UtcNow && a.Status == WorkflowApprovalStatus.Pending
         }).ToList();
 
-        if (pendingApprovalStatuses.Count == 0 && currentStepDefinition?.StepType == WorkflowStepType.Approval)
+        if (!isTerminalInstance && pendingApprovalStatuses.Count == 0 && currentStepDefinition?.StepType == WorkflowStepType.Approval)
         {
             pendingApprovalStatuses = BuildConfiguredPendingApprovalStatuses(currentStepDefinition, currentStep);
         }
@@ -810,6 +845,23 @@ public class WorkflowEngine : IWorkflowEngine
             };
         }
 
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
+        if (action != WorkflowStepAction.Reject)
+        {
+            var checklistErrors = ValidateApprovalChecklist(config, stepInstance.ResultData, resultData);
+            if (checklistErrors.Count > 0)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = stepDefinition.Id,
+                    Message = string.Join(" ", checklistErrors)
+                };
+            }
+        }
+
         approval.Status = action == WorkflowStepAction.Reject
             ? WorkflowApprovalStatus.Rejected
             : WorkflowApprovalStatus.Approved;
@@ -833,7 +885,6 @@ public class WorkflowEngine : IWorkflowEngine
             stepInstance.Id,
             resultData);
 
-        var config = DeserializeStepConfig(stepDefinition.Configuration);
         if (action == WorkflowStepAction.Reject)
         {
             return await HandleRejectionAsync(instance, stepInstance, stepDefinition, config, userId, comments);
@@ -1303,6 +1354,100 @@ public class WorkflowEngine : IWorkflowEngine
         return stepInstance;
     }
 
+    private bool CanCurrentUserActOnManualStep(
+        WorkflowStepInstance stepInstance,
+        WorkflowStep stepDefinition,
+        WorkflowStepConfigurationDto? config,
+        Guid userId)
+    {
+        if (stepDefinition.StepType != WorkflowStepType.Manual)
+        {
+            return true;
+        }
+
+        if (stepInstance.Status != WorkflowStepInstanceStatus.Pending &&
+            stepInstance.Status != WorkflowStepInstanceStatus.InProgress)
+        {
+            return false;
+        }
+
+        if (stepInstance.AssignedToId.HasValue && stepInstance.AssignedToId.Value == userId)
+        {
+            return true;
+        }
+
+        var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(stepDefinition.RequiredRole) && roleSet.Contains(stepDefinition.RequiredRole))
+        {
+            return true;
+        }
+
+        var assignedRoles = config?.AssignmentRules?
+            .Where(rule => rule.AssignmentType == WorkflowAssignmentType.Role && !string.IsNullOrWhiteSpace(rule.Role))
+            .Select(rule => rule.Role!)
+            .ToList() ?? new List<string>();
+
+        return assignedRoles.Any(roleSet.Contains);
+    }
+
+    private static List<string> ValidateTaskCompletionRequirements(
+        WorkflowStepConfigurationDto? config,
+        string? existingResultData)
+    {
+        var errors = new List<string>();
+        var taskConfig = config?.TaskConfig;
+        var requiresDocument = taskConfig?.RequiresDocument == true ||
+            string.Equals(taskConfig?.TaskActionType, "document", StringComparison.OrdinalIgnoreCase);
+        if (!requiresDocument)
+        {
+            return errors;
+        }
+
+        var attachments = GetWorkflowTaskAttachments(existingResultData);
+        var requirementKey = taskConfig?.DocumentRequirementKey?.Trim();
+        var hasRequiredDocument = attachments.Any(attachment =>
+            string.IsNullOrWhiteSpace(requirementKey) ||
+            string.Equals(attachment.RequirementKey, requirementKey, StringComparison.OrdinalIgnoreCase));
+
+        if (!hasRequiredDocument)
+        {
+            var configuredDocumentName = taskConfig?.DocumentName?.Trim();
+            var documentName = string.IsNullOrWhiteSpace(configuredDocumentName)
+                ? "the required document"
+                : configuredDocumentName;
+            errors.Add($"Attach {documentName} before completing this workflow task.");
+        }
+
+        return errors;
+    }
+
+    private static List<WorkflowTaskAttachmentDto> GetWorkflowTaskAttachments(string? resultData)
+    {
+        if (string.IsNullOrWhiteSpace(resultData))
+        {
+            return new List<WorkflowTaskAttachmentDto>();
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(resultData, GetJsonSerializerOptions());
+            if (payload == null ||
+                !payload.TryGetValue("workflowTaskAttachments", out var attachmentsElement) ||
+                attachmentsElement.ValueKind != JsonValueKind.Array)
+            {
+                return new List<WorkflowTaskAttachmentDto>();
+            }
+
+            return JsonSerializer.Deserialize<List<WorkflowTaskAttachmentDto>>(
+                attachmentsElement.GetRawText(),
+                GetJsonSerializerOptions()) ?? new List<WorkflowTaskAttachmentDto>();
+        }
+        catch
+        {
+            return new List<WorkflowTaskAttachmentDto>();
+        }
+    }
+
     private async Task<Guid?> ResolveStepAssignmentAsync(
         WorkflowStep stepDefinition,
         WorkflowStepConfigurationDto? config,
@@ -1324,6 +1469,12 @@ public class WorkflowEngine : IWorkflowEngine
                         if (rule.UserId.HasValue)
                         {
                             return rule.UserId;
+                        }
+                        break;
+                    case WorkflowAssignmentType.Role:
+                        if (!string.IsNullOrWhiteSpace(rule.Role))
+                        {
+                            return null;
                         }
                         break;
                     case WorkflowAssignmentType.Dynamic:
@@ -1477,6 +1628,124 @@ public class WorkflowEngine : IWorkflowEngine
         {
             return null;
         }
+    }
+
+    private static List<string> ValidateApprovalChecklist(
+        WorkflowStepConfigurationDto? config,
+        string? storedResultData,
+        object? resultData)
+    {
+        var checklist = config?.QualityConfig?.QualityChecks?
+            .Where(item => item.IsRequired && !string.IsNullOrWhiteSpace(item.Name))
+            .ToList() ?? new List<WorkflowQualityCheckDto>();
+
+        if (checklist.Count == 0)
+        {
+            return new List<string>();
+        }
+
+        var responses = ExtractApprovalChecklistResponses(resultData)
+            .Concat(ExtractApprovalChecklistResponses(storedResultData))
+            .GroupBy(response => NormalizeChecklistKey(response.Id, response.Name), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        var errors = new List<string>();
+        foreach (var item in checklist)
+        {
+            var key = NormalizeChecklistKey(item.Id, item.Name);
+            if (!responses.TryGetValue(key, out var response) || !response.IsSatisfied)
+            {
+                errors.Add($"Required checklist item '{item.Name}' must be satisfied before approval.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static List<WorkflowApprovalChecklistResponseDto> ExtractApprovalChecklistResponses(object? data)
+    {
+        if (data == null)
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+
+        if (data is string json)
+        {
+            return ExtractApprovalChecklistResponses(json);
+        }
+
+        try
+        {
+            return ExtractApprovalChecklistResponses(JsonSerializer.Serialize(data));
+        }
+        catch
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+    }
+
+    private static List<WorkflowApprovalChecklistResponseDto> ExtractApprovalChecklistResponses(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return JsonSerializer.Deserialize<List<WorkflowApprovalChecklistResponseDto>>(document.RootElement.GetRawText(), GetJsonSerializerOptions()) ??
+                    new List<WorkflowApprovalChecklistResponseDto>();
+            }
+
+            if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                TryGetPropertyIgnoreCase(document.RootElement, "approvalChecklistResponses", out var responsesElement) &&
+                responsesElement.ValueKind == JsonValueKind.Array)
+            {
+                return JsonSerializer.Deserialize<List<WorkflowApprovalChecklistResponseDto>>(responsesElement.GetRawText(), GetJsonSerializerOptions()) ??
+                    new List<WorkflowApprovalChecklistResponseDto>();
+            }
+        }
+        catch
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+
+        return new List<WorkflowApprovalChecklistResponseDto>();
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string NormalizeChecklistKey(string? id, string? name)
+    {
+        return !string.IsNullOrWhiteSpace(id)
+            ? id.Trim()
+            : (name ?? string.Empty).Trim();
+    }
+
+    private static JsonSerializerOptions GetJsonSerializerOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
     }
 
     private static Dictionary<string, object> MergeDataContext(WorkflowInstance instance, object? dataContext)

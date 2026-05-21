@@ -1,4 +1,5 @@
 import { compatibleApiService as apiService } from './compatibleApiService';
+import { apiService as rawApiService } from './api.service';
 import type { ApiResponse } from '../types';
 import type {
   WorkflowDefinitionAdminDto,
@@ -23,7 +24,9 @@ import type {
   ProcessApprovalRequest,
   WorkflowInstance,
   WorkflowVariableInfo,
-  WorkflowEntityTypeInfo
+  WorkflowEntityTypeInfo,
+  WorkflowApprovalChecklistResponseDto,
+  WorkflowTaskAttachmentDto
 } from '../types/workflow';
 
 type ApiPagedResponse<T> = ApiResponse<T> & {
@@ -328,6 +331,67 @@ export class WorkflowApiService {
       request
     );
     return this.requireData(response, 'Workflow step processing response did not include data.');
+  }
+
+  /**
+   * Saves approval checklist responses against a workflow step before the approval action is processed.
+   */
+  async saveStepChecklistResponses(stepInstanceId: string, responses: WorkflowApprovalChecklistResponseDto[]): Promise<void> {
+    await apiService.post<ApiResponse<void>>(
+      `${this.basePath}/steps/${stepInstanceId}/checklist-responses`,
+      { responses }
+    );
+  }
+
+  /**
+   * Gets attachments uploaded against a manual workflow task step.
+   */
+  async getStepAttachments(stepInstanceId: string): Promise<WorkflowTaskAttachmentDto[]> {
+    const response = await apiService.get<ApiResponse<WorkflowTaskAttachmentDto[]>>(
+      `${this.basePath}/steps/${stepInstanceId}/attachments`
+    );
+
+    return response.data || [];
+  }
+
+  /**
+   * Downloads a task attachment for review from workflow history or the current step.
+   */
+  async downloadStepAttachment(stepInstanceId: string, attachmentId: string): Promise<Blob> {
+    return rawApiService.downloadBlob(
+      `${this.basePath}/steps/${encodeURIComponent(stepInstanceId)}/attachments/${encodeURIComponent(attachmentId)}/download`
+    );
+  }
+
+  /**
+   * Uploads a task attachment. Uses the raw API service so FormData is sent as multipart/form-data.
+   */
+  async uploadStepAttachment(
+    stepInstanceId: string,
+    file: File,
+    requirementKey?: string,
+    documentName?: string
+  ): Promise<WorkflowTaskAttachmentDto> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    if (requirementKey) {
+      formData.append('requirementKey', requirementKey);
+    }
+
+    if (documentName) {
+      formData.append('documentName', documentName);
+    }
+
+    const response = await rawApiService.request<ApiResponse<WorkflowTaskAttachmentDto>>(
+      `${this.basePath}/steps/${stepInstanceId}/attachments`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+
+    return this.requireData(response, 'Workflow task attachment upload response did not include data.');
   }
 
   /**

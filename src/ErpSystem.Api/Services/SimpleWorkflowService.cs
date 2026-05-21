@@ -17,6 +17,7 @@ using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Interfaces.Workflow;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services;
@@ -192,7 +193,7 @@ public class SimpleWorkflowService : IWorkflowService
             return false;
         }
 
-        var user = await _userManager.FindByIdAsync(userId.ToString());
+        var (workflowUserId, user) = await ResolveWorkflowUserAsync(userId, "approval check");
         if (user == null)
         {
             _logger.LogWarning("Workflow approval check failed: user {UserId} not found", userId);
@@ -224,7 +225,7 @@ public class SimpleWorkflowService : IWorkflowService
 
         var canApprove = approvals.Any(a =>
             a.Status == WorkflowApprovalStatus.Pending &&
-            (a.ApproverId == userId || (!string.IsNullOrWhiteSpace(a.ApproverRole) && roleSet.Contains(a.ApproverRole))));
+            (a.ApproverId == workflowUserId || (!string.IsNullOrWhiteSpace(a.ApproverRole) && roleSet.Contains(a.ApproverRole))));
 
         var currentStepType = stepInstance.WorkflowStep?.StepType;
         var isApprovalStep = currentStepType == WorkflowStepType.Approval;
@@ -234,7 +235,7 @@ public class SimpleWorkflowService : IWorkflowService
         if (!canApprove &&
             !isApprovalStep &&
             stepInstance.AssignedToId.HasValue &&
-            stepInstance.AssignedToId.Value == userId &&
+            stepInstance.AssignedToId.Value == workflowUserId &&
             (stepInstance.Status == WorkflowStepInstanceStatus.Pending || stepInstance.Status == WorkflowStepInstanceStatus.InProgress))
         {
             canApprove = true;
@@ -251,7 +252,7 @@ public class SimpleWorkflowService : IWorkflowService
             canApprove = true;
         }
 
-        if (!canApprove && IsUserConfiguredAsApprover(stepInstance, userId, roleSet))
+        if (!canApprove && IsUserConfiguredAsApprover(stepInstance, workflowUserId, roleSet))
         {
             canApprove = true;
         }
@@ -260,7 +261,7 @@ public class SimpleWorkflowService : IWorkflowService
         {
             _logger.LogDebug(
                 "Workflow approval check denied: user {UserId} has no matching pending approval for step {StepInstanceId}",
-                userId,
+                workflowUserId,
                 stepInstance.Id);
         }
 
@@ -322,6 +323,17 @@ public class SimpleWorkflowService : IWorkflowService
 
     public async Task<WorkflowExecutionResult> ProcessApprovalStepAsync(string entityType, Guid entityId, Guid userId, string action, string? comments = null)
     {
+        var (workflowUserId, user) = await ResolveWorkflowUserAsync(userId, "approval processing");
+        if (user == null)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Failed,
+                Message = "Approval user not found"
+            };
+        }
+
         var instance = await ResolveActiveWorkflowInstanceAsync(entityType, entityId);
         if (instance == null)
         {
@@ -345,7 +357,35 @@ public class SimpleWorkflowService : IWorkflowService
         }
 
         var stepAction = MapToStepAction(action);
-        return await _workflowEngine.ProcessStepAsync(stepInstance.Id, userId, stepAction, comments: comments);
+        return await _workflowEngine.ProcessStepAsync(stepInstance.Id, workflowUserId, stepAction, comments: comments);
+    }
+
+    private async Task<(Guid UserId, ApplicationUser? User)> ResolveWorkflowUserAsync(Guid suppliedId, string operation)
+    {
+        if (suppliedId == Guid.Empty)
+        {
+            return (Guid.Empty, null);
+        }
+
+        var user = await _userManager.FindByIdAsync(suppliedId.ToString());
+        if (user != null)
+        {
+            return (user.Id, user);
+        }
+
+        var linkedUser = await _userManager.Users
+            .FirstOrDefaultAsync(u => u.EmployeeId == suppliedId);
+        if (linkedUser != null)
+        {
+            _logger.LogWarning(
+                "Workflow {Operation} received EmployeeId {EmployeeId}; resolved to ApplicationUser {UserId}. Module callers should pass ApplicationUser.Id to workflow APIs.",
+                operation,
+                suppliedId,
+                linkedUser.Id);
+            return (linkedUser.Id, linkedUser);
+        }
+
+        return (suppliedId, null);
     }
 
     public async Task<WorkflowStepInfo?> GetCurrentWorkflowStepAsync(string entityType, Guid entityId)

@@ -14,13 +14,15 @@ public interface IWorkflowIntegrationService
     Task<WorkflowIntegrationResult> SubmitAsync(string entityType, Guid entityId);
 
     /// <summary>
-    /// Processes an approval action and returns a normalized outcome
+    /// Processes an approval action and returns a normalized outcome.
+    /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
     /// </summary>
     Task<WorkflowIntegrationResult> ProcessApprovalAsync(string entityType, Guid entityId, Guid userId, string action,
         string? comments = null);
 
     /// <summary>
-    /// Checks if a user can approve the current workflow step
+    /// Checks if a user can approve the current workflow step.
+    /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
     /// </summary>
     Task<bool> CanUserApproveAsync(string entityType, Guid entityId, Guid userId);
 

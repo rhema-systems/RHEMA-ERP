@@ -54,6 +54,7 @@ public interface IPayrollService
     Task<PayrollBackpayRuleDto> UpsertBackpayRuleAsync(Guid tenantId, UpsertPayrollBackpayRuleDto dto, CancellationToken cancellationToken = default);
     Task<PayrollBackpayExceptionDto> UpsertBackpayExceptionAsync(Guid tenantId, UpsertPayrollBackpayExceptionDto dto, CancellationToken cancellationToken = default);
     Task<PayrollJournalMappingDto> UpsertJournalMappingAsync(Guid tenantId, UpsertPayrollJournalMappingDto dto, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PayrollJournalMappingDto>> SeedOracleJournalMappingsAsync(Guid tenantId, string? legacyCompanyCode = null, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<PayrollEmployeeProfileDto>> GetEmployeeProfilesAsync(Guid tenantId, string? searchTerm = null, CancellationToken cancellationToken = default);
     Task<PayrollEmployeeProfileDto> UpsertEmployeeProfileAsync(Guid tenantId, UpsertPayrollEmployeeProfileDto dto, CancellationToken cancellationToken = default);
@@ -91,5 +92,6 @@ public interface IPayrollService
     Task<IReadOnlyList<PayrollPayslipDto>> GetPayslipsAsync(Guid tenantId, Guid runId, Guid? employeeId = null, string? categoryType = null, string? categoryValue = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PayrollPayslipSnapshotDto>> GeneratePayslipSnapshotsAsync(Guid tenantId, Guid runId, Guid? userId, CancellationToken cancellationToken = default);
     Task<PayrollPayslipEmailResultDto> EmailPayslipsAsync(Guid tenantId, Guid runId, Guid? userId, PayrollPayslipEmailRequestDto dto, CancellationToken cancellationToken = default);
+    Task<PayrollJournalPreviewDto> GetPayrollJournalPreviewAsync(Guid tenantId, Guid runId, CancellationToken cancellationToken = default);
     Task<PayrollJournalPostingDto> PostPayrollJournalAsync(Guid tenantId, Guid runId, Guid? userId, PayrollRunActionDto dto, CancellationToken cancellationToken = default);
 }

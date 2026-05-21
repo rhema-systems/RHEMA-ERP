@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import {
   Table,
   TableBody,
@@ -278,7 +278,7 @@ export default function PurchaseOrderDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="items">Items ({order.itemCount})</TabsTrigger>
           <TabsTrigger value="receipts">Receipts ({order.receipts?.length || 0})</TabsTrigger>
-          <TabsTrigger value="approval">Approval History</TabsTrigger>
+          <WorkflowTabTrigger value="approval" />
         </TabsList>
 
         {/* Overview Tab */}
@@ -797,10 +797,36 @@ export default function PurchaseOrderDetailPage() {
           </Card>
         </TabsContent>
 
-        {/* Approval History Tab */}
-        <TabsContent value="approval" className="space-y-6">
-          <WorkflowApprovalHistoryPanel entityType="PurchaseOrder" entityId={id} />
-        </TabsContent>
+        <WorkflowTabContent
+          value="approval"
+          className="space-y-6"
+          entityType="PurchaseOrder"
+          entityId={id}
+          entityLabel="Purchase Order"
+          entityNumber={order.orderNumber}
+          status={order.status}
+          currentStepName={order.currentWorkflowStepName}
+          canSubmit={canSubmit}
+          canApproveReject={canApprove}
+          onSubmit={async () => {
+            await purchasingService.submitPurchaseOrder(id);
+          }}
+          onApprove={async (comments) => {
+            await purchasingService.approvePurchaseOrder(id, {
+              approved: true,
+              comments: comments || undefined,
+            });
+          }}
+          onReject={async (comments) => {
+            await purchasingService.approvePurchaseOrder(id, {
+              approved: false,
+              comments: comments || undefined,
+              rejectionReason: comments || undefined,
+            });
+          }}
+          onAfterAction={fetchOrder}
+          onOpenWorkflows={() => router.push('/administration/workflow')}
+        />
       </Tabs>
     </div>
   );

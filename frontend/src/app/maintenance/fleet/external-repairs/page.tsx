@@ -11,8 +11,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatFleetDateTime } from '@/lib/date-format';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 export default function FleetExternalRepairsPage() {
+  const { currencyCode, formatMoney } = useMaintenanceCurrency();
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [vehicleId, setVehicleId] = React.useState<string>('all');
   const [status, setStatus] = React.useState<string>('all');
@@ -97,10 +99,10 @@ export default function FleetExternalRepairsPage() {
         title: form.title,
         description: form.description || undefined,
         estimatedCost: form.estimatedCost ? Number(form.estimatedCost) : undefined,
-        currencyCode: form.currencyCode || undefined,
+        currencyCode: form.currencyCode || currencyCode,
       });
       setOpen(false);
-      setForm({ title: '', description: '', vendorBusinessPartnerId: 'none', estimatedCost: '', currencyCode: '' });
+      setForm({ title: '', description: '', vendorBusinessPartnerId: 'none', estimatedCost: '', currencyCode });
       await load();
     } catch (e: any) {
       alert(e?.message || 'Failed to create');
@@ -112,7 +114,7 @@ export default function FleetExternalRepairsPage() {
     setStatusForm({
       status: nextStatus ?? r.status,
       actualCost: r.actualCost?.toString() ?? '',
-      currencyCode: r.currencyCode ?? '',
+      currencyCode: r.currencyCode ?? currencyCode,
     });
     setStatusOpen(true);
   };
@@ -125,7 +127,7 @@ export default function FleetExternalRepairsPage() {
       await fleetService.updateExternalRepairStatus(statusEditing.id, {
         status: statusForm.status,
         actualCost: parsedCost,
-        currencyCode: statusForm.currencyCode || undefined,
+        currencyCode: statusForm.currencyCode || currencyCode,
       });
       setStatusOpen(false);
       setStatusEditing(null);
@@ -227,10 +229,10 @@ export default function FleetExternalRepairsPage() {
                       <td className="py-2">{r.title}</td>
                       <td className="py-2">{r.status}</td>
                       <td className="py-2">
-                        {r.estimatedCost ? `${r.estimatedCost.toLocaleString()}${r.currencyCode ? ` ${r.currencyCode}` : ''}` : '—'}
+                        {r.estimatedCost ? formatMoney(r.estimatedCost) : '—'}
                       </td>
                       <td className="py-2">
-                        {r.actualCost ? `${r.actualCost.toLocaleString()}${r.currencyCode ? ` ${r.currencyCode}` : ''}` : '—'}
+                        {r.actualCost ? formatMoney(r.actualCost) : '—'}
                       </td>
                       <td className="py-2 text-right">
                         <div className="flex justify-end gap-2">
@@ -299,7 +301,7 @@ export default function FleetExternalRepairsPage() {
 
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Input value={statusForm.currencyCode} onChange={(e) => setStatusForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+              <Input value={statusForm.currencyCode || currencyCode} disabled />
             </div>
             <div className="text-sm text-muted-foreground md:col-span-2">
               If you enter an actual cost, the system updates the Fleet cost ledger for this external repair (reconciling the earlier estimate).
@@ -356,7 +358,7 @@ export default function FleetExternalRepairsPage() {
             </div>
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Input value={form.currencyCode} onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+              <Input value={form.currencyCode || currencyCode} disabled />
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label>Description</Label>

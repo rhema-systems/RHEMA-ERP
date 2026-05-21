@@ -6,6 +6,8 @@ import { authService } from '../services/auth';
 import { QUERY_KEYS } from '../config/api';
 import type { User, LoginRequest } from '../types';
 import { hasAllPermissionsAccess, hasAnyPermissionAccess, hasPermissionAccess } from '../lib/permissions';
+import { buildTenantSelectRedirectUrl } from '../lib/auth-redirect';
+import { getExternalPortalPath, isExternalPortalUser } from '../lib/auth-routing';
 
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -38,8 +40,12 @@ export function useAuth() {
       queryClient.setQueryData(QUERY_KEYS.CURRENT_USER, response.user);
       // Invalidate tenant query to ensure fresh data
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.TENANTS });
-      // Redirect to dashboard
-      router.push('/dashboard');
+
+      router.push(
+        isExternalPortalUser(response.user)
+          ? getExternalPortalPath()
+          : buildTenantSelectRedirectUrl()
+      );
     },
     onError: (error) => {
       console.error('Login failed:', error);

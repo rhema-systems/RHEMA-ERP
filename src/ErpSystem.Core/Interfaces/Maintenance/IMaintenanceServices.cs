@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.DTOs.Finance;
 
 namespace ErpSystem.Core.Interfaces.Maintenance;
 
@@ -316,6 +317,7 @@ public interface IWorkOrderService
     Task<WorkOrderDto> ApproveWorkOrderAsync(Guid id, string? approvalNotes = null);
     Task<WorkOrderDto> StartWorkOrderAsync(Guid id);
     Task<WorkOrderDto> CompleteWorkOrderAsync(Guid id, CompleteWorkOrderDto completeDto);
+    Task<InvoiceDto> PostWorkOrderBillingToArInvoiceAsync(Guid id);
 
     // Business logic
     Task<IEnumerable<WorkOrderListDto>> GetOverdueWorkOrdersAsync();

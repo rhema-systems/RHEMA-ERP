@@ -123,10 +123,10 @@ namespace ErpSystem.Web.Services
                     _context.ChangeTracker.Clear();
                 }
 
-                // Always seed/update test users in development to ensure correct passwords
+                // Ensure development test users exist without changing passwords for existing accounts.
                 if (_environment.IsDevelopment())
                 {
-                    _logger.LogInformation("Ensuring test users have correct passwords...");
+                    _logger.LogInformation("Ensuring development test users exist...");
                     await SeedTestUsersAsync();
                     _logger.LogInformation("Ensuring project demo data is seeded...");
                     await EnsureProjectDemoDataSeededAsync();
@@ -5147,8 +5147,8 @@ namespace ErpSystem.Web.Services
                 return;
             }
 
-            // Ensure seeded accounts exist and remain usable on every Development seed run.
-            // Preserve existing contact details so local/admin edits are not undone by startup seeding.
+            // Ensure seeded accounts exist on every Development seed run.
+            // Preserve existing passwords/contact details so local/admin edits are not undone by startup seeding.
             await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
                 "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.Local);
 
@@ -5317,6 +5317,7 @@ namespace ErpSystem.Web.Services
                 new { Name = Constants.Roles.TenantAdmin, Description = "Tenant Administrator with tenant-wide access" },
                 new { Name = Constants.Roles.Manager, Description = "Manager with departmental access" },
                 new { Name = Constants.Roles.Employee, Description = "Standard employee with limited access" },
+                new { Name = Constants.Roles.ReadOnly, Description = "Read-only user for restricted system access" },
                 new { Name = Constants.Roles.ExternalUser, Description = "External portal user (customers/vendors/partners/citizens)" },
                 new { Name = Constants.Roles.HelpdeskAgent, Description = "Helpdesk agent for managing tickets" },
                 new { Name = Constants.Roles.HelpdeskSupervisor, Description = "Helpdesk supervisor for assignment and escalation" },
@@ -5331,13 +5332,14 @@ namespace ErpSystem.Web.Services
 
             foreach (var roleInfo in roles)
             {
+                var isProtectedSystemRole = Constants.Roles.IsProtectedSystemRole(roleInfo.Name);
                 var existingRole = await _roleManager.FindByNameAsync(roleInfo.Name);
                 if (existingRole == null)
                 {
                     var role = new ApplicationRole(roleInfo.Name)
                     {
                         Description = roleInfo.Description,
-                        IsSystemRole = roleInfo.Name.Contains("Admin") || roleInfo.Name.Contains("Manager"),
+                        IsSystemRole = isProtectedSystemRole,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = "System"
                     };
@@ -5351,6 +5353,25 @@ namespace ErpSystem.Web.Services
                     {
                         _logger.LogError("Failed to create role {RoleName}: {Errors}", 
                             roleInfo.Name, string.Join(", ", result.Errors.Select(e => e.Description)));
+                    }
+                }
+                else if (isProtectedSystemRole && !existingRole.IsSystemRole)
+                {
+                    existingRole.IsSystemRole = true;
+                    existingRole.UpdatedAt = DateTime.UtcNow;
+                    existingRole.UpdatedBy = "System";
+
+                    var result = await _roleManager.UpdateAsync(existingRole);
+                    if (result.Succeeded)
+                    {
+                        _logger.LogInformation("Marked protected role {RoleName} as a system role.", roleInfo.Name);
+                    }
+                    else
+                    {
+                        _logger.LogError(
+                            "Failed to mark protected role {RoleName} as a system role: {Errors}",
+                            roleInfo.Name,
+                            string.Join(", ", result.Errors.Select(e => e.Description)));
                     }
                 }
             }
@@ -5750,21 +5771,7 @@ namespace ErpSystem.Web.Services
                     }
                 }
 
-                // Reset password to the expected strong password to align with docs/login page
-                var resetToken = await _userManager.GeneratePasswordResetTokenAsync(existingUser);
-                var resetResult = await _userManager.ResetPasswordAsync(existingUser, resetToken, password);
-                if (resetResult.Succeeded)
-                {
-                    // Clear lockout just in case
-                    await _userManager.SetLockoutEndDateAsync(existingUser, null);
-                    await _userManager.ResetAccessFailedCountAsync(existingUser);
-                    _logger.LogInformation("Updated existing user {Username} and reset password.", username);
-                }
-                else
-                {
-                    _logger.LogError("Failed to reset password for {Username}: {Errors}", username,
-                        string.Join(", ", resetResult.Errors.Select(e => e.Description)));
-                }
+                _logger.LogInformation("Ensured existing seeded user {Username}; password was not changed.", username);
 
                 return;
             }

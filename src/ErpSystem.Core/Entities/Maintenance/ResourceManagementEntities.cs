@@ -331,8 +331,8 @@ public class ToolCheckout : TenantEntity
     // Navigation properties
     [ForeignKey(nameof(ToolId))]
     public virtual ErpSystem.Core.Entities.Inventory.InventoryItem Tool { get; set; } = null!;
-    public virtual ApplicationUser CheckedOutBy { get; set; } = null!;
-    public virtual ApplicationUser? CheckedInBy { get; set; }
+    public virtual Employee CheckedOutBy { get; set; } = null!;
+    public virtual Employee? CheckedInBy { get; set; }
     public virtual WorkOrder? WorkOrder { get; set; }
     public virtual JobCard? JobCard { get; set; }
 }

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR.Payroll;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Payroll;
@@ -9,6 +10,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Data;
+using iText.Kernel.Pdf;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -49,6 +51,29 @@ public class PayrollService : IPayrollService
     private const string PayrollPayslipEmailTemplateName = "Payroll Payslip Email";
     private const string PayrollPayslipEmailEntityType = "PayrollPayslipEmail";
     private const string PayrollPayslipEmailTopicKey = PayrollPayslipEmailEntityType + ".PayslipEmail.Employee";
+    private const string PayrollJournalSourceModule = "PAYROLL";
+    private const string PayrollJournalNumberPrefix = "PAY-";
+    private const decimal PayrollJournalBalanceTolerance = 0m;
+
+    private sealed record PayrollJournalMappingSeed(
+        int SequenceNo,
+        string TransactionType,
+        string? ComponentCode,
+        string? ShortDescription,
+        string Description,
+        string DebitCredit,
+        string AccountCode,
+        string LegacyCompanyCode,
+        string AccountType);
+
+    private sealed record PayrollFinanceAccountSeed(
+        string AccountNumber,
+        string AccountCode,
+        string AccountName,
+        AccountType AccountType,
+        string AccountCategory,
+        string? AccountSubCategory,
+        string Description);
 
     private static readonly IReadOnlyList<PayrollLegacyMenuItemDto> LegacyMenuItems =
     [
@@ -69,6 +94,7 @@ public class PayrollService : IPayrollService
         Menu("A0000117", "A00001", "Allowances & Deductions Setup", "Main Menu > Setup > Allowances & Deductions Setup", "Form", "PR3_009.fmb", "001", 17),
         Menu("A0000118", "A00001", "Bonus Setup", "Main Menu > Setup > Bonus Setup", "Form", "PR3_022.fmb", "001", 18),
         Menu("A0000119", "A00001", "Backpay / Salary Increase", "Main Menu > Setup > Backpay / Salary Increase", "Form", "PR3_023.fmb", "001", 19, true),
+        Menu("A0000124", "A00001", "Journal Setup", "Main Menu > Setup > Journal Setup", "Form", "PR3_026.fmb", "001", 24, true),
         Menu("A0000131", "A00001", "Budget Analysis", "Main Menu > Setup > Budget Analysis", "Form", "PR3_032.fmb", "DEMO", 31, true),
         Menu("A00002", "A000", "Payroll Process", "Main Menu > Payroll Process", "Folder", null, "001", 2),
         Menu("A0000212", "A00002", "Allowances & Ded Exception", "Main Menu > Payroll Process > Allowances & Ded Exception", "Form", "PR3_021.fmb", "001", 17, true),
@@ -204,8 +230,10 @@ public class PayrollService : IPayrollService
         var journalMappings = await _context.PayrollJournalMappings
             .AsNoTracking()
             .Where(e => e.TenantId == tenantId)
-            .OrderBy(e => e.TransactionType)
+            .OrderBy(e => e.SequenceNo)
+            .ThenBy(e => e.TransactionType)
             .ThenBy(e => e.ComponentCode)
+            .ThenBy(e => e.DebitCredit)
             .ToListAsync(cancellationToken);
 
         var codeTypes = await _context.PayrollCodeTypes
@@ -2289,12 +2317,15 @@ public class PayrollService : IPayrollService
         var entity = await FindForUpsertAsync(_context.PayrollJournalMappings, tenantId, dto.Id, cancellationToken)
             ?? new PayrollJournalMapping { TenantId = tenantId };
 
+        entity.SequenceNo = dto.SequenceNo > 0 ? dto.SequenceNo : await NextPayrollJournalMappingSequenceAsync(tenantId, cancellationToken);
         entity.TransactionType = RequireText(dto.TransactionType, nameof(dto.TransactionType)).Trim();
         entity.ComponentCode = string.IsNullOrWhiteSpace(dto.ComponentCode) ? null : NormalizeCode(dto.ComponentCode);
+        entity.ShortDescription = TrimOrNull(dto.ShortDescription);
         entity.Description = RequireText(dto.Description, nameof(dto.Description));
         entity.DebitCredit = NormalizeDebitCredit(dto.DebitCredit);
         entity.AccountCode = RequireText(dto.AccountCode, nameof(dto.AccountCode)).Trim();
         entity.AccountType = string.IsNullOrWhiteSpace(dto.AccountType) ? null : dto.AccountType.Trim();
+        entity.LegacyCompanyCode = NormalizeOptionalLegacyCode(dto.LegacyCompanyCode, 5);
         entity.IsActive = dto.IsActive;
 
         AddIfNew(_context.PayrollJournalMappings, entity);
@@ -2606,12 +2637,22 @@ public class PayrollService : IPayrollService
         PayrollLoanRepaymentRequestDto dto,
         CancellationToken cancellationToken = default)
     {
-        if (dto.RepaymentAmount <= 0)
+        var hasRepaymentSplit = dto.PrincipalAmount.HasValue || dto.InterestAmount.HasValue;
+        var requestedPrincipal = hasRepaymentSplit ? Math.Round(dto.PrincipalAmount.GetValueOrDefault(), 2) : 0m;
+        var requestedInterest = hasRepaymentSplit ? Math.Round(dto.InterestAmount.GetValueOrDefault(), 2) : 0m;
+        if (requestedPrincipal < 0 || requestedInterest < 0)
+        {
+            throw new InvalidOperationException("Principal and interest amounts cannot be negative.");
+        }
+
+        var repaymentAmount = hasRepaymentSplit
+            ? Math.Round(requestedPrincipal + requestedInterest, 2)
+            : Math.Round(dto.RepaymentAmount, 2);
+        if (repaymentAmount <= 0)
         {
             throw new InvalidOperationException("Repayment Amount must be greater than zero.");
         }
 
-        var repaymentAmount = Math.Round(dto.RepaymentAmount, 2);
         var actualRepaymentDate = (dto.ActualRepaymentDate ?? DateTime.UtcNow).Date;
         var facilityNumber = dto.FacilityNumber.Trim();
         var employeeNumber = dto.EmployeeNumber.Trim();
@@ -2688,8 +2729,28 @@ public class PayrollService : IPayrollService
 
         var principalDue = Math.Max(0, Math.Round(schedule.PrincipalAmount - schedule.AmountPaid, 2));
         var interestDue = Math.Max(0, Math.Round(schedule.InterestAmount - schedule.InterestPaid, 2));
-        var principalPaid = Math.Min(repaymentAmount, principalDue);
-        var interestPaid = Math.Min(Math.Round(repaymentAmount - principalPaid, 2), interestDue);
+        decimal principalPaid;
+        decimal interestPaid;
+        if (hasRepaymentSplit)
+        {
+            if (requestedPrincipal > principalDue)
+            {
+                throw new InvalidOperationException($"Principal amount cannot exceed the scheduled principal balance of {principalDue:N2}.");
+            }
+
+            if (requestedInterest > interestDue)
+            {
+                throw new InvalidOperationException($"Interest amount cannot exceed the scheduled interest balance of {interestDue:N2}.");
+            }
+
+            principalPaid = requestedPrincipal;
+            interestPaid = requestedInterest;
+        }
+        else
+        {
+            principalPaid = Math.Min(repaymentAmount, principalDue);
+            interestPaid = Math.Min(Math.Round(repaymentAmount - principalPaid, 2), interestDue);
+        }
 
         if (principalPaid <= 0 && interestPaid <= 0)
         {
@@ -2834,6 +2895,333 @@ public class PayrollService : IPayrollService
         AddIfNew(_context.PayrollSalaryAdvances, entity);
         await _context.SaveChangesAsync(cancellationToken);
         return ToDto(entity);
+    }
+
+    public async Task<IReadOnlyList<PayrollJournalMappingDto>> SeedOracleJournalMappingsAsync(
+        Guid tenantId,
+        string? legacyCompanyCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        var companyCode = NormalizeOptionalLegacyCode(legacyCompanyCode, 5)
+            ?? await _context.PayrollParameterSets
+                .AsNoTracking()
+                .Where(e => e.TenantId == tenantId && e.IsActive)
+                .OrderBy(e => e.Code)
+                .Select(e => e.LegacyCompanyCode)
+                .FirstOrDefaultAsync(cancellationToken)
+            ?? "001";
+
+        await EnsurePayrollFinanceAccountsAsync(tenantId, cancellationToken);
+
+        var accounts = await _context.Accounts
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId && !e.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var availableAccountCodes = accounts
+            .SelectMany(e => new[]
+            {
+                NormalizePayrollJournalAccountCode(e.AccountCode),
+                NormalizePayrollJournalAccountCode(e.AccountNumber)
+            })
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var salaryExpenseAccount = PickPayrollSeedAccount(accounts, ["6020", "001-000-6020", "6000", "001-000-6000"], "6020");
+        var accruedPayableAccount = PickPayrollSeedAccount(accounts, ["2120", "001-000-2120", "2100", "001-000-2100", "2000", "001-000-2000"], "2120");
+        var bankAccount = PickPayrollSeedAccount(accounts, ["1010", "001-000-1010", "1000", "001-000-1000"], "1010");
+        var loanReceivableAccount = PickPayrollSeedAccount(accounts, ["1120", "001-000-1120", "1100", "001-000-1100"], accruedPayableAccount);
+        var otherIncomeAccount = PickPayrollSeedAccount(accounts, ["4920", "001-000-4920", "4900", "001-000-4900", "4100", "001-000-4100"], accruedPayableAccount);
+
+        var seeds = BuildOracleJournalMappingSeeds(
+            companyCode,
+            salaryExpenseAccount,
+            accruedPayableAccount,
+            bankAccount,
+            loanReceivableAccount,
+            otherIncomeAccount);
+
+        var codeValues = await _context.PayrollCodeValues
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId &&
+                        !e.Blocked &&
+                        (e.LegacyCompanyCode == null || e.LegacyCompanyCode == companyCode))
+            .OrderBy(e => e.CodeType)
+            .ThenBy(e => e.ActualCode)
+            .ToListAsync(cancellationToken);
+        AddOracleComponentJournalMappingSeeds(
+            seeds,
+            codeValues,
+            companyCode,
+            availableAccountCodes,
+            salaryExpenseAccount,
+            accruedPayableAccount,
+            loanReceivableAccount,
+            otherIncomeAccount);
+
+        foreach (var seed in seeds)
+        {
+            await UpsertPayrollJournalMappingSeedAsync(tenantId, seed, cancellationToken);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var mappings = await _context.PayrollJournalMappings
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId &&
+                        (e.LegacyCompanyCode == null || e.LegacyCompanyCode == companyCode))
+            .OrderBy(e => e.SequenceNo)
+            .ThenBy(e => e.TransactionType)
+            .ThenBy(e => e.ComponentCode)
+            .ThenBy(e => e.DebitCredit)
+            .ToListAsync(cancellationToken);
+        return mappings.Select(ToDto).ToList();
+    }
+
+    private async Task EnsurePayrollFinanceAccountsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var seeds = BuildPayrollFinanceAccountSeeds();
+        var existingAccounts = await _context.Accounts
+            .Where(e => e.TenantId == tenantId && !e.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var existingByCode = existingAccounts
+            .SelectMany(e => new[]
+            {
+                new { Code = NormalizePayrollJournalAccountCode(e.AccountCode), Account = e },
+                new { Code = NormalizePayrollJournalAccountCode(e.AccountNumber), Account = e }
+            })
+            .Where(e => e.Code.Length > 0)
+            .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(e => e.Key, e => e.First().Account, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var seed in seeds)
+        {
+            var code = NormalizePayrollJournalAccountCode(seed.AccountCode);
+            var number = NormalizePayrollJournalAccountCode(seed.AccountNumber);
+            var account = existingByCode.GetValueOrDefault(code) ??
+                          existingByCode.GetValueOrDefault(number);
+
+            if (account == null)
+            {
+                account = new Account
+                {
+                    TenantId = tenantId,
+                    AccountCode = seed.AccountCode,
+                    AccountNumber = seed.AccountNumber,
+                    AccountName = seed.AccountName,
+                    AccountType = seed.AccountType,
+                    CurrencyCode = "GHS",
+                    IsSegmented = true,
+                    AllowDirectPosting = true,
+                    IsSystemAccount = true,
+                    Status = AccountStatus.Active,
+                    ReferenceNumber = seed.AccountCode,
+                    EffectiveDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = PayrollJournalSourceModule
+                };
+                _context.Accounts.Add(account);
+            }
+
+            account.AccountCategory = seed.AccountCategory;
+            account.AccountSubCategory = seed.AccountSubCategory;
+            account.AccountNumber = seed.AccountNumber;
+            account.Description = seed.Description;
+            account.IsSegmented = true;
+            account.AllowDirectPosting = true;
+            account.IsSystemAccount = true;
+            account.Status = AccountStatus.Active;
+            account.UpdatedAt = DateTime.UtcNow;
+            account.UpdatedBy = PayrollJournalSourceModule;
+
+            existingByCode[code] = account;
+            existingByCode[number] = account;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static IReadOnlyList<PayrollFinanceAccountSeed> BuildPayrollFinanceAccountSeeds()
+        =>
+        [
+            new("001-000-1010", "1010", "Cash and Bank - Payroll Clearing", AccountType.Asset, "Current Assets", "Cash and Bank", "Default bank and cash clearing account used by payroll net pay journals."),
+            new("001-000-1120", "1120", "Staff Loans and Salary Advances", AccountType.Asset, "Current Assets", "Employee Receivables", "Receivable account for staff loan repayments, salary advances, and related payroll recoveries."),
+            new("001-000-2120", "2120", "Accrued Payroll Payables", AccountType.Liability, "Current Liabilities", "Payroll Payables", "Default liability account for accrued payroll deductions, taxes, pensions, and contribution payables."),
+            new("001-000-4920", "4920", "Payroll Recoveries and Interest Income", AccountType.Revenue, "Other Income", "Payroll Recoveries", "Income account for payroll loan interest and recoveries credited from payroll runs."),
+            new("001-000-6020", "6020", "Salaries, Wages and Payroll Costs", AccountType.Expense, "Operating Expenses", "Payroll Costs", "Default payroll expense account for basic salary, allowances, overtime, employer contributions, and arrears.")
+        ];
+
+    private async Task<int> NextPayrollJournalMappingSequenceAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var maxSequence = await _context.PayrollJournalMappings
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId)
+            .Select(e => (int?)e.SequenceNo)
+            .MaxAsync(cancellationToken);
+        return maxSequence.GetValueOrDefault() + 1;
+    }
+
+    private async Task UpsertPayrollJournalMappingSeedAsync(
+        Guid tenantId,
+        PayrollJournalMappingSeed seed,
+        CancellationToken cancellationToken)
+    {
+        var componentCode = TrimOrNull(seed.ComponentCode);
+        var entity = await _context.PayrollJournalMappings
+            .FirstOrDefaultAsync(e =>
+                e.TenantId == tenantId &&
+                e.TransactionType == seed.TransactionType &&
+                e.ComponentCode == componentCode &&
+                e.DebitCredit == seed.DebitCredit &&
+                e.LegacyCompanyCode == seed.LegacyCompanyCode,
+                cancellationToken)
+            ?? new PayrollJournalMapping { TenantId = tenantId };
+
+        entity.SequenceNo = seed.SequenceNo;
+        entity.TransactionType = seed.TransactionType;
+        entity.ComponentCode = componentCode;
+        entity.ShortDescription = seed.ShortDescription;
+        entity.Description = seed.Description;
+        entity.DebitCredit = seed.DebitCredit;
+        entity.AccountCode = seed.AccountCode;
+        entity.AccountType = seed.AccountType;
+        entity.LegacyCompanyCode = seed.LegacyCompanyCode;
+        entity.IsActive = true;
+
+        AddIfNew(_context.PayrollJournalMappings, entity);
+    }
+
+    private static List<PayrollJournalMappingSeed> BuildOracleJournalMappingSeeds(
+        string companyCode,
+        string salaryExpenseAccount,
+        string accruedPayableAccount,
+        string bankAccount,
+        string loanReceivableAccount,
+        string otherIncomeAccount)
+    {
+        return
+        [
+            JournalSeed(10, BonusTransactionType, null, "BONUS", "BONUS", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(20, "BAS", null, "BASIC", "GROSS BASIC SALARY", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(30, "ALW", null, "ALLOWANCES", "ALLOWANCES", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(40, "BEN", null, "BENEFITS", "BENEFITS", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(50, OvertimeTransactionType, OvertimeTransactionType, "OVERTIME", "OVERTIME", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(60, PromotionBasicArrearsTransactionType, null, "BASIC ARREARS", "BASIC ARREARS", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(70, PromotionAllowanceArrearsTransactionType, null, "ALLOWANCE ARREARS", "ALLOWANCE ARREARS", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(80, "DED", null, "DEDUCTIONS", "DEDUCTIONS", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(90, "TAX", null, "PAYE", "INCOME TAX", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(100, "TXR", null, "PAYE ARREARS", "PAYE ARREARS", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(110, "ESF", null, "EMPL SSF", "EMPLOYEE SSF CONTRIBUTION", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(120, "CSF", null, "COMP SSF", "EMPLOYER SSF CONTRIBUTION", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(121, "CSF", null, "CEMPL SSF", "EMPLOYER SSF PAY OUT", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(130, "CON", null, "EMPLOYEE CON", "EMPLOYEE PF PAYOUT", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(140, "ECO", null, "EMPLOYER CON", "EMPLOYER PF COST", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(141, "ECO", null, "EMPLOYER CON", "EMPLOYER PF PAYOUT", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(150, PromotionEmployeeContributionArrearsTransactionType, null, "EMPL SSF ARREARS", "STAFF SSF PAYOUT ARREARS", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(160, PromotionEmployerContributionArrearsTransactionType, null, "COMP SSF ARREARS", "COMPANY SSF CON. ARREARS", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(161, PromotionEmployerContributionArrearsTransactionType, null, "CEMPL SSF ARREARS", "EMPLOYER SSF PAY OUT ARREARS", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(170, "ECR", null, "EMPLOYER CON ARR", "EMPLOYER PF COST ARREARS", "DR", salaryExpenseAccount, companyCode, "Expense"),
+            JournalSeed(171, "ECR", null, "EMPLOYER CON ARR", "EMPLOYER PF PAYOUT ARREARS", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(180, BackpayDeductionArrearsTransactionType, null, "DEDUCTION ARREARS", "DEDUCTION ARREARS", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(190, AbsenceTransactionType, AbsenceTransactionType, "ABSENCE", "ABSENCE DEDUCTION", "CR", accruedPayableAccount, companyCode, "Payable"),
+            JournalSeed(200, LoanRepaymentTransactionType, null, "LOAN REPAYMENT", "LOAN REPAYMENT", "CR", loanReceivableAccount, companyCode, "Receivable"),
+            JournalSeed(210, LoanInterestTransactionType, null, "LOAN INTEREST", "INTEREST ON LOAN", "CR", otherIncomeAccount, companyCode, "Income"),
+            JournalSeed(220, SalaryAdvanceTransactionType, SalaryAdvanceTransactionType, "SALARY ADVANCE", "SALARY ADVANCE", "CR", loanReceivableAccount, companyCode, "Receivable"),
+            JournalSeed(230, "BAN", null, "BANK PAYMENT", "NET PAYMENT - BANK", "CR", bankAccount, companyCode, "Bank/Cash"),
+            JournalSeed(240, "CAS", null, "CASH PAYMENT", "NET PAYMENT - CASH", "CR", bankAccount, companyCode, "Bank/Cash")
+        ];
+    }
+
+    private static void AddOracleComponentJournalMappingSeeds(
+        ICollection<PayrollJournalMappingSeed> seeds,
+        IReadOnlyList<PayrollCodeValue> codeValues,
+        string companyCode,
+        ISet<string> availableAccountCodes,
+        string salaryExpenseAccount,
+        string accruedPayableAccount,
+        string loanReceivableAccount,
+        string otherIncomeAccount)
+    {
+        var nextSequence = seeds.Max(e => e.SequenceNo) + 10;
+        foreach (var codeValue in codeValues)
+        {
+            var codeType = NormalizeCode(codeValue.CodeType);
+            var actualCode = NormalizeCode(codeValue.ActualCode);
+            var description = TrimOrNull(codeValue.Description) ?? $"{codeType} {actualCode}";
+
+            switch (codeType)
+            {
+                case "ALW":
+                    seeds.Add(JournalSeed(nextSequence++, "ALW", actualCode, description, description, "DR", ExistingOrFallbackAccount(codeValue.AccountCode, salaryExpenseAccount, availableAccountCodes), companyCode, "Expense"));
+                    break;
+                case "BEN":
+                    seeds.Add(JournalSeed(nextSequence++, "BEN", actualCode, description, description, "DR", ExistingOrFallbackAccount(codeValue.AccountCode, salaryExpenseAccount, availableAccountCodes), companyCode, "Expense"));
+                    break;
+                case "BON":
+                    seeds.Add(JournalSeed(nextSequence++, BonusTransactionType, actualCode, description, description, "DR", ExistingOrFallbackAccount(codeValue.AccountCode, salaryExpenseAccount, availableAccountCodes), companyCode, "Expense"));
+                    break;
+                case "DED":
+                    seeds.Add(JournalSeed(nextSequence++, "DED", actualCode, description, description, "CR", ExistingOrFallbackAccount(codeValue.AccountCode, accruedPayableAccount, availableAccountCodes), companyCode, "Payable"));
+                    break;
+                case "CON":
+                    seeds.Add(JournalSeed(nextSequence++, "CON", actualCode, description, description, "CR", ExistingOrFallbackAccount(codeValue.AccountCode, accruedPayableAccount, availableAccountCodes), companyCode, "Payable"));
+                    seeds.Add(JournalSeed(nextSequence++, "ECO", actualCode, $"EMPLOYER {description}", $"EMPLOYER {description}", "DR", salaryExpenseAccount, companyCode, "Expense"));
+                    seeds.Add(JournalSeed(nextSequence++, "ECO", actualCode, $"EMPLOYER {description}", $"EMPLOYER {description}", "CR", ExistingOrFallbackAccount(codeValue.AccountCode, accruedPayableAccount, availableAccountCodes), companyCode, "Payable"));
+                    break;
+                case "LOA":
+                    seeds.Add(JournalSeed(nextSequence++, LoanRepaymentTransactionType, actualCode, description, description, "CR", ExistingOrFallbackAccount(codeValue.AccountCode, loanReceivableAccount, availableAccountCodes), companyCode, "Receivable"));
+                    seeds.Add(JournalSeed(nextSequence++, LoanInterestTransactionType, actualCode, $"{description} INT", $"{description} INTEREST", "CR", otherIncomeAccount, companyCode, "Income"));
+                    break;
+            }
+        }
+    }
+
+    private static PayrollJournalMappingSeed JournalSeed(
+        int sequenceNo,
+        string transactionType,
+        string? componentCode,
+        string shortDescription,
+        string description,
+        string debitCredit,
+        string accountCode,
+        string companyCode,
+        string accountType)
+        => new(
+            sequenceNo,
+            transactionType,
+            TrimOrNull(componentCode),
+            LimitText(TrimOrNull(shortDescription), 30),
+            LimitText(description, 120) ?? description,
+            NormalizeDebitCredit(debitCredit),
+            accountCode,
+            companyCode,
+            LimitText(accountType, 120) ?? accountType);
+
+    private static string? LimitText(string? value, int maxLength)
+    {
+        var trimmed = TrimOrNull(value);
+        return trimmed == null || trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
+    }
+
+    private static string ExistingOrFallbackAccount(string? candidate, string fallback, ISet<string> availableAccountCodes)
+    {
+        var normalized = NormalizePayrollJournalAccountCode(candidate);
+        return normalized.Length > 0 && availableAccountCodes.Contains(normalized) ? normalized : fallback;
+    }
+
+    private static string PickPayrollSeedAccount(IReadOnlyList<Account> accounts, IReadOnlyList<string> preferredCodes, string fallback)
+    {
+        foreach (var preferredCode in preferredCodes.Select(NormalizePayrollJournalAccountCode).Where(e => e.Length > 0))
+        {
+            var account = accounts.FirstOrDefault(e =>
+                NormalizePayrollJournalAccountCode(e.AccountCode).Equals(preferredCode, StringComparison.OrdinalIgnoreCase) ||
+                NormalizePayrollJournalAccountCode(e.AccountNumber).Equals(preferredCode, StringComparison.OrdinalIgnoreCase));
+            if (account != null)
+            {
+                return TrimOrNull(account.AccountCode) ?? TrimOrNull(account.AccountNumber) ?? fallback;
+            }
+        }
+
+        return fallback;
     }
 
     public async Task<IReadOnlyList<PayrollEmployeeTaxReliefDto>> GetEmployeeTaxReliefsAsync(
@@ -4743,7 +5131,7 @@ public class PayrollService : IPayrollService
         _context.PayrollRunEmployees.AddRange(runEmployees);
         _context.PayrollTransactions.AddRange(transactions);
 
-        var journalLines = await BuildJournalLinesAsync(tenantId, run.Id, transactions, cancellationToken);
+        var journalLines = await BuildJournalLinesAsync(tenantId, run, transactions, cancellationToken);
         _context.PayrollJournalLines.AddRange(journalLines);
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -4896,7 +5284,7 @@ public class PayrollService : IPayrollService
                     .AsNoTracking()
                     .Where(e => e.TenantId == tenantId && e.PayrollRunId == run.Id)
                     .ToListAsync(cancellationToken);
-                var journalLines = await BuildJournalLinesAsync(tenantId, run.Id, transactions, cancellationToken);
+                var journalLines = await BuildJournalLinesAsync(tenantId, run, transactions, cancellationToken);
                 _context.PayrollJournalLines.AddRange(journalLines);
             }
 
@@ -5157,6 +5545,7 @@ public class PayrollService : IPayrollService
         foreach (var runEmployee in runEmployees)
         {
             var payslip = BuildPayslip(run, runEmployee, snapshots.GetValueOrDefault(runEmployee.Id), payslipContext);
+            payslipContext.ProfilesByEmployeeId.TryGetValue(runEmployee.EmployeeId, out var profile);
             var email = payslip.EmployeeEmail?.Trim();
             var result = new PayrollPayslipEmailRecipientDto
             {
@@ -5180,6 +5569,14 @@ public class PayrollService : IPayrollService
                 continue;
             }
 
+            var payslipPassword = BuildPayslipPdfPassword(profile);
+            if (string.IsNullOrWhiteSpace(payslipPassword))
+            {
+                result.Message = "Employee date of birth or employee number is not configured for encrypted payslip delivery.";
+                recipients.Add(result);
+                continue;
+            }
+
             var printHtmlDocument = BuildPayslipPrintHtmlDocument(payslip);
             var printInnerHtml = payslip.HtmlContent ?? BuildPayslipPrintInnerHtml(payslip);
             var templateValues = BuildPayslipTemplateValues(
@@ -5195,7 +5592,7 @@ public class PayrollService : IPayrollService
             var emailSubject = RenderNotificationTemplate(subjectTemplate, templateValues);
             var html = BuildPayslipEmailHtml(activePayslipEmailTemplate, templateValues);
             var textBody = activePayslipEmailTemplate == null
-                ? null
+                ? DefaultPayrollPayslipEmailPlainText()
                 : TrimOrNull(RenderNotificationTemplate(activePayslipEmailTemplate.PlainTextBody ?? string.Empty, templateValues));
             var attachmentFileName = BuildPayslipEmailFileName(payslip);
             IReadOnlyList<NotificationTopicEmailAttachment> attachments = dto.AttachHtmlCopy
@@ -5205,7 +5602,7 @@ public class PayrollService : IPayrollService
                     {
                         FileName = attachmentFileName,
                         ContentType = "application/pdf",
-                        ContentBase64 = Convert.ToBase64String(BuildPayslipPdfAttachment(payslip))
+                        ContentBase64 = Convert.ToBase64String(BuildPayslipPdfAttachment(payslip, payslipPassword))
                     }
                 ]
                 : [];
@@ -5268,11 +5665,9 @@ public class PayrollService : IPayrollService
         };
     }
 
-    public async Task<PayrollJournalPostingDto> PostPayrollJournalAsync(
+    public async Task<PayrollJournalPreviewDto> GetPayrollJournalPreviewAsync(
         Guid tenantId,
         Guid runId,
-        Guid? userId,
-        PayrollRunActionDto dto,
         CancellationToken cancellationToken = default)
     {
         var run = await PayrollRunQuery(tenantId)
@@ -5280,124 +5675,252 @@ public class PayrollService : IPayrollService
             ?? throw new KeyNotFoundException("Payroll run not found.");
 
         EnsureRunHasSavedOutput(run);
-        await EnsurePayrollRunWorkflowApprovedForFinalOutputAsync(tenantId, run, "posting payroll", cancellationToken);
 
-        if (run.JournalLines.Any(e => e.Posted || e.JournalEntryId.HasValue))
-        {
-            throw new InvalidOperationException("Payroll journal has already been posted.");
-        }
-
-        if (run.JournalLines.Count == 0)
-        {
-            var journalLines = await BuildJournalLinesAsync(tenantId, run.Id, run.Transactions.ToList(), cancellationToken);
-            _context.PayrollJournalLines.AddRange(journalLines);
-            await _context.SaveChangesAsync(cancellationToken);
-
-            run = await PayrollRunQuery(tenantId)
-                .FirstAsync(e => e.Id == runId, cancellationToken);
-        }
-
-        var unmapped = run.JournalLines
-            .Where(e => string.IsNullOrWhiteSpace(e.AccountCode) || e.AccountCode.Equals("UNMAPPED", StringComparison.OrdinalIgnoreCase))
+        var generatedForPreview = false;
+        var journalLines = run.JournalLines
+            .Where(e => e.Posted || e.JournalEntryId.HasValue)
             .ToList();
-        if (unmapped.Count > 0)
+        if (journalLines.Count == 0)
         {
-            throw new InvalidOperationException("Payroll journal contains unmapped GL accounts. Complete Payroll Journal Mapping before posting.");
+            journalLines = (await BuildJournalLinesAsync(tenantId, run, run.Transactions.ToList(), cancellationToken)).ToList();
+            generatedForPreview = true;
         }
 
-        var totalDebit = run.JournalLines.Where(e => e.DebitCredit == "DR").Sum(e => e.Amount);
-        var totalCredit = run.JournalLines.Where(e => e.DebitCredit == "CR").Sum(e => e.Amount);
-        if (totalDebit != totalCredit)
-        {
-            throw new InvalidOperationException($"Payroll journal is not balanced. Debit: {totalDebit}, Credit: {totalCredit}.");
-        }
+        var lines = journalLines
+            .OrderBy(e => e.SequenceNo)
+            .Select(BuildPayrollJournalPreviewLine)
+            .ToList();
 
-        var accountCodes = run.JournalLines.Select(e => e.AccountCode).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var accounts = await _context.Accounts
-            .AsNoTracking()
-            .Where(e => e.TenantId == tenantId && (accountCodes.Contains(e.AccountCode) || accountCodes.Contains(e.AccountNumber)))
-            .ToListAsync(cancellationToken);
+        var journalNumber = BuildPayrollJournalNumber(run);
+        var totalDebit = RoundMoney(lines.Where(e => e.DebitCredit == "DR").Sum(e => e.Amount));
+        var totalCredit = RoundMoney(lines.Where(e => e.DebitCredit == "CR").Sum(e => e.Amount));
+        var difference = RoundMoney(Math.Abs(totalDebit - totalCredit));
+        var missingAccountCodes = await FindMissingPayrollJournalAccountCodesAsync(tenantId, lines, cancellationToken);
+        var existingJournal = await _journalEntryService.GetJournalEntryByNumberAsync(journalNumber, cancellationToken);
+        var alreadyPosted = lines.Any(e => e.Posted || e.JournalEntryId.HasValue) || existingJournal != null;
+        var unmappedLineCount = lines.Count(IsPayrollJournalLineUnmapped);
+        var invalidLineCount = lines.Count(e => e.DebitCredit is not "DR" and not "CR" || e.Amount <= 0);
+        var blocker = BuildPayrollJournalPreviewBlocker(
+            run,
+            journalNumber,
+            lines,
+            missingAccountCodes,
+            existingJournal != null,
+            alreadyPosted,
+            totalDebit,
+            totalCredit,
+            difference);
 
-        var accountsByCode = accounts
-            .SelectMany(e => new[]
-            {
-                new { Code = e.AccountCode, AccountId = e.Id },
-                new { Code = e.AccountNumber, AccountId = e.Id }
-            })
-            .Where(e => !string.IsNullOrWhiteSpace(e.Code))
-            .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(e => e.Key, e => e.First().AccountId, StringComparer.OrdinalIgnoreCase);
-
-        var missingAccounts = accountCodes.Where(code => !accountsByCode.ContainsKey(code)).ToList();
-        if (missingAccounts.Count > 0)
-        {
-            throw new InvalidOperationException($"Payroll journal account code(s) not found in Chart of Accounts: {string.Join(", ", missingAccounts)}.");
-        }
-
-        var postedAt = DateTime.UtcNow;
-        var journalDto = new CreateJournalEntryDto
-        {
-            JournalNumber = $"PAY-{run.RunNumber}",
-            TransactionDate = run.ClosedAt ?? postedAt,
-            Description = $"Payroll journal for {run.RunNumber}",
-            Reference = run.RunNumber,
-            SourceModule = "PAYROLL",
-            Transactions = run.JournalLines
-                .OrderBy(e => e.SequenceNo)
-                .Select(e => new CreateAccountTransactionDto
-                {
-                    AccountId = accountsByCode[e.AccountCode],
-                    Amount = e.Amount,
-                    TransactionType = e.DebitCredit == "DR" ? "Debit" : "Credit",
-                    Description = e.Description,
-                    Reference = run.RunNumber,
-                    CurrencyCode = run.CurrencyCode,
-                    LineNumber = e.SequenceNo
-                })
-                .ToList()
-        };
-
-        var created = await _journalEntryService.CreateJournalEntryAsync(journalDto, cancellationToken);
-        var posted = await _journalEntryService.PostJournalEntryAsync(created.Id, cancellationToken);
-
-        foreach (var line in run.JournalLines)
-        {
-            line.Posted = true;
-            line.JournalEntryId = posted.Id;
-        }
-
-        await ApplyPostedLoanRepaymentsAsync(tenantId, run, postedAt, cancellationToken);
-
-        if (run.Status != PayrollRunStatus.Closed)
-        {
-            run.Status = PayrollRunStatus.Closed;
-            run.ClosedAt = postedAt;
-            run.ClosedByUserId = userId;
-        }
-        else
-        {
-            run.ClosedAt ??= postedAt;
-            run.ClosedByUserId ??= userId;
-        }
-
-        AppendNotes(run, dto.Notes);
-        await AdvanceBonusPoliciesAfterCloseAsync(tenantId, run, cancellationToken);
-        await AdvanceActivePayrollPeriodAfterCloseAsync(tenantId, run, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
-        await GeneratePayslipSnapshotsAsync(tenantId, run.Id, userId, cancellationToken);
-
-        return new PayrollJournalPostingDto
+        return new PayrollJournalPreviewDto
         {
             PayrollRunId = run.Id,
             RunNumber = run.RunNumber,
-            JournalEntryId = posted.Id,
-            JournalNumber = posted.JournalNumber,
+            JournalNumber = journalNumber,
+            RunStatus = run.Status,
+            CurrencyCode = run.CurrencyCode,
+            EmployeeCount = run.EmployeeCount,
+            GrossAmount = run.GrossAmount,
+            NetAmount = run.NetAmount,
             TotalDebit = totalDebit,
             TotalCredit = totalCredit,
-            PostedAt = postedAt,
-            JournalEntry = posted,
-            Lines = run.JournalLines.OrderBy(e => e.SequenceNo).Select(ToDto).ToList()
+            Difference = difference,
+            LineCount = lines.Count,
+            UnmappedLineCount = unmappedLineCount,
+            InvalidLineCount = invalidLineCount,
+            GeneratedForPreview = generatedForPreview,
+            IsBalanced = difference <= PayrollJournalBalanceTolerance,
+            AlreadyPosted = alreadyPosted,
+            CanPost = blocker == null,
+            Blocker = blocker,
+            MissingAccountCodes = missingAccountCodes,
+            Lines = lines
         };
+    }
+
+    public async Task<PayrollJournalPostingDto> PostPayrollJournalAsync(
+        Guid tenantId,
+        Guid runId,
+        Guid? userId,
+        PayrollRunActionDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
+        {
+            var run = await PayrollRunQuery(tenantId)
+                .FirstOrDefaultAsync(e => e.Id == runId, cancellationToken)
+                ?? throw new KeyNotFoundException("Payroll run not found.");
+
+            EnsureRunHasSavedOutput(run);
+            await EnsurePayrollRunWorkflowApprovedForFinalOutputAsync(tenantId, run, "posting payroll", cancellationToken);
+
+            var journalNumber = BuildPayrollJournalNumber(run);
+            if (run.JournalLines.Any(e => e.Posted || e.JournalEntryId.HasValue))
+            {
+                throw new InvalidOperationException($"Payroll journal {journalNumber} has already been posted.");
+            }
+
+            var existingJournal = await _journalEntryService.GetJournalEntryByNumberAsync(journalNumber, cancellationToken);
+            if (existingJournal != null)
+            {
+                throw new InvalidOperationException($"Finance journal {journalNumber} already exists. Review the existing journal before posting this payroll run again.");
+            }
+
+            var journalLines = run.JournalLines.ToList();
+            if (journalLines.Count > 0)
+            {
+                _context.PayrollJournalLines.RemoveRange(journalLines);
+            }
+
+            journalLines = (await BuildJournalLinesAsync(tenantId, run, run.Transactions.ToList(), cancellationToken)).ToList();
+            if (journalLines.Count == 0)
+            {
+                throw new InvalidOperationException("Payroll journal cannot be posted because no journal lines were generated.");
+            }
+
+            _context.PayrollJournalLines.AddRange(journalLines);
+
+            foreach (var line in journalLines)
+            {
+                line.AccountCode = NormalizePayrollJournalAccountCode(line.AccountCode);
+                line.DebitCredit = NormalizePayrollDebitCredit(line.DebitCredit);
+                line.Amount = RoundMoney(Math.Abs(line.Amount));
+                line.Description = TrimOrNull(line.Description) ?? $"{line.TransactionType} payroll journal";
+            }
+
+            var invalidSides = journalLines
+                .Where(e => e.DebitCredit is not "DR" and not "CR")
+                .Select(FormatPayrollJournalLineHint)
+                .Take(5)
+                .ToList();
+            if (invalidSides.Count > 0)
+            {
+                throw new InvalidOperationException($"Payroll journal contains invalid debit/credit side(s): {string.Join(", ", invalidSides)}.");
+            }
+
+            var nonPositiveLines = journalLines
+                .Where(e => e.Amount <= 0)
+                .Select(FormatPayrollJournalLineHint)
+                .Take(5)
+                .ToList();
+            if (nonPositiveLines.Count > 0)
+            {
+                throw new InvalidOperationException($"Payroll journal contains zero or negative amount line(s): {string.Join(", ", nonPositiveLines)}.");
+            }
+
+            var unmapped = journalLines
+                .Where(e => string.IsNullOrWhiteSpace(e.AccountCode) || e.AccountCode.Equals("UNMAPPED", StringComparison.OrdinalIgnoreCase))
+                .Select(FormatPayrollJournalLineHint)
+                .Take(5)
+                .ToList();
+            if (unmapped.Count > 0)
+            {
+                throw new InvalidOperationException($"Payroll journal contains unmapped GL accounts ({string.Join(", ", unmapped)}). Complete Payroll Journal Mapping before posting.");
+            }
+
+            var totalDebit = RoundMoney(journalLines.Where(e => e.DebitCredit == "DR").Sum(e => e.Amount));
+            var totalCredit = RoundMoney(journalLines.Where(e => e.DebitCredit == "CR").Sum(e => e.Amount));
+            var balanceDifference = Math.Abs(totalDebit - totalCredit);
+            if (balanceDifference > PayrollJournalBalanceTolerance)
+            {
+                throw new InvalidOperationException($"Payroll journal is not balanced. Debit: {totalDebit}, Credit: {totalCredit}, Difference: {balanceDifference}.");
+            }
+
+            var accountCodes = journalLines
+                .Select(e => NormalizePayrollJournalAccountCode(e.AccountCode))
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var accounts = await _context.Accounts
+                .AsNoTracking()
+                .Where(e => e.TenantId == tenantId && (accountCodes.Contains(e.AccountCode.Trim()) || accountCodes.Contains(e.AccountNumber.Trim())))
+                .ToListAsync(cancellationToken);
+
+            var accountsByCode = accounts
+                .SelectMany(e => new[]
+                {
+                    new { Code = NormalizePayrollJournalAccountCode(e.AccountCode), AccountId = e.Id },
+                    new { Code = NormalizePayrollJournalAccountCode(e.AccountNumber), AccountId = e.Id }
+                })
+                .Where(e => !string.IsNullOrWhiteSpace(e.Code))
+                .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(e => e.Key, e => e.First().AccountId, StringComparer.OrdinalIgnoreCase);
+
+            var missingAccounts = accountCodes.Where(code => !accountsByCode.ContainsKey(code)).ToList();
+            if (missingAccounts.Count > 0)
+            {
+                throw new InvalidOperationException($"Payroll journal account code(s) not found in Chart of Accounts: {string.Join(", ", missingAccounts)}.");
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+            var postedAt = DateTime.UtcNow;
+            var journalDto = new CreateJournalEntryDto
+            {
+                JournalNumber = journalNumber,
+                TransactionDate = run.ClosedAt ?? postedAt,
+                Description = $"Payroll journal for {run.RunNumber}",
+                Reference = run.RunNumber,
+                SourceModule = PayrollJournalSourceModule,
+                Transactions = journalLines
+                    .OrderBy(e => e.SequenceNo)
+                    .Select(e => new CreateAccountTransactionDto
+                    {
+                        AccountId = accountsByCode[NormalizePayrollJournalAccountCode(e.AccountCode)],
+                        Amount = e.Amount,
+                        TransactionType = e.DebitCredit == "DR" ? "Debit" : "Credit",
+                        Description = e.Description,
+                        Reference = run.RunNumber,
+                        CurrencyCode = run.CurrencyCode,
+                        LineNumber = e.SequenceNo
+                    })
+                    .ToList()
+            };
+
+            var created = await _journalEntryService.CreateJournalEntryAsync(journalDto, cancellationToken);
+            var posted = await _journalEntryService.PostJournalEntryAsync(created.Id, cancellationToken);
+
+            foreach (var line in journalLines)
+            {
+                line.Posted = true;
+                line.JournalEntryId = posted.Id;
+            }
+
+            await ApplyPostedLoanRepaymentsAsync(tenantId, run, postedAt, cancellationToken);
+
+            if (run.Status != PayrollRunStatus.Closed)
+            {
+                run.Status = PayrollRunStatus.Closed;
+                run.ClosedAt = postedAt;
+                run.ClosedByUserId = userId;
+            }
+            else
+            {
+                run.ClosedAt ??= postedAt;
+                run.ClosedByUserId ??= userId;
+            }
+
+            AppendNotes(run, dto.Notes);
+            await AdvanceBonusPoliciesAfterCloseAsync(tenantId, run, cancellationToken);
+            await AdvanceActivePayrollPeriodAfterCloseAsync(tenantId, run, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+            await GeneratePayslipSnapshotsAsync(tenantId, run.Id, userId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return new PayrollJournalPostingDto
+            {
+                PayrollRunId = run.Id,
+                RunNumber = run.RunNumber,
+                JournalEntryId = posted.Id,
+                JournalNumber = posted.JournalNumber,
+                TotalDebit = totalDebit,
+                TotalCredit = totalCredit,
+                PostedAt = postedAt,
+                JournalEntry = posted,
+                Lines = journalLines.OrderBy(e => e.SequenceNo).Select(ToDto).ToList()
+            };
+        });
     }
 
     private async Task<PayrollParameterSet?> GetActivePayrollParametersAsync(Guid tenantId, CancellationToken cancellationToken)
@@ -8185,6 +8708,161 @@ public class PayrollService : IPayrollService
     private static decimal RoundMoney(decimal amount)
         => Math.Round(amount, 2);
 
+    private static string BuildPayrollJournalNumber(PayrollRun run)
+        => $"{PayrollJournalNumberPrefix}{run.RunNumber}";
+
+    private static string NormalizePayrollJournalAccountCode(string? value)
+        => value?.Trim() ?? string.Empty;
+
+    private static string NormalizePayrollDebitCredit(string? value)
+        => value?.Trim().ToUpperInvariant() switch
+        {
+            "DR" or "D" => "DR",
+            "CR" or "C" => "CR",
+            _ => string.Empty
+        };
+
+    private static string FormatPayrollJournalLineHint(PayrollJournalLine line)
+        => $"{line.SequenceNo}:{line.TransactionType}/{line.AccountCode}";
+
+    private static string FormatPayrollJournalLineHint(PayrollJournalLineDto line)
+        => $"{line.SequenceNo}:{line.TransactionType}/{line.AccountCode}";
+
+    private static PayrollJournalLineDto BuildPayrollJournalPreviewLine(PayrollJournalLine line)
+        => new()
+        {
+            Id = line.Id,
+            SequenceNo = line.SequenceNo,
+            TransactionType = line.TransactionType,
+            DebitCredit = NormalizePayrollDebitCredit(line.DebitCredit),
+            AccountCode = NormalizePayrollJournalAccountCode(line.AccountCode),
+            Description = TrimOrNull(line.Description) ?? $"{line.TransactionType} payroll journal",
+            Amount = RoundMoney(Math.Abs(line.Amount)),
+            Posted = line.Posted,
+            JournalEntryId = line.JournalEntryId
+        };
+
+    private static bool IsPayrollJournalLineUnmapped(PayrollJournalLineDto line)
+        => string.IsNullOrWhiteSpace(line.AccountCode) || line.AccountCode.Equals("UNMAPPED", StringComparison.OrdinalIgnoreCase);
+
+    private static string? BuildPayrollJournalPreviewBlocker(
+        PayrollRun run,
+        string journalNumber,
+        IReadOnlyList<PayrollJournalLineDto> lines,
+        IReadOnlyList<string> missingAccountCodes,
+        bool existingJournalFound,
+        bool alreadyPosted,
+        decimal totalDebit,
+        decimal totalCredit,
+        decimal difference)
+    {
+        if (lines.Count == 0)
+        {
+            return "Payroll journal cannot be posted because no journal lines were generated.";
+        }
+
+        if (existingJournalFound)
+        {
+            return $"Finance journal {journalNumber} already exists. Review the existing journal before posting this payroll run again.";
+        }
+
+        if (alreadyPosted)
+        {
+            return $"Payroll journal {journalNumber} has already been posted.";
+        }
+
+        if (run.Status == PayrollRunStatus.Closed)
+        {
+            return "This payroll run is already closed.";
+        }
+
+        if (run.Status == PayrollRunStatus.InReview)
+        {
+            return "Payroll workflow approval is required before posting.";
+        }
+
+        if (run.Status is PayrollRunStatus.Draft or PayrollRunStatus.RolledBack)
+        {
+            return "Calculate the payroll run before posting.";
+        }
+
+        var invalidSides = lines
+            .Where(e => e.DebitCredit is not "DR" and not "CR")
+            .Select(FormatPayrollJournalLineHint)
+            .Take(5)
+            .ToList();
+        if (invalidSides.Count > 0)
+        {
+            return $"Payroll journal contains invalid debit/credit side(s): {string.Join(", ", invalidSides)}.";
+        }
+
+        var invalidAmounts = lines
+            .Where(e => e.Amount <= 0)
+            .Select(FormatPayrollJournalLineHint)
+            .Take(5)
+            .ToList();
+        if (invalidAmounts.Count > 0)
+        {
+            return $"Payroll journal contains zero or negative amount line(s): {string.Join(", ", invalidAmounts)}.";
+        }
+
+        var unmapped = lines
+            .Where(IsPayrollJournalLineUnmapped)
+            .Select(FormatPayrollJournalLineHint)
+            .Take(5)
+            .ToList();
+        if (unmapped.Count > 0)
+        {
+            return $"Payroll journal contains unmapped GL accounts ({string.Join(", ", unmapped)}). Complete Payroll Journal Mapping before posting.";
+        }
+
+        if (missingAccountCodes.Count > 0)
+        {
+            return $"Payroll journal account code(s) not found in Chart of Accounts: {string.Join(", ", missingAccountCodes)}.";
+        }
+
+        if (difference > PayrollJournalBalanceTolerance)
+        {
+            return $"Payroll journal is not balanced. Debit: {totalDebit}, Credit: {totalCredit}, Difference: {difference}.";
+        }
+
+        return null;
+    }
+
+    private async Task<IReadOnlyList<string>> FindMissingPayrollJournalAccountCodesAsync(
+        Guid tenantId,
+        IReadOnlyList<PayrollJournalLineDto> lines,
+        CancellationToken cancellationToken)
+    {
+        var accountCodes = lines
+            .Select(e => NormalizePayrollJournalAccountCode(e.AccountCode))
+            .Where(e => !string.IsNullOrWhiteSpace(e) && !e.Equals("UNMAPPED", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (accountCodes.Count == 0)
+        {
+            return [];
+        }
+
+        var accounts = await _context.Accounts
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId)
+            .Select(e => new { e.AccountCode, e.AccountNumber })
+            .ToListAsync(cancellationToken);
+        var availableCodes = accounts
+            .SelectMany(e => new[]
+            {
+                NormalizePayrollJournalAccountCode(e.AccountCode),
+                NormalizePayrollJournalAccountCode(e.AccountNumber)
+            })
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return accountCodes
+            .Where(code => !availableCodes.Contains(code))
+            .ToList();
+    }
+
     private async Task<PayrollPayslipBuildContext> LoadPayslipContextAsync(
         Guid tenantId,
         PayrollRun run,
@@ -8509,7 +9187,7 @@ public class PayrollService : IPayrollService
                 TableName = "PayrollPayslipEmail",
                 Subject = "Payslip - {{pay_period}}",
                 HtmlBody = DefaultPayrollPayslipEmailHtmlTemplate(),
-                PlainTextBody = "Dear {{employee_name}}, your payslip for {{pay_period}} is attached.",
+                PlainTextBody = DefaultPayrollPayslipEmailPlainText(),
                 TemplateVariables = variables,
                 Description = "Payroll payslip email body. The full payslip is attached as a PDF generated from the payroll print preview layout.",
                 IsActive = true,
@@ -8785,6 +9463,9 @@ public class PayrollService : IPayrollService
             "bonus_income_tax",
             "employee_contribution",
             "employer_contribution",
+            "payslip_password_format",
+            "payslip_password_example",
+            "payslip_password_help",
             "message",
             "action_url"
         ];
@@ -8854,6 +9535,9 @@ public class PayrollService : IPayrollService
             ["bonus_income_tax"] = FormatEmailAmount(bonusIncomeTax),
             ["employee_contribution"] = FormatEmailAmount(payslip.EmployeeContribution),
             ["employer_contribution"] = FormatEmailAmount(payslip.EmployerContribution),
+            ["payslip_password_format"] = "DDMMYYYY + EMPLOYEENUMBER",
+            ["payslip_password_example"] = "26021985PAY001",
+            ["payslip_password_help"] = "Your attached payslip PDF is password-protected. Use your date of birth in DDMMYYYY format followed immediately by your employee number in uppercase, for example 26021985PAY001.",
             ["message"] = message ?? string.Empty,
             ["action_url"] = $"/hr/payroll?runId={run.Id}",
             ["payslip_print_html"] = printInnerHtml,
@@ -8880,6 +9564,9 @@ public class PayrollService : IPayrollService
            <p>Net salary: <strong>{{net_salary}}</strong> {{currency_code}}</p>
            {{message}}
            """;
+
+    private static string DefaultPayrollPayslipEmailPlainText()
+        => "Dear {{employee_name}}, your payslip for {{pay_period}} is attached.";
 
     private static string RenderNotificationTemplate(string template, IReadOnlyDictionary<string, string> values)
     {
@@ -9238,11 +9925,11 @@ public class PayrollService : IPayrollService
             .AppendLine("</span></div>");
     }
 
-    private static byte[] BuildPayslipPdfAttachment(PayrollPayslipDto payslip)
+    private static byte[] BuildPayslipPdfAttachment(PayrollPayslipDto payslip, string password)
     {
         QuestPDF.Settings.License = LicenseType.Community;
 
-        return Document.Create(container =>
+        var pdfBytes = Document.Create(container =>
         {
             container.Page(page =>
             {
@@ -9268,6 +9955,48 @@ public class PayrollService : IPayrollService
                     });
             });
         }).GeneratePdf();
+
+        return EncryptPayslipPdf(pdfBytes, password);
+    }
+
+    private static byte[] EncryptPayslipPdf(byte[] pdfBytes, string password)
+    {
+        if (pdfBytes.Length == 0)
+        {
+            return pdfBytes;
+        }
+
+        var userPassword = Encoding.UTF8.GetBytes(password);
+        var ownerPassword = Encoding.UTF8.GetBytes(Guid.NewGuid().ToString("N"));
+        var writerProperties = new WriterProperties()
+            .SetStandardEncryption(
+                userPassword,
+                ownerPassword,
+                EncryptionConstants.ALLOW_PRINTING,
+                EncryptionConstants.ENCRYPTION_AES_256);
+
+        using var input = new MemoryStream(pdfBytes);
+        using var output = new MemoryStream();
+        using var reader = new PdfReader(input);
+        using var writer = new PdfWriter(output, writerProperties);
+        using (var pdf = new PdfDocument(reader, writer))
+        {
+            pdf.Close();
+        }
+
+        return output.ToArray();
+    }
+
+    private static string? BuildPayslipPdfPassword(PayrollEmployeeProfile? profile)
+    {
+        var dateOfBirth = profile?.Employee.DateOfBirth;
+        var employeeNumber = TrimOrNull(profile?.Employee.EmployeeNumber);
+        if (dateOfBirth == null || string.IsNullOrWhiteSpace(employeeNumber))
+        {
+            return null;
+        }
+
+        return dateOfBirth.Value.ToString("ddMMyyyy", CultureInfo.InvariantCulture) + employeeNumber.ToUpperInvariant();
     }
 
     private static void ComposeStandardPayslipPdf(IContainer container, PayrollPayslipDto payslip)
@@ -10308,55 +11037,568 @@ public class PayrollService : IPayrollService
 
     private async Task<IReadOnlyList<PayrollJournalLine>> BuildJournalLinesAsync(
         Guid tenantId,
-        Guid runId,
+        PayrollRun run,
         IReadOnlyList<PayrollTransaction> transactions,
         CancellationToken cancellationToken)
     {
         var mappings = await _context.PayrollJournalMappings
             .AsNoTracking()
             .Where(e => e.TenantId == tenantId && e.IsActive)
+            .OrderBy(e => e.SequenceNo)
+            .ThenBy(e => e.TransactionType)
+            .ThenBy(e => e.ComponentCode)
+            .ThenBy(e => e.DebitCredit)
+            .ThenBy(e => e.AccountCode)
             .ToListAsync(cancellationToken);
 
-        var groups = transactions
-            .Where(e => e.TransactionType != TaxReliefTransactionType)
-            .GroupBy(e => new { e.TransactionType, e.ComponentCode })
-            .OrderBy(e => e.Key.TransactionType)
-            .ThenBy(e => e.Key.ComponentCode)
+        var employeeIds = transactions
+            .Select(e => e.EmployeeId)
+            .Where(e => e != Guid.Empty)
+            .Distinct()
             .ToList();
+        var paymentProfiles = employeeIds.Count == 0
+            ? new List<PayrollEmployeeProfile>()
+            : await _context.PayrollEmployeeProfiles
+                .AsNoTracking()
+                .Include(e => e.PaymentMethods.OrderBy(m => m.SequenceNo))
+                .Where(e => e.TenantId == tenantId && employeeIds.Contains(e.EmployeeId))
+                .ToListAsync(cancellationToken);
+        var profilesByEmployeeId = paymentProfiles
+            .GroupBy(e => e.EmployeeId)
+            .ToDictionary(e => e.Key, e => e.First());
 
         var lines = new List<PayrollJournalLine>();
         var sequence = 1;
-        foreach (var group in groups)
-        {
-            var mapping = mappings.FirstOrDefault(e =>
-                    e.TransactionType.Equals(group.Key.TransactionType, StringComparison.OrdinalIgnoreCase) &&
-                    !string.IsNullOrWhiteSpace(e.ComponentCode) &&
-                    e.ComponentCode.Equals(group.Key.ComponentCode, StringComparison.OrdinalIgnoreCase))
-                ?? mappings.FirstOrDefault(e =>
-                    e.TransactionType.Equals(group.Key.TransactionType, StringComparison.OrdinalIgnoreCase) &&
-                    string.IsNullOrWhiteSpace(e.ComponentCode));
 
-            var amount = group.Sum(e => e.EmployerAmount ?? e.Amount);
-            if (amount == 0)
+        var regularGroups = transactions
+            .Where(e => IsRegularPayrollJournalTransaction(e.TransactionType))
+            .GroupBy(e => new { e.TransactionType, e.ComponentCode })
+            .OrderBy(e => PayrollJournalSortOrder(e.Key.TransactionType))
+            .ThenBy(e => e.Key.TransactionType)
+            .ThenBy(e => e.Key.ComponentCode)
+            .ToList();
+
+        foreach (var group in regularGroups)
+        {
+            var amount = group.Sum(e => e.Amount);
+            var description = group
+                .Select(e => TrimOrNull(e.Description))
+                .FirstOrDefault(e => e != null) ?? $"{group.Key.TransactionType} payroll journal";
+            var matchedMappings = FindPayrollJournalMappings(mappings, group.Key.TransactionType, group.Key.ComponentCode);
+
+            AddPayrollJournalLines(
+                lines,
+                tenantId,
+                run.Id,
+                ref sequence,
+                group.Key.TransactionType,
+                description,
+                amount,
+                matchedMappings,
+                InferDebitCredit(group.Key.TransactionType));
+        }
+
+        AddNetPayJournalLines(tenantId, run, transactions, mappings, profilesByEmployeeId, lines, ref sequence);
+        AddEmployerContributionJournalLines(tenantId, run.Id, transactions, mappings, lines, ref sequence);
+
+        return lines;
+    }
+
+    private static bool IsRegularPayrollJournalTransaction(string transactionType)
+        => !transactionType.Equals(TaxReliefTransactionType, StringComparison.OrdinalIgnoreCase) &&
+           !transactionType.Equals(NetPayTransactionType, StringComparison.OrdinalIgnoreCase) &&
+           !IsEmployerOnlyPayrollJournalTransaction(transactionType);
+
+    private static bool IsEmployerOnlyPayrollJournalTransaction(string transactionType)
+        => transactionType.Equals(EmployerPensionTransactionType, StringComparison.OrdinalIgnoreCase) ||
+           transactionType.Equals(PayrollComponentType.EmployerContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+           transactionType.Equals(PromotionEmployerContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase);
+
+    private static int PayrollJournalSortOrder(string transactionType)
+    {
+        if (transactionType.Equals(BasicSalaryTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.Allowance.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.Benefit.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(BonusTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(OvertimeTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PromotionBasicArrearsTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PromotionAllowanceArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return 10;
+        }
+
+        if (transactionType.Equals(IncomeTaxTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return 20;
+        }
+
+        if (transactionType.Equals(EmployeePensionTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.Deduction.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(LoanRepaymentTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(LoanInterestTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(SalaryAdvanceTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return 30;
+        }
+
+        return 50;
+    }
+
+    private static IReadOnlyList<PayrollJournalMapping> FindPayrollJournalMappings(
+        IReadOnlyList<PayrollJournalMapping> mappings,
+        string transactionType,
+        string? componentCode,
+        IEnumerable<string>? extraAliases = null)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddPayrollJournalMappingKey(keys, transactionType);
+        foreach (var alias in PayrollJournalTransactionAliases(transactionType))
+        {
+            AddPayrollJournalMappingKey(keys, alias);
+        }
+
+        if (extraAliases != null)
+        {
+            foreach (var alias in extraAliases)
+            {
+                AddPayrollJournalMappingKey(keys, alias);
+            }
+        }
+
+        var candidates = mappings
+            .Where(e => keys.Contains(e.TransactionType.Trim()))
+            .ToList();
+        var component = TrimOrNull(componentCode);
+        if (component != null)
+        {
+            var specific = candidates
+                .Where(e => !string.IsNullOrWhiteSpace(e.ComponentCode) &&
+                            e.ComponentCode.Trim().Equals(component, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (specific.Count > 0)
+            {
+                return specific;
+            }
+        }
+
+        return candidates
+            .Where(e => string.IsNullOrWhiteSpace(e.ComponentCode))
+            .ToList();
+    }
+
+    private static void AddPayrollJournalMappingKey(ISet<string> keys, string? value)
+    {
+        var key = TrimOrNull(value);
+        if (key != null)
+        {
+            keys.Add(key);
+        }
+    }
+
+    private static IReadOnlyList<string> PayrollJournalTransactionAliases(string transactionType)
+    {
+        if (transactionType.Equals(BasicSalaryTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["BAS"];
+        }
+
+        if (transactionType.Equals(IncomeTaxTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["TAX"];
+        }
+
+        if (transactionType.Equals(NetPayTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["BAN", "CAS", "Bank", "Cash"];
+        }
+
+        if (transactionType.Equals(EmployeePensionTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["ESF"];
+        }
+
+        if (transactionType.Equals(EmployerPensionTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["CSF"];
+        }
+
+        if (transactionType.Equals(PayrollComponentType.Allowance.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return ["ALW"];
+        }
+
+        if (transactionType.Equals(PayrollComponentType.Benefit.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return ["BEN"];
+        }
+
+        if (transactionType.Equals(PayrollComponentType.Deduction.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return ["DED"];
+        }
+
+        if (transactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return ["CON"];
+        }
+
+        if (transactionType.Equals(PayrollComponentType.EmployerContribution.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return ["ECO"];
+        }
+
+        if (transactionType.Equals(PromotionEmployerContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["CSR"];
+        }
+
+        if (transactionType.Equals(PromotionBasicArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["BAR"];
+        }
+
+        if (transactionType.Equals(PromotionAllowanceArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["ALR"];
+        }
+
+        if (transactionType.Equals(PromotionEmployeeContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["ESR"];
+        }
+
+        if (transactionType.Equals(BackpayDeductionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ["DER"];
+        }
+
+        return [];
+    }
+
+    private static IReadOnlyList<string> PayrollPaymentJournalAliases(string paymentType)
+    {
+        var aliases = new List<string> { NetPayTransactionType };
+        var normalized = TrimOrNull(paymentType);
+        if (normalized == null)
+        {
+            aliases.Add("BAN");
+            return aliases;
+        }
+
+        aliases.Add(normalized);
+        aliases.Add(normalized.Length >= 3 ? normalized[..3].ToUpperInvariant() : normalized.ToUpperInvariant());
+        if (normalized.Equals("Bank", StringComparison.OrdinalIgnoreCase))
+        {
+            aliases.Add("BAN");
+        }
+        else if (normalized.Equals("Cash", StringComparison.OrdinalIgnoreCase))
+        {
+            aliases.Add("CAS");
+        }
+
+        return aliases;
+    }
+
+    private static void AddPayrollJournalLines(
+        ICollection<PayrollJournalLine> lines,
+        Guid tenantId,
+        Guid runId,
+        ref int sequence,
+        string transactionType,
+        string description,
+        decimal amount,
+        IReadOnlyList<PayrollJournalMapping> mappings,
+        string fallbackDebitCredit)
+    {
+        var roundedAmount = RoundMoney(Math.Abs(amount));
+        if (roundedAmount <= 0m)
+        {
+            return;
+        }
+
+        if (mappings.Count == 0)
+        {
+            AddPayrollJournalLine(
+                lines,
+                tenantId,
+                runId,
+                ref sequence,
+                transactionType,
+                fallbackDebitCredit,
+                "UNMAPPED",
+                description,
+                roundedAmount);
+            return;
+        }
+
+        foreach (var mapping in mappings)
+        {
+            AddPayrollJournalLine(
+                lines,
+                tenantId,
+                runId,
+                ref sequence,
+                TrimOrNull(mapping.TransactionType) ?? transactionType,
+                NormalizeDebitCredit(mapping.DebitCredit),
+                mapping.AccountCode,
+                TrimOrNull(mapping.Description) ?? description,
+                roundedAmount);
+        }
+    }
+
+    private static void AddPayrollJournalLine(
+        ICollection<PayrollJournalLine> lines,
+        Guid tenantId,
+        Guid runId,
+        ref int sequence,
+        string transactionType,
+        string debitCredit,
+        string? accountCode,
+        string description,
+        decimal amount)
+    {
+        lines.Add(new PayrollJournalLine
+        {
+            TenantId = tenantId,
+            PayrollRunId = runId,
+            SequenceNo = sequence++,
+            TransactionType = transactionType,
+            DebitCredit = NormalizeDebitCredit(debitCredit),
+            AccountCode = TrimOrNull(accountCode) ?? "UNMAPPED",
+            Description = description,
+            Amount = RoundMoney(Math.Abs(amount)),
+            Posted = false
+        });
+    }
+
+    private static void AddNetPayJournalLines(
+        Guid tenantId,
+        PayrollRun run,
+        IReadOnlyList<PayrollTransaction> transactions,
+        IReadOnlyList<PayrollJournalMapping> mappings,
+        IReadOnlyDictionary<Guid, PayrollEmployeeProfile> profilesByEmployeeId,
+        ICollection<PayrollJournalLine> lines,
+        ref int sequence)
+    {
+        var netTransactions = transactions
+            .Where(e => e.TransactionType.Equals(NetPayTransactionType, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var netPayByPaymentType = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var transaction in netTransactions)
+        {
+            var amount = RoundMoney(transaction.Amount);
+            if (amount == 0m)
             {
                 continue;
             }
 
-            lines.Add(new PayrollJournalLine
+            if (profilesByEmployeeId.TryGetValue(transaction.EmployeeId, out var profile))
             {
-                TenantId = tenantId,
-                PayrollRunId = runId,
-                SequenceNo = sequence++,
-                TransactionType = group.Key.TransactionType,
-                DebitCredit = mapping?.DebitCredit ?? InferDebitCredit(group.Key.TransactionType),
-                AccountCode = mapping?.AccountCode ?? "UNMAPPED",
-                Description = mapping?.Description ?? $"{group.Key.TransactionType} payroll journal",
-                Amount = Math.Abs(amount),
-                Posted = false
-            });
+                var paymentMethods = profile.PaymentMethods
+                    .Where(e => e.IsActive && IsEffective(e.StartDate, e.EndDate, run.PayPeriodFrom, run.PayPeriodTo))
+                    .OrderBy(e => e.SequenceNo)
+                    .ToList();
+
+                if (paymentMethods.Count > 0)
+                {
+                    foreach (var allocation in BuildPaymentAllocations(paymentMethods, amount, transaction.CurrencyCode))
+                    {
+                        AddJournalAmount(netPayByPaymentType, NormalizePayrollPaymentType(allocation.Method.PaymentType), allocation.BaseAmount);
+                    }
+
+                    continue;
+                }
+            }
+
+            AddJournalAmount(netPayByPaymentType, "Bank", amount);
         }
 
-        return lines;
+        if (netTransactions.Count == 0 && run.NetAmount != 0m)
+        {
+            AddJournalAmount(netPayByPaymentType, "Bank", run.NetAmount);
+        }
+
+        foreach (var paymentGroup in netPayByPaymentType.OrderBy(e => e.Key))
+        {
+            var matchedMappings = FindPayrollJournalMappings(
+                mappings,
+                paymentGroup.Key,
+                componentCode: null,
+                extraAliases: PayrollPaymentJournalAliases(paymentGroup.Key));
+            AddPayrollJournalLines(
+                lines,
+                tenantId,
+                run.Id,
+                ref sequence,
+                paymentGroup.Key,
+                $"{paymentGroup.Key} net pay",
+                paymentGroup.Value,
+                matchedMappings,
+                "CR");
+        }
+    }
+
+    private static string NormalizePayrollPaymentType(string? paymentType)
+        => TrimOrNull(paymentType) ?? "Bank";
+
+    private static void AddJournalAmount(IDictionary<string, decimal> amounts, string key, decimal amount)
+    {
+        var roundedAmount = RoundMoney(amount);
+        if (roundedAmount == 0m)
+        {
+            return;
+        }
+
+        amounts.TryGetValue(key, out var currentAmount);
+        amounts[key] = RoundMoney(currentAmount + roundedAmount);
+    }
+
+    private static void AddEmployerContributionJournalLines(
+        Guid tenantId,
+        Guid runId,
+        IReadOnlyList<PayrollTransaction> transactions,
+        IReadOnlyList<PayrollJournalMapping> mappings,
+        ICollection<PayrollJournalLine> lines,
+        ref int sequence)
+    {
+        var groups = transactions
+            .Select(e => new
+            {
+                Transaction = e,
+                JournalTransactionType = ResolveEmployerContributionJournalTransactionType(e.TransactionType),
+                MappingTransactionType = ResolveEmployerContributionJournalMappingType(e.TransactionType),
+                Amount = ResolveEmployerContributionJournalAmount(e)
+            })
+            .Where(e => e.Amount != 0m && e.JournalTransactionType != null && e.MappingTransactionType != null)
+            .GroupBy(e => new
+            {
+                TransactionType = e.JournalTransactionType!,
+                MappingTransactionType = e.MappingTransactionType!,
+                e.Transaction.ComponentCode
+            })
+            .OrderBy(e => e.Key.TransactionType)
+            .ThenBy(e => e.Key.ComponentCode)
+            .ToList();
+
+        foreach (var group in groups)
+        {
+            var amount = group.Sum(e => e.Amount);
+            var description = group
+                .Select(e => TrimOrNull(e.Transaction.Description))
+                .FirstOrDefault(e => e != null) ?? $"{group.Key.TransactionType} payroll journal";
+            var matchedMappings = FindPayrollJournalMappings(mappings, group.Key.MappingTransactionType, group.Key.ComponentCode);
+            AddEmployerContributionJournalPair(
+                lines,
+                tenantId,
+                runId,
+                ref sequence,
+                group.Key.TransactionType,
+                $"Employer {description}",
+                amount,
+                matchedMappings);
+        }
+    }
+
+    private static string? ResolveEmployerContributionJournalTransactionType(string transactionType)
+    {
+        if (transactionType.Equals(EmployerPensionTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PromotionEmployerContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return transactionType;
+        }
+
+        if (transactionType.Equals(PayrollComponentType.EmployerContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PromotionContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return PayrollComponentType.EmployerContribution.ToString();
+        }
+
+        return null;
+    }
+
+    private static string? ResolveEmployerContributionJournalMappingType(string transactionType)
+    {
+        if (transactionType.Equals(EmployerPensionTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return EmployerPensionTransactionType;
+        }
+
+        if (transactionType.Equals(PromotionEmployerContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return PromotionEmployerContributionArrearsTransactionType;
+        }
+
+        if (transactionType.Equals(PromotionContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return "ECR";
+        }
+
+        if (transactionType.Equals(PayrollComponentType.EmployerContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return "ECO";
+        }
+
+        return null;
+    }
+
+    private static decimal ResolveEmployerContributionJournalAmount(PayrollTransaction transaction)
+    {
+        if (IsEmployerOnlyPayrollJournalTransaction(transaction.TransactionType))
+        {
+            return transaction.EmployerAmount ?? transaction.Amount;
+        }
+
+        if (transaction.TransactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transaction.TransactionType.Equals(PromotionContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return transaction.EmployerAmount.GetValueOrDefault();
+        }
+
+        return 0m;
+    }
+
+    private static void AddEmployerContributionJournalPair(
+        ICollection<PayrollJournalLine> lines,
+        Guid tenantId,
+        Guid runId,
+        ref int sequence,
+        string transactionType,
+        string description,
+        decimal amount,
+        IReadOnlyList<PayrollJournalMapping> mappings)
+    {
+        var debitMappings = mappings
+            .Where(e => NormalizeDebitCredit(e.DebitCredit) == "DR")
+            .ToList();
+        var creditMappings = mappings
+            .Where(e => NormalizeDebitCredit(e.DebitCredit) == "CR")
+            .ToList();
+
+        AddPayrollJournalLines(
+            lines,
+            tenantId,
+            runId,
+            ref sequence,
+            transactionType,
+            $"{description} expense",
+            amount,
+            debitMappings,
+            "DR");
+
+        AddPayrollJournalLines(
+            lines,
+            tenantId,
+            runId,
+            ref sequence,
+            transactionType,
+            $"{description} payable",
+            amount,
+            creditMappings,
+            "CR");
     }
 
     private static IEnumerable<ResolvedPayrollComponent> ResolveComponents(
@@ -12628,7 +13870,7 @@ public class PayrollService : IPayrollService
     private static string NormalizeDebitCredit(string? debitCredit)
     {
         var value = debitCredit?.Trim().ToUpperInvariant();
-        return value is "CR" ? "CR" : "DR";
+        return value is "CR" or "C" ? "CR" : "DR";
     }
 
     private static string NormalizeBackpayOperation(string? operationType)
@@ -12691,8 +13933,8 @@ public class PayrollService : IPayrollService
         var value = transactionType?.Trim().Replace(" ", string.Empty, StringComparison.OrdinalIgnoreCase);
         return value?.ToUpperInvariant() switch
         {
-            "WITHDRAWAL" => "Withdrawal",
-            "INTEREST" => "Interest",
+            "W" or "WD" or "WITHDRAW" or "WITHDRAWAL" => "Withdrawal",
+            "I" or "INT" or "INTEREST" => "Interest",
             _ => throw new InvalidOperationException("Transaction type must be Withdrawal or Interest.")
         };
     }
@@ -12847,19 +14089,27 @@ public class PayrollService : IPayrollService
     }
 
     private static string InferDebitCredit(string transactionType)
-        => transactionType is IncomeTaxTransactionType
-            or EmployeePensionTransactionType
-            or EmployerPensionTransactionType
-            or LoanRepaymentTransactionType
-            or LoanInterestTransactionType
-            or SalaryAdvanceTransactionType
-            or AbsenceTransactionType
-            or PromotionEmployeeContributionArrearsTransactionType
-            or PromotionEmployerContributionArrearsTransactionType
-            or PromotionContributionArrearsTransactionType
-            or BackpayDeductionArrearsTransactionType
-            ? "CR"
-            : "DR";
+    {
+        if (transactionType.Equals(IncomeTaxTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(EmployeePensionTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(EmployerPensionTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.Deduction.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PayrollComponentType.EmployeeContribution.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(LoanRepaymentTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(LoanInterestTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(SalaryAdvanceTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(AbsenceTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(NetPayTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PromotionEmployeeContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PromotionEmployerContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(PromotionContributionArrearsTransactionType, StringComparison.OrdinalIgnoreCase) ||
+            transactionType.Equals(BackpayDeductionArrearsTransactionType, StringComparison.OrdinalIgnoreCase))
+        {
+            return "CR";
+        }
+
+        return "DR";
+    }
 
     private static decimal RemainingScheduleAmount(PayrollLoanSchedule schedule)
         => Math.Max(0, Math.Round(schedule.PrincipalAmount + schedule.InterestAmount - schedule.AmountPaid - schedule.InterestPaid, 2));
@@ -13344,12 +14594,15 @@ public class PayrollService : IPayrollService
         => new()
         {
             Id = entity.Id,
+            SequenceNo = entity.SequenceNo,
             TransactionType = entity.TransactionType,
             ComponentCode = entity.ComponentCode,
+            ShortDescription = entity.ShortDescription,
             Description = entity.Description,
             DebitCredit = entity.DebitCredit,
             AccountCode = entity.AccountCode,
             AccountType = entity.AccountType,
+            LegacyCompanyCode = entity.LegacyCompanyCode,
             IsActive = entity.IsActive
         };
 

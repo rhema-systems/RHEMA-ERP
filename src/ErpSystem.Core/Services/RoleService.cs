@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -54,6 +55,11 @@ public class RoleService : IRoleService
     {
         try
         {
+            if (Constants.Roles.IsProtectedSystemRole(role.Name))
+            {
+                throw new InvalidOperationException($"'{role.Name}' is a protected system role name and cannot be created through role management.");
+            }
+
             role.Id = Guid.NewGuid();
             role.CreatedAt = DateTime.UtcNow;
 
@@ -78,6 +84,25 @@ public class RoleService : IRoleService
     {
         try
         {
+            var persistedRole = await _roleManager.Roles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(existingRole => existingRole.Id == role.Id);
+
+            if (persistedRole == null)
+            {
+                throw new InvalidOperationException($"Role with ID '{role.Id}' was not found.");
+            }
+
+            if (persistedRole.IsSystemRole || Constants.Roles.IsProtectedSystemRole(persistedRole.Name))
+            {
+                throw new InvalidOperationException($"'{persistedRole.Name}' is a protected system role and cannot be modified.");
+            }
+
+            if (Constants.Roles.IsProtectedSystemRole(role.Name))
+            {
+                throw new InvalidOperationException($"'{role.Name}' is a protected system role name and cannot be assigned to a custom role.");
+            }
+
             var result = await _roleManager.UpdateAsync(role);
             if (!result.Succeeded)
             {
@@ -105,8 +130,7 @@ public class RoleService : IRoleService
                 return false;
             }
 
-            // Don't allow deletion of system roles
-            if (role.IsSystemRole)
+            if (role.IsSystemRole || Constants.Roles.IsProtectedSystemRole(role.Name))
             {
                 _logger.LogWarning("Attempted to delete system role {RoleName}", role.Name);
                 return false;

@@ -825,7 +825,7 @@ public class UnifiedNotificationService : INotificationService
                 "Payroll",
                 "PayrollPayslipEmail",
                 "Payslip - {{pay_period}}",
-                "<p>Dear {{employee_name}},</p><p>Your payslip for {{pay_period}} is attached as a PDF.</p><p>Run: <strong>{{run_number}}</strong></p><p>Net salary: <strong>{{net_salary}}</strong> {{currency_code}}</p>{{message}}",
+                "<p>Dear {{employee_name}},</p><p>Your payslip for {{pay_period}} is attached as a password-protected PDF.</p><p>Run: <strong>{{run_number}}</strong></p><p>Net salary: <strong>{{net_salary}}</strong> {{currency_code}}</p>{{message}}",
                 "Dear {{employee_name}}, your payslip for {{pay_period}} is attached.",
                 "Payroll payslip email body. The full payslip is attached as a PDF generated from the payroll print preview layout.",
                 PayrollPayslipTemplateVariables()),
@@ -884,6 +884,9 @@ public class UnifiedNotificationService : INotificationService
             "bonus_income_tax",
             "employee_contribution",
             "employer_contribution",
+            "payslip_password_format",
+            "payslip_password_example",
+            "payslip_password_help",
             "message",
             "action_url"
         ];

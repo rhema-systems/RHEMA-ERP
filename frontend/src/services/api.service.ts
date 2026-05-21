@@ -448,6 +448,10 @@ class ApiService {
     return this.privateRequest<T>(endpoint, options, true, true);
   }
 
+  public async downloadBlob(endpoint: string, query?: Record<string, unknown>): Promise<Blob> {
+    return this.privateBlobRequest(this.appendQueryParams(endpoint, query), { method: 'GET' });
+  }
+
   // Rename private request method
   private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true, silent: boolean = false, retryCount: number = 0): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
@@ -553,6 +557,52 @@ class ApiService {
       if (!silent) {
         console.error(`💥 API ${method} ${endpoint} failed:`, error);
       }
+      throw error;
+    }
+  }
+
+  private async privateBlobRequest(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<Blob> {
+    const url = `${this.baseUrl}${endpoint}`;
+    const isFormData = options.body instanceof FormData;
+    const config: RequestInit = {
+      headers: this.getHeaders(isFormData, true),
+      ...options,
+    };
+
+    try {
+      const response = await fetch(url, config);
+
+      if (response.ok) {
+        return await response.blob();
+      }
+
+      let error: any;
+      try {
+        await this.handleResponse<never>(response);
+      } catch (e) {
+        error = e;
+      }
+
+      if (error?.status === 401 && retryCount === 0 && this.token) {
+        try {
+          await this.refreshToken();
+          return this.privateBlobRequest(endpoint, options, retryCount + 1);
+        } catch {
+          this.clearToken();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('session-blacklisted', {
+              detail: {
+                status: 401,
+                message: 'Session terminated - token refresh failed'
+              }
+            }));
+          }
+        }
+      }
+
+      throw error || new Error(`HTTP ${response.status}: ${response.statusText}`);
+    } catch (error) {
+      console.error(`Blob download ${endpoint} failed:`, error);
       throw error;
     }
   }

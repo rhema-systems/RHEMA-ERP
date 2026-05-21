@@ -667,11 +667,16 @@ public class PayrollBackpayException : TenantEntity
 
 public class PayrollJournalMapping : TenantEntity
 {
+    public int SequenceNo { get; set; }
+
     [Required, MaxLength(40)]
     public string TransactionType { get; set; } = string.Empty;
 
     [MaxLength(20)]
     public string? ComponentCode { get; set; }
+
+    [MaxLength(30)]
+    public string? ShortDescription { get; set; }
 
     [Required, MaxLength(120)]
     public string Description { get; set; } = string.Empty;
@@ -684,6 +689,9 @@ public class PayrollJournalMapping : TenantEntity
 
     [MaxLength(120)]
     public string? AccountType { get; set; }
+
+    [MaxLength(5)]
+    public string? LegacyCompanyCode { get; set; }
 
     public bool IsActive { get; set; } = true;
 }

@@ -299,6 +299,8 @@ namespace ErpSystem.Api.Extensions
             // Finance - Common repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IPaymentTermRepository, ErpSystem.Data.Repositories.Finance.PaymentTermRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyRepository, ErpSystem.Data.Repositories.Finance.CurrencyRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ITaxCalculationEngine, ErpSystem.Api.Services.Finance.Taxation.TaxCalculationEngine>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IInvoiceService, ErpSystem.Api.Services.Finance.AR.InvoiceService>();
 
             // Award Verification repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardVerificationChecklistTemplateRepository, ErpSystem.Data.Repositories.Procurement.AwardVerificationChecklistTemplateRepository>();

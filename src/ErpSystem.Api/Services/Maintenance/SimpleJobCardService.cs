@@ -160,9 +160,9 @@ public class SimpleJobCardService : IJobCardService
         return Task.FromResult(new List<JobCardListDto>());
     }
 
-    public Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string billingType = "Repairs")
+    public Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string? billingType = null)
     {
-        _logger.LogInformation("GenerateWorkOrderAsync called for ID: {JobCardId} with billing type: {BillingType} - not implemented", jobCardId, billingType);
+        _logger.LogInformation("GenerateWorkOrderAsync called for ID: {JobCardId} with billing type: {BillingType} - not implemented", jobCardId, billingType ?? "Repairs");
         throw new NotImplementedException("Work order generation is not yet implemented");
     }
 
@@ -223,6 +223,12 @@ public class SimpleJobCardService : IJobCardService
     {
         _logger.LogInformation("GetDocumentsAsync called for ID: {JobCardId} - returning empty list", id);
         return Task.FromResult(new List<JobCardDocumentDto>());
+    }
+
+    public Task<JobCardDocumentDownloadDto> DownloadDocumentAsync(Guid jobCardId, Guid documentId)
+    {
+        _logger.LogInformation("DownloadDocumentAsync called for job card ID: {JobCardId}, document ID: {DocumentId} - not implemented", jobCardId, documentId);
+        throw new NotImplementedException("Document download is not yet implemented");
     }
 
     public Task<JobCardDto> CompleteJobCardAsync(Guid id, CompleteJobCardDto completeDto)

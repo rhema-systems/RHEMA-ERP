@@ -788,12 +788,15 @@ public class UpsertPayrollBackpayExceptionDto : PayrollBackpayExceptionDto
 public class PayrollJournalMappingDto
 {
     public Guid Id { get; set; }
+    public int SequenceNo { get; set; }
     public string TransactionType { get; set; } = string.Empty;
     public string? ComponentCode { get; set; }
+    public string? ShortDescription { get; set; }
     public string Description { get; set; } = string.Empty;
     public string DebitCredit { get; set; } = "DR";
     public string AccountCode { get; set; } = string.Empty;
     public string? AccountType { get; set; }
+    public string? LegacyCompanyCode { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -1407,6 +1410,8 @@ public class PayrollLoanRepaymentRequestDto
     public string EmployeeNumber { get; set; } = string.Empty;
     public string FacilityNumber { get; set; } = string.Empty;
     public decimal RepaymentAmount { get; set; }
+    public decimal? PrincipalAmount { get; set; }
+    public decimal? InterestAmount { get; set; }
     public DateTime? ActualRepaymentDate { get; set; }
 }
 
@@ -1601,6 +1606,31 @@ public class PayrollJournalLineDto
     public decimal Amount { get; set; }
     public bool Posted { get; set; }
     public Guid? JournalEntryId { get; set; }
+}
+
+public class PayrollJournalPreviewDto
+{
+    public Guid PayrollRunId { get; set; }
+    public string RunNumber { get; set; } = string.Empty;
+    public string JournalNumber { get; set; } = string.Empty;
+    public PayrollRunStatus RunStatus { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public int EmployeeCount { get; set; }
+    public decimal GrossAmount { get; set; }
+    public decimal NetAmount { get; set; }
+    public decimal TotalDebit { get; set; }
+    public decimal TotalCredit { get; set; }
+    public decimal Difference { get; set; }
+    public int LineCount { get; set; }
+    public int UnmappedLineCount { get; set; }
+    public int InvalidLineCount { get; set; }
+    public bool GeneratedForPreview { get; set; }
+    public bool IsBalanced { get; set; }
+    public bool AlreadyPosted { get; set; }
+    public bool CanPost { get; set; }
+    public string? Blocker { get; set; }
+    public IReadOnlyList<string> MissingAccountCodes { get; set; } = [];
+    public IReadOnlyList<PayrollJournalLineDto> Lines { get; set; } = [];
 }
 
 public class PayrollSummaryReportDto

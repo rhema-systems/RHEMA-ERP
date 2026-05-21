@@ -7,8 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowRecordPanel } from '@/components/workflow/WorkflowRecordTab';
 import {
   type CreateProjectActionItemDto,
   type CreateProjectChangeRequestDto,
@@ -71,8 +70,6 @@ type ProjectGovernanceTabProps = {
   closure: UpsertProjectClosureDto;
   setClosure: Dispatch<SetStateAction<UpsertProjectClosureDto>>;
   closureRecord: ProjectClosureDto | null;
-  showClosureApprovalHistory: boolean;
-  setShowClosureApprovalHistory: Dispatch<SetStateAction<boolean>>;
   currentUserId?: string;
   activeUsers: IdentifiedRecord[];
   formatUserLabel: (user: IdentifiedRecord) => string;
@@ -137,8 +134,6 @@ export function ProjectGovernanceTab({
   closure,
   setClosure,
   closureRecord,
-  showClosureApprovalHistory,
-  setShowClosureApprovalHistory,
   currentUserId,
   activeUsers,
   formatUserLabel,
@@ -339,31 +334,23 @@ export function ProjectGovernanceTab({
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => act(() => projectService.upsertClosure(project.id, closure).then(() => Promise.resolve()), 'Closure draft saved')}><Save className="mr-2 h-4 w-4" />Save Closure Draft</Button>
-                {closureRecord ? (
-                  <>
-                    <WorkflowApprovalActions
-                      entityType="ProjectClosure"
-                      entityId={closureRecord.id}
-                      entityLabel="Project Closure"
-                      entityNumber={project.projectCode}
-                      status={closureRecord.status}
-                      loadWorkflowSummary
-                      showStepBadge
-                      canSubmit={closureRecord.status === 'Draft' || closureRecord.status === 'Rejected'}
-                      canApproveReject={closureRecord.status === 'PendingApproval'}
-                      onSubmit={() => projectService.submitClosure(project.id)}
-                      onApprove={(comments) => projectService.approveClosure(closureRecord.id, comments)}
-                      onReject={(comments) => projectService.rejectClosure(closureRecord.id, comments || 'Rejected', comments)}
-                      onAfterAction={async () => onLoad()}
-                      onOpenWorkflows={onOpenWorkflows}
-                    />
-                    <Button variant="outline" onClick={() => setShowClosureApprovalHistory((value) => !value)}>
-                      {showClosureApprovalHistory ? 'Hide Approval History' : 'View Approval History'}
-                    </Button>
-                  </>
-                ) : null}
               </div>
-              {closureRecord && showClosureApprovalHistory ? <WorkflowApprovalHistoryPanel entityType="ProjectClosure" entityId={closureRecord.id} /> : null}
+              {closureRecord ? (
+                <WorkflowRecordPanel
+                  entityType="ProjectClosure"
+                  entityId={closureRecord.id}
+                  entityLabel="Project Closure"
+                  entityNumber={project.projectCode}
+                  status={closureRecord.status}
+                  canSubmit={closureRecord.status === 'Draft' || closureRecord.status === 'Rejected'}
+                  canApproveReject={closureRecord.status === 'PendingApproval'}
+                  onSubmit={() => projectService.submitClosure(project.id)}
+                  onApprove={(comments) => projectService.approveClosure(closureRecord.id, comments)}
+                  onReject={(comments) => projectService.rejectClosure(closureRecord.id, comments || 'Rejected', comments)}
+                  onAfterAction={async () => onLoad()}
+                  onOpenWorkflows={onOpenWorkflows}
+                />
+              ) : null}
             </CardContent>
           </Card>
     </div>

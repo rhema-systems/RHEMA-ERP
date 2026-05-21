@@ -291,8 +291,27 @@ public class AssetConditionService : IAssetConditionService
 
         var itemResult = await _repository.GetItemResultByRecordAndItemAsync(recordId, dto.ChecklistItemId, TenantId);
 
-        if (itemResult == null)
-            throw new KeyNotFoundException($"Item result not found for checklist item {dto.ChecklistItemId}");
+        var isNewItemResult = itemResult == null;
+        if (isNewItemResult)
+        {
+            var checklistItem = await _repository.GetTemplateItemByIdAsync(dto.ChecklistItemId, TenantId)
+                ?? throw new KeyNotFoundException($"Checklist item {dto.ChecklistItemId} not found");
+
+            if (checklistItem.TemplateId != record.TemplateId)
+            {
+                throw new KeyNotFoundException($"Checklist item {dto.ChecklistItemId} does not belong to inspection template {record.TemplateId}");
+            }
+
+            itemResult = new AssetConditionItemResult
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ConditionRecordId = record.Id,
+                ChecklistItemId = checklistItem.Id,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = UserId
+            };
+        }
 
         itemResult.IsPresent = dto.IsPresent;
         itemResult.TextValue = dto.TextValue;
@@ -311,7 +330,15 @@ public class AssetConditionService : IAssetConditionService
         itemResult.UpdatedAt = DateTime.UtcNow;
         itemResult.LastModifiedById = UserId;
 
-        await _repository.UpdateItemResultAsync(itemResult);
+        if (isNewItemResult)
+        {
+            await _repository.AddItemResultAsync(itemResult);
+        }
+        else
+        {
+            await _repository.UpdateItemResultAsync(itemResult);
+        }
+
         await _unitOfWork.SaveChangesAsync();
 
         return MapItemResultToDto(itemResult);

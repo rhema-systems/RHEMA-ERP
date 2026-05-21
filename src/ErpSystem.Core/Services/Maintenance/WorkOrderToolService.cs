@@ -308,7 +308,7 @@ public class WorkOrderToolService : IWorkOrderToolService
             {
                 Id = Guid.NewGuid(),
                 ToolId = checkoutDto.ToolId,
-                CheckedOutById = Guid.Parse(checkoutDto.TechnicianId.ToString()),
+                CheckedOutById = checkoutDto.TechnicianId,
                 WorkOrderId = checkoutDto.WorkOrderId,
                 CheckoutDate = DateTime.UtcNow,
                 ExpectedReturnDate = checkoutDto.ExpectedReturnDate,
@@ -372,7 +372,7 @@ public class WorkOrderToolService : IWorkOrderToolService
             checkout.DamageDescription = returnDto.DamageDescription;
             checkout.DamageCost = returnDto.DamageCost;
             checkout.Status = "Returned";
-            checkout.CheckedInById = !string.IsNullOrEmpty(_currentUserService.UserId) ? Guid.Parse(_currentUserService.UserId) : null;
+            checkout.CheckedInById = _currentUserService.EmployeeId ?? checkout.CheckedOutById;
             await _checkoutRepository.UpdateAsync(checkout);
 
             // Release warehouse allocation if exists

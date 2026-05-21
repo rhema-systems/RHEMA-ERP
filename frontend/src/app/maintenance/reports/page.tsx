@@ -34,7 +34,7 @@ import {
   AreaChart,
   Area
 } from 'recharts';
-import { 
+import {
   BarChart3,
   Download,
   Calendar as CalendarIcon,
@@ -53,6 +53,7 @@ import {
   Plus
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 interface ReportsData {
   workOrdersByMonth: Array<{ month: string; preventive: number; corrective: number; emergency: number }>;
@@ -70,6 +71,7 @@ interface ReportsData {
 }
 
 function MaintenanceReportsPageOriginal() {
+  const { formatMoney } = useMaintenanceCurrency();
   const [loading, setLoading] = useState(true);
   const [reportsData, setReportsData] = useState<ReportsData>({
     workOrdersByMonth: [],
@@ -199,7 +201,7 @@ function MaintenanceReportsPageOriginal() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold">$71,400</p>
+                <p className="text-2xl font-bold">{formatMoney(71400, 0)}</p>
                 <p className="text-sm text-muted-foreground">Total Costs</p>
                 <p className="text-xs text-red-600 flex items-center mt-1">
                   <TrendingDown className="h-3 w-3 mr-1" />
@@ -392,7 +394,7 @@ function MaintenanceReportsPageOriginal() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis />
-                    <Tooltip formatter={(value) => [`$${value.toLocaleString()}`, 'Cost']} />
+                    <Tooltip formatter={(value) => [formatMoney(Number(value ?? 0), 0), 'Cost']} />
                     <Line type="monotone" dataKey="cost" stroke="#10b981" strokeWidth={3} />
                   </LineChart>
                 </ResponsiveContainer>

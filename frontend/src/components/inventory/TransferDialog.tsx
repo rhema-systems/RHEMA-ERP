@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { Plus, Trash2, Search, Package, AlertCircle, Barcode, Layers } from 'lucide-react';
 import {
   inventoryManagementService,
@@ -413,7 +413,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
                 Items ({transferDetail?.items?.length || 0})
               </TabsTrigger>
               {showApprovalsTab && (
-                <TabsTrigger value="approvals">Approvals</TabsTrigger>
+                <WorkflowTabTrigger value="approvals" />
               )}
             </TabsList>
 
@@ -592,9 +592,29 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
             </TabsContent>
 
             {showApprovalsTab && transferDetail && (
-              <TabsContent value="approvals" className="space-y-4 mt-4">
-                <WorkflowApprovalHistoryPanel entityType="InventoryTransfer" entityId={transferDetail.id} />
-              </TabsContent>
+              <WorkflowTabContent
+                value="approvals"
+                entityType="InventoryTransfer"
+                entityId={transferDetail.id}
+                entityLabel="Inventory Transfer"
+                entityNumber={transferDetail.transferNumber}
+                status={transferDetail.status}
+                currentStepName={transferDetail.currentWorkflowStepName}
+                canSubmit={transferDetail.status === 'Draft'}
+                canApproveReject={transferDetail.status === 'Submitted'}
+                onSubmit={async () => {
+                  await inventoryManagementService.submitTransferForApproval(transferDetail.id);
+                }}
+                onApprove={async (comments) => {
+                  await inventoryManagementService.approveTransfer(transferDetail.id, comments || undefined);
+                }}
+                onReject={async (comments) => {
+                  await inventoryManagementService.rejectTransfer(transferDetail.id, comments);
+                }}
+                onAfterAction={async () => {
+                  await loadTransferDetails();
+                }}
+              />
             )}
           </Tabs>
         )}

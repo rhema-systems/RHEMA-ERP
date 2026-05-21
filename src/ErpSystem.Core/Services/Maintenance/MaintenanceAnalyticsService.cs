@@ -507,7 +507,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
     private static decimal CalculateLaborCost(WorkOrderListDto workOrder)
     {
         // Mock calculation - would calculate from labor records
-        return (decimal)workOrder.ActualHours * 75m; // $75/hour average
+        return (decimal)workOrder.ActualHours * 75m; // base-currency hourly average
     }
 
     private static decimal CalculatePartsCost(WorkOrderListDto workOrder)
@@ -556,7 +556,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
     private static async Task<decimal> CalculateBudgetVarianceAsync(DateTime startDate, DateTime endDate)
     {
         // Mock calculation - would compare against budget
-        return -15000m; // $15k under budget
+        return -15000m; // base-currency variance under budget
     }
 
     #endregion

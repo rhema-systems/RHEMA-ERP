@@ -56,8 +56,21 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// NOTE:
         /// - For large tenants, this may be replaced by a paged query in controllers.
         /// </summary>
+        /// <param name="accountType">Optional account type filter.</param>
+        /// <param name="status">Optional account status filter.</param>
+        /// <param name="isMultiCurrency">Optional multi-currency filter.</param>
+        /// <param name="coaType">Optional chart-of-accounts structure filter.</param>
+        /// <param name="search">Optional search term for account code, number, or name.</param>
+        /// <param name="take">Optional maximum number of records to return.</param>
         /// <param name="cancellationToken">Optional cancellation token.</param>
-        Task<IReadOnlyList<AccountDto>> GetAllAsync(CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<AccountDto>> GetAllAsync(
+            string? accountType = null,
+            string? status = null,
+            bool? isMultiCurrency = null,
+            string? coaType = null,
+            string? search = null,
+            int? take = null,
+            CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Retrieves all accounts filtered by account type (e.g., Asset, Liability, Revenue).

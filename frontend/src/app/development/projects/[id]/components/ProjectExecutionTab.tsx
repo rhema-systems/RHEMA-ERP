@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowRecordPanel } from '@/components/workflow/WorkflowRecordTab';
 import {
   type CreateProjectDeliverableDto,
   type CreateProjectExpenseDto,
@@ -181,7 +181,20 @@ export function ProjectExecutionTab({
                 ) : null}
                 {expandedDeliverableHistoryId === item.id ? (
                   <div className="mt-4">
-                    <WorkflowApprovalHistoryPanel entityType="ProjectDeliverable" entityId={item.id} />
+                    <WorkflowRecordPanel
+                      entityType="ProjectDeliverable"
+                      entityId={item.id}
+                      entityLabel="Deliverable"
+                      entityNumber={item.title}
+                      status={item.status}
+                      canSubmit={item.status === 'Draft' || item.status === 'Rejected'}
+                      canApproveReject={item.status === 'PendingApproval'}
+                      onSubmit={async () => { await projectService.submitDeliverable(item.id, { notes: 'Submitted from workspace' }); }}
+                      onApprove={async (comments) => { await projectService.approveDeliverable(item.id, comments); }}
+                      onReject={async (comments) => { await projectService.rejectDeliverable(item.id, comments || 'Rejected from workspace'); }}
+                      onAfterAction={onLoad}
+                      onOpenWorkflows={onOpenWorkflows}
+                    />
                   </div>
                 ) : null}
               </div>

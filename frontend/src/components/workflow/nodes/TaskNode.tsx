@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 
 interface TaskNodeData {
   label: string;
+  taskActionType?: string;
+  documentName?: string;
   assignee?: string;
   priority?: 'low' | 'medium' | 'high';
   dueDate?: string;
@@ -41,6 +43,20 @@ export const TaskNode = memo<NodeProps<TaskNodeData>>(({ data }) => {
           <Badge variant="outline" className={`text-xs ${getPriorityColor(data.priority)}`}>
             {data.priority.toUpperCase()}
           </Badge>
+        </div>
+      )}
+
+      {data.taskActionType && data.taskActionType !== 'general' && (
+        <div className="flex justify-center mb-1">
+          <Badge variant="outline" className="text-xs bg-blue-50 text-blue-800">
+            {data.taskActionType === 'document' ? 'DOCUMENT' : data.taskActionType.toUpperCase()}
+          </Badge>
+        </div>
+      )}
+
+      {data.documentName && (
+        <div className="text-xs text-center text-gray-600 mb-1 truncate max-w-[140px]">
+          {data.documentName}
         </div>
       )}
       

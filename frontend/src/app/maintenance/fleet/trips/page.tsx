@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 import fleetService, {
@@ -33,7 +34,7 @@ import fleetService, {
   StartFleetTripInspectionDto,
 } from '@/services/fleetService';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { formatFleetDateTime } from '@/lib/date-format';
 import maintenanceSettingsService from '@/services/maintenanceSettingsService';
 import { MaintenanceAttachmentEntityType } from '@/services/maintenanceAttachmentsService';
@@ -113,6 +114,7 @@ export default function FleetTripsPage() {
 }
 
 function FleetTripsPageContent() {
+  const { currencyCode, formatMoney } = useMaintenanceCurrency();
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const initialOpenId = searchParams?.get('id');
@@ -193,7 +195,7 @@ function FleetTripsPageContent() {
     costDateUtc: new Date().toISOString(),
     costType: 'Other',
     amount: 0,
-    currencyCode: null,
+    currencyCode,
     notes: null,
   });
 
@@ -476,7 +478,7 @@ function FleetTripsPageContent() {
       costDateUtc: new Date().toISOString(),
       costType: presetType,
       amount: 0,
-      currencyCode: null,
+      currencyCode,
       notes: null,
     });
     setAddExpenseOpen(true);
@@ -525,7 +527,7 @@ function FleetTripsPageContent() {
         costType: expenseForm.costType.trim(),
         source: 'TripExpense',
         amount: Number(expenseForm.amount),
-        currencyCode: expenseForm.currencyCode?.trim() || null,
+        currencyCode: expenseForm.currencyCode?.trim() || currencyCode,
         notes: expenseForm.notes?.trim() || null,
       };
 
@@ -983,7 +985,7 @@ function FleetTripsPageContent() {
             <TabsList className="w-fit">
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="expenses">Expenses</TabsTrigger>
-              <TabsTrigger value="approvals">Approval History</TabsTrigger>
+              <WorkflowTabTrigger value="approvals" />
             </TabsList>
 
             <TabsContent value="details" className="mt-4 min-h-0 flex-1 overflow-hidden">
@@ -1245,7 +1247,7 @@ function FleetTripsPageContent() {
                                     <Badge variant="outline">{c.source}</Badge>
                                   </TableCell>
                                   <TableCell className="text-right">
-                                    {typeof c.amount === 'number' ? c.amount.toFixed(2) : String(c.amount)} {c.currencyCode || ''}
+                                    {formatMoney(typeof c.amount === 'number' ? c.amount : Number(c.amount) || 0)}
                                   </TableCell>
                                   <TableCell className="max-w-[420px] truncate text-muted-foreground" title={c.notes || ''}>
                                     {c.notes || '-'}
@@ -1272,7 +1274,7 @@ function FleetTripsPageContent() {
                           <div>Total entries: {tripCosts.length}</div>
                           <div>
                             Total:{' '}
-                            {tripCosts.reduce((sum, x) => sum + (typeof x.amount === 'number' ? x.amount : Number(x.amount) || 0), 0).toFixed(2)}
+                            {formatMoney(tripCosts.reduce((sum, x) => sum + (typeof x.amount === 'number' ? x.amount : Number(x.amount) || 0), 0))}
                           </div>
                         </div>
                       ) : null}
@@ -1282,15 +1284,38 @@ function FleetTripsPageContent() {
               </div>
             </TabsContent>
 
-            <TabsContent value="approvals" className="mt-4 flex-1 overflow-hidden">
-              <div className="h-full overflow-y-auto pr-1">
-                {!selected ? (
+            {selected ? (
+              <WorkflowTabContent
+                value="approvals"
+                className="mt-4 flex-1 overflow-y-auto pr-1"
+                entityType="FleetTrip"
+                entityId={selected.id}
+                entityLabel="Fleet Trip"
+                entityNumber={selected.vehicleAssetNumber || selected.vehicleLicensePlate || undefined}
+                status={selected.status}
+                canSubmit={selected.status === 'Draft'}
+                canApproveReject={selected.status === 'Submitted'}
+                onSubmit={async () => {
+                  await fleetService.submitTrip(selected.id);
+                }}
+                onApprove={async (comments) => {
+                  await fleetService.approveTrip(selected.id, comments);
+                }}
+                onReject={async (comments) => {
+                  await fleetService.rejectTrip(selected.id, 'Rejected', comments);
+                }}
+                onAfterAction={async () => {
+                  await refreshSelected();
+                  await loadTrips();
+                }}
+              />
+            ) : (
+              <TabsContent value="approvals" className="mt-4 flex-1 overflow-hidden">
+                <div className="h-full overflow-y-auto pr-1">
                   <div className="py-10 text-center text-muted-foreground">No trip selected</div>
-                ) : (
-                  <WorkflowApprovalHistoryPanel entityType="FleetTrip" entityId={selected.id} />
-                )}
-              </div>
-            </TabsContent>
+                </div>
+              </TabsContent>
+            )}
           </Tabs>
 
           <DialogFooter className="border-t pt-3 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:space-x-0">
@@ -1763,11 +1788,10 @@ function FleetTripsPageContent() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Currency (optional)</Label>
+              <Label>Currency</Label>
               <Input
-                value={expenseForm.currencyCode || ''}
-                onChange={(e) => setExpenseForm((p) => ({ ...p, currencyCode: e.target.value }))}
-                placeholder="e.g. USD"
+                value={expenseForm.currencyCode || currencyCode}
+                disabled
               />
             </div>
             <div className="space-y-2 md:col-span-2">

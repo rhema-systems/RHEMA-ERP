@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -106,6 +107,32 @@ public class WorkOrdersController : ControllerBase
         {
             _logger.LogError(ex, $"Error retrieving work order with ID {id}");
             return StatusCode(500, $"An error occurred while retrieving work order with ID {id}");
+        }
+    }
+
+    /// <summary>
+    /// Posts billable work order lines to a draft AR invoice.
+    /// </summary>
+    [HttpPost("{id:guid}/post-ar-invoice")]
+    public async Task<ActionResult<InvoiceDto>> PostArInvoice(Guid id)
+    {
+        try
+        {
+            var invoice = await _workOrderService.PostWorkOrderBillingToArInvoiceAsync(id);
+            return Ok(invoice);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error posting work order {WorkOrderId} to AR invoice", id);
+            return StatusCode(500, new { message = "An error occurred while posting the work order to AR invoice" });
         }
     }
 

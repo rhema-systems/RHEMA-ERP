@@ -28,6 +28,7 @@ import {
   Clock
 } from 'lucide-react';
 import analyticsApiService from '@/services/analytics-api.service';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 // Analytics Components
 import {
@@ -108,6 +109,7 @@ const defaultFilters: AnalyticsFilters = {
 // #region Asset Analytics Dashboard Component
 
 function AssetAnalyticsDashboardOriginal() {
+  const { formatMoney } = useMaintenanceCurrency();
   const [dashboardState, setDashboardState] = useState<DashboardState>({
     selectedAssetId: '1',
     filters: defaultFilters,
@@ -483,7 +485,7 @@ function AssetAnalyticsDashboardOriginal() {
                 </Card>
                 <Card>
                   <CardContent className="p-6 text-center">
-                    <div className="text-2xl font-bold text-orange-600">$183</div>
+                    <div className="text-2xl font-bold text-orange-600">{formatMoney(183, 0)}</div>
                     <p className="text-sm text-muted-foreground">Daily Energy Cost</p>
                   </CardContent>
                 </Card>

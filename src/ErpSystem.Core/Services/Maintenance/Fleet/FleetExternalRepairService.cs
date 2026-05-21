@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -25,6 +26,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
         if (pageSize > 100) pageSize = 100;
 
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
         var repo = _unitOfWork.Repository<FleetExternalRepair>();
 
         IQueryable<FleetExternalRepair> q = repo.GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted)
@@ -54,7 +56,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
                 Status = r.Status,
                 EstimatedCost = r.EstimatedCost,
                 ActualCost = r.ActualCost,
-                CurrencyCode = r.CurrencyCode,
+                CurrencyCode = r.CurrencyCode == null || r.CurrencyCode == string.Empty ? baseCurrencyCode : r.CurrencyCode,
                 RequestedAtUtc = r.RequestedAtUtc,
                 ApprovedAtUtc = r.ApprovedAtUtc,
                 CompletedAtUtc = r.CompletedAtUtc,
@@ -70,6 +72,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
     {
         if (id == Guid.Empty) return null;
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
 
         var repo = _unitOfWork.Repository<FleetExternalRepair>();
         var r = await repo.GetQueryable(x => x.TenantId == tenantId && x.Id == id && !x.IsDeleted)
@@ -91,7 +94,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
             Status = r.Status,
             EstimatedCost = r.EstimatedCost,
             ActualCost = r.ActualCost,
-            CurrencyCode = r.CurrencyCode,
+            CurrencyCode = r.CurrencyCode == null || r.CurrencyCode == string.Empty ? baseCurrencyCode : r.CurrencyCode,
             RequestedAtUtc = r.RequestedAtUtc,
             ApprovedAtUtc = r.ApprovedAtUtc,
             CompletedAtUtc = r.CompletedAtUtc,
@@ -109,6 +112,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
         var tenantId = _currentUserProvider.TenantId;
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode);
 
         // Validate vendor if provided
         if (dto.VendorBusinessPartnerId.HasValue && dto.VendorBusinessPartnerId.Value != Guid.Empty)
@@ -128,7 +132,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
             Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim(),
             Status = "Requested",
             EstimatedCost = dto.EstimatedCost,
-            CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
+            CurrencyCode = currencyCode,
             RequestedAtUtc = now,
             CreatedAt = now,
             CreatedById = userId
@@ -172,6 +176,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
         var repo = _unitOfWork.Repository<FleetExternalRepair>();
         var entity = await repo.FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted)
             ?? throw new ArgumentException("External repair not found.");
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode ?? entity.CurrencyCode);
 
         entity.Status = dto.Status.Trim();
 
@@ -180,10 +185,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
             entity.ActualCost = Math.Round(dto.ActualCost.Value, 2, MidpointRounding.AwayFromZero);
         }
 
-        if (!string.IsNullOrWhiteSpace(dto.CurrencyCode))
-        {
-            entity.CurrencyCode = dto.CurrencyCode.Trim();
-        }
+        entity.CurrencyCode = currencyCode;
 
         if (string.Equals(entity.Status, "Approved", StringComparison.OrdinalIgnoreCase) && !entity.ApprovedAtUtc.HasValue)
             entity.ApprovedAtUtc = now;

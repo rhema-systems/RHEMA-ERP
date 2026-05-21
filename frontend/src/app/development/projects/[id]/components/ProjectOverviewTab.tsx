@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowRecordPanel } from '@/components/workflow/WorkflowRecordTab';
 import {
   type AddProjectMemberDto,
   type CreateProjectBillingScheduleDto,
@@ -84,8 +84,6 @@ type ProjectOverviewTabProps = {
   forecastVersion: CreateProjectForecastVersionDto;
   setForecastVersion: Dispatch<SetStateAction<CreateProjectForecastVersionDto>>;
   forecastVersions: ProjectForecastVersionDto[];
-  showProjectApprovalHistory: boolean;
-  setShowProjectApprovalHistory: Dispatch<SetStateAction<boolean>>;
   expandedBudgetRevisionHistoryId: string | null;
   setExpandedBudgetRevisionHistoryId: Dispatch<SetStateAction<string | null>>;
   boolValue: (value?: boolean | null) => string;
@@ -152,8 +150,6 @@ export function ProjectOverviewTab({
   forecastVersion,
   setForecastVersion,
   forecastVersions,
-  showProjectApprovalHistory,
-  setShowProjectApprovalHistory,
   expandedBudgetRevisionHistoryId,
   setExpandedBudgetRevisionHistoryId,
   boolValue,
@@ -223,40 +219,20 @@ export function ProjectOverviewTab({
         <Card><CardHeader className="pb-2"><CardTitle className="text-base">Open Issues</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{project.issues.filter((item) => item.status === 'Open').length}</div></CardContent></Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Workflow</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="outline">{project.status}</Badge>
-            {project.portfolioName ? <Badge variant="outline">{project.portfolioName}</Badge> : null}
-            {project.programName ? <Badge variant="outline">{project.programName}</Badge> : null}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <WorkflowApprovalActions
-              entityType="Project"
-              entityId={project.id}
-              entityLabel="Project"
-              entityNumber={project.projectCode}
-              status={project.status}
-              loadWorkflowSummary
-              showStepBadge
-              canSubmit={project.status === 'Draft'}
-              canApproveReject={project.status === 'PendingApproval'}
-              onSubmit={() => projectService.submitProject(project.id)}
-              onApprove={(comments) => projectService.approveProject(project.id, comments)}
-              onReject={(comments) => projectService.rejectProject(project.id, comments || 'Rejected', comments)}
-              onAfterAction={onLoad}
-              onOpenWorkflows={onOpenWorkflows}
-            />
-            <Button variant="outline" size="sm" onClick={() => setShowProjectApprovalHistory((value) => !value)}>
-              {showProjectApprovalHistory ? 'Hide Approval History' : 'View Approval History'}
-            </Button>
-          </div>
-          {showProjectApprovalHistory ? <WorkflowApprovalHistoryPanel entityType="Project" entityId={project.id} /> : null}
-        </CardContent>
-      </Card>
+      <WorkflowRecordPanel
+        entityType="Project"
+        entityId={project.id}
+        entityLabel="Project"
+        entityNumber={project.projectCode}
+        status={project.status}
+        canSubmit={project.status === 'Draft'}
+        canApproveReject={project.status === 'PendingApproval'}
+        onSubmit={() => projectService.submitProject(project.id)}
+        onApprove={(comments) => projectService.approveProject(project.id, comments)}
+        onReject={(comments) => projectService.rejectProject(project.id, comments || 'Rejected', comments)}
+        onAfterAction={onLoad}
+        onOpenWorkflows={onOpenWorkflows}
+      />
 
       <Card>
         <CardHeader>
@@ -722,7 +698,20 @@ export function ProjectOverviewTab({
                 </div>
                 {expandedBudgetRevisionHistoryId === item.id ? (
                   <div className="mt-4">
-                    <WorkflowApprovalHistoryPanel entityType="ProjectBudgetRevision" entityId={item.id} />
+                    <WorkflowRecordPanel
+                      entityType="ProjectBudgetRevision"
+                      entityId={item.id}
+                      entityLabel="Budget Revision"
+                      entityNumber={item.revisionName}
+                      status={item.status}
+                      canSubmit={item.status === 'Draft' || item.status === 'Rejected'}
+                      canApproveReject={item.status === 'PendingApproval'}
+                      onSubmit={async () => { await projectService.submitBudgetRevision(item.id); }}
+                      onApprove={async (comments) => { await projectService.approveBudgetRevision(item.id, comments); }}
+                      onReject={async (comments) => { await projectService.rejectBudgetRevision(item.id, comments || 'Rejected', comments); }}
+                      onAfterAction={onLoad}
+                      onOpenWorkflows={onOpenWorkflows}
+                    />
                   </div>
                 ) : null}
               </div>
