@@ -1,8 +1,11 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -20,10 +23,33 @@ namespace ErpSystem.Api.Controllers.Finance
     public class VendorInvoiceController : ControllerBase
     {
         private readonly IVendorInvoiceService _invoiceService;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly ApplicationDbContext _dbContext;
 
-        public VendorInvoiceController(IVendorInvoiceService invoiceService)
+        public VendorInvoiceController(
+            IVendorInvoiceService invoiceService,
+            ICurrentUserService currentUserService,
+            ApplicationDbContext dbContext)
         {
             _invoiceService = invoiceService;
+            _currentUserService = currentUserService;
+            _dbContext = dbContext;
+        }
+
+        private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+
+        private async Task<bool> HasAnyPermissionAsync(params string[] requiredPermissions)
+        {
+            if (requiredPermissions.Length == 0) return true;
+            if (PrivilegedRoles.Any(_currentUserService.IsInRole)) return true;
+            if (!Guid.TryParse(_currentUserService.UserId, out var userId)) return false;
+
+            var userPermissions = await _dbContext.UserRoles
+                .Where(ur => ur.UserId == userId)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .ToListAsync();
+
+            return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
         }
 
         /// <summary>Retrieves a paginated list of vendor invoices filtered by query parameters.</summary>
@@ -51,6 +77,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost]
         public async Task<ActionResult<VendorInvoiceDto>> Create([FromBody] VendorInvoiceCreateDto dto)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"))
+                return Forbid();
+
             try
             {
                 var invoice = await _invoiceService.CreateAsync(dto);
@@ -64,6 +93,8 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<VendorInvoiceDto>> Update(Guid id, [FromBody] VendorInvoiceUpdateDto dto)
         {
             if (id != dto.Id) return BadRequest("ID mismatch");
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write"))
+                return Forbid();
             try { return Ok(await _invoiceService.UpdateAsync(dto)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -72,6 +103,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(Guid id)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Delete", "Finance.AP.Invoices.Write"))
+                return Forbid();
             try { await _invoiceService.DeleteAsync(id); return NoContent(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -82,6 +115,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/submit")]
         public async Task<ActionResult<VendorInvoiceDto>> SubmitForApproval(Guid id)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.SubmitForApproval", "Finance.AP.Invoices.Approve"))
+                return Forbid();
             try { return Ok(await _invoiceService.SubmitForApprovalAsync(id)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -90,6 +125,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/approve")]
         public async Task<ActionResult<VendorInvoiceDto>> Approve(Guid id, [FromBody] string? comments = null)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Approve"))
+                return Forbid();
             try { return Ok(await _invoiceService.ApproveAsync(id, comments)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -98,6 +135,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/reject")]
         public async Task<ActionResult<VendorInvoiceDto>> Reject(Guid id, [FromBody] string comments)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Approve"))
+                return Forbid();
             try { return Ok(await _invoiceService.RejectAsync(id, comments)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -106,6 +145,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/void")]
         public async Task<ActionResult<VendorInvoiceDto>> Void(Guid id, [FromBody] string reason)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Void"))
+                return Forbid();
             try { return Ok(await _invoiceService.VoidAsync(id, reason)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }

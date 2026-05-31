@@ -1,8 +1,10 @@
 using ErpSystem.Core.Interfaces; // For IGeneralLedgerService
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -23,17 +25,36 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IGeneralLedgerService _generalLedgerService;
         private readonly IWorkflowService _workflowService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ApplicationDbContext _dbContext;
 
         public JournalEntryController(
             IJournalEntryService journalEntryService,
             IGeneralLedgerService generalLedgerService,
             IWorkflowService workflowService,
-            ICurrentUserService currentUserService)
+            ICurrentUserService currentUserService,
+            ApplicationDbContext dbContext)
         {
             _journalEntryService = journalEntryService;
             _generalLedgerService = generalLedgerService;
             _workflowService = workflowService;
             _currentUserService = currentUserService;
+            _dbContext = dbContext;
+        }
+
+        private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+
+        private async Task<bool> HasAnyPermissionAsync(params string[] requiredPermissions)
+        {
+            if (requiredPermissions.Length == 0) return true;
+            if (PrivilegedRoles.Any(_currentUserService.IsInRole)) return true;
+            if (!Guid.TryParse(_currentUserService.UserId, out var userId)) return false;
+
+            var userPermissions = await _dbContext.UserRoles
+                .Where(ur => ur.UserId == userId)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .ToListAsync();
+
+            return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
         }
 
         // ====================================================================
@@ -139,6 +160,9 @@ namespace ErpSystem.Api.Controllers.Finance
 
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Edit", "Finance.JournalEntries.Write"))
+                    return Forbid();
+
                 var entry = await _journalEntryService.UpdateJournalEntryAsync(id, dto);
                 return Ok(entry);
             }
@@ -165,6 +189,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Delete", "Finance.JournalEntries.Write"))
+                    return Forbid();
+
                 await _journalEntryService.DeleteJournalEntryAsync(id);
                 return NoContent();
             }
@@ -191,6 +218,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Post"))
+                    return Forbid();
+
                 await _journalEntryService.PostJournalEntryAsync(id);
                 return Ok(new { message = "Journal entry posted successfully" });
             }
@@ -246,6 +276,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.SubmitForApproval", "Finance.JournalEntries.Approve"))
+                    return Forbid();
+
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
                     return NotFound($"Journal entry with ID {id} not found");
@@ -281,6 +314,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Approve"))
+                    return Forbid();
+
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
                     return NotFound($"Journal entry with ID {id} not found");
@@ -318,6 +354,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Approve"))
+                    return Forbid();
+
                 if (string.IsNullOrWhiteSpace(request?.Reason))
                     return BadRequest("A rejection reason is required.");
 
