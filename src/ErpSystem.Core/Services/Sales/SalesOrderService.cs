@@ -1,6 +1,5 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Sales;
-using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Procurement;
@@ -23,9 +22,6 @@ public class SalesOrderService : ISalesOrderService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<SalesOrderService> _logger;
-    private readonly IInventoryManagementService _inventoryService;
-    private readonly IInvoiceService _invoiceService;
-    private readonly ITaxCalculationEngine _taxEngine;
 
     public SalesOrderService(
         IGenericRepository<SalesOrder> salesOrderRepo,
@@ -35,10 +31,7 @@ public class SalesOrderService : ISalesOrderService
         IGenericRepository<Quote> quoteRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
-        ILogger<SalesOrderService> logger,
-        IInventoryManagementService inventoryService,
-        IInvoiceService invoiceService,
-        ITaxCalculationEngine taxEngine)
+        ILogger<SalesOrderService> logger)
     {
         _salesOrderRepo = salesOrderRepo;
         _lineRepo = lineRepo;
@@ -48,9 +41,6 @@ public class SalesOrderService : ISalesOrderService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
-        _inventoryService = inventoryService;
-        _invoiceService = invoiceService;
-        _taxEngine = taxEngine;
     }
 
     #region CRUD
@@ -74,8 +64,6 @@ public class SalesOrderService : ISalesOrderService
                 OrderPriority = dto.OrderPriority ?? "Normal",
                 SalesRepId = dto.SalesRepId,
                 Currency = dto.Currency ?? "GHS",
-                ExchangeRate = dto.ExchangeRate > 0 ? dto.ExchangeRate.Value : 1.0m,
-                TaxGroupId = dto.TaxGroupId,
                 DiscountAmount = dto.DiscountAmount ?? 0,
                 DiscountPercentage = dto.DiscountPercentage ?? 0,
                 ShippingAmount = dto.ShippingAmount ?? 0,
@@ -119,6 +107,8 @@ public class SalesOrderService : ISalesOrderService
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
                     DiscountPercentage = lineDto.DiscountPercentage ?? 0,
+                    DiscountAmount = lineDto.DiscountAmount ?? 0,
+                    TaxRate = lineDto.TaxRate ?? 0,
                     TaxCode = lineDto.TaxCode,
                     Unit = lineDto.Unit,
                     WarehouseId = lineDto.WarehouseId ?? dto.WarehouseId,
@@ -131,38 +121,9 @@ public class SalesOrderService : ISalesOrderService
                     TenantId = bp.TenantId
                 };
 
-                line.DiscountAmount = line.LineTotal * (line.DiscountPercentage / 100);
-                decimal lineNetAmount = line.LineTotal - line.DiscountAmount;
-
-                var lineTaxGroupId = lineDto.TaxGroupId ?? dto.TaxGroupId;
-                decimal lineTax = 0;
-
-                if (lineTaxGroupId.HasValue)
-                {
-                    var taxRequest = new TaxCalculationRequestDto
-                    {
-                        TransactionType = TaxTransactionType.SaleOfGoods,
-                        BaseAmount = lineNetAmount,
-                        TaxGroupId = lineTaxGroupId.Value,
-                        BusinessPartnerId = dto.BusinessPartnerId
-                    };
-
-                    var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest);
-                    lineTax = taxResult.TotalTaxAmount;
-                    line.TaxCode = taxResult.TaxGroupName ?? line.TaxCode;
-                    line.TaxRate = taxResult.EffectiveTaxRate;
-                }
-                else
-                {
-                    line.TaxRate = lineDto.TaxRate ?? 0;
-                    lineTax = lineNetAmount * (line.TaxRate / 100);
-                }
-
-                line.TaxGroupId = lineTaxGroupId;
-                line.TaxAmount = lineTax;
-
-                subTotal += lineNetAmount;
-                totalTax += lineTax;
+                line.TaxAmount = line.LineTotal * (line.TaxRate / 100);
+                subTotal += line.LineTotal - line.DiscountAmount;
+                totalTax += line.TaxAmount;
 
                 await _lineRepo.AddAsync(line);
             }
@@ -218,8 +179,6 @@ public class SalesOrderService : ISalesOrderService
             if (dto.InternalNotes != null) so.InternalNotes = dto.InternalNotes;
             if (dto.ExternalNotes != null) so.ExternalNotes = dto.ExternalNotes;
             if (dto.ReferenceNumber != null) so.ReferenceNumber = dto.ReferenceNumber;
-            if (dto.TaxGroupId.HasValue) so.TaxGroupId = dto.TaxGroupId;
-            if (dto.ExchangeRate.HasValue && dto.ExchangeRate > 0) so.ExchangeRate = dto.ExchangeRate.Value;
 
             // If lines are provided, replace them
             if (dto.Lines != null)
@@ -245,6 +204,8 @@ public class SalesOrderService : ISalesOrderService
                         Quantity = lineDto.Quantity,
                         UnitPrice = lineDto.UnitPrice,
                         DiscountPercentage = lineDto.DiscountPercentage ?? 0,
+                        DiscountAmount = lineDto.DiscountAmount ?? 0,
+                        TaxRate = lineDto.TaxRate ?? 0,
                         TaxCode = lineDto.TaxCode,
                         Unit = lineDto.Unit,
                         WarehouseId = lineDto.WarehouseId ?? so.WarehouseId,
@@ -254,38 +215,9 @@ public class SalesOrderService : ISalesOrderService
                         TenantId = so.TenantId
                     };
 
-                    line.DiscountAmount = line.LineTotal * (line.DiscountPercentage / 100);
-                    decimal lineNetAmount = line.LineTotal - line.DiscountAmount;
-
-                    var lineTaxGroupId = lineDto.TaxGroupId ?? so.TaxGroupId;
-                    decimal lineTax = 0;
-
-                    if (lineTaxGroupId.HasValue)
-                    {
-                        var taxRequest = new TaxCalculationRequestDto
-                        {
-                            TransactionType = TaxTransactionType.SaleOfGoods,
-                            BaseAmount = lineNetAmount,
-                            TaxGroupId = lineTaxGroupId.Value,
-                            BusinessPartnerId = so.BusinessPartnerId
-                        };
-
-                        var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest);
-                        lineTax = taxResult.TotalTaxAmount;
-                        line.TaxCode = taxResult.TaxGroupName ?? line.TaxCode;
-                        line.TaxRate = taxResult.EffectiveTaxRate;
-                    }
-                    else
-                    {
-                        line.TaxRate = lineDto.TaxRate ?? 0;
-                        lineTax = lineNetAmount * (line.TaxRate / 100);
-                    }
-
-                    line.TaxGroupId = lineTaxGroupId;
-                    line.TaxAmount = lineTax;
-
-                    subTotal += lineNetAmount;
-                    totalTax += lineTax;
+                    line.TaxAmount = line.LineTotal * (line.TaxRate / 100);
+                    subTotal += line.LineTotal - line.DiscountAmount;
+                    totalTax += line.TaxAmount;
 
                     await _lineRepo.AddAsync(line);
                 }
@@ -661,11 +593,6 @@ public class SalesOrderService : ISalesOrderService
                 BusinessPartnerId = quote.CustomerId ?? throw new InvalidOperationException("Quote has no customer"),
                 QuoteId = quoteId,
                 OpportunityId = quote.OpportunityId,
-                Currency = quote.Currency,
-                ExchangeRate = quote.ExchangeRate,
-                TaxGroupId = quote.TaxGroupId,
-                DiscountAmount = quote.DiscountAmount,
-                ShippingAmount = quote.ShippingAmount,
                 Lines = quote.LineItems.Select(li => new CreateSalesOrderLineDto
                 {
                     ProductCode = li.ProductCode,
@@ -675,7 +602,6 @@ public class SalesOrderService : ISalesOrderService
                     DiscountPercentage = li.DiscountPercentage,
                     DiscountAmount = li.DiscountAmount,
                     TaxCode = li.TaxCode,
-                    TaxGroupId = li.TaxGroupId,
                     Unit = li.Unit
                 }).ToList()
             };
@@ -694,55 +620,10 @@ public class SalesOrderService : ISalesOrderService
 
     public async Task<Guid> GenerateInvoiceAsync(Guid salesOrderId)
     {
-        var so = await _salesOrderRepo.GetByIdAsync(salesOrderId, s => s.Lines)
-            ?? throw new InvalidOperationException($"Sales Order {salesOrderId} not found");
-
-        if (so.InvoiceId.HasValue)
-        {
-            _logger.LogWarning("Sales Order {SalesOrderId} already has an Invoice {InvoiceId}", salesOrderId, so.InvoiceId);
-            return so.InvoiceId.Value;
-        }
-
-        // Prevent duplicate by reference
-        if (await _invoiceService.IsDuplicateAsync(so.BusinessPartnerId, so.DocumentNumber, so.DocumentDate))
-        {
-            _logger.LogWarning("A potential duplicate invoice exists for Sales Order {OrderNumber}", so.DocumentNumber);
-            // In a strict flow, we could throw. We'll proceed or throw based on strictness.
-            // For now, we will throw an exception to be safe.
-            throw new InvalidOperationException($"An invoice for Sales Order {so.DocumentNumber} already exists.");
-        }
-
-        var invoiceCreateDto = new ErpSystem.Core.DTOs.AR.InvoiceCreateDto
-        {
-            BusinessPartnerId = so.BusinessPartnerId,
-            InvoiceDate = DateTime.UtcNow,
-            DueDate = DateTime.UtcNow.AddDays(so.PaymentTermsDays),
-            Reference = so.DocumentNumber, // SourceReference
-            Notes = $"Generated from Sales Order {so.DocumentNumber}",
-            CurrencyCode = so.Currency,
-            ExchangeRate = so.ExchangeRate,
-            DiscountAmount = so.DiscountAmount,
-            TaxGroupId = so.TaxGroupId,
-            LineItems = so.Lines.Select(l => new ErpSystem.Core.DTOs.AR.InvoiceLineItemCreateDto
-            {
-                LineItemType = l.InventoryItemId.HasValue ? "Product" : "Service",
-                ProductId = l.ProductId ?? l.InventoryItemId, // Fallback if applicable
-                GLAccountId = l.GLAccountId,
-                Description = l.Description,
-                Quantity = l.Quantity,
-                UnitPrice = l.UnitPrice,
-                TaxCode = l.TaxCode,
-                TaxGroupId = l.TaxGroupId,
-                Unit = l.Unit,
-                DiscountPercentage = l.DiscountPercentage
-            }).ToList()
-        };
-
-        var createdInvoice = await _invoiceService.CreateAsync(invoiceCreateDto);
-
-        _logger.LogInformation("Generated Draft Invoice {InvoiceId} for Sales Order {SalesOrderId}", createdInvoice.Id, salesOrderId);
-
-        return createdInvoice.Id;
+        // TODO: Integrate with Finance module's Invoice creation service
+        // This will create an Invoice from the Sales Order lines and link it back
+        _logger.LogWarning("GenerateInvoiceAsync not yet integrated with Finance module for SO {SalesOrderId}", salesOrderId);
+        throw new NotImplementedException("Invoice generation will be implemented during Finance module integration");
     }
 
     #endregion
@@ -975,7 +856,6 @@ public class SalesOrderService : ISalesOrderService
         PaymentTermsDays = so.PaymentTermsDays,
         WarehouseId = so.WarehouseId,
         QuoteId = so.QuoteId,
-        TaxGroupId = so.TaxGroupId,
         OpportunityId = so.OpportunityId,
         InvoiceId = so.InvoiceId,
         SalesRepId = so.SalesRepId,
@@ -1023,7 +903,6 @@ public class SalesOrderService : ISalesOrderService
             Unit = l.Unit,
             WarehouseId = l.WarehouseId,
             LocationId = l.LocationId,
-            TaxGroupId = l.TaxGroupId,
             SerialNumber = l.SerialNumber,
             LotNumber = l.LotNumber,
             IsStockReserved = l.IsStockReserved,

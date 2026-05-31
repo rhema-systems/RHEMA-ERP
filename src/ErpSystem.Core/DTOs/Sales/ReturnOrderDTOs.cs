@@ -19,16 +19,13 @@ public class ReturnOrderSummaryDto
     public int LineCount { get; set; }
     public DateTime? ReceivedDate { get; set; }
     public DateTime CreatedAt { get; set; }
-    public string Currency { get; set; } = "GHS";
-    public decimal ExchangeRate { get; set; } = 1.0m;
 }
 
 public class ReturnOrderDetailDto : ReturnOrderSummaryDto
 {
     public Guid SalesOrderId { get; set; }
     public Guid? DeliveryNoteId { get; set; }
-    public Guid? InvoiceId { get; set; }
-    public Guid BusinessPartnerId { get; set; }
+    public Guid CustomerId { get; set; }
     public string? ReasonDescription { get; set; }
     public DateTime? InspectedDate { get; set; }
     public string? InspectedByName { get; set; }
@@ -42,7 +39,6 @@ public class ReturnOrderDetailDto : ReturnOrderSummaryDto
 public class ReturnOrderLineDto
 {
     public Guid Id { get; set; }
-    public Guid? InvoiceLineItemId { get; set; }
     public string Description { get; set; } = string.Empty;
     public string? ProductCode { get; set; }
     public decimal QuantityReturned { get; set; }
@@ -58,7 +54,6 @@ public class CreateReturnOrderDto
     [Required]
     public Guid SalesOrderId { get; set; }
     public Guid? DeliveryNoteId { get; set; }
-    public Guid? InvoiceId { get; set; }
     [Required]
     public Guid CustomerId { get; set; }
     public ReturnReasonCode ReasonCode { get; set; }
@@ -70,7 +65,6 @@ public class CreateReturnOrderDto
 public class CreateReturnOrderLineDto
 {
     public Guid? SalesOrderLineId { get; set; }
-    public Guid? InvoiceLineItemId { get; set; }
     [Required]
     public string Description { get; set; } = string.Empty;
     public string? ProductCode { get; set; }
@@ -80,7 +74,6 @@ public class CreateReturnOrderLineDto
     public string? Condition { get; set; }
     public bool IsRestockable { get; set; } = true;
 }
-
 
 // ═════════════════════════════════════════════
 //  CREDIT NOTE DTOs
