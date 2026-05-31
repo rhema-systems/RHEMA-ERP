@@ -348,5 +348,64 @@ namespace ErpSystem.Api.Controllers.Finance
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// Links an uploaded file to a journal entry.
+        /// </summary>
+        [HttpPost("{id}/attachments/{fileUploadRecordId}")]
+        public async Task<IActionResult> LinkAttachment(Guid id, Guid fileUploadRecordId)
+        {
+            try
+            {
+                await _journalEntryService.LinkAttachmentAsync(id, fileUploadRecordId);
+                return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Unlinks an attachment from a journal entry.
+        /// </summary>
+        [HttpDelete("{id}/attachments/{fileUploadRecordId}")]
+        public async Task<IActionResult> UnlinkAttachment(Guid id, Guid fileUploadRecordId)
+        {
+            try
+            {
+                await _journalEntryService.UnlinkAttachmentAsync(id, fileUploadRecordId);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets attachment metadata linked to a journal entry.
+        /// </summary>
+        [HttpGet("{id}/attachments")]
+        public async Task<ActionResult<IReadOnlyList<JournalEntryAttachmentDto>>> GetAttachments(Guid id)
+        {
+            try
+            {
+                var attachments = await _journalEntryService.GetAttachmentsAsync(id);
+                return Ok(attachments);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
     }
 }

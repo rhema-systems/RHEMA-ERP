@@ -85,5 +85,10 @@ namespace ErpSystem.Core.Interfaces.Finance
             Guid? approvedByUserId = null,
             string? rejectionReason = null,
             CancellationToken cancellationToken = default);
+
+        Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
+        Task UnlinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<Guid>> GetAttachmentIdsAsync(Guid journalEntryId, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<JournalEntryAttachmentDto>> GetAttachmentsAsync(Guid journalEntryId, CancellationToken cancellationToken = default);
     }
 }

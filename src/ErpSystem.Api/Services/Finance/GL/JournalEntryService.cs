@@ -384,5 +384,73 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             await _context.SaveChangesAsync(cancellationToken);
         }
+
+        public async Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+
+            var exists = await _context.Set<JournalEntryAttachment>()
+                .AnyAsync(x => x.TenantId == tenantId && x.JournalEntryId == journalEntryId && x.FileUploadRecordId == fileUploadRecordId, cancellationToken);
+
+            if (exists) return;
+
+            var link = new JournalEntryAttachment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryId = journalEntryId,
+                FileUploadRecordId = fileUploadRecordId
+            };
+
+            _context.Set<JournalEntryAttachment>().Add(link);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        public async Task UnlinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+
+            var link = await _context.Set<JournalEntryAttachment>()
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.JournalEntryId == journalEntryId && x.FileUploadRecordId == fileUploadRecordId, cancellationToken);
+
+            if (link == null) return;
+
+            _context.Set<JournalEntryAttachment>().Remove(link);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        public async Task<IReadOnlyList<Guid>> GetAttachmentIdsAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+
+            return await _context.Set<JournalEntryAttachment>()
+                .Where(x => x.TenantId == tenantId && x.JournalEntryId == journalEntryId)
+                .Select(x => x.FileUploadRecordId)
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<IReadOnlyList<JournalEntryAttachmentDto>> GetAttachmentsAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+
+            var rows = await _context.Set<JournalEntryAttachment>()
+                .Include(x => x.FileUploadRecord)
+                .Where(x => x.TenantId == tenantId && x.JournalEntryId == journalEntryId)
+                .OrderByDescending(x => x.CreatedAt)
+                .ToListAsync(cancellationToken);
+
+            return rows.Select(x => new JournalEntryAttachmentDto
+            {
+                Id = x.Id,
+                JournalEntryId = x.JournalEntryId,
+                FileId = x.FileUploadRecordId,
+                FileName = x.FileUploadRecord.OriginalFileName,
+                FileUrl = x.FileUploadRecord.FilePath,
+                ContentType = x.FileUploadRecord.ContentType ?? "application/octet-stream",
+                FileSize = x.FileUploadRecord.FileSize,
+                UploadedAt = x.FileUploadRecord.CreatedAt,
+                UploadedBy = x.FileUploadRecord.UploadedByUserId.ToString()
+            }).ToList();
+        }
     }
 }
