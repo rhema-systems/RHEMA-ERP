@@ -26,8 +26,10 @@ import type {
     ModuleDefinition,
     CreateFiscalYearDto,
 } from '@/types/finance';
+import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
 import { apiService } from '@/services/api.service';
+import { normalizeJournalEntry, normalizeJournalEntries } from '@/lib/finance/journal-entry-normalizer';
 
 // =============================================================================
 // FINANCE DATA SERVICE
@@ -56,16 +58,11 @@ class FinanceDataService {
         status?: string;
         isMultiCurrency?: boolean;
         coaType?: 'Standard' | 'Segmented';
-        search?: string;
-        take?: number;
     }): Promise<Account[]> {
         const queryParams = new URLSearchParams();
         if (filters?.accountType) queryParams.append('accountType', filters.accountType);
         if (filters?.status) queryParams.append('status', filters.status);
         if (filters?.isMultiCurrency !== undefined) queryParams.append('isMultiCurrency', String(filters.isMultiCurrency));
-        if (filters?.coaType) queryParams.append('coaType', filters.coaType);
-        if (filters?.search) queryParams.append('search', filters.search);
-        if (filters?.take !== undefined) queryParams.append('take', String(filters.take));
 
         const endpoint = `/finance/accounts${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<Account[]>(endpoint);
@@ -192,8 +189,12 @@ class FinanceDataService {
         return apiService.get<FiscalPeriod>(`/finance/fiscal-periods/${id}`);
     }
 
+    async openFiscalPeriod(id: string): Promise<FiscalPeriod> {
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/open`, {});
+    }
+
     async closeFiscalPeriod(id: string): Promise<FiscalPeriod> {
-        return apiService.put<FiscalPeriod>(`/finance/fiscal-periods/${id}/close`, {});
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/close`, {});
     }
 
     // ===== MODULE LOCKING =====
@@ -231,15 +232,18 @@ class FinanceDataService {
         if (filters?.fiscalPeriodId) queryParams.append('fiscalPeriodId', filters.fiscalPeriodId);
 
         const endpoint = `/finance/journal-entries${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<JournalEntry[]>(endpoint);
+        const raw = await apiService.get<any[]>(endpoint);
+        return normalizeJournalEntries(raw);
     }
 
     async getJournalEntryById(id: string): Promise<JournalEntry> {
-        return apiService.get<JournalEntry>(`/finance/journal-entries/${id}`);
+        const raw = await apiService.get<any>(`/finance/journal-entries/${id}`);
+        return normalizeJournalEntry(raw);
     }
 
     async createJournalEntry(dto: CreateJournalEntryDto): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>('/finance/journal-entries', dto);
+        const raw = await apiService.post<any>('/finance/journal-entries', dto);
+        return normalizeJournalEntry(raw);
     }
 
     async updateJournalEntry(id: string, dto: Partial<JournalEntry>): Promise<JournalEntry> {
@@ -250,12 +254,17 @@ class FinanceDataService {
         return apiService.delete(`/finance/journal-entries/${id}`);
     }
 
-    async postJournalEntry(id: string): Promise<JournalEntry> {
-        return apiService.put<JournalEntry>(`/finance/journal-entries/${id}/post`, {});
+    async postJournalEntry(id: string): Promise<void> {
+        await apiService.post(`/finance/journal-entries/${id}/post`, {});
     }
 
-    async reverseJournalEntry(id: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/reverse`, {});
+    async reverseJournalEntry(id: string, reason: string, reversalDate?: string): Promise<JournalEntry> {
+        const queryParams = new URLSearchParams({ reason });
+        if (reversalDate) {
+            queryParams.append('reversalDate', reversalDate);
+        }
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/reverse?${queryParams.toString()}`, {});
+        return normalizeJournalEntry(raw);
     }
 
     async getNextJournalNumber(): Promise<string> {
@@ -266,15 +275,18 @@ class FinanceDataService {
     // ===== JOURNAL ENTRY APPROVAL WORKFLOW =====
 
     async requestJournalEntryApproval(id: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/request-approval`);
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/request-approval`);
+        return normalizeJournalEntry(raw);
     }
 
     async approveJournalEntry(id: string, comments?: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/approve`, { comments });
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/approve`, { comments });
+        return normalizeJournalEntry(raw);
     }
 
     async rejectJournalEntry(id: string, reason: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/reject`, { reason });
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/reject`, { reason });
+        return normalizeJournalEntry(raw);
     }
 
     // ===== ATTACHMENTS =====
@@ -325,10 +337,51 @@ class FinanceDataService {
         return apiService.put<FinanceSettings>('/finance/settings', dto);
     }
 
+    // ===== FINANCIAL STATEMENTS =====
+
+    async getTrialBalance(params: { asAtDate: string; bookClassification?: string; includeZeroBalances?: boolean; segmentFilters?: string[] }): Promise<any> {
+        const queryParams = new URLSearchParams();
+        if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeZeroBalances !== undefined) queryParams.append('includeZeroBalances', String(params.includeZeroBalances));
+        if (params.segmentFilters && params.segmentFilters.length > 0) {
+            params.segmentFilters.forEach(filter => queryParams.append('segmentFilters', filter));
+        }
+
+        return apiService.get<any>(`/finance/statements/trial-balance?${queryParams}`);
+    }
+
+    async getIncomeStatement(params: { periodStart: string; periodEnd: string; bookClassification?: string; segmentFilters?: string[] }): Promise<any> {
+        const queryParams = new URLSearchParams();
+        if (params.periodStart) queryParams.append('periodStart', params.periodStart);
+        if (params.periodEnd) queryParams.append('periodEnd', params.periodEnd);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.segmentFilters && params.segmentFilters.length > 0) {
+            params.segmentFilters.forEach(filter => queryParams.append('segmentFilters', filter));
+        }
+
+        return apiService.get<any>(`/finance/statements/income-statement?${queryParams}`);
+    }
+
+    async getBalanceSheet(params: { asAtDate: string; bookClassification?: string; segmentFilters?: string[] }): Promise<any> {
+        const queryParams = new URLSearchParams();
+        if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.segmentFilters && params.segmentFilters.length > 0) {
+            params.segmentFilters.forEach(filter => queryParams.append('segmentFilters', filter));
+        }
+
+        return apiService.get<any>(`/finance/statements/balance-sheet?${queryParams}`);
+    }
+
     // ===== SEGMENT STRUCTURES =====
 
     async getSegmentStructures(): Promise<SegmentStructure[]> {
         return apiService.get<SegmentStructure[]>('/finance/segments');
+    }
+
+    async getReportingDimensions(): Promise<SegmentStructure[]> {
+        return apiService.get<SegmentStructure[]>('/finance/segments/reporting-dimensions');
     }
 
     async getSegmentStructureById(id: string): Promise<SegmentStructure> {

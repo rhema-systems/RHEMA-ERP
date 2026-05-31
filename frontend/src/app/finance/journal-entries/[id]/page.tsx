@@ -169,6 +169,22 @@ export default function JournalEntryDetailPage() {
         }
     };
 
+    const handleReverse = async () => {
+        if (!entry || !reverseReason.trim()) return;
+        try {
+            setActionLoading('reverse');
+            await financeDataService.reverseJournalEntry(entry.id, reverseReason, reverseDate);
+            toast({ title: 'Reversed', description: 'Journal entry has been successfully reversed.' });
+            setShowReverseForm(false);
+            setReverseReason('');
+            await fetchEntry();
+        } catch (err: any) {
+            toast({ title: 'Error', description: err?.message || 'Failed to reverse', variant: 'destructive' });
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
     const handleDelete = async () => {
         if (!entry) return;
         try {
@@ -314,13 +330,25 @@ export default function JournalEntryDetailPage() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {entry.transactions.map((line) => (
+                                        {entry.transactions.map((line) => {
+                                            const isSystemClearing = line.description?.startsWith('System Clearing');
+                                            return (
                                             <tr key={line.id} className="border-b last:border-0 hover:bg-muted/50">
                                                 <td className="p-3">
-                                                    <div className="font-mono font-semibold">{line.accountCode}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="font-mono font-semibold">{line.accountCode}</div>
+                                                        {isSystemClearing && (
+                                                            <Badge variant="outline" className="text-xs bg-amber-100 text-amber-800 border-amber-200">
+                                                                SYS-SPLIT
+                                                            </Badge>
+                                                        )}
+                                                    </div>
                                                     <div className="text-sm text-muted-foreground">{line.accountName}</div>
                                                 </td>
-                                                <td className="p-3">{line.description}</td>
+                                                <td className="p-3">
+                                                    {line.description}
+                                                    {isSystemClearing && <div className="text-xs text-amber-600 mt-1">Auto-generated balancing line</div>}
+                                                </td>
                                                 <td className="p-3 text-right font-mono">
                                                     {line.debitAmount > 0 ? formatCurrency(line.debitAmount) : '-'}
                                                 </td>
@@ -328,7 +356,7 @@ export default function JournalEntryDetailPage() {
                                                     {line.creditAmount > 0 ? formatCurrency(line.creditAmount) : '-'}
                                                 </td>
                                             </tr>
-                                        ))}
+                                        )})}
                                     </tbody>
                                     <tfoot>
                                         <tr className="bg-muted/50 font-bold">

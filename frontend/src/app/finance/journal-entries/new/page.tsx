@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,13 +17,20 @@ import { cn } from '@/lib/utils';
 import type { JournalType, Account, CreateJournalEntryDto } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
+import { mapJournalEntryFormToCreateDto, validateJournalEntryForm } from '@/lib/finance/journal-entry-mapper';
+
+const BOOK_CLASSIFICATIONS = {
+    IFRS: 'IFRS',
+    MANAGEMENT: 'Management',
+    LOCAL: 'Local',
+} as const;
 
 interface JournalLine {
     id: string;
     accountId: string;
     description: string;
     currencyCode: string;
-    exchangeRate: number;
+    exchangeRate: number | '';
     debit: number;
     credit: number;
     foreignDebit?: number;
@@ -59,6 +66,7 @@ export default function NewJournalEntryPage() {
         description: '',
         referenceNumber: '',
         notes: '',
+        bookClassification: BOOK_CLASSIFICATIONS.IFRS as string,
     });
     const [journalNumber, setJournalNumber] = useState('Generating...');
     const [saving, setSaving] = useState(false);
@@ -171,7 +179,7 @@ export default function NewJournalEntryPage() {
                         }
                         if (account.currencyCode && account.currencyCode !== BASE_CURRENCY) {
                             updatedLine.currencyCode = account.currencyCode;
-                            updatedLine.exchangeRate = 12.5; // Default rate — user can adjust
+                            updatedLine.exchangeRate = 12.5; // Default rate � user can adjust
                         } else if (account.isMultiCurrency) {
                             // Multi-currency, user can select currency
                         } else {
@@ -249,29 +257,7 @@ export default function NewJournalEntryPage() {
             return;
         }
 
-        const validLines = lines.filter(l => l.accountId && (l.debit > 0 || l.credit > 0));
-        if (validLines.length < 2) {
-            toast({ title: 'Validation', description: 'At least 2 transaction lines with amounts are required', variant: 'destructive' });
-            return;
-        }
-
-        const dto: CreateJournalEntryDto = {
-            journalType: header.journalType,
-            entryDate: header.entryDate,
-            description: header.description,
-            referenceNumber: header.referenceNumber || undefined,
-            bookClassification: 'Base',
-            notes: header.notes || undefined,
-            transactions: validLines.map(l => ({
-                accountId: l.accountId,
-                description: l.description || undefined,
-                debitAmount: l.debit || 0,
-                creditAmount: l.credit || 0,
-                transactionCurrency: l.currencyCode !== BASE_CURRENCY ? l.currencyCode : undefined,
-                foreignCurrencyAmount: l.foreignDebit || l.foreignCredit || undefined,
-                exchangeRate: l.currencyCode !== BASE_CURRENCY ? l.exchangeRate : undefined,
-            })),
-        };
+        const dto = mapJournalEntryFormToCreateDto(header, lines, journalNumber, BASE_CURRENCY);
 
         try {
             setSaving(true);
@@ -340,7 +326,7 @@ export default function NewJournalEntryPage() {
                     <AlertCircle className="h-4 w-4" />
                     <AlertTitle>Entry is not balanced</AlertTitle>
                     <AlertDescription>
-                        Total Debits ({totalDebit.toFixed(2)}) must equal Total Credits ({totalCredit.toFixed(2)}).
+                        Total Debits ({totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) must equal Total Credits ({totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}).
                         Difference: {Math.abs(totalDebit - totalCredit).toFixed(2)}
                     </AlertDescription>
                 </Alert>
@@ -400,8 +386,22 @@ export default function NewJournalEntryPage() {
                                 </SelectContent>
                             </Select>
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="bookClassification">Book Classification *</Label>
+                            <Select
+                                value={header.bookClassification}
+                                onValueChange={(value) => setHeader({ ...header, bookClassification: value })}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value={BOOK_CLASSIFICATIONS.IFRS}>IFRS</SelectItem>
+                                    <SelectItem value={BOOK_CLASSIFICATIONS.MANAGEMENT}>Management</SelectItem>
+                                    <SelectItem value={BOOK_CLASSIFICATIONS.LOCAL}>Local</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
 
-                        <div className="space-y-2 md:col-span-3">
+                        <div className="space-y-2 md:col-span-2">
                             <Label htmlFor="description">Description *</Label>
                             <Input
                                 id="description"
@@ -565,7 +565,7 @@ export default function NewJournalEntryPage() {
                                                             type="number"
                                                             step="0.0001"
                                                             value={line.exchangeRate}
-                                                            onChange={(e) => updateLine(line.id, 'exchangeRate', parseFloat(e.target.value) || 1)}
+                                                            onChange={(e) => updateLine(line.id, 'exchangeRate', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
                                                             className="text-right w-full"
                                                         />
                                                     )}
@@ -634,8 +634,8 @@ export default function NewJournalEntryPage() {
                                 <tfoot>
                                     <tr className="bg-muted/50 font-bold">
                                         <td colSpan={6} className="p-3 text-right">Totals ({BASE_CURRENCY}):</td>
-                                        <td className="p-3 text-right">{totalDebit.toFixed(2)}</td>
-                                        <td className="p-3 text-right">{totalCredit.toFixed(2)}</td>
+                                        <td className="p-3 text-right">{totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="p-3 text-right">{totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                         <td></td>
                                     </tr>
                                 </tfoot>

@@ -11,17 +11,22 @@ import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText } from 'lucide-rea
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { JournalType, Account, JournalEntry } from '@/types/finance';
-import { BOOK_CLASSIFICATIONS } from '@/constants/finance';
+
+const BOOK_CLASSIFICATIONS = {
+    IFRS: 'IFRS',
+    MANAGEMENT: 'Management',
+    LOCAL: 'Local',
+} as const;
 
 // MOCK ACCOUNTS
 const MOCK_ACCOUNTS: Account[] = [
-    { id: 'acc-1', accountCode: '1000', accountName: 'Cash (GHS)', accountType: 'Asset', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '1000', isSegmented: false, isIFRSClassified: true, isBaseClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
-    { id: 'acc-1b', accountCode: '1001', accountName: 'Cash (USD)', accountType: 'Asset', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '1001', isSegmented: false, isIFRSClassified: true, isBaseClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'USD' },
-    { id: 'acc-1c', accountCode: '1002', accountName: 'Cash (EUR)', accountType: 'Asset', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '1002', isSegmented: false, isIFRSClassified: true, isBaseClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'EUR' },
-    { id: 'acc-2', accountCode: '1100', accountName: 'Accounts Receivable', accountType: 'Asset', status: 'Active', isMultiCurrency: true, tenantId: 't1', accountNumber: '1100', isSegmented: false, isIFRSClassified: true, isBaseClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: true, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
-    { id: 'acc-3', accountCode: '2000', accountName: 'Accounts Payable', accountType: 'Liability', status: 'Active', isMultiCurrency: true, tenantId: 't1', accountNumber: '2000', isSegmented: false, isIFRSClassified: true, isBaseClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: true, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
-    { id: 'acc-4', accountCode: '4000', accountName: 'Sales Revenue', accountType: 'Revenue', status: 'Active', isMultiCurrency: true, tenantId: 't1', accountNumber: '4000', isSegmented: false, isIFRSClassified: true, isBaseClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: true, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
-    { id: 'acc-5', accountCode: '5000', accountName: 'Cost of Goods Sold', accountType: 'Expense', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '5000', isSegmented: false, isIFRSClassified: true, isBaseClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: true, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
+    { id: 'acc-1', accountCode: '1000', accountName: 'Cash (GHS)', accountType: 'Asset', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '1000', isSegmented: false, isIFRSClassified: true, isManagementClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
+    { id: 'acc-1b', accountCode: '1001', accountName: 'Cash (USD)', accountType: 'Asset', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '1001', isSegmented: false, isIFRSClassified: true, isManagementClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
+    { id: 'acc-1c', accountCode: '1002', accountName: 'Cash (EUR)', accountType: 'Asset', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '1002', isSegmented: false, isIFRSClassified: true, isManagementClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'EUR' },
+    { id: 'acc-2', accountCode: '1100', accountName: 'Accounts Receivable', accountType: 'Asset', status: 'Active', isMultiCurrency: true, tenantId: 't1', accountNumber: '1100', isSegmented: false, isIFRSClassified: true, isManagementClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: true, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
+    { id: 'acc-3', accountCode: '2000', accountName: 'Accounts Payable', accountType: 'Liability', status: 'Active', isMultiCurrency: true, tenantId: 't1', accountNumber: '2000', isSegmented: false, isIFRSClassified: true, isManagementClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: true, budgetTrackingEnabled: false, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
+    { id: 'acc-4', accountCode: '4000', accountName: 'Sales Revenue', accountType: 'Revenue', status: 'Active', isMultiCurrency: true, tenantId: 't1', accountNumber: '4000', isSegmented: false, isIFRSClassified: true, isManagementClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: true, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
+    { id: 'acc-5', accountCode: '5000', accountName: 'Cost of Goods Sold', accountType: 'Expense', status: 'Active', isMultiCurrency: false, tenantId: 't1', accountNumber: '5000', isSegmented: false, isIFRSClassified: true, isManagementClassified: true, isLocalClassified: true, allowDirectPosting: true, isControlAccount: false, budgetTrackingEnabled: true, createdAt: '', updatedAt: '', currencyCode: 'GHS' },
 ];
 
 // MOCK ENTRY TO EDIT
@@ -35,8 +40,8 @@ const MOCK_ENTRY: JournalEntry = {
     totalCreditAmount: 12500.00,
     isBalanced: true,
     isMultiCurrency: true,
-    primaryCurrency: 'USD',
-    bookClassification: 'Base',
+    primaryCurrency: 'GHS',
+    bookClassification: 'Management',
     fiscalPeriodId: 'fp-1',
     postingStatus: 'Draft',
     requiresApproval: true,
@@ -44,8 +49,8 @@ const MOCK_ENTRY: JournalEntry = {
     isReversed: false,
     isRevaluationEntry: false,
     transactions: [
-        { id: '1', journalEntryId: 'je-2', lineNumber: 1, accountId: 'acc-2', accountCode: '1100', accountName: 'Accounts Receivable', description: 'Inv #1001', debitAmount: 12500.00, creditAmount: 0, foreignCurrencyAmount: 1000.00, transactionCurrency: 'USD', createdAt: '', updatedAt: '', isRevaluationEntry: false },
-        { id: '2', journalEntryId: 'je-2', lineNumber: 2, accountId: 'acc-4', accountCode: '4000', accountName: 'Sales Revenue', description: 'Inv #1001', debitAmount: 0, creditAmount: 12500.00, foreignCurrencyAmount: 1000.00, transactionCurrency: 'USD', createdAt: '', updatedAt: '', isRevaluationEntry: false },
+        { id: '1', journalEntryId: 'je-2', lineNumber: 1, accountId: 'acc-2', accountCode: '1100', accountName: 'Accounts Receivable', description: 'Inv #1001', debitAmount: 12500.00, creditAmount: 0, foreignCurrencyAmount: 1000.00, transactionCurrency: 'GHS', createdAt: '', updatedAt: '', isRevaluationEntry: false },
+        { id: '2', journalEntryId: 'je-2', lineNumber: 2, accountId: 'acc-4', accountCode: '4000', accountName: 'Sales Revenue', description: 'Inv #1001', debitAmount: 0, creditAmount: 12500.00, foreignCurrencyAmount: 1000.00, transactionCurrency: 'GHS', createdAt: '', updatedAt: '', isRevaluationEntry: false },
     ],
     createdAt: '2024-01-20T14:00:00Z',
     updatedAt: '2024-01-20T14:00:00Z',
@@ -88,7 +93,8 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
         journalType: MOCK_ENTRY.journalType,
         description: MOCK_ENTRY.description,
         referenceNumber: MOCK_ENTRY.referenceNumber || '',
-        defaultCurrency: MOCK_ENTRY.primaryCurrency || 'GHS', // Used as default for new lines
+        defaultCurrency: MOCK_ENTRY.primaryCurrency || 'GHS',
+        bookClassification: MOCK_ENTRY.bookClassification || 'IFRS',
     });
 
     const [lines, setLines] = useState<JournalLine[]>(
@@ -233,7 +239,7 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
             }
         }
 
-        console.log(`Updating JE ${params.id} (${status}):`, { header, lines, status });
+        // Submit the update
         // Simulate save
         setTimeout(() => {
             router.push(`/finance/journal-entries/${params.id}`);

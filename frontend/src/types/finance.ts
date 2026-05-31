@@ -75,10 +75,11 @@ export interface FiscalPeriod {
     id: string;
     fiscalYearId: string;
     periodNumber: number;
+    periodCode: string;
     periodName: string;
     startDate: string;
     endDate: string;
-    status: PeriodStatus;
+    periodStatus: PeriodStatus;
     isClosed: boolean;
     isLocked: boolean;
     closedDate?: string;
@@ -129,7 +130,7 @@ export interface Account {
     currencyCode: string;
     isMultiCurrency: boolean;
     isIFRSClassified: boolean;
-    isBaseClassified: boolean;
+    isManagementClassified: boolean;
     isLocalClassified: boolean;
     ifrsLineItem?: string;
     baseLineItem?: string;
@@ -207,23 +208,45 @@ export interface SegmentLookupValue {
     updatedAt: string;
 }
 
+/**
+ * Maps to backend: JournalEntryDto (JournalEntryDtos.cs)
+ * JSON serialization: camelCase from PascalCase C# properties
+ */
 export interface JournalEntry {
     id: string;
+    /** Backend: JournalNumber */
+    journalNumber: string;
+    /** Alias kept for backward compat with UI components */
     journalEntryNumber: string;
-    journalType: JournalType;
+    /** Backend: TransactionDate */
+    transactionDate: string;
+    /** Alias kept for backward compat */
     entryDate: string;
     description: string;
+    reference?: string;
+    /** Alias kept for backward compat */
     referenceNumber?: string;
     sourceModule?: string;
+    totalDebit: number;
+    totalCredit: number;
+    /** Alias kept for backward compat */
     totalDebitAmount: number;
+    /** Alias kept for backward compat */
     totalCreditAmount: number;
-    isBalanced: boolean;
-    isMultiCurrency: boolean;
-    primaryCurrency?: string;
-    bookClassification: string;
-    fiscalPeriodId: string;
+    /** Backend: Status (aliased as PostingStatus) */
+    status: string;
+    /** Alias kept for backward compat */
     postingStatus: PostingStatus;
+    isReversed: boolean;
+    reversalJournalId?: string;
+    /** Alias kept for backward compat */
+    reversalJournalEntryId?: string;
+    postedDate?: string;
+    /** Alias kept for backward compat */
     postingDate?: string;
+    postedByUserId?: string;
+    postedByUserName?: string;
+    // Approval workflow
     requiresApproval: boolean;
     approvalStatus?: string;
     approvedByUserId?: string;
@@ -249,33 +272,32 @@ export interface JournalEntry {
     revaluationType?: string;
     reversalDate?: string;
     reversalReason?: string;
-    isRevaluationEntry: boolean;
-    revaluationType?: string;
-    transactions: JournalEntryLine[];
     notes?: string;
-    createdAt: string;
-    updatedAt: string;
-    createdBy: string;
-    updatedBy: string;
 }
 
-export interface JournalEntryLine {
+/**
+ * Maps to backend: AccountTransactionDto (AccountTransactionDtos.cs)
+ */
+export interface AccountTransaction {
     id: string;
-    journalEntryId: string;
-    lineNumber: number;
     accountId: string;
-    accountCode: string;
-    accountName: string;
-    description: string;
-    debitAmount: number;
-    creditAmount: number;
-    transactionCurrency?: string;
-    foreignCurrencyAmount?: number;
-    exchangeRate?: number;
-    isRevaluationEntry: boolean;
-    revaluationType?: string;
-    createdAt: string;
-    updatedAt: string;
+    accountName?: string;
+    accountNumber?: string;
+    /** Alias kept for backward compat */
+    accountCode?: string;
+    journalEntryId: string;
+    amount: number;
+    transactionType: 'Debit' | 'Credit';
+    description?: string;
+    transactionDate: string;
+    reference: string;
+    balanceAfter: number;
+    // Computed helpers for UI compatibility
+    /** debitAmount = amount when transactionType === 'Debit', else 0 */
+    debitAmount?: number;
+    /** creditAmount = amount when transactionType === 'Credit', else 0 */
+    creditAmount?: number;
+    lineNumber?: number;
 }
 
 /** @deprecated Use AccountTransaction instead */
@@ -582,24 +604,28 @@ export interface JournalEntryFilters {
 }
 
 export interface CreateJournalEntryDto {
-    journalType: JournalType;
-    entryDate: string;
-    description: string;
-    referenceNumber?: string;
-    bookClassification: string;
+    journalNumber: string;
+    transactionDate: string;
+    description?: string;
+    reference?: string;
+    bookClassification?: string;
     fiscalPeriodId?: string;
-    notes?: string;
-    transactions: CreateJournalEntryLineDto[];
+    sourceModule?: string;
+    sourceDocumentId?: string;
+    sourceDocumentType?: string;
+    transactions: CreateAccountTransactionDto[];
 }
 
-export interface CreateJournalEntryLineDto {
+export interface CreateAccountTransactionDto {
     accountId: string;
+    amount: number;
+    transactionType: 'Debit' | 'Credit';
     description?: string;
-    debitAmount: number;
-    creditAmount: number;
-    transactionCurrency?: string;
-    foreignCurrencyAmount?: number;
+    reference: string;
+    currencyCode?: string;
+    foreignAmount?: number;
     exchangeRate?: number;
+    lineNumber?: number;
 }
 
 // Reports
