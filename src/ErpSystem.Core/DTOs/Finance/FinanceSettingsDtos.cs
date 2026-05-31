@@ -16,6 +16,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }
         public Guid? RealizedGainLossAccountId { get; set; }
+        public Guid? RealizedFxGainAccountId { get; set; }
+        public Guid? RealizedFxLossAccountId { get; set; }
         public Guid? SuspenseAccountId { get; set; }
         public Guid? ControlAccountArId { get; set; }
         public Guid? ControlAccountApId { get; set; }
@@ -45,6 +47,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }
         public Guid? RealizedGainLossAccountId { get; set; }
+        public Guid? RealizedFxGainAccountId { get; set; }
+        public Guid? RealizedFxLossAccountId { get; set; }
         public Guid? SuspenseAccountId { get; set; }
         public Guid? ControlAccountArId { get; set; }
         public Guid? ControlAccountApId { get; set; }

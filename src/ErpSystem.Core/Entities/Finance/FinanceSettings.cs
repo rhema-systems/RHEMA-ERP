@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Entities.Base;
 
 namespace ErpSystem.Core.Entities.Finance
@@ -43,21 +44,46 @@ namespace ErpSystem.Core.Entities.Finance
         /// Default Unrealized Gain/Loss account for currency revaluation
         /// </summary>
         public Guid? UnrealizedGainLossAccountId { get; set; }
-
+        
         /// <summary>
-        /// Default Realized Gain/Loss account for settled transactions
+        /// Account for realized FX gain/loss postings.
         /// </summary>
         public Guid? RealizedGainLossAccountId { get; set; }
+
+        /// <summary>
+        /// Default Realized FX Gain account for settled transactions
+        /// </summary>
+        public Guid? RealizedFxGainAccountId { get; set; }
+
+        /// <summary>
+        /// Default Realized FX Loss account for settled transactions
+        /// </summary>
+        public Guid? RealizedFxLossAccountId { get; set; }
 
         /// <summary>
         /// Default Suspense account for unbalanced entries
         /// </summary>
         public Guid? SuspenseAccountId { get; set; }
 
+        /// <summary>
+        /// Default Zero-Balance Clearing Account / Inter-segment Due-To/Due-From Account
+        /// Used by the Document Splitting Engine to balance trial balances per segment.
+        /// </summary>
+        public Guid? SegmentClearingAccountId { get; set; }
+
+        /// <summary>
+        /// Controls which books automated subledger postings target.
+        /// Values: "IFRS", "Management", "Local", "AllClassifiedBooks"
+        /// Default: "IFRS"
+        /// </summary>
+        [MaxLength(30)]
+        public string SubledgerPostingMode { get; set; } = "IFRS";
+
         // Navigation properties
         public virtual Account? RetainedEarningsAccount { get; set; }
         public virtual Account? UnrealizedGainLossAccount { get; set; }
-        public virtual Account? RealizedGainLossAccount { get; set; }
+        public virtual Account? RealizedFxGainAccount { get; set; }
+        public virtual Account? RealizedFxLossAccount { get; set; }
         public virtual Account? SuspenseAccount { get; set; }
 
         /// <summary>
@@ -132,5 +158,24 @@ namespace ErpSystem.Core.Entities.Finance
         /// </summary>
         public Guid? LeaseInterestExpenseAccountId { get; set; }
         public virtual Account? LeaseInterestExpenseAccount { get; set; }
+
+        // ── Subledger Journals Defaults ─────────────────────────────────
+        
+        /// <summary>
+        /// Default expense account for bad debt / write-offs (AR)
+        /// </summary>
+        public Guid? WriteOffExpenseAccountId { get; set; }
+        public virtual Account? WriteOffExpenseAccount { get; set; }
+
+        /// <summary>
+        /// Default income/recovery account for vendor write-offs (AP)
+        /// </summary>
+        public Guid? WriteOffRecoveryAccountId { get; set; }
+        public virtual Account? WriteOffRecoveryAccount { get; set; }
+
+        /// <summary>
+        /// If true, subledger journals must go through the approval workflow before posting
+        /// </summary>
+        public bool RequireSubledgerJournalApproval { get; set; } = false;
     }
 }

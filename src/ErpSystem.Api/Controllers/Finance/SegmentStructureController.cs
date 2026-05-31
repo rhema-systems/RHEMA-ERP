@@ -70,6 +70,29 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Retrieves all segment structures configured as reporting dimensions.
+        /// </summary>
+        /// <remarks>
+        /// Returns only the segments where IsReportingDimension is true, including their lookup values.
+        /// Useful for building dynamic filter UIs in financial reports.
+        /// </remarks>
+        /// <returns>List of reporting dimension segment structures.</returns>
+        [HttpGet("reporting-dimensions")]
+        public async Task<ActionResult<List<SegmentStructureDto>>> GetReportingDimensions()
+        {
+            try
+            {
+                var segments = await _segmentStructureService.GetSegmentStructuresAsync();
+                var dimensions = segments.Where(s => s.IsReportingDimension && s.IsActive).ToList();
+                return Ok(dimensions);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Retrieves a segment structure by its unique identifier.
         /// </summary>
         /// <remarks>
