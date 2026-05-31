@@ -49,8 +49,6 @@ public class VendorInvoiceDto
     public decimal WithholdingTaxRate { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
 
-    public Guid? TaxGroupId { get; set; }
-
     // Matching
     public InvoiceMatchingType MatchingType { get; set; }
     public InvoiceMatchingStatus MatchingStatus { get; set; }
@@ -103,8 +101,6 @@ public class VendorInvoiceCreateDto
     // Withholding tax
     public decimal WithholdingTaxRate { get; set; }
 
-    public Guid? TaxGroupId { get; set; }
-
     // Matching
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
 
@@ -140,8 +136,6 @@ public class VendorInvoiceUpdateDto
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
     public decimal WithholdingTaxRate { get; set; }
-
-    public Guid? TaxGroupId { get; set; }
 
     public InvoiceMatchingType MatchingType { get; set; }
 
@@ -187,7 +181,6 @@ public class VendorInvoiceLineItemDto
     public decimal TaxRate { get; set; }
     public decimal TaxAmount { get; set; }
     public string? TaxCode { get; set; }
-    public Guid? TaxGroupId { get; set; }
     public decimal DiscountPercentage { get; set; }
     public decimal DiscountAmount { get; set; }
     public string? Unit { get; set; }
@@ -209,7 +202,6 @@ public class VendorInvoiceLineItemCreateDto
 
     public decimal TaxRate { get; set; }
     public string? TaxCode { get; set; }
-    public Guid? TaxGroupId { get; set; }
     public decimal DiscountPercentage { get; set; }
     public string? Unit { get; set; }
 }
@@ -591,205 +583,3 @@ public class ApSummaryDto
 }
 
 #endregion
-
-public class CreateFinancePurchaseReceiptDto
-{
-    [Required]
-    public Guid FinancePurchaseOrderId { get; set; }
-
-    [Required]
-    [MaxLength(50)]
-    public string ReceiptNumber { get; set; } = string.Empty;
-
-    public DateTime ReceiptDate { get; set; } = DateTime.UtcNow;
-
-    [MaxLength(500)]
-    public string? Remarks { get; set; }
-
-    [Required]
-    public List<CreateFinancePurchaseReceiptLineDto> Lines { get; set; } = new();
-}
-
-public class CreateFinancePurchaseReceiptLineDto
-{
-    [Required]
-    public Guid FinancePurchaseOrderItemId { get; set; }
-
-    [Required]
-    public decimal QuantityReceived { get; set; }
-}
-
-#region Finance Purchase Order DTOs
-
-public class FinancePurchaseOrderDto
-{
-    public Guid Id { get; set; }
-    public string OrderNumber { get; set; } = string.Empty;
-    public Guid VendorId { get; set; }
-    public string? VendorName { get; set; }
-    public DateTime OrderDate { get; set; }
-    public DateTime? ExpectedDeliveryDate { get; set; }
-    public FinancePurchaseOrderStatus Status { get; set; }
-    public string CurrencyCode { get; set; } = "GHS";
-    public decimal ExchangeRate { get; set; } = 1.0m;
-    public decimal TotalAmount { get; set; }
-    public decimal DiscountAmount { get; set; }
-    public string? Remarks { get; set; }
-    public Guid? TaxGroupId { get; set; }
-    public List<FinancePurchaseOrderItemDto> Items { get; set; } = new();
-    public DateTime CreatedAt { get; set; }
-}
-
-public class FinancePurchaseOrderItemDto
-{
-    public Guid Id { get; set; }
-    public Guid FinancePurchaseOrderId { get; set; }
-    public FinancePurchaseOrderLineType LineType { get; set; }
-    public Guid? InventoryItemId { get; set; }
-    public string? InventoryItemName { get; set; }
-    public Guid? WarehouseId { get; set; }
-    public Guid? GlAccountId { get; set; }
-    public string? GlAccountName { get; set; }
-    public string Description { get; set; } = string.Empty;
-    public decimal OrderedQuantity { get; set; }
-    public decimal ReceivedQuantity { get; set; }
-    public decimal InvoicedQuantity { get; set; }
-    public decimal CancelledQuantity { get; set; }
-    public decimal UnitPrice { get; set; }
-    public string? CurrencyCode { get; set; }
-    public decimal ExchangeRate { get; set; } = 1.0m;
-    public string? TaxCode { get; set; }
-    public Guid? TaxGroupId { get; set; }
-    public decimal TaxRate { get; set; }
-    public decimal TaxAmount { get; set; }
-    public decimal DiscountPercentage { get; set; }
-    public decimal DiscountAmount { get; set; }
-    public decimal LineTotal { get; set; }
-}
-
-public class CreateFinancePurchaseOrderDto
-{
-    [Required]
-    [MaxLength(50)]
-    public string OrderNumber { get; set; } = string.Empty;
-
-    [Required]
-    public Guid VendorId { get; set; }
-
-    [Required]
-    public DateTime OrderDate { get; set; }
-
-    public DateTime? ExpectedDeliveryDate { get; set; }
-
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = "GHS";
-
-    public decimal ExchangeRate { get; set; } = 1.0m;
-
-    [MaxLength(500)]
-    public string? Remarks { get; set; }
-
-    public decimal? DiscountAmount { get; set; }
-    public Guid? TaxGroupId { get; set; }
-
-    [Required]
-    public List<CreateFinancePurchaseOrderItemDto> Items { get; set; } = new();
-}
-
-public class CreateFinancePurchaseOrderItemDto
-{
-    [Required]
-    public FinancePurchaseOrderLineType LineType { get; set; }
-
-    public Guid? InventoryItemId { get; set; }
-    public Guid? WarehouseId { get; set; }
-    public Guid? GlAccountId { get; set; }
-
-    [Required]
-    [MaxLength(500)]
-    public string Description { get; set; } = string.Empty;
-
-    [Required]
-    [Range(0.0001, double.MaxValue)]
-    public decimal OrderedQuantity { get; set; }
-
-    [Required]
-    [Range(0.0, double.MaxValue)]
-    public decimal UnitPrice { get; set; }
-
-    [MaxLength(3)]
-    public string? CurrencyCode { get; set; }
-
-    public decimal ExchangeRate { get; set; } = 1.0m;
-
-    [MaxLength(50)]
-    public string? TaxCode { get; set; }
-
-    public Guid? TaxGroupId { get; set; }
-
-    public decimal TaxRate { get; set; }
-    public decimal TaxAmount { get; set; }
-    public decimal? DiscountPercentage { get; set; }
-    public decimal? DiscountAmount { get; set; }
-    public decimal LineTotal { get; set; }
-}
-
-#endregion
-
-public class CreateSupplierReturnDto
-{
-    [Required]
-    [MaxLength(50)]
-    public string ReturnNumber { get; set; } = string.Empty;
-
-    [Required]
-    public Guid VendorId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string VendorName { get; set; } = string.Empty;
-
-    public Guid? OriginalVendorInvoiceId { get; set; }
-    public Guid? OriginalFinancePurchaseOrderReceiptId { get; set; }
-
-    [Required]
-    public DateTime ReturnDate { get; set; } = DateTime.UtcNow;
-
-    [MaxLength(500)]
-    public string? Reason { get; set; }
-
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = "GHS";
-
-    public decimal ExchangeRate { get; set; } = 1.0m;
-
-    [Required]
-    public List<CreateSupplierReturnLineDto> Lines { get; set; } = new();
-}
-
-public class CreateSupplierReturnLineDto
-{
-    public Guid? OriginalVendorInvoiceLineItemId { get; set; }
-    public Guid? OriginalFinancePurchaseOrderItemId { get; set; }
-
-    [Required]
-    [MaxLength(500)]
-    public string Description { get; set; } = string.Empty;
-
-    [Required]
-    [Range(0.0001, double.MaxValue)]
-    public decimal QuantityReturned { get; set; }
-
-    [Required]
-    [Range(0.0, double.MaxValue)]
-    public decimal UnitPrice { get; set; }
-
-    public Guid? TaxGroupId { get; set; }
-    public decimal TaxRate { get; set; }
-    public decimal TaxAmount { get; set; }
-    public decimal LineTotal { get; set; }
-}
-
-
-

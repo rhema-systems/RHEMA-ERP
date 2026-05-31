@@ -1864,13 +1864,16 @@ public class FinanceDataSeeder
         var systemUserId = Guid.Parse("00000000-0000-0000-0000-000000000001"); 
 
         // 1.1 NHIL (2.5%)
-        var nhil = await GetOrCreateTaxAsync(tenantId, "NHIL", "National Health Insurance Levy", 2.5m, TaxApplicability.Both, TaxCategory.Standard, true, baseDate, systemUserId);
+        var nhil = await GetOrCreateTaxAsync(tenantId, "NHIL", "National Health Insurance Levy", 2.5m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
         
         // 1.2 GETFund (2.5%)
-        var getfund = await GetOrCreateTaxAsync(tenantId, "GETFUND", "GETFund Levy", 2.5m, TaxApplicability.Both, TaxCategory.Standard, true, baseDate, systemUserId);
+        var getfund = await GetOrCreateTaxAsync(tenantId, "GETFUND", "GETFund Levy", 2.5m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
         
-        // 1.3 VAT Standard (15%)
-        var vatStd = await GetOrCreateTaxAsync(tenantId, "VAT-STD", "Value Added Tax (Standard)", 15.0m, TaxApplicability.Both, TaxCategory.Standard, true, baseDate, systemUserId);
+        // 1.3 COVID-19 (1%)
+        var covid = await GetOrCreateTaxAsync(tenantId, "COVID19", "COVID-19 Health Recovery Levy", 1.0m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
+        
+        // 1.4 VAT Standard (15%)
+        var vatStd = await GetOrCreateTaxAsync(tenantId, "VAT-STD", "Value Added Tax (Standard)", 15.0m, TaxApplicability.Sales, TaxCategory.Standard, true, baseDate, systemUserId);
         
         // 1.5 WHT 7.5% (Services)
         var whtServices = await GetOrCreateTaxAsync(tenantId, "WHT-SERV", "Withholding Tax (Services)", 7.5m, TaxApplicability.Purchases, TaxCategory.Withholding, false, baseDate, systemUserId, 2000m);
@@ -1891,8 +1894,8 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 Code = "VAT-STD-SCHEME",
                 Name = "VAT Standard Scheme (15% + Levies)",
-                Description = "Standard VAT Scheme including NHIL, GETFund (Act 1151 Compliant)",
-                Applicability = TaxApplicability.Both,
+                Description = "Standard VAT Scheme including NHIL, GETFund, and COVID-19 Levy",
+                Applicability = TaxApplicability.Sales,
                 IsDefault = true,
                 IsActive = true,
                 CreatedAt = baseDate,

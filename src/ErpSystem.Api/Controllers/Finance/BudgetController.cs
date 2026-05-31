@@ -310,13 +310,6 @@ public class BudgetController : ControllerBase
         return Ok(result);
     }
 
-    [HttpGet("returns/my-returns")]
-    public async Task<ActionResult<IEnumerable<BudgetReturnDto>>> GetMyReturns()
-    {
-        var result = await _budgetService.GetMyReturnsAsync();
-        return Ok(result);
-    }
-
     /// <summary>
     /// Retrieves a single budget return by its unique identifier.
     /// </summary>

@@ -85,25 +85,5 @@ namespace ErpSystem.Core.Interfaces.Finance
             Guid? approvedByUserId = null,
             string? rejectionReason = null,
             CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Links an uploaded file to a journal entry.
-        /// </summary>
-        Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Unlinks an attachment from a journal entry.
-        /// </summary>
-        Task UnlinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Gets all attachments linked to a journal entry.
-        /// </summary>
-        Task<IReadOnlyList<Guid>> GetAttachmentIdsAsync(Guid journalEntryId, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Gets attachment metadata linked to a journal entry.
-        /// </summary>
-        Task<IReadOnlyList<JournalEntryAttachmentDto>> GetAttachmentsAsync(Guid journalEntryId, CancellationToken cancellationToken = default);
     }
 }

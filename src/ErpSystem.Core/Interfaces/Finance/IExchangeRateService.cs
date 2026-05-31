@@ -66,17 +66,5 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<IReadOnlyList<ExchangeRateDto>> BulkUploadRatesAsync(
             List<CreateExchangeRateDto> rates,
             CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Analyzes exchange rate trends over a period.
-        /// </summary>
-        Task<IReadOnlyList<TrendAnalysisDto>> GetTrendsAsync(
-            string? sourceCurrency,
-            string targetCurrency,
-            DateTime startDate,
-            DateTime endDate,
-            string groupBy = "daily",
-            int movingAverageWindow = 7,
-            CancellationToken cancellationToken = default);
     }
 }

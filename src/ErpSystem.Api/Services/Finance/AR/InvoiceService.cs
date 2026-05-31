@@ -24,7 +24,6 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly ITaxCalculationEngine _taxEngine;
         private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly IInventoryValuationService _inventoryValuationService;
-        private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<InvoiceService> _logger;
 
         public InvoiceService(
@@ -33,7 +32,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             ITaxCalculationEngine taxEngine,
             ISubledgerPostingService subledgerPostingService,
             IInventoryValuationService inventoryValuationService,
-            ITenantSettingsService tenantSettingsService,
             ILogger<InvoiceService> logger)
         {
             _unitOfWork = unitOfWork;
@@ -41,7 +39,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             _taxEngine = taxEngine;
             _subledgerPostingService = subledgerPostingService;
             _inventoryValuationService = inventoryValuationService;
-            _tenantSettingsService = tenantSettingsService;
             _logger = logger;
         }
 
@@ -168,32 +165,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Generate invoice number
             var invoiceNumber = await GenerateInvoiceNumberAsync(cancellationToken);
 
-            // Resolve base currency
-            var baseCurrency = "GHS";
-            try
-            {
-                baseCurrency = await _tenantSettingsService.GetBaseCurrencyAsync() ?? "GHS";
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve base currency from tenant settings. Defaulting to GHS.");
-            }
-
-            var currency = (dto.CurrencyCode ?? baseCurrency).Trim().ToUpperInvariant();
-            decimal exchangeRate = dto.ExchangeRate;
-
-            if (currency == baseCurrency.ToUpperInvariant())
-            {
-                exchangeRate = 1.0m;
-            }
-            else
-            {
-                if (exchangeRate <= 0.0m)
-                {
-                    throw new ArgumentException($"Exchange rate must be greater than zero for foreign currency '{dto.CurrencyCode}'.");
-                }
-            }
-
             var now = DateTime.UtcNow;
             var invoice = new Invoice
             {
@@ -207,10 +178,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                 DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(customer.PaymentTermsDays),
                 Reference = dto.Reference,
                 Notes = dto.Notes,
-                CurrencyCode = currency,
-                ExchangeRate = exchangeRate,
+                CurrencyCode = dto.CurrencyCode,
+                ExchangeRate = dto.ExchangeRate,
                 PaymentTermsDays = customer.PaymentTermsDays,
-                TaxGroupId = dto.TaxGroupId,
                 Status = InvoiceStatus.Draft,
                 CreatedAt = now,
                 CreatedBy = UserName
@@ -226,47 +196,19 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
 
-                var lineTaxGroupId = lineDto.TaxGroupId ?? dto.TaxGroupId;
+                // Calculate tax for this line if tax code provided
                 decimal lineTax = 0;
-                string? resolvedTaxCode = lineDto.TaxCode;
-                decimal resolvedTaxRate = 0;
-
-                if (lineTaxGroupId.HasValue)
+                if (!string.IsNullOrWhiteSpace(lineDto.TaxCode))
                 {
-                    var transactionType = lineDto.LineItemType == "Product" 
-                        ? TaxTransactionType.SaleOfGoods 
-                        : TaxTransactionType.SaleOfServices;
-
                     var taxRequest = new TaxCalculationRequestDto
                     {
-                        TransactionType = transactionType,
-                        BaseAmount = lineNetAmount,
-                        TaxGroupId = lineTaxGroupId.Value,
-                        BusinessPartnerId = dto.BusinessPartnerId
-                    };
-
-                    var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest, cancellationToken);
-                    lineTax = taxResult.TotalTaxAmount;
-                    resolvedTaxRate = taxResult.EffectiveTaxRate;
-                    resolvedTaxCode = taxResult.TaxGroupName ?? lineDto.TaxCode;
-                }
-                else if (!string.IsNullOrWhiteSpace(lineDto.TaxCode))
-                {
-                    var transactionType = lineDto.LineItemType == "Product" 
-                        ? TaxTransactionType.SaleOfGoods 
-                        : TaxTransactionType.SaleOfServices;
-
-                    var taxRequest = new TaxCalculationRequestDto
-                    {
-                        TransactionType = transactionType,
+                        TransactionType = TaxTransactionType.SaleOfGoods,
                         BaseAmount = lineNetAmount,
                         CustomerId = dto.CustomerId
                     };
 
                     var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest, cancellationToken);
                     lineTax = taxResult.TotalTaxAmount;
-                    resolvedTaxRate = taxResult.EffectiveTaxRate;
-                    resolvedTaxCode = taxResult.TaxGroupName ?? lineDto.TaxCode;
                 }
 
                 // Parse LineItemType from string
@@ -285,10 +227,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Description = lineDto.Description,
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
-                    TaxGroupId = lineTaxGroupId,
-                    TaxCode = resolvedTaxCode,
-                    TaxRate = resolvedTaxRate,
-                    TaxAmount = lineTax,
+                    TaxCode = lineDto.TaxCode,
+                    TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0,
                     Unit = lineDto.Unit,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -301,6 +241,30 @@ namespace ErpSystem.Api.Services.Finance.AR
                 totalTax += lineTax;
             }
 
+            // Fetch Tenant for Base Currency
+            var tenant = await _unitOfWork.Repository<Tenant>()
+                .GetQueryable(t => t.Id == TenantId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (tenant == null)
+                throw new InvalidOperationException("Tenant context not found.");
+
+            // Calculate Base Currency Amount
+            decimal baseCurrencyAmount;
+            decimal exchangeRate = dto.ExchangeRate;
+
+            if (string.Equals(dto.CurrencyCode, tenant.BaseCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                exchangeRate = 1.0m;
+                baseCurrencyAmount = subtotal + totalTax - dto.DiscountAmount; // Same as TotalAmount
+            }
+            else
+            {
+                // Ensure exchange rate is valid for foreign currency
+                if (exchangeRate <= 0) exchangeRate = 1.0m; 
+                baseCurrencyAmount = (subtotal + totalTax - dto.DiscountAmount) * exchangeRate;
+            }
+
             invoice.SubTotal = subtotal;
             invoice.TaxAmount = totalTax;
             invoice.DiscountAmount = dto.DiscountAmount;
@@ -309,7 +273,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             
             // Set Multicurrency fields
             invoice.ExchangeRate = exchangeRate;
-            invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
+            invoice.BaseCurrencyAmount = baseCurrencyAmount;
 
             // Check credit limit before saving (using Base Currency)
             // Note: Customer.OutstandingBalance is now assumed to be in Base Currency
@@ -317,7 +281,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (newOutstanding > customer.CreditLimit)
             {
                 _logger.LogWarning("Credit limit exceeded for customer {CustomerId}. Limit: {Limit} {BaseCurrency}, New Outstanding: {Outstanding} {BaseCurrency}",
-                    customer.Id, customer.CreditLimit, baseCurrency, newOutstanding, baseCurrency);
+                    customer.Id, customer.CreditLimit, tenant.BaseCurrency, newOutstanding, tenant.BaseCurrency);
                 // Allow creation but might flag for approval in a real system
             }
 
@@ -342,32 +306,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Only allow updates if invoice is in Draft status
             if (invoice.Status != InvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be updated.");
-
-            // Resolve base currency
-            var baseCurrency = "GHS";
-            try
-            {
-                baseCurrency = await _tenantSettingsService.GetBaseCurrencyAsync() ?? "GHS";
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve base currency from tenant settings. Defaulting to GHS.");
-            }
-
-            var currency = (dto.CurrencyCode ?? baseCurrency).Trim().ToUpperInvariant();
-            decimal exchangeRate = dto.ExchangeRate;
-
-            if (currency == baseCurrency.ToUpperInvariant())
-            {
-                exchangeRate = 1.0m;
-            }
-            else
-            {
-                if (exchangeRate <= 0.0m)
-                {
-                    throw new ArgumentException($"Exchange rate must be greater than zero for foreign currency '{dto.CurrencyCode}'.");
-                }
-            }
+            
+            // Fetch Tenant for Base Currency (needed for recalculation)
+            var tenant = await _unitOfWork.Repository<Tenant>()
+                .GetQueryable(t => t.Id == TenantId)
+                .FirstOrDefaultAsync(cancellationToken);
+            
+             if (tenant == null) throw new InvalidOperationException("Tenant context not found.");
 
             var now = DateTime.UtcNow;
             invoice.InvoiceDate = dto.InvoiceDate;
@@ -375,9 +320,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.Reference = dto.Reference;
             invoice.Notes = dto.Notes;
             invoice.DiscountAmount = dto.DiscountAmount;
-            invoice.TaxGroupId = dto.TaxGroupId;
-            invoice.CurrencyCode = currency;
-            invoice.ExchangeRate = exchangeRate;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
@@ -398,47 +340,18 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
 
-                var lineTaxGroupId = lineDto.TaxGroupId ?? dto.TaxGroupId;
                 decimal lineTax = 0;
-                string? resolvedTaxCode = lineDto.TaxCode;
-                decimal resolvedTaxRate = 0;
-
-                if (lineTaxGroupId.HasValue)
+                if (!string.IsNullOrWhiteSpace(lineDto.TaxCode))
                 {
-                    var transactionType = lineDto.LineItemType == "Product" 
-                        ? TaxTransactionType.SaleOfGoods 
-                        : TaxTransactionType.SaleOfServices;
-
                     var taxRequest = new TaxCalculationRequestDto
                     {
-                        TransactionType = transactionType,
-                        BaseAmount = lineNetAmount,
-                        TaxGroupId = lineTaxGroupId.Value,
-                        BusinessPartnerId = invoice.BusinessPartnerId
-                    };
-
-                    var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest, cancellationToken);
-                    lineTax = taxResult.TotalTaxAmount;
-                    resolvedTaxRate = taxResult.EffectiveTaxRate;
-                    resolvedTaxCode = taxResult.TaxGroupName ?? lineDto.TaxCode;
-                }
-                else if (!string.IsNullOrWhiteSpace(lineDto.TaxCode))
-                {
-                    var transactionType = lineDto.LineItemType == "Product" 
-                        ? TaxTransactionType.SaleOfGoods 
-                        : TaxTransactionType.SaleOfServices;
-
-                    var taxRequest = new TaxCalculationRequestDto
-                    {
-                        TransactionType = transactionType,
+                        TransactionType = TaxTransactionType.SaleOfGoods,
                         BaseAmount = lineNetAmount,
                         CustomerId = invoice.CustomerId
                     };
 
                     var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest, cancellationToken);
                     lineTax = taxResult.TotalTaxAmount;
-                    resolvedTaxRate = taxResult.EffectiveTaxRate;
-                    resolvedTaxCode = taxResult.TaxGroupName ?? lineDto.TaxCode;
                 }
 
                 // Parse LineItemType from string (mirrors CreateAsync logic)
@@ -457,10 +370,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Description = lineDto.Description,
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
-                    TaxGroupId = lineTaxGroupId,
-                    TaxCode = resolvedTaxCode,
-                    TaxRate = resolvedTaxRate,
-                    TaxAmount = lineTax,
+                    TaxCode = lineDto.TaxCode,
+                    TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0,
                     Unit = lineDto.Unit,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -478,7 +389,17 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.TotalAmount = subtotal + totalTax - dto.DiscountAmount;
             
             // Recalculate BaseCurrencyAmount
-            invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
+            if (string.Equals(invoice.CurrencyCode, tenant.BaseCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                invoice.ExchangeRate = 1.0m;
+                invoice.BaseCurrencyAmount = invoice.TotalAmount;
+            }
+            else
+            {
+                // Keep existing rate unless we want to allow updating it via DTO (which isn't in UpdateDto currently)
+                // Assuming rate implies updating fields that affect total, we re-apply rate.
+                invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
+            }
 
             await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -549,28 +470,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                     await _unitOfWork.Repository<InvoiceLineItem>().UpdateAsync(line);
                 }
             }
-
-            // Record Tax Audit Trail
-            var taxResult = new TaxCalculationResultDto { BaseAmount = invoice.SubTotal, GrandTotal = invoice.TotalAmount, TotalTaxAmount = invoice.TaxAmount };
-            foreach (var lineItem in invoice.LineItems.Where(li => li.TaxGroupId.HasValue))
-            {
-                var transactionType = lineItem.LineItemType == LineItemType.Product
-                    ? TaxTransactionType.SaleOfGoods
-                    : TaxTransactionType.SaleOfServices;
-
-                var taxRequest = new TaxCalculationRequestDto
-                {
-                    TransactionType = transactionType,
-                    BaseAmount = lineItem.LineTotal - lineItem.DiscountAmount,
-                    TaxGroupId = lineItem.TaxGroupId.Value,
-                    BusinessPartnerId = invoice.BusinessPartnerId
-                };
-
-                var lineTaxResult = await _taxEngine.CalculateTaxesAsync(taxRequest, cancellationToken);
-                taxResult.TaxBreakdowns.AddRange(lineTaxResult.TaxBreakdowns);
-            }
-            
-            await _taxAuditService.RecordTaxCalculationsAsync("CustomerInvoice", invoice.Id, taxResult, cancellationToken);
 
             // Update customer's outstanding balance
             if (invoice.Customer != null)
@@ -731,7 +630,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 CurrencyCode = invoice.CurrencyCode,
                 ExchangeRate = invoice.ExchangeRate,
                 PaymentTermsDays = invoice.PaymentTermsDays,
-                TaxGroupId = invoice.TaxGroupId,
                 LineItems = invoice.LineItems.Select(li => new InvoiceLineItemDto
                 {
                     Id = li.Id,
@@ -744,7 +642,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Quantity = li.Quantity,
                     UnitPrice = li.UnitPrice,
                     LineTotal = li.LineTotal,
-                    TaxGroupId = li.TaxGroupId,
                     TaxRate = li.TaxRate,
                     TaxAmount = li.TaxAmount,
                     TaxCode = li.TaxCode,
