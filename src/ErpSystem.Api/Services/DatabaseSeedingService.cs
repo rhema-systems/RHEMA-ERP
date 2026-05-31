@@ -739,7 +739,15 @@ namespace ErpSystem.Web.Services
                     apartmentContractor,
                     baseCurrencyCode,
                     now));
-            await EnsureAccraApartmentDevelopmentPhasePackagesSeededAsync(tenantId, baseCurrencyCode, now);
+            try
+            {
+                await EnsureAccraApartmentDevelopmentPhasePackagesSeededAsync(tenantId, baseCurrencyCode, now);
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogWarning(
+                    "Skipping apartment development phase package seed because project schema appears behind code (missing columns). Apply latest migrations and rerun seeding.");
+            }
 
             await EnsureProjectDemoInterdependenciesSeededAsync(tenantId, projectManager, financeOwner, now);
             await EnsureProjectDemoQualityDataSeededAsync(tenantId, sponsor, financeOwner, teamMember, now);

@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -858,9 +859,19 @@ public class FinanceDataSeeder
     {
         var payrollAccounts = GetPayrollChartOfAccounts(tenantId, baseDate);
         var payrollCodes = payrollAccounts.Select(a => a.AccountCode).ToList();
-        var existingAccounts = await _context.Accounts
-            .Where(a => a.TenantId == tenantId && payrollCodes.Contains(a.AccountCode))
-            .ToListAsync();
+        List<Account> existingAccounts;
+        try
+        {
+            existingAccounts = await _context.Accounts
+                .Where(a => a.TenantId == tenantId && payrollCodes.Contains(a.AccountCode))
+                .ToListAsync();
+        }
+        catch (SqlException ex) when (ex.Number == 207)
+        {
+            _logger.LogWarning(
+                "Skipping payroll GL account seed because account schema appears behind code (missing columns). Apply latest migrations and rerun seeding.");
+            return;
+        }
 
         foreach (var account in payrollAccounts)
         {
