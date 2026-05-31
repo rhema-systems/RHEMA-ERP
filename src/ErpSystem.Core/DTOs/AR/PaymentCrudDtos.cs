@@ -73,6 +73,7 @@ public class InvoiceCreateDto
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public decimal DiscountAmount { get; set; }
+    public Guid? TaxGroupId { get; set; }
     public List<InvoiceLineItemCreateDto> LineItems { get; set; } = new();
 }
 
@@ -85,6 +86,7 @@ public class InvoiceLineItemCreateDto
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public string? TaxCode { get; set; }
+    public Guid? TaxGroupId { get; set; }
     public string? Unit { get; set; }
     public decimal DiscountPercentage { get; set; }
 }
@@ -97,6 +99,9 @@ public class InvoiceUpdateDto
     public string? Reference { get; set; }
     public string? Notes { get; set; }
     public decimal DiscountAmount { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public string CurrencyCode { get; set; } = "USD";
+    public decimal ExchangeRate { get; set; } = 1.0m;
     public List<InvoiceLineItemUpdateDto> LineItems { get; set; } = new();
 }
 
@@ -110,6 +115,7 @@ public class InvoiceLineItemUpdateDto
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public string? TaxCode { get; set; }
+    public Guid? TaxGroupId { get; set; }
     public string? Unit { get; set; }
     public decimal DiscountPercentage { get; set; }
 }

@@ -22,6 +22,19 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
+        
+        // Subledger Settings
+        public Guid? WriteOffExpenseAccountId { get; set; }
+        public Guid? WriteOffRecoveryAccountId { get; set; }
+        public bool RequireSubledgerJournalApproval { get; set; }
+
+        /// <summary>
+        /// True when posted transactions exist for the tenant.
+        /// When true, base currency and default control accounts cannot be changed.
+        /// </summary>
+        public bool TransactionsExist { get; set; }
+        public Guid? MigrationClearingAccountId { get; set; }
+        public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
     }
 
     public class UpdateFinanceSettingsDto
@@ -38,5 +51,12 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
+        public Guid? MigrationClearingAccountId { get; set; }
+        public bool? OpeningBalanceAutoRoutingEnabled { get; set; }
+        
+        // Subledger Settings
+        public Guid? WriteOffExpenseAccountId { get; set; }
+        public Guid? WriteOffRecoveryAccountId { get; set; }
+        public bool? RequireSubledgerJournalApproval { get; set; }
     }
 }

@@ -19,11 +19,57 @@ namespace ErpSystem.Api.Controllers.Finance
     [Route("api/ap/invoices")]
     public class VendorInvoiceController : ControllerBase
     {
+        private static readonly string[] PrivilegedRoles = ["admin", "superadmin", "tenantadmin"];
+        private static readonly string[] PermissionClaimTypes = ["permission", "permissions", ClaimTypes.Role];
+        private static readonly Dictionary<string, string[]> ActionPermissions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Create"] = ["Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"],
+            ["Edit"] = ["Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write"],
+            ["Delete"] = ["Finance.AP.Invoices.Delete", "Finance.AP.Invoices.Write"],
+            ["Submit"] = ["Finance.AP.Invoices.SubmitForApproval", "Finance.AP.Invoices.Approve"],
+            ["Approve"] = ["Finance.AP.Invoices.Approve"],
+            ["Reject"] = ["Finance.AP.Invoices.Approve"],
+            ["Void"] = ["Finance.AP.Invoices.Void"]
+        };
+
         private readonly IVendorInvoiceService _invoiceService;
 
         public VendorInvoiceController(IVendorInvoiceService invoiceService)
         {
             _invoiceService = invoiceService;
+        }
+
+        private bool CurrentUserHasAnyPermission(params string[] permissions)
+        {
+            if (User?.Identity?.IsAuthenticated != true) return false;
+
+            var roles = User.FindAll(ClaimTypes.Role)
+                .Select(c => c.Value?.Trim().ToLowerInvariant())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToHashSet();
+
+            if (roles.Overlaps(PrivilegedRoles)) return true;
+
+            var granted = User.Claims
+                .Where(c => PermissionClaimTypes.Contains(c.Type, StringComparer.OrdinalIgnoreCase))
+                .SelectMany(c => c.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Select(v => v.Trim().ToLowerInvariant())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToHashSet();
+
+            if (granted.Contains("*")) return true;
+
+            return permissions
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim().ToLowerInvariant())
+                .Any(granted.Contains);
+        }
+
+        private ActionResult? EnsureActionPermission(string actionName)
+        {
+            if (!ActionPermissions.TryGetValue(actionName, out var permissions)) return null;
+            if (CurrentUserHasAnyPermission(permissions)) return null;
+            return StatusCode(StatusCodes.Status403Forbidden, $"You do not have permission to {actionName.ToLowerInvariant()} AP invoices.");
         }
 
         /// <summary>Retrieves a paginated list of vendor invoices filtered by query parameters.</summary>
@@ -51,6 +97,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost]
         public async Task<ActionResult<VendorInvoiceDto>> Create([FromBody] VendorInvoiceCreateDto dto)
         {
+            var permissionCheck = EnsureActionPermission("Create");
+            if (permissionCheck != null) return permissionCheck;
             try
             {
                 var invoice = await _invoiceService.CreateAsync(dto);
@@ -63,6 +111,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPut("{id}")]
         public async Task<ActionResult<VendorInvoiceDto>> Update(Guid id, [FromBody] VendorInvoiceUpdateDto dto)
         {
+            var permissionCheck = EnsureActionPermission("Edit");
+            if (permissionCheck != null) return permissionCheck;
             if (id != dto.Id) return BadRequest("ID mismatch");
             try { return Ok(await _invoiceService.UpdateAsync(dto)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
@@ -72,6 +122,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("Delete");
+            if (permissionCheck != null) return permissionCheck;
             try { await _invoiceService.DeleteAsync(id); return NoContent(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -82,6 +134,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/submit")]
         public async Task<ActionResult<VendorInvoiceDto>> SubmitForApproval(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("Submit");
+            if (permissionCheck != null) return permissionCheck;
             try { return Ok(await _invoiceService.SubmitForApprovalAsync(id)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -90,6 +144,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/approve")]
         public async Task<ActionResult<VendorInvoiceDto>> Approve(Guid id, [FromBody] string? comments = null)
         {
+            var permissionCheck = EnsureActionPermission("Approve");
+            if (permissionCheck != null) return permissionCheck;
             try { return Ok(await _invoiceService.ApproveAsync(id, comments)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -98,6 +154,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/reject")]
         public async Task<ActionResult<VendorInvoiceDto>> Reject(Guid id, [FromBody] string comments)
         {
+            var permissionCheck = EnsureActionPermission("Reject");
+            if (permissionCheck != null) return permissionCheck;
             try { return Ok(await _invoiceService.RejectAsync(id, comments)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -106,6 +164,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/void")]
         public async Task<ActionResult<VendorInvoiceDto>> Void(Guid id, [FromBody] string reason)
         {
+            var permissionCheck = EnsureActionPermission("Void");
+            if (permissionCheck != null) return permissionCheck;
             try { return Ok(await _invoiceService.VoidAsync(id, reason)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }

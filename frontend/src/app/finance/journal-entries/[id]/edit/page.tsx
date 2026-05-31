@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,7 @@ import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText } from 'lucide-rea
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { JournalType, Account, JournalEntry } from '@/types/finance';
+import { BOOK_CLASSIFICATIONS } from '@/constants/finance';
 
 // MOCK ACCOUNTS
 const MOCK_ACCOUNTS: Account[] = [
@@ -64,6 +65,19 @@ interface JournalLine {
     foreignCredit?: number;
 }
 
+const getBookClassificationFlag = (bookClassification: string): keyof Account | null => {
+    if (bookClassification === BOOK_CLASSIFICATIONS.IFRS) return 'isIFRSClassified';
+    if (bookClassification === BOOK_CLASSIFICATIONS.MANAGEMENT) return 'isManagementClassified';
+    if (bookClassification === BOOK_CLASSIFICATIONS.LOCAL) return 'isLocalClassified';
+    return null;
+};
+
+const isAccountEligibleForBook = (account: Account, bookClassification: string): boolean => {
+    const flag = getBookClassificationFlag(bookClassification);
+    if (!flag) return true;
+    return Boolean(account[flag]);
+};
+
 export default function EditJournalEntryPage({ params }: { params: { id: string } }) {
     const router = useRouter();
     const BASE_CURRENCY = 'GHS';
@@ -102,6 +116,18 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
     const totalDebit = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
     const totalCredit = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
     const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
+    const invalidLines = useMemo(() => {
+        return lines
+            .map((line, index) => {
+                const account = MOCK_ACCOUNTS.find(a => a.id === line.accountId);
+                if (!account) return null;
+                const eligible = isAccountEligibleForBook(account, header.bookClassification);
+                return eligible
+                    ? null
+                    : { id: line.id, index: index + 1, accountLabel: `${account.accountCode} - ${account.accountName}` };
+            })
+            .filter((v): v is { id: string; index: number; accountLabel: string } => v !== null);
+    }, [header.bookClassification, lines]);
 
     const handleAddLine = () => {
         setLines([
@@ -134,6 +160,9 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
                 if (field === 'accountId') {
                     const account = MOCK_ACCOUNTS.find(a => a.id === value);
                     if (account) {
+                        if (!isAccountEligibleForBook(account, header.bookClassification)) {
+                            return line;
+                        }
                         if (account.currencyCode && account.currencyCode !== BASE_CURRENCY) {
                             updatedLine.currencyCode = account.currencyCode;
                             updatedLine.exchangeRate = 12.5;
@@ -188,6 +217,11 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
     };
 
     const handleSubmit = (status: 'Draft' | 'Posted') => {
+        if (invalidLines.length > 0) {
+            alert(`Line ${invalidLines[0].index} account is not classified for ${header.bookClassification}.`);
+            return;
+        }
+
         if (status === 'Posted') {
             if (!isBalanced) {
                 alert('Journal entry must be balanced to Post.');
@@ -266,6 +300,15 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
                     </AlertDescription>
                 </Alert>
             )}
+            {invalidLines.length > 0 && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Book Classification Mismatch</AlertTitle>
+                    <AlertDescription>
+                        {invalidLines.length} line(s) use account(s) not classified for {header.bookClassification}: {invalidLines.map(l => l.index).join(', ')}.
+                    </AlertDescription>
+                </Alert>
+            )}
 
             {/* Header Form */}
             <Card>
@@ -310,8 +353,22 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
                                 </SelectContent>
                             </Select>
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="bookClassification">Book Classification *</Label>
+                            <Select
+                                value={header.bookClassification}
+                                onValueChange={(value) => setHeader({ ...header, bookClassification: value })}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value={BOOK_CLASSIFICATIONS.IFRS}>IFRS</SelectItem>
+                                    <SelectItem value={BOOK_CLASSIFICATIONS.MANAGEMENT}>Management</SelectItem>
+                                    <SelectItem value={BOOK_CLASSIFICATIONS.LOCAL}>Local</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
 
-                        <div className="space-y-2 md:col-span-3">
+                        <div className="space-y-2 md:col-span-2">
                             <Label htmlFor="description">Description *</Label>
                             <Input
                                 id="description"
@@ -374,13 +431,26 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
                                                         <SelectValue placeholder="Select Account" />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        {MOCK_ACCOUNTS.map((acc) => (
-                                                            <SelectItem key={acc.id} value={acc.id}>
-                                                                {acc.accountCode} - {acc.accountName}
-                                                            </SelectItem>
-                                                        ))}
+                                                        {MOCK_ACCOUNTS.map((acc) => {
+                                                            const eligible = isAccountEligibleForBook(acc, header.bookClassification);
+                                                            return (
+                                                                <SelectItem key={acc.id} value={acc.id} disabled={!eligible}>
+                                                                    {acc.accountCode} - {acc.accountName}
+                                                                    {!eligible ? ` (Not classified for ${header.bookClassification})` : ''}
+                                                                </SelectItem>
+                                                            );
+                                                        })}
                                                     </SelectContent>
                                                 </Select>
+                                                {line.accountId && (() => {
+                                                    const selected = MOCK_ACCOUNTS.find(a => a.id === line.accountId);
+                                                    if (!selected || isAccountEligibleForBook(selected, header.bookClassification)) return null;
+                                                    return (
+                                                        <p className="mt-1 text-xs text-red-600">
+                                                            Not classified for {header.bookClassification}.
+                                                        </p>
+                                                    );
+                                                })()}
                                             </td>
                                             <td className="p-3">
                                                 <Input

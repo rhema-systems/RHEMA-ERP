@@ -18,7 +18,9 @@ import type {
     TaxThresholdStatus,
     TaxRule,
     CreateTaxRuleDto,
-    UpdateTaxRuleDto
+    UpdateTaxRuleDto,
+    TransactionWithTax,
+    WHTSummaryEntry
 } from '@/types/tax';
 import { apiService } from '@/services/api.service';
 

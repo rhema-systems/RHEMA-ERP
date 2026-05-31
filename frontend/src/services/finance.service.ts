@@ -36,6 +36,7 @@ import type {
   PeriodStatus,
   // Response Types
   PaginatedResponse,
+  TrendAnalysisDto,
 } from '@/types/finance';
 
 // ============================================
@@ -480,6 +481,13 @@ class FinanceService {
    */
   async getCurrentExchangeRate(currencyCode: string): Promise<ExchangeRate> {
     return apiService.get<ExchangeRate>(`${this.baseUrl}/exchange-rates/current/${currencyCode}`);
+  }
+
+  /**
+   * Get exchange rate trends
+   */
+  async getExchangeRateTrends(currencyCode: string, months: number = 6): Promise<TrendAnalysisDto[]> {
+    return apiService.get<TrendAnalysisDto[]>(`${this.baseUrl}/exchange-rates/trends/${currencyCode}?months=${months}`);
   }
 
   /**

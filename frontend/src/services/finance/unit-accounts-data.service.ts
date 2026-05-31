@@ -180,24 +180,24 @@ class UnitAccountsDataService {
         if (filters?.unitAccountId) queryParams.append('unitAccountId', filters.unitAccountId);
         if (filters?.fiscalYearId) queryParams.append('fiscalYearId', filters.fiscalYearId);
 
-        const endpoint = `/finance/unit-account-budgets${queryParams.toString() ? `?${queryParams}` : ''}`;
+        const endpoint = `/finance/unit-budgets${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<UnitAccountBudget[]>(endpoint);
     }
 
     async getUnitAccountBudgetById(id: string): Promise<UnitAccountBudget> {
-        return apiService.get<UnitAccountBudget>(`/finance/unit-account-budgets/${id}`);
+        return apiService.get<UnitAccountBudget>(`/finance/unit-budgets/${id}`);
     }
 
     async createBudget(dto: CreateBudgetDto): Promise<UnitAccountBudget> {
-        return apiService.post<UnitAccountBudget>('/finance/unit-account-budgets', dto);
+        return apiService.post<UnitAccountBudget>('/finance/unit-budgets', dto);
     }
 
     async updateBudget(id: string, dto: UpdateBudgetDto): Promise<UnitAccountBudget> {
-        return apiService.put<UnitAccountBudget>(`/finance/unit-account-budgets/${id}`, dto);
+        return apiService.put<UnitAccountBudget>(`/finance/unit-budgets/${id}`, dto);
     }
 
     async deleteBudget(id: string): Promise<void> {
-        return apiService.delete(`/finance/unit-account-budgets/${id}`);
+        return apiService.delete(`/finance/unit-budgets/${id}`);
     }
 
     // ===== ALLOCATION RULES =====

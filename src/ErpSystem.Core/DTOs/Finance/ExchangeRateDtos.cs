@@ -127,4 +127,22 @@ namespace ErpSystem.Core.DTOs.Finance
         
         public bool IsActive { get; set; } = true;
     }
+
+    /// <summary>
+    /// READ DTO: Represents exchange rate trend analysis data over a specific period.
+    /// </summary>
+    public class TrendAnalysisDto
+    {
+        public DateTime Date { get; set; }
+        public string SourceCurrency { get; set; } = string.Empty;
+        public string TargetCurrency { get; set; } = string.Empty;
+        public decimal Rate { get; set; }
+        public decimal? PreviousRate { get; set; }
+        public decimal? ChangeAmount { get; set; }
+        public decimal? ChangePercentage { get; set; }
+        public decimal? MovingAverage { get; set; }
+        public decimal? Volatility { get; set; }
+        public decimal? MinRate { get; set; }
+        public decimal? MaxRate { get; set; }
+    }
 }

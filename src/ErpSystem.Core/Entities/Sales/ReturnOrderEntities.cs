@@ -19,8 +19,12 @@ public class ReturnOrder : DocumentEntity
     public Guid? DeliveryNoteId { get; set; }
     public virtual DeliveryNote? DeliveryNote { get; set; }
 
-    public Guid CustomerId { get; set; }
-    public virtual Customer Customer { get; set; } = null!;
+    // Optional linkage to Invoice for invoice-linked returns
+    public Guid? InvoiceId { get; set; }
+    public virtual Invoice? Invoice { get; set; }
+
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 
     public ReturnOrderStatus ReturnStatus { get; set; } = ReturnOrderStatus.Requested;
     public ReturnReasonCode ReasonCode { get; set; }
@@ -62,6 +66,11 @@ public class ReturnOrderLine : BaseEntity
     // Reference to the original sales order line
     public Guid? SalesOrderLineId { get; set; }
     public virtual SalesOrderLine? SalesOrderLine { get; set; }
+
+    // Reference to the original invoice line item
+    public Guid? InvoiceLineItemId { get; set; }
+    public virtual InvoiceLineItem? InvoiceLineItem { get; set; }
+
 
     [Required]
     [StringLength(200)]

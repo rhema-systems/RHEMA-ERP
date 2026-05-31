@@ -111,6 +111,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<LeaseContract> LeaseContracts { get; set; }
     public DbSet<LeaseScheduleLine> LeaseScheduleLines { get; set; }
     public DbSet<JournalEntry> JournalEntries { get; set; }
+    public DbSet<JournalEntryAttachment> JournalEntryAttachments { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
@@ -120,7 +121,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<TaxRule> TaxRules { get; set; }
     public DbSet<Invoice> Invoices { get; set; }
     public DbSet<VendorInvoice> VendorInvoices { get; set; }
-    public DbSet<Customer> Customers { get; set; }
+
+    // Finance AP Purchasing
+    public DbSet<FinancePurchaseOrder> FinancePurchaseOrders { get; set; }
+    public DbSet<FinancePurchaseOrderItem> FinancePurchaseOrderItems { get; set; }
+    public DbSet<FinancePurchaseOrderReceipt> FinancePurchaseOrderReceipts { get; set; }
+    public DbSet<FinancePurchaseOrderReceiptItem> FinancePurchaseOrderReceiptItems { get; set; }
+
+    // Supplier Returns & Debit Notes
+    public DbSet<SupplierReturn> SupplierReturns { get; set; }
+    public DbSet<SupplierReturnLineItem> SupplierReturnLineItems { get; set; }
+    public DbSet<SupplierDebitNote> SupplierDebitNotes { get; set; }
+    public DbSet<SupplierDebitNoteLineItem> SupplierDebitNoteLineItems { get; set; }
+
+
 
     // Sales Order Management entities
     public DbSet<SalesOrder> SalesOrders { get; set; }
@@ -798,6 +812,75 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     {
         base.OnModelCreating(builder);
 
+        // Prevent multiple cascade paths for Finance Purchase Orders
+        builder.Entity<FinancePurchaseOrderReceiptItem>()
+            .HasOne(x => x.FinancePurchaseOrderReceipt)
+            .WithMany(x => x.Items)
+            .HasForeignKey(x => x.FinancePurchaseOrderReceiptId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Prevent multiple cascade paths for Supplier Returns & Debit Notes
+        builder.Entity<SupplierReturnLineItem>()
+            .HasOne(x => x.SupplierReturn)
+            .WithMany(x => x.LineItems)
+            .HasForeignKey(x => x.SupplierReturnId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<SupplierDebitNoteLineItem>()
+            .HasOne(x => x.SupplierDebitNote)
+            .WithMany(x => x.LineItems)
+            .HasForeignKey(x => x.SupplierDebitNoteId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // FiscalYearBookStatus Unique Constraint
+        builder.Entity<FiscalYearBookStatus>()
+            .HasIndex(x => new { x.TenantId, x.FiscalYearId, x.BookClassification })
+            .IsUnique();
+
+        // FixedAssetBook Unique Constraint
+        builder.Entity<FixedAssetBook>()
+            .HasIndex(x => new { x.TenantId, x.FixedAssetId, x.BookClassification })
+            .IsUnique();
+
+        // Immutability Locks for Financial Transactions
+        builder.Entity<AccountTransaction>().Property(t => t.DebitAmount).Metadata.SetAfterSaveBehavior(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Throw);
+        builder.Entity<AccountTransaction>().Property(t => t.CreditAmount).Metadata.SetAfterSaveBehavior(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Throw);
+        builder.Entity<AccountTransaction>().Property(t => t.AccountId).Metadata.SetAfterSaveBehavior(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Throw);
+
+        // Account Invariant: Control accounts cannot allow direct posting.
+        // This is a database-level enforcement of the business rule.
+        builder.Entity<Account>().ToTable(t => t.HasCheckConstraint(
+            "CK_Account_ControlAccount_NoDirectPosting",
+            "[IsControlAccount] = 0 OR [AllowDirectPosting] = 0"));
+
+        // Subledger Journal configurations
+        // BusinessPartner is configured at the Line level
+
+
+        builder.Entity<SubledgerJournalEntry>()
+            .HasOne(s => s.FiscalPeriod)
+            .WithMany()
+            .HasForeignKey(s => s.FiscalPeriodId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<SubledgerJournalLine>()
+            .HasOne(l => l.Account)
+            .WithMany()
+            .HasForeignKey(l => l.AccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<SubledgerJournalLine>()
+            .HasOne(l => l.BusinessPartner)
+            .WithMany()
+            .HasForeignKey(l => l.BusinessPartnerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<SubledgerJournalGlLink>()
+            .HasOne(l => l.JournalEntry)
+            .WithMany()
+            .HasForeignKey(l => l.JournalEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // Apply entity configurations
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
@@ -1146,7 +1229,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.DeliveryNoteId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Customer)
+            entity.HasOne(e => e.Invoice)
+                .WithMany()
+                .HasForeignKey(e => e.InvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
                 .HasForeignKey(e => e.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -1179,6 +1266,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.SalesOrderLineId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InvoiceLineItem)
+                .WithMany()
+                .HasForeignKey(e => e.InvoiceLineItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)

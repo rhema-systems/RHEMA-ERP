@@ -26,11 +26,13 @@ import { arService } from '@/services/ar-service';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
     const params = useParams();
     const id = params.id as string;
+    const { hasPermission } = useAuth();
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
@@ -75,9 +77,11 @@ export default function InvoiceDetailsPage() {
                     <Button variant="outline" size="sm" onClick={() => window.print()}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
+                    {hasPermission('Finance.AR.Invoices.Send') && (
                     <Button variant="outline" size="sm">
                         <Mail className="mr-2 h-4 w-4" /> Email
                     </Button>
+                    )}
                     {invoice.status === 'Posted' && invoice.balanceAmount > 0 && (
                         <Button size="sm" onClick={() => router.push(`/finance/ar/payments/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Record Payment

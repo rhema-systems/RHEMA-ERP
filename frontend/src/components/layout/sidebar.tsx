@@ -140,7 +140,10 @@ const navigationItems: NavItem[] = [
         icon: FileText,
         children: [
           { title: 'Dashboard', href: '/finance/ap/dashboard', icon: LayoutDashboard },
+          { title: 'Purchase Orders', href: '/finance/ap/purchase-orders', icon: ShoppingCart },
+          { title: 'Goods Receipts', href: '/finance/ap/receipts', icon: Package },
           { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
+          { title: 'Supplier Returns', href: '/finance/ap/returns', icon: RotateCcw },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
           { title: 'Reports', href: '/finance/ap/reports', icon: BarChart3 },
         ],
@@ -151,12 +154,20 @@ const navigationItems: NavItem[] = [
         icon: Users,
         children: [
           { title: 'Dashboard', href: '/finance/ar/dashboard', icon: LayoutDashboard },
+          { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
+          { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
+          { title: 'Deliveries', href: '/sales/deliveries', icon: Truck },
           { title: 'Customers', href: '/finance/ar/customers', icon: Users },
           { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
+          { title: 'Customer Returns', href: '/sales/return-orders', icon: RotateCcw },
+          { title: 'Credit Notes', href: '/sales/credit-notes', icon: CreditCard },
           { title: 'Payments', href: '/finance/ar/payments', icon: CreditCard },
+          { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
+          { title: 'Journals', href: '/finance/ar/journals', icon: FileText },
           { title: 'Reports', href: '/finance/ar/reports', icon: BarChart3 },
         ],
       },
+
       {
         title: 'Cash Management',
         href: '/finance/cash',
@@ -197,6 +208,7 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Currencies', href: '/finance/currencies', icon: CreditCard },
           { title: 'Exchange Rates', href: '/finance/exchange-rates', icon: BarChart3 },
+          { title: 'Rate Trends', href: '/finance/exchange-rates/trends', icon: TrendingUp },
           { title: 'Revaluation', href: '/finance/revaluation', icon: BarChart3 },
         ],
       },

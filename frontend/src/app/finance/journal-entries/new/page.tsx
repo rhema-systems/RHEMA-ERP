@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,19 @@ interface JournalLine {
     foreignCredit?: number;
 }
 
+const getBookClassificationFlag = (bookClassification: string): keyof Account | null => {
+    if (bookClassification === BOOK_CLASSIFICATIONS.IFRS) return 'isIFRSClassified';
+    if (bookClassification === BOOK_CLASSIFICATIONS.MANAGEMENT) return 'isManagementClassified';
+    if (bookClassification === BOOK_CLASSIFICATIONS.LOCAL) return 'isLocalClassified';
+    return null;
+};
+
+const isAccountEligibleForBook = (account: Account, bookClassification: string): boolean => {
+    const flag = getBookClassificationFlag(bookClassification);
+    if (!flag) return true;
+    return Boolean(account[flag]);
+};
+
 export default function NewJournalEntryPage() {
     const router = useRouter();
     const { toast } = useToast();
@@ -50,6 +63,8 @@ export default function NewJournalEntryPage() {
     const [journalNumber, setJournalNumber] = useState('Generating...');
     const [saving, setSaving] = useState(false);
     const [openAccountPopover, setOpenAccountPopover] = useState<string | null>(null);
+    const [migrationClearingConfigured, setMigrationClearingConfigured] = useState(true);
+    const [openingBalanceAutoRoutingEnabled, setOpeningBalanceAutoRoutingEnabled] = useState(true);
 
     // Load journal number and accounts on mount
     useEffect(() => {
@@ -82,8 +97,19 @@ export default function NewJournalEntryPage() {
             }
         };
 
+        const loadFinanceSettings = async () => {
+            try {
+                const financeSettings = await financeDataService.getFinanceSettings();
+                setMigrationClearingConfigured(Boolean(financeSettings.migrationClearingAccountId));
+                setOpeningBalanceAutoRoutingEnabled(financeSettings.openingBalanceAutoRoutingEnabled ?? true);
+            } catch (e) {
+                console.error("Failed to load finance settings", e);
+            }
+        };
+
         loadNumber();
         loadAccounts();
+        loadFinanceSettings();
     }, []);
 
     // Lines State
@@ -96,6 +122,19 @@ export default function NewJournalEntryPage() {
     const totalDebit = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
     const totalCredit = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
     const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
+    const allowOpeningBalanceAutoBalance = header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled;
+    const invalidLines = useMemo(() => {
+        return lines
+            .map((line, index) => {
+                const account = accounts.find(a => a.id === line.accountId);
+                if (!account) return null;
+                const eligible = isAccountEligibleForBook(account, header.bookClassification);
+                return eligible
+                    ? null
+                    : { id: line.id, index: index + 1, accountLabel: `${account.accountNumber} - ${account.accountName}` };
+            })
+            .filter((v): v is { id: string; index: number; accountLabel: string } => v !== null);
+    }, [accounts, header.bookClassification, lines]);
 
     const handleAddLine = () => {
         setLines([
@@ -127,6 +166,9 @@ export default function NewJournalEntryPage() {
                 if (field === 'accountId') {
                     const account = accounts.find(a => a.id === value);
                     if (account) {
+                        if (!isAccountEligibleForBook(account, header.bookClassification)) {
+                            return line;
+                        }
                         if (account.currencyCode && account.currencyCode !== BASE_CURRENCY) {
                             updatedLine.currencyCode = account.currencyCode;
                             updatedLine.exchangeRate = 12.5; // Default rate — user can adjust
@@ -180,8 +222,30 @@ export default function NewJournalEntryPage() {
     };
 
     const handleSaveDraft = async () => {
-        if (!header.description.trim()) {
-            toast({ title: 'Validation', description: 'Description is required', variant: 'destructive' });
+        if (header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled && !migrationClearingConfigured) {
+            toast({
+                title: 'Migration Clearing Account Required',
+                description: 'Set Migration Clearing Account in Finance Settings before saving Opening Balance journals.',
+                variant: 'destructive'
+            });
+            return;
+        }
+
+        if (invalidLines.length > 0) {
+            toast({
+                title: 'Classification Validation',
+                description: `Line ${invalidLines[0].index} account is not classified for ${header.bookClassification}.`,
+                variant: 'destructive'
+            });
+            return;
+        }
+
+        // Use centralised contract guard for validation and mapping
+        const validationErrors = validateJournalEntryForm(header, lines, journalNumber, {
+            openingBalanceAutoRoutingEnabled
+        });
+        if (validationErrors.length > 0) {
+            toast({ title: 'Validation', description: validationErrors[0], variant: 'destructive' });
             return;
         }
 
@@ -235,7 +299,10 @@ export default function NewJournalEntryPage() {
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Cancel
                     </Button>
-                    <Button onClick={handleSaveDraft} disabled={saving}>
+                    <Button
+                        onClick={handleSaveDraft}
+                        disabled={saving || (header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled && !migrationClearingConfigured)}
+                    >
                         {saving ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         ) : (
@@ -268,13 +335,31 @@ export default function NewJournalEntryPage() {
             </Breadcrumb>
 
             {/* Validation Alert */}
-            {!isBalanced && totalDebit > 0 && (
+            {!allowOpeningBalanceAutoBalance && !isBalanced && totalDebit > 0 && (
                 <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
                     <AlertTitle>Entry is not balanced</AlertTitle>
                     <AlertDescription>
                         Total Debits ({totalDebit.toFixed(2)}) must equal Total Credits ({totalCredit.toFixed(2)}).
                         Difference: {Math.abs(totalDebit - totalCredit).toFixed(2)}
+                    </AlertDescription>
+                </Alert>
+            )}
+            {invalidLines.length > 0 && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Book Classification Mismatch</AlertTitle>
+                    <AlertDescription>
+                        {invalidLines.length} line(s) use account(s) not classified for {header.bookClassification}: {invalidLines.map(l => l.index).join(', ')}.
+                    </AlertDescription>
+                </Alert>
+            )}
+            {header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled && !migrationClearingConfigured && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Migration Clearing Account Not Configured</AlertTitle>
+                    <AlertDescription>
+                        Opening Balance journals require Migration Clearing Account in Finance Settings.
                     </AlertDescription>
                 </Alert>
             )}
@@ -407,14 +492,20 @@ export default function NewJournalEntryPage() {
                                                                 <CommandList>
                                                                     <CommandEmpty>No account found.</CommandEmpty>
                                                                     <CommandGroup>
-                                                                        {accounts.map((acc) => (
+                                                                        {accounts.map((acc) => {
+                                                                            const eligible = isAccountEligibleForBook(acc, header.bookClassification);
+                                                                            return (
                                                                             <CommandItem
                                                                                 key={acc.id}
                                                                                 value={`${acc.accountNumber} ${acc.accountName}`}
+                                                                                disabled={!eligible}
                                                                                 onSelect={() => {
+                                                                                    if (!eligible) return;
                                                                                     updateLine(line.id, 'accountId', acc.id);
                                                                                     setOpenAccountPopover(null);
                                                                                 }}
+                                                                                className={!eligible ? 'opacity-50 cursor-not-allowed' : undefined}
+                                                                                title={!eligible ? `Not classified for ${header.bookClassification}` : undefined}
                                                                             >
                                                                                 <Check
                                                                                     className={cn(
@@ -423,13 +514,27 @@ export default function NewJournalEntryPage() {
                                                                                     )}
                                                                                 />
                                                                                 <span className="truncate">{acc.accountNumber} - {acc.accountName}</span>
+                                                                                {!eligible && (
+                                                                                    <span className="ml-2 rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                                                                                        Not classified for {header.bookClassification}
+                                                                                    </span>
+                                                                                )}
                                                                             </CommandItem>
-                                                                        ))}
+                                                                        )})}
                                                                     </CommandGroup>
                                                                 </CommandList>
                                                             </Command>
                                                         </PopoverContent>
                                                     </Popover>
+                                                    {line.accountId && (() => {
+                                                        const selected = accounts.find(a => a.id === line.accountId);
+                                                        if (!selected || isAccountEligibleForBook(selected, header.bookClassification)) return null;
+                                                        return (
+                                                            <p className="mt-1 text-xs text-red-600">
+                                                                Not classified for {header.bookClassification}.
+                                                            </p>
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td className="p-3">
                                                     <Input

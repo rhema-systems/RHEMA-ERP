@@ -234,6 +234,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     SegmentName = dto.SegmentName ?? existing.SegmentName,
                     Description = dto.Description ?? existing.Description,
                     IsReportingDimension = dto.IsReportingDimension ?? existing.IsReportingDimension,
+                    IsMandatory = dto.IsMandatory ?? existing.IsMandatory,
                     IsActive = dto.IsActive ?? existing.IsActive,
 
                     // Preserved fields
@@ -243,7 +244,6 @@ namespace ErpSystem.Api.Controllers.Finance
                     DataType = existing.DataType,
                     SeparatorCharacter = existing.SeparatorCharacter,
                     LookupTableRequired = existing.LookupTableRequired,
-                    IsMandatory = existing.IsMandatory,
                     IsNaturalAccount = existing.IsNaturalAccount
                 };
 

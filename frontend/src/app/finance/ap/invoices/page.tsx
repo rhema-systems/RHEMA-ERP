@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
@@ -39,6 +39,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import { workflowApiService } from '@/services/workflow-api.service';
+import type { WorkflowEntitySummaryDto } from '@/types/workflow';
 
 export default function VendorInvoicesPage() {
     const router = useRouter();
@@ -49,6 +52,8 @@ export default function VendorInvoicesPage() {
     const [page, setPage] = useState(1);
     const [pageSize] = useState(10);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const { hasPermission, hasAnyPermission } = useAuth();
+    const [workflowSummaryMap, setWorkflowSummaryMap] = useState<Record<string, WorkflowEntitySummaryDto>>({});
 
     const { data: invoicesData, isLoading } = useQuery({
         queryKey: ['vendor-invoices', page, pageSize, debouncedSearchTerm, statusFilter],
@@ -95,6 +100,38 @@ export default function VendorInvoicesPage() {
             });
         },
     });
+
+    const submitInvoiceMutation = useMutation({
+        mutationFn: (id: string) => accountsPayableService.submitInvoiceForApproval(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            toast({ title: 'Success', description: 'Invoice submitted for approval.' });
+        },
+        onError: (error: any) => {
+            toast({ title: 'Error', description: error.message || 'Failed to submit invoice', variant: 'destructive' });
+        },
+    });
+
+    React.useEffect(() => {
+        const loadSummaries = async () => {
+            const items = invoicesData?.items ?? [];
+            if (items.length === 0) return;
+            const pending = items.filter(i => i.status === 'PendingApproval');
+            if (pending.length === 0) return;
+
+            const pairs = await Promise.all(pending.map(async (i) => {
+                try {
+                    const s = await workflowApiService.getWorkflowEntitySummary('VendorInvoice', i.id);
+                    return [i.id, s] as const;
+                } catch {
+                    return null;
+                }
+            }));
+            const mapped = Object.fromEntries(pairs.filter(Boolean) as Array<[string, WorkflowEntitySummaryDto]>);
+            setWorkflowSummaryMap(prev => ({ ...prev, ...mapped }));
+        };
+        loadSummaries();
+    }, [invoicesData?.items]);
 
     const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSearchTerm(e.target.value);
@@ -233,12 +270,17 @@ export default function VendorInvoicesPage() {
                                                         <DropdownMenuItem onClick={() => router.push(`/finance/ap/invoices/${invoice.id}`)}>
                                                             <FileText className="mr-2 h-4 w-4" /> View Details
                                                         </DropdownMenuItem>
-                                                        {invoice.status === 'Draft' && (
+                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.Edit', 'Finance.AP.Invoices.Write']) && (
                                                             <DropdownMenuItem onClick={() => router.push(`/finance/ap/invoices/${invoice.id}/edit`)}>
                                                                 <FileText className="mr-2 h-4 w-4" /> Edit Invoice
                                                             </DropdownMenuItem>
                                                         )}
-                                                        {invoice.status === 'PendingApproval' && (
+                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
+                                                            <DropdownMenuItem onClick={() => submitInvoiceMutation.mutate(invoice.id)}>
+                                                                <CheckCircle className="mr-2 h-4 w-4" /> Submit for Approval
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        {invoice.status === 'PendingApproval' && hasPermission('Finance.AP.Invoices.Approve') && (workflowSummaryMap[invoice.id]?.canCurrentUserApprove ?? true) && (
                                                             <DropdownMenuItem onClick={() => approveInvoiceMutation.mutate(invoice.id)}>
                                                                 <CheckCircle className="mr-2 h-4 w-4" /> Approve
                                                             </DropdownMenuItem>
@@ -249,7 +291,7 @@ export default function VendorInvoicesPage() {
                                                             </DropdownMenuItem>
                                                         )}
                                                         <DropdownMenuSeparator />
-                                                        {(invoice.status === 'Approved' || invoice.status === 'Overdue') && (
+                                                        {(invoice.status === 'Approved' || invoice.status === 'Overdue') && hasPermission('Finance.AP.Invoices.Void') && (
                                                             <DropdownMenuItem
                                                                 className="text-red-600"
                                                                 onClick={() => voidInvoiceMutation.mutate(invoice.id)}

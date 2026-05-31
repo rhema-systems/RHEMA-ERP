@@ -54,6 +54,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Description { get; set; }
 
         public bool? IsReportingDimension { get; set; }
+        public bool? IsMandatory { get; set; }
         public bool? IsActive { get; set; }
     }
 

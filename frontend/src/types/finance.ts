@@ -229,8 +229,24 @@ export interface JournalEntry {
     approvedByUserId?: string;
     approvedDate?: string;
     rejectionReason?: string;
-    isReversed: boolean;
-    reversalJournalEntryId?: string;
+    transactions: AccountTransaction[];
+    attachments?: JournalEntryAttachment[];
+    createdAt: string;
+    createdById?: string;
+    /** Alias kept for backward compat */
+    createdBy: string;
+    updatedAt: string;
+    /** Alias kept for backward compat */
+    updatedBy: string;
+    // Frontend-only fields that may not come from backend
+    journalType?: JournalType;
+    isBalanced?: boolean;
+    isMultiCurrency?: boolean;
+    primaryCurrency?: string;
+    bookClassification?: string;
+    fiscalPeriodId?: string;
+    isRevaluationEntry?: boolean;
+    revaluationType?: string;
     reversalDate?: string;
     reversalReason?: string;
     isRevaluationEntry: boolean;
@@ -260,6 +276,21 @@ export interface JournalEntryLine {
     revaluationType?: string;
     createdAt: string;
     updatedAt: string;
+}
+
+/** @deprecated Use AccountTransaction instead */
+export type JournalEntryLine = AccountTransaction;
+
+export interface JournalEntryAttachment {
+    id: string;
+    journalEntryId: string;
+    fileId: string;
+    fileName: string;
+    fileUrl: string;
+    contentType: string;
+    fileSize?: number;
+    uploadedAt: string;
+    uploadedBy: string;
 }
 
 export interface AccountBalance {
@@ -302,6 +333,10 @@ export interface FinanceSettings {
     controlAccountInventoryId?: string;
     controlAccountPayrollId?: string;
     controlAccountTaxId?: string;
+    migrationClearingAccountId?: string;
+    openingBalanceAutoRoutingEnabled?: boolean;
+    /** True when posted transactions exist — base currency and control accounts become locked */
+    transactionsExist?: boolean;
 }
 
 export interface UpdateFinanceSettingsDto {
@@ -317,6 +352,8 @@ export interface UpdateFinanceSettingsDto {
     controlAccountInventoryId?: string;
     controlAccountPayrollId?: string;
     controlAccountTaxId?: string;
+    migrationClearingAccountId?: string;
+    openingBalanceAutoRoutingEnabled?: boolean;
 }
 
 // Currency
@@ -356,6 +393,21 @@ export interface ExchangeRateFilters {
     from?: string;
     to?: string;
     isActive?: boolean;
+}
+
+// Exchange Rate Trends
+export interface TrendAnalysisDto {
+    date: string;
+    sourceCurrency: string;
+    targetCurrency: string;
+    rate: number;
+    previousRate: number;
+    changeAmount: number;
+    changePercentage: number;
+    movingAverage: number;
+    volatility: number;
+    minRate: number;
+    maxRate: number;
 }
 
 // Fiscal Year
@@ -432,12 +484,15 @@ export interface CreateAccountDto {
     currencyCode: string;
     isMultiCurrency: boolean;
     isIFRSClassified: boolean;
-    isBaseClassified: boolean;
-    isLocalClassified: boolean;
+    isManagementClassified?: boolean;
+    isLocalClassified?: boolean;
+    isBaseFrameworkClassified?: boolean;
+    isLocalFrameworkClassified?: boolean;
     ifrsLineItem?: string;
     baseLineItem?: string;
     localLineItem?: string;
-    allowDirectPosting: boolean;
+    allowDirectPosting?: boolean;
+    isPostingAllowed?: boolean;
     isControlAccount: boolean;
     budgetTrackingEnabled: boolean;
     status: AccountStatus;

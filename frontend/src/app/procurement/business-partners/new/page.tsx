@@ -243,6 +243,7 @@ export default function NewBusinessPartnerPage() {
         bankBranchCode: formData.bankBranchCode || undefined,
         notes: formData.notes || undefined,
         parentId: formData.parentId || undefined,
+        currency: formData.currency || undefined,
       };
 
       // Add customer-specific fields if partner type is Customer
@@ -250,7 +251,7 @@ export default function NewBusinessPartnerPage() {
         createData.customerType = formData.customerType || undefined;
         createData.creditLimit = formData.creditLimit ? parseFloat(formData.creditLimit) : undefined;
         createData.paymentTerms = formData.paymentTerms || undefined;
-        createData.currency = formData.currency || undefined;
+        createData.paymentTerms = formData.paymentTerms || undefined;
         createData.defaultDiscount = formData.defaultDiscount ? parseFloat(formData.defaultDiscount) : undefined;
         createData.priceList = formData.priceList || undefined;
         createData.salesTerritory = formData.salesTerritory || undefined;
@@ -531,6 +532,24 @@ export default function NewBusinessPartnerPage() {
               <TabsContent value="banking" className="space-y-6 mt-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
+                    <Label htmlFor="currency">Default Currency</Label>
+                    <Select
+                      value={formData.currency}
+                      onValueChange={(value) => handleInputChange('currency', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(currencies || []).map((curr) => (
+                          <SelectItem key={curr.id} value={curr.code}>
+                            {curr.code} - {curr.name} ({curr.symbol})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="bankName" className="flex items-center gap-2">
                       <CreditCard className="w-4 h-4" />
                       Bank Name
@@ -676,24 +695,7 @@ export default function NewBusinessPartnerPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="currency">Currency</Label>
-                        <Select
-                          value={formData.currency}
-                          onValueChange={(value) => handleInputChange('currency', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select currency" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(currencies || []).map((curr) => (
-                              <SelectItem key={curr.id} value={curr.id}>
-                                {curr.code} - {curr.name} ({curr.symbol})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+
                       <div className="space-y-2">
                         <Label htmlFor="defaultDiscount" className="flex items-center gap-2">
                           <Percent className="w-4 h-4" />

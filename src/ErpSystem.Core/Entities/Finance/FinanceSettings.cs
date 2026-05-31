@@ -98,6 +98,21 @@ namespace ErpSystem.Core.Entities.Finance
 
         public Guid? DefaultBankAccountId { get; set; }
 
+        /// <summary>
+        /// Migration/Opening Balance Clearing Account.
+        /// Used during go-live to offset subledger opening balance entries.
+        /// The balance of this account should be zero after migration is complete.
+        /// This is distinct from SuspenseAccountId, which handles operational exceptions.
+        /// </summary>
+        public Guid? MigrationClearingAccountId { get; set; }
+        public virtual Account? MigrationClearingAccount { get; set; }
+
+        /// <summary>
+        /// When enabled, opening balance postings auto-route balancing/offset lines
+        /// to the Migration Clearing Account.
+        /// </summary>
+        public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
+
         // ── Lease Accounting (IFRS 16) GL Defaults ──────────────────────
 
         /// <summary>

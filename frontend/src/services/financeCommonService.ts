@@ -199,26 +199,46 @@ export const paymentTermService = {
 export const currencyService = {
   // Get all currencies
   getAll: async (): Promise<CurrencyListDto[]> => {
-    const response = await api.get<CurrencyApiDto[]>('/finance/Currencies');
-    return normalizeCurrencyList(response ?? []);
+    const res = await api.get<any[]>('/finance/Currencies');
+    return res.map(c => ({
+      ...c,
+      code: c.code || c.currencyCode,
+      name: c.name || c.currencyName,
+      symbol: c.symbol || c.currencySymbol
+    })) as CurrencyListDto[];
   },
 
   // Get active currencies
   getActive: async (): Promise<CurrencyListDto[]> => {
-    const response = await api.get<CurrencyApiDto[]>('/finance/Currencies/active');
-    return normalizeCurrencyList(response ?? []);
+    const res = await api.get<any[]>('/finance/Currencies/active');
+    return res.map(c => ({
+      ...c,
+      code: c.code || c.currencyCode,
+      name: c.name || c.currencyName,
+      symbol: c.symbol || c.currencySymbol
+    })) as CurrencyListDto[];
   },
 
   // Get currency by ID
   getById: async (id: string): Promise<CurrencyDetailDto> => {
-    const response = await api.get<CurrencyApiDto>(`/finance/Currencies/${id}`);
-    return normalizeCurrencyDto(response ?? {});
+    const c = await api.get<any>(`/finance/Currencies/${id}`);
+    return {
+      ...c,
+      code: c.code || c.currencyCode,
+      name: c.name || c.currencyName,
+      symbol: c.symbol || c.currencySymbol
+    } as CurrencyDetailDto;
   },
 
   // Get currency by code
   getByCode: async (code: string): Promise<CurrencyDetailDto> => {
-    const response = await api.get<CurrencyApiDto>(`/finance/Currencies/code/${code}`);
-    return normalizeCurrencyDto(response ?? {});
+    const c = await api.get<any>(`/finance/Currencies/code/${code}`);
+    return {
+      ...c,
+      code: c.code || c.currencyCode,
+      name: c.name || c.currencyName,
+      symbol: c.symbol || c.currencySymbol
+    } as CurrencyDetailDto;
   },
 
   // Get base currency

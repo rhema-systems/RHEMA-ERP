@@ -5,14 +5,86 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers } from 'lucide-react';
+import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown } from 'lucide-react';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { FinanceSettings, UpdateFinanceSettingsDto, Account } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
+
+interface AccountPickerProps {
+    id: string;
+    value?: string;
+    placeholder: string;
+    disabled?: boolean;
+    accounts: Account[];
+    onChange: (value?: string) => void;
+}
+
+function AccountPicker({ id, value, placeholder, disabled, accounts, onChange }: AccountPickerProps) {
+    const [open, setOpen] = useState(false);
+    const selected = accounts.find(a => a.id === value);
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    id={id}
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    disabled={disabled}
+                    className="w-full justify-between font-normal"
+                >
+                    <span className="truncate">
+                        {selected ? `${selected.accountCode} - ${selected.accountName}` : 'None'}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[420px] p-0" align="start">
+                <Command>
+                    <CommandInput placeholder={placeholder} />
+                    <CommandList>
+                        <CommandEmpty>No account found.</CommandEmpty>
+                        <CommandGroup>
+                            <CommandItem
+                                value="none"
+                                onSelect={() => {
+                                    onChange(undefined);
+                                    setOpen(false);
+                                }}
+                            >
+                                <Check className={cn("mr-2 h-4 w-4", !value ? "opacity-100" : "opacity-0")} />
+                                None
+                            </CommandItem>
+                            {accounts.map(account => (
+                                <CommandItem
+                                    key={account.id}
+                                    value={`${account.accountCode} ${account.accountName}`}
+                                    onSelect={() => {
+                                        onChange(account.id);
+                                        setOpen(false);
+                                    }}
+                                >
+                                    <Check className={cn("mr-2 h-4 w-4", value === account.id ? "opacity-100" : "opacity-0")} />
+                                    <span className="truncate">{account.accountCode} - {account.accountName}</span>
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
 
 export default function FinanceSettingsPage() {
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
@@ -34,6 +106,8 @@ export default function FinanceSettingsPage() {
         controlAccountInventoryId: undefined,
         controlAccountPayrollId: undefined,
         controlAccountTaxId: undefined,
+        migrationClearingAccountId: undefined,
+        openingBalanceAutoRoutingEnabled: true,
     });
 
     useEffect(() => {
@@ -64,6 +138,8 @@ export default function FinanceSettingsPage() {
                 controlAccountInventoryId: data.controlAccountInventoryId,
                 controlAccountPayrollId: data.controlAccountPayrollId,
                 controlAccountTaxId: data.controlAccountTaxId,
+                migrationClearingAccountId: data.migrationClearingAccountId,
+                openingBalanceAutoRoutingEnabled: data.openingBalanceAutoRoutingEnabled ?? true,
             });
 
             // Load accounts for the current COA type
@@ -271,24 +347,14 @@ export default function FinanceSettingsPage() {
                 <CardContent className="space-y-4">
                     <div className="space-y-2">
                         <Label htmlFor="retainedEarnings">Retained Earnings Account</Label>
-                        <Select
-                            value={formData.retainedEarningsAccountId || '__none__'}
-                            onValueChange={(value) => setFormData({ ...formData, retainedEarningsAccountId: value === '__none__' ? undefined : value })}
-                        >
-                            <SelectTrigger id="retainedEarnings">
-                                <SelectValue placeholder="Select account" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">None</SelectItem>
-                                {accounts
-                                    .filter(a => a.accountType === 'Equity')
-                                    .map(account => (
-                                        <SelectItem key={account.id} value={account.id}>
-                                            {account.accountCode} - {account.accountName}
-                                        </SelectItem>
-                                    ))}
-                            </SelectContent>
-                        </Select>
+                        <AccountPicker
+                            id="retainedEarnings"
+                            value={formData.retainedEarningsAccountId}
+                            placeholder="Search equity accounts..."
+                            disabled={settings?.transactionsExist}
+                            accounts={accounts.filter(a => a.accountType === 'Equity')}
+                            onChange={(value) => setFormData({ ...formData, retainedEarningsAccountId: value })}
+                        />
                         <p className="text-sm text-muted-foreground">
                             Used for year-end closing entries
                         </p>
@@ -296,24 +362,14 @@ export default function FinanceSettingsPage() {
 
                     <div className="space-y-2">
                         <Label htmlFor="unrealizedGainLoss">Unrealized Gain/Loss Account</Label>
-                        <Select
-                            value={formData.unrealizedGainLossAccountId || '__none__'}
-                            onValueChange={(value) => setFormData({ ...formData, unrealizedGainLossAccountId: value === '__none__' ? undefined : value })}
-                        >
-                            <SelectTrigger id="unrealizedGainLoss">
-                                <SelectValue placeholder="Select account" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">None</SelectItem>
-                                {accounts
-                                    .filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')
-                                    .map(account => (
-                                        <SelectItem key={account.id} value={account.id}>
-                                            {account.accountCode} - {account.accountName}
-                                        </SelectItem>
-                                    ))}
-                            </SelectContent>
-                        </Select>
+                        <AccountPicker
+                            id="unrealizedGainLoss"
+                            value={formData.unrealizedGainLossAccountId}
+                            placeholder="Search revenue/expense accounts..."
+                            disabled={settings?.transactionsExist}
+                            accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
+                            onChange={(value) => setFormData({ ...formData, unrealizedGainLossAccountId: value })}
+                        />
                         <p className="text-sm text-muted-foreground">
                             Used for currency revaluation entries
                         </p>
@@ -321,138 +377,110 @@ export default function FinanceSettingsPage() {
 
                     <div className="space-y-2">
                         <Label htmlFor="realizedGainLoss">Realized Gain/Loss Account</Label>
-                        <Select
-                            value={formData.realizedGainLossAccountId || '__none__'}
-                            onValueChange={(value) => setFormData({ ...formData, realizedGainLossAccountId: value === '__none__' ? undefined : value })}
-                        >
-                            <SelectTrigger id="realizedGainLoss">
-                                <SelectValue placeholder="Select account" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">None</SelectItem>
-                                {accounts
-                                    .filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')
-                                    .map(account => (
-                                        <SelectItem key={account.id} value={account.id}>
-                                            {account.accountCode} - {account.accountName}
-                                        </SelectItem>
-                                    ))}
-                            </SelectContent>
-                        </Select>
+                        <AccountPicker
+                            id="realizedGainLoss"
+                            value={formData.realizedGainLossAccountId}
+                            placeholder="Search revenue/expense accounts..."
+                            disabled={settings?.transactionsExist}
+                            accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
+                            onChange={(value) => setFormData({ ...formData, realizedGainLossAccountId: value })}
+                        />
                         <p className="text-sm text-muted-foreground">
                             Used for settled foreign currency transactions
                         </p>
                     </div>
 
+                    <div className="space-y-2">
+                        <Label htmlFor="migrationClearingAccount">Migration Clearing Account</Label>
+                        <AccountPicker
+                            id="migrationClearingAccount"
+                            value={formData.migrationClearingAccountId}
+                            placeholder="Search clearing/suspense accounts..."
+                            disabled={settings?.transactionsExist}
+                            accounts={accounts}
+                            onChange={(value) => setFormData({ ...formData, migrationClearingAccountId: value })}
+                        />
+                        <p className="text-sm text-muted-foreground">
+                            Used as the offset account for opening-balance migration postings.
+                        </p>
+                    </div>
+                    <div className="rounded-md border p-3">
+                        <div className="flex items-center justify-between">
+                            <div className="space-y-1">
+                                <Label htmlFor="openingBalanceAutoRouting">Opening Balance Auto-Routing</Label>
+                                <p className="text-sm text-muted-foreground">
+                                    When enabled, Opening Balance postings in GL/Subledger auto-route balancing/offset lines to Migration Clearing Account.
+                                </p>
+                            </div>
+                            <Switch
+                                id="openingBalanceAutoRouting"
+                                checked={formData.openingBalanceAutoRoutingEnabled ?? true}
+                                onCheckedChange={(checked) =>
+                                    setFormData({ ...formData, openingBalanceAutoRoutingEnabled: checked })
+                                }
+                            />
+                        </div>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
                         <div className="space-y-2">
                             <Label htmlFor="controlAccountAr">Accounts Receivable (AR) Control</Label>
-                            <Select
-                                value={formData.controlAccountArId || '__none__'}
-                                onValueChange={(value) => setFormData({ ...formData, controlAccountArId: value === '__none__' ? undefined : value })}
-                            >
-                                <SelectTrigger id="controlAccountAr">
-                                    <SelectValue placeholder="Select AR account" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="__none__">None</SelectItem>
-                                    {accounts
-                                        .filter(a => a.accountType === 'Asset')
-                                        .map(account => (
-                                            <SelectItem key={account.id} value={account.id}>
-                                                {account.accountCode} - {account.accountName}
-                                            </SelectItem>
-                                        ))}
-                                </SelectContent>
-                            </Select>
+                            <AccountPicker
+                                id="controlAccountAr"
+                                value={formData.controlAccountArId}
+                                placeholder="Search AR control accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Asset')}
+                                onChange={(value) => setFormData({ ...formData, controlAccountArId: value })}
+                            />
                         </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="controlAccountAp">Accounts Payable (AP) Control</Label>
-                            <Select
-                                value={formData.controlAccountApId || '__none__'}
-                                onValueChange={(value) => setFormData({ ...formData, controlAccountApId: value === '__none__' ? undefined : value })}
-                            >
-                                <SelectTrigger id="controlAccountAp">
-                                    <SelectValue placeholder="Select AP account" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="__none__">None</SelectItem>
-                                    {accounts
-                                        .filter(a => a.accountType === 'Liability')
-                                        .map(account => (
-                                            <SelectItem key={account.id} value={account.id}>
-                                                {account.accountCode} - {account.accountName}
-                                            </SelectItem>
-                                        ))}
-                                </SelectContent>
-                            </Select>
+                            <AccountPicker
+                                id="controlAccountAp"
+                                value={formData.controlAccountApId}
+                                placeholder="Search AP control accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Liability')}
+                                onChange={(value) => setFormData({ ...formData, controlAccountApId: value })}
+                            />
                         </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="controlAccountInventory">Inventory Control</Label>
-                            <Select
-                                value={formData.controlAccountInventoryId || '__none__'}
-                                onValueChange={(value) => setFormData({ ...formData, controlAccountInventoryId: value === '__none__' ? undefined : value })}
-                            >
-                                <SelectTrigger id="controlAccountInventory">
-                                    <SelectValue placeholder="Select Inventory account" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="__none__">None</SelectItem>
-                                    {accounts
-                                        .filter(a => a.accountType === 'Asset')
-                                        .map(account => (
-                                            <SelectItem key={account.id} value={account.id}>
-                                                {account.accountCode} - {account.accountName}
-                                            </SelectItem>
-                                        ))}
-                                </SelectContent>
-                            </Select>
+                            <AccountPicker
+                                id="controlAccountInventory"
+                                value={formData.controlAccountInventoryId}
+                                placeholder="Search inventory control accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Asset')}
+                                onChange={(value) => setFormData({ ...formData, controlAccountInventoryId: value })}
+                            />
                         </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="controlAccountPayroll">Payroll/Salaries Payable</Label>
-                            <Select
-                                value={formData.controlAccountPayrollId || '__none__'}
-                                onValueChange={(value) => setFormData({ ...formData, controlAccountPayrollId: value === '__none__' ? undefined : value })}
-                            >
-                                <SelectTrigger id="controlAccountPayroll">
-                                    <SelectValue placeholder="Select Payroll account" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="__none__">None</SelectItem>
-                                    {accounts
-                                        .filter(a => a.accountType === 'Liability')
-                                        .map(account => (
-                                            <SelectItem key={account.id} value={account.id}>
-                                                {account.accountCode} - {account.accountName}
-                                            </SelectItem>
-                                        ))}
-                                </SelectContent>
-                            </Select>
+                            <AccountPicker
+                                id="controlAccountPayroll"
+                                value={formData.controlAccountPayrollId}
+                                placeholder="Search payroll control accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Liability')}
+                                onChange={(value) => setFormData({ ...formData, controlAccountPayrollId: value })}
+                            />
                         </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="controlAccountTax">Tax/VAT Control</Label>
-                            <Select
-                                value={formData.controlAccountTaxId || '__none__'}
-                                onValueChange={(value) => setFormData({ ...formData, controlAccountTaxId: value === '__none__' ? undefined : value })}
-                            >
-                                <SelectTrigger id="controlAccountTax">
-                                    <SelectValue placeholder="Select Tax account" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="__none__">None</SelectItem>
-                                    {accounts
-                                        .filter(a => a.accountType === 'Liability')
-                                        .map(account => (
-                                            <SelectItem key={account.id} value={account.id}>
-                                                {account.accountCode} - {account.accountName}
-                                            </SelectItem>
-                                        ))}
-                                </SelectContent>
-                            </Select>
+                            <AccountPicker
+                                id="controlAccountTax"
+                                value={formData.controlAccountTaxId}
+                                placeholder="Search tax control accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Liability')}
+                                onChange={(value) => setFormData({ ...formData, controlAccountTaxId: value })}
+                            />
                         </div>
                     </div>
 

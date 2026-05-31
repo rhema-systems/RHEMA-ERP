@@ -3,6 +3,8 @@ using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Enums;
+using System.Security.Claims;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -19,6 +21,20 @@ namespace ErpSystem.Api.Controllers.Finance
     [Route("api/finance/journal-entries")]
     public class JournalEntryController : ControllerBase
     {
+        private static readonly string[] PrivilegedRoles = ["admin", "superadmin", "tenantadmin"];
+        private static readonly string[] PermissionClaimTypes = ["permission", "permissions", ClaimTypes.Role];
+        private static readonly Dictionary<string, string[]> ActionPermissions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Edit"] = ["Finance.JournalEntries.Edit", "Finance.JournalEntries.Write"],
+            ["Delete"] = ["Finance.JournalEntries.Delete", "Finance.JournalEntries.Write"],
+            ["Post"] = ["Finance.JournalEntries.Post"],
+            ["Reverse"] = ["Finance.JournalEntries.Reverse"],
+            ["SubmitForApproval"] = ["Finance.JournalEntries.SubmitForApproval", "Finance.JournalEntries.Approve"],
+            ["Approve"] = ["Finance.JournalEntries.Approve"],
+            ["Reject"] = ["Finance.JournalEntries.Approve"],
+            ["Attach"] = ["Finance.JournalEntries.Edit", "Finance.JournalEntries.Write"]
+        };
+
         private readonly IJournalEntryService _journalEntryService;
         private readonly IGeneralLedgerService _generalLedgerService;
         private readonly IWorkflowService _workflowService;
@@ -34,6 +50,56 @@ namespace ErpSystem.Api.Controllers.Finance
             _generalLedgerService = generalLedgerService;
             _workflowService = workflowService;
             _currentUserService = currentUserService;
+        }
+
+        private bool CurrentUserHasAnyPermission(params string[] permissions)
+        {
+            if (User?.Identity?.IsAuthenticated != true)
+            {
+                return false;
+            }
+
+            var roles = User.FindAll(ClaimTypes.Role)
+                .Select(c => c.Value?.Trim().ToLowerInvariant())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToHashSet();
+
+            if (roles.Overlaps(PrivilegedRoles))
+            {
+                return true;
+            }
+
+            var granted = User.Claims
+                .Where(c => PermissionClaimTypes.Contains(c.Type, StringComparer.OrdinalIgnoreCase))
+                .SelectMany(c => c.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Select(v => v.Trim().ToLowerInvariant())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToHashSet();
+
+            if (granted.Contains("*"))
+            {
+                return true;
+            }
+
+            return permissions
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim().ToLowerInvariant())
+                .Any(granted.Contains);
+        }
+
+        private ActionResult? EnsureActionPermission(string actionName)
+        {
+            if (!ActionPermissions.TryGetValue(actionName, out var permissions))
+            {
+                return null;
+            }
+
+            if (CurrentUserHasAnyPermission(permissions))
+            {
+                return null;
+            }
+
+            return StatusCode(StatusCodes.Status403Forbidden, $"You do not have permission to {actionName.ToLowerInvariant()} journal entries.");
         }
 
         // ====================================================================
@@ -134,6 +200,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPut("{id}")]
         public async Task<ActionResult<JournalEntryDto>> UpdateJournalEntry(Guid id, [FromBody] UpdateJournalEntryDto dto)
         {
+            var permissionCheck = EnsureActionPermission("Edit");
+            if (permissionCheck != null) return permissionCheck;
+
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
@@ -163,6 +232,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteJournalEntry(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("Delete");
+            if (permissionCheck != null) return permissionCheck;
+
             try
             {
                 await _journalEntryService.DeleteJournalEntryAsync(id);
@@ -189,6 +261,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/post")]
         public async Task<ActionResult> PostJournalEntry(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("Post");
+            if (permissionCheck != null) return permissionCheck;
+
             try
             {
                 await _journalEntryService.PostJournalEntryAsync(id);
@@ -215,10 +290,98 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/reverse")]
         public async Task<ActionResult<JournalEntryDto>> ReverseJournalEntry(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("Reverse");
+            if (permissionCheck != null) return permissionCheck;
+
             try
             {
                 var reversedEntry = await _journalEntryService.ReverseJournalEntryAsync(id, "Manual reversal");
                 return Ok(reversedEntry);
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        // ====================================================================
+        // ATTACHMENT ENDPOINTS
+        // ====================================================================
+
+        /// <summary>
+        /// Links an uploaded file to a journal entry.
+        /// </summary>
+        [HttpPost("{id}/attachments/{fileId}")]
+        public async Task<ActionResult> LinkAttachment(Guid id, Guid fileId)
+        {
+            var permissionCheck = EnsureActionPermission("Attach");
+            if (permissionCheck != null) return permissionCheck;
+
+            try
+            {
+                await _journalEntryService.LinkAttachmentAsync(id, fileId);
+                return Ok(new { message = "Attachment linked successfully" });
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Unlinks an attachment from a journal entry.
+        /// </summary>
+        [HttpDelete("{id}/attachments/{fileId}")]
+        public async Task<ActionResult> UnlinkAttachment(Guid id, Guid fileId)
+        {
+            var permissionCheck = EnsureActionPermission("Attach");
+            if (permissionCheck != null) return permissionCheck;
+
+            try
+            {
+                await _journalEntryService.UnlinkAttachmentAsync(id, fileId);
+                return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets full attachment metadata linked to a journal entry.
+        /// </summary>
+        [HttpGet("{id}/attachments")]
+        public async Task<ActionResult<IReadOnlyList<JournalEntryAttachmentDto>>> GetAttachments(Guid id)
+        {
+            try
+            {
+                var attachments = await _journalEntryService.GetAttachmentsAsync(id);
+                return Ok(attachments);
             }
             catch (ArgumentException ex)
             {
@@ -244,6 +407,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/request-approval")]
         public async Task<ActionResult<JournalEntryDto>> RequestApproval(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("SubmitForApproval");
+            if (permissionCheck != null) return permissionCheck;
+
             try
             {
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
@@ -279,6 +445,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/approve")]
         public async Task<ActionResult<JournalEntryDto>> ApproveJournalEntry(Guid id, [FromBody] ApprovalActionDto? request = null)
         {
+            var permissionCheck = EnsureActionPermission("Approve");
+            if (permissionCheck != null) return permissionCheck;
+
             try
             {
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
@@ -316,6 +485,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/reject")]
         public async Task<ActionResult<JournalEntryDto>> RejectJournalEntry(Guid id, [FromBody] ApprovalActionDto request)
         {
+            var permissionCheck = EnsureActionPermission("Reject");
+            if (permissionCheck != null) return permissionCheck;
+
             try
             {
                 if (string.IsNullOrWhiteSpace(request?.Reason))

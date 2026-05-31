@@ -70,6 +70,8 @@ public class DeliveryService : IDeliveryService
                 InternalNotes = dto.InternalNotes,
                 ExternalNotes = dto.ExternalNotes,
                 Currency = so.Currency,
+                ExchangeRate = so.ExchangeRate,
+                TaxGroupId = so.TaxGroupId,
                 TenantId = so.TenantId,
                 ReferenceNumber = so.DocumentNumber // Reference back to SO
             };
@@ -101,7 +103,13 @@ public class DeliveryService : IDeliveryService
                     SerialNumber = lineDto.SerialNumber ?? soLine.SerialNumber,
                     LotNumber = lineDto.LotNumber ?? soLine.LotNumber,
                     Notes = lineDto.Notes,
-                    TenantId = so.TenantId
+                    TenantId = so.TenantId,
+                    UnitPrice = soLine.UnitPrice,
+                    DiscountPercentage = soLine.DiscountPercentage,
+                    DiscountAmount = soLine.DiscountAmount,
+                    TaxRate = soLine.TaxRate,
+                    TaxAmount = soLine.TaxAmount,
+                    TaxGroupId = soLine.TaxGroupId
                 };
 
                 await _lineRepo.AddAsync(line);
@@ -466,6 +474,8 @@ public class DeliveryService : IDeliveryService
         ExternalNotes = dn.ExternalNotes,
         TotalAmount = dn.TotalAmount,
         Currency = dn.Currency,
+        ExchangeRate = dn.ExchangeRate,
+        TaxGroupId = dn.TaxGroupId,
         LineCount = dn.Lines?.Count ?? 0,
         Lines = dn.Lines?.Select(l => new DeliveryNoteLineDto
         {
@@ -486,7 +496,13 @@ public class DeliveryService : IDeliveryService
             LotNumber = l.LotNumber,
             IsStockDeducted = l.IsStockDeducted,
             Notes = l.Notes,
-            DamageNotes = l.DamageNotes
+            DamageNotes = l.DamageNotes,
+            UnitPrice = l.UnitPrice,
+            DiscountPercentage = l.DiscountPercentage,
+            DiscountAmount = l.DiscountAmount,
+            TaxRate = l.TaxRate,
+            TaxAmount = l.TaxAmount,
+            TaxGroupId = l.TaxGroupId
         }).ToList() ?? new()
     };
 

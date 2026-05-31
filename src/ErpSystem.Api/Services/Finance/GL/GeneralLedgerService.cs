@@ -194,6 +194,13 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var segmentDef = segments[i];
                 var segmentValue = parts[i];
 
+                // Optional segments can be intentionally left blank in UI; we represent
+                // this as all-zero placeholder (e.g., "000") to preserve segment count.
+                if (!segmentDef.IsMandatory && (string.IsNullOrWhiteSpace(segmentValue) || IsAllZeros(segmentValue)))
+                {
+                    continue;
+                }
+
                 // A. Length Check
                 if (segmentValue.Length != segmentDef.SegmentLength)
                 {
@@ -219,6 +226,24 @@ namespace ErpSystem.Api.Services.Finance.GL
                     {
                         throw new ArgumentException($"Invalid value '{segmentValue}' for segment {segmentDef.SegmentName}. Value not found in lookup table.");
                     }
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsAllZeros(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            foreach (var ch in value)
+            {
+                if (ch != '0')
+                {
+                    return false;
                 }
             }
 

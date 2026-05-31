@@ -41,6 +41,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function InvoicesPage() {
     const router = useRouter();
@@ -51,6 +52,7 @@ export default function InvoicesPage() {
     const [page, setPage] = useState(1);
     const [pageSize] = useState(10);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const { hasPermission, hasAnyPermission } = useAuth();
 
     const { data: invoicesData, isLoading } = useQuery({
         queryKey: ['invoices', page, pageSize, debouncedSearchTerm, statusFilter],
@@ -105,9 +107,11 @@ export default function InvoicesPage() {
                         Create and manage customer invoices.
                     </p>
                 </div>
+                {hasAnyPermission(['Finance.AR.Invoices.Create', 'Finance.AR.Invoices.Write']) && (
                 <Button onClick={() => router.push('/finance/ar/invoices/new')}>
                     <Plus className="mr-2 h-4 w-4" /> New Invoice
                 </Button>
+                )}
             </div>
 
             <Card>
@@ -205,7 +209,7 @@ export default function InvoicesPage() {
                                                         <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/${invoice.id}`)}>
                                                             View Details
                                                         </DropdownMenuItem>
-                                                        {invoice.status === 'Draft' && (
+                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AR.Invoices.Edit', 'Finance.AR.Invoices.Write']) && (
                                                             <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/${invoice.id}/edit`)}>
                                                                 <FileText className="mr-2 h-4 w-4" /> Edit Invoice
                                                             </DropdownMenuItem>
@@ -216,10 +220,12 @@ export default function InvoicesPage() {
                                                             </DropdownMenuItem>
                                                         )}
                                                         <DropdownMenuSeparator />
+                                                        {hasPermission('Finance.AR.Invoices.Send') && (
                                                         <DropdownMenuItem onClick={() => arService.sendInvoice(invoice.id)}>
                                                             <Send className="mr-2 h-4 w-4" /> Send Email
                                                         </DropdownMenuItem>
-                                                        {(invoice.status === 'Posted' || invoice.status === 'Overdue') && (
+                                                        )}
+                                                        {(invoice.status === 'Posted' || invoice.status === 'Overdue') && hasPermission('Finance.AR.Invoices.Void') && (
                                                             <DropdownMenuItem
                                                                 className="text-red-600"
                                                                 onClick={() => voidInvoiceMutation.mutate(invoice.id)}

@@ -16,6 +16,7 @@ public interface IBudgetService
     Task<BudgetReturnDto> CreateReturnAsync(CreateBudgetReturnDto dto);
     Task<BudgetReturnDto> GetReturnAsync(Guid id);
     Task<IEnumerable<BudgetReturnDto>> GetReturnsForScenarioAsync(Guid scenarioId);
+    Task<IEnumerable<BudgetReturnDto>> GetMyReturnsAsync();
     Task<BudgetReturnDto> SubmitReturnAsync(Guid id);
     Task<BudgetReturnDto> ApproveReturnAsync(Guid id, Guid approverId);
     Task<BudgetReturnDto> RejectReturnAsync(Guid id, string reason, Guid rejectorId);

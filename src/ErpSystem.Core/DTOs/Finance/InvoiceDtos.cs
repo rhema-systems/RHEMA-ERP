@@ -25,6 +25,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string CurrencyCode { get; set; } = "USD";
         public decimal ExchangeRate { get; set; } = 1.0m;
         public int PaymentTermsDays { get; set; } = 30; // AR-specific
+        public Guid? TaxGroupId { get; set; }
         public List<InvoiceLineItemDto> LineItems { get; set; } = new();
         public List<PaymentDto> Payments { get; set; } = new();
         public DateTime CreatedAt { get; set; }
@@ -95,6 +96,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal TaxRate { get; set; }
         public decimal TaxAmount { get; set; }
         public string? TaxCode { get; set; } // AR-specific
+        public Guid? TaxGroupId { get; set; }
         public string? Unit { get; set; }
         public decimal DiscountPercentage { get; set; } // AR-specific
         public decimal DiscountAmount { get; set; } // AR-specific

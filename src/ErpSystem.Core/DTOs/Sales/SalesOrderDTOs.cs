@@ -62,6 +62,7 @@ public class SalesOrderDetailDto : SalesOrderSummaryDto
     public string? InternalNotes { get; set; }
     public string? ExternalNotes { get; set; }
     public string? ReferenceNumber { get; set; }
+    public Guid? TaxGroupId { get; set; }
 
     // Approval
     public Guid? SubmittedById { get; set; }
@@ -108,6 +109,7 @@ public class SalesOrderLineDto
     public Guid? WarehouseId { get; set; }
     public string? WarehouseName { get; set; }
     public Guid? LocationId { get; set; }
+    public Guid? TaxGroupId { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public bool IsStockReserved { get; set; }
@@ -159,6 +161,8 @@ public class CreateSalesOrderDto
     // Payment
     public Guid? PaymentTermId { get; set; }
     public string? Currency { get; set; } = "GHS";
+    public decimal? ExchangeRate { get; set; }
+    public Guid? TaxGroupId { get; set; }
 
     // Delivery
     public ShipmentMethod? ShipmentMethod { get; set; }
@@ -212,6 +216,7 @@ public class CreateSalesOrderLineDto
     public Guid? WarehouseId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid? GLAccountId { get; set; }
+    public Guid? TaxGroupId { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public DateTime? ExpirationDate { get; set; }
@@ -242,6 +247,8 @@ public class UpdateSalesOrderDto
     public string? InternalNotes { get; set; }
     public string? ExternalNotes { get; set; }
     public string? ReferenceNumber { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public decimal? ExchangeRate { get; set; }
 
     public List<CreateSalesOrderLineDto>? Lines { get; set; }
 }

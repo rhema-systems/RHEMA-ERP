@@ -201,9 +201,10 @@ public class FileUploadController : ControllerBase
                 result.StorageProvider, file.FileName, result.FilePath);
 
             // Record upload for quotas/auditability
+            Guid? fileRecordId = null;
             try
             {
-                _db.FileUploadRecords.Add(new ErpSystem.Core.Entities.FileUploadRecord
+                var record = new ErpSystem.Core.Entities.FileUploadRecord
                 {
                     Id = Guid.NewGuid(),
                     TenantId = effectiveTenantId,
@@ -221,7 +222,9 @@ public class FileUploadController : ControllerBase
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = _currentUserService.UserName,
                     CreatedById = actorUserId
-                });
+                };
+                fileRecordId = record.Id;
+                _db.FileUploadRecords.Add(record);
                 await _db.SaveChangesAsync();
             }
             catch (Exception ex)
@@ -241,6 +244,7 @@ public class FileUploadController : ControllerBase
                 ContentType = result.ContentType,
                 Category = result.Category,
                 TenantId = effectiveTenantId.ToString(),
+                FileId = fileRecordId,
                 UploadedAt = result.UploadedAt
             });
         }
@@ -527,6 +531,7 @@ public class FileUploadOptions
 public class FileUploadResult
 {
     public bool Success { get; set; }
+    public Guid? FileId { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string OriginalFileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;

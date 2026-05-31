@@ -9,8 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { TrendingUp, Plus, Edit, Upload, Filter } from 'lucide-react';
+import { TrendingUp, Plus, Edit, Upload, Filter, LineChart } from 'lucide-react';
 import type { ExchangeRate } from '@/types/finance';
+import Link from 'next/link';
 
 
 
@@ -177,6 +178,12 @@ export default function ExchangeRatesPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <Button asChild variant="outline" className="mr-2">
+                        <Link href="/finance/exchange-rates/trends">
+                            <LineChart className="mr-2 h-4 w-4" />
+                            Trend Analysis
+                        </Link>
+                    </Button>
                     <Dialog open={isBulkUploadOpen} onOpenChange={setIsBulkUploadOpen}>
                         <DialogTrigger asChild>
                             <Button variant="outline">

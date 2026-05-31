@@ -64,12 +64,17 @@ namespace ErpSystem.Api.Services.Finance.Segments
             AccountSegmentValueCreateDto dto,
             CancellationToken cancellationToken = default)
         {
+            if (!dto.AccountId.HasValue || dto.AccountId.Value == Guid.Empty)
+                throw new ArgumentException("Account ID is required for creating a segment value assignment.", nameof(dto.AccountId));
+
+            var accountId = dto.AccountId.Value;
+
             // Validate account exists
             var account = await _unitOfWork.Repository<Account>()
-                .FirstOrDefaultAsync(a => a.Id == dto.AccountId && a.TenantId == TenantId && !a.IsDeleted);
+                .FirstOrDefaultAsync(a => a.Id == accountId && a.TenantId == TenantId && !a.IsDeleted);
 
             if (account == null)
-                throw new ArgumentException($"Account with ID '{dto.AccountId}' not found.");
+                throw new ArgumentException($"Account with ID '{accountId}' not found.");
 
             // Validate segment structure exists
             var segment = await _unitOfWork.Repository<AccountSegmentStructure>()
@@ -80,7 +85,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
 
             // Validate no duplicate position for this account
             var existing = await _unitOfWork.Repository<AccountSegmentValue>()
-                .FirstOrDefaultAsync(v => v.AccountId == dto.AccountId && 
+                .FirstOrDefaultAsync(v => v.AccountId == accountId && 
                     v.SegmentStructure!.SegmentPosition == segment.SegmentPosition && !v.IsDeleted);
 
             if (existing != null)
@@ -90,7 +95,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
-                AccountId = dto.AccountId,
+                AccountId = accountId,
                 SegmentStructureId = dto.SegmentStructureId,
                 SegmentValue = dto.SegmentValue,
                 SegmentLookupValueId = dto.SegmentLookupValueId,
@@ -101,7 +106,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
             await _unitOfWork.Repository<AccountSegmentValue>().AddAsync(segmentValue);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Account segment value created for account {AccountId}", dto.AccountId);
+            _logger.LogInformation("Account segment value created for account {AccountId}", accountId);
 
             return (await GetByIdAsync(segmentValue.Id, cancellationToken))!;
         }

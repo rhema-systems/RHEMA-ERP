@@ -107,6 +107,14 @@ class AccountsPayableService {
         return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}/approve`, { comments });
     }
 
+    public async submitInvoiceForApproval(id: string): Promise<VendorInvoice> {
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/submit`, {});
+    }
+
+    public async rejectInvoice(id: string, comments: string): Promise<VendorInvoice> {
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/reject`, comments);
+    }
+
     public async voidInvoice(id: string, comments?: string): Promise<VendorInvoice> {
         return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}/void`, { comments });
     }
@@ -201,6 +209,24 @@ class AccountsPayableService {
 
     public async getApSummary(): Promise<ApSummaryStats> {
         return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/ap-summary`);
+    }
+
+    // --- Supplier Returns & Debit Notes ---
+
+    public async getSupplierReturns(): Promise<any[]> {
+        return apiService.get<any[]>(`${this.baseUrl}/supplier-returns`);
+    }
+
+    public async getSupplierReturn(id: string): Promise<any> {
+        return apiService.get<any>(`${this.baseUrl}/supplier-returns/${id}`);
+    }
+
+    public async createSupplierReturn(data: any): Promise<any> {
+        return apiService.post<any>(`${this.baseUrl}/supplier-returns`, data);
+    }
+
+    public async approveSupplierReturn(id: string): Promise<any> {
+        return apiService.post<any>(`${this.baseUrl}/supplier-returns/${id}/approve`);
     }
 }
 

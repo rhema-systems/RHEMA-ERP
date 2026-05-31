@@ -127,6 +127,9 @@ export interface CreateSalesOrderDto {
   customerPoNumber?: string;
   notes?: string;
   internalNotes?: string;
+  currency?: string;
+  exchangeRate?: number;
+  taxGroupId?: string;
   lines: CreateSalesOrderLineDto[];
 }
 
@@ -138,8 +141,8 @@ export interface CreateSalesOrderLineDto {
   quantity: number;
   unitOfMeasure?: string;
   unitPrice: number;
-  discountPercent?: number;
-  taxPercent?: number;
+  discountPercentage?: number;
+  taxGroupId?: string;
 }
 
 export interface UpdateSalesOrderDto {
@@ -154,6 +157,9 @@ export interface UpdateSalesOrderDto {
   customerPoNumber?: string;
   notes?: string;
   internalNotes?: string;
+  currency?: string;
+  exchangeRate?: number;
+  taxGroupId?: string;
   lines?: CreateSalesOrderLineDto[];
 }
 

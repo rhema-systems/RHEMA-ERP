@@ -331,5 +331,60 @@ namespace ErpSystem.Api.Controllers.Finance
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// Analyzes exchange rate trends over a period.
+        /// </summary>
+        /// <remarks>
+        /// **Authorization:** Requires Finance.Read permission
+        /// </remarks>
+        [HttpGet("trends")]
+        public async Task<ActionResult<List<TrendAnalysisDto>>> GetTrends(
+            [FromQuery] string sourceCurrency,
+            [FromQuery] string targetCurrency,
+            [FromQuery] DateTime startDate,
+            [FromQuery] DateTime endDate,
+            [FromQuery] string groupBy = "daily",
+            [FromQuery] int movingAverageWindow = 7)
+        {
+            try
+            {
+                var trends = await _exchangeRateService.GetTrendsAsync(
+                    sourceCurrency, targetCurrency, startDate, endDate, groupBy, movingAverageWindow);
+                return Ok(trends);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Analyzes exchange rate trends for a target currency against the base currency over a relative period.
+        /// </summary>
+        /// <remarks>
+        /// **Authorization:** Requires Finance.Read permission
+        /// </remarks>
+        [HttpGet("trends/{targetCurrency}")]
+        public async Task<ActionResult<List<TrendAnalysisDto>>> GetTrendsForCurrency(
+            string targetCurrency,
+            [FromQuery] int months = 6,
+            [FromQuery] string? sourceCurrency = null,
+            [FromQuery] string groupBy = "daily",
+            [FromQuery] int movingAverageWindow = 7)
+        {
+            try
+            {
+                var endDate = DateTime.UtcNow;
+                var startDate = endDate.AddMonths(-months);
+                var trends = await _exchangeRateService.GetTrendsAsync(
+                    sourceCurrency, targetCurrency, startDate, endDate, groupBy, movingAverageWindow);
+                return Ok(trends);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
     }
 }

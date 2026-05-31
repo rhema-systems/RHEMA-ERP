@@ -126,6 +126,7 @@ export default function NewAccountPage() {
 
     // Segment values for segmented COA
     const [segmentValues, setSegmentValues] = useState<Record<string, string>>({});
+    const [segmentErrors, setSegmentErrors] = useState<Record<string, string>>({});
 
     // Form data
     const [formData, setFormData] = useState({
@@ -274,24 +275,111 @@ export default function NewAccountPage() {
             ...prev,
             [segmentId]: value,
         }));
+        setSegmentErrors(prev => {
+            if (!prev[segmentId]) return prev;
+            const next = { ...prev };
+            delete next[segmentId];
+            return next;
+        });
+    };
+
+    const validateSegments = () => {
+        const sortedSegments = [...segments].sort((a, b) => a.segmentPosition - b.segmentPosition);
+        const nextErrors: Record<string, string> = {};
+
+        for (const seg of sortedSegments) {
+            const segmentError = validateSegment(seg, segmentValues[seg.id] || '');
+            if (segmentError) {
+                nextErrors[seg.id] = segmentError;
+            }
+        }
+
+        setSegmentErrors(nextErrors);
+        return { sortedSegments, nextErrors };
+    };
+
+    const validateSegment = (seg: SegmentStructure, rawValue: string): string | undefined => {
+        const value = rawValue.trim();
+        const isRequired = seg.isMandatory;
+
+        if (isRequired && !value) {
+            return `${seg.segmentName} is required.`;
+        }
+
+        if (!value) {
+            return undefined;
+        }
+
+        if (value.length !== seg.segmentLength) {
+            return `${seg.segmentName} must be exactly ${seg.segmentLength} characters.`;
+        }
+
+        if (seg.dataType?.toLowerCase() === 'numeric' && !/^\d+$/.test(value)) {
+            return `${seg.segmentName} must contain only numbers.`;
+        }
+
+        if (seg.lookupTableRequired) {
+            const isAllowed = (seg.lookupValues || []).some(
+                lv => lv.isActive && lv.segmentValue === value
+            );
+            if (!isAllowed) {
+                return `${seg.segmentName} must be selected from allowed lookup values.`;
+            }
+        }
+
+        return undefined;
+    };
+
+    const validateSegmentOnBlur = (seg: SegmentStructure) => {
+        const error = validateSegment(seg, segmentValues[seg.id] || '');
+        setSegmentErrors(prev => {
+            const next = { ...prev };
+            if (error) {
+                next[seg.id] = error;
+            } else {
+                delete next[seg.id];
+            }
+            return next;
+        });
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
         try {
+            const { sortedSegments, nextErrors } = validateSegments();
+            if (Object.keys(nextErrors).length > 0) {
+                throw new Error(Object.values(nextErrors)[0]);
+            }
+
             setSaving(true);
 
             // Build segment values array for segmented accounts
             // Note: We ALWAYS use segmented accounts - Standard COA is no longer supported
-            const segmentValueInputs = segments.map(seg => ({
-                segmentStructureId: seg.id,
-                segmentPosition: seg.segmentPosition,
-                segmentValue: segmentValues[seg.id] || '',
-            }));
+            const segmentValueInputs = sortedSegments
+                .map(seg => ({
+                    segmentStructureId: seg.id,
+                    segmentPosition: seg.segmentPosition,
+                    segmentValue: (segmentValues[seg.id] || '').trim(),
+                }))
+                .filter(seg => seg.segmentValue.length > 0);
 
             await financeDataService.createAccount({
-                ...formData,
+                accountCode: formData.accountCode,
+                accountNumber: formData.accountNumber,
+                accountName: formData.accountName,
+                accountType: formData.accountType,
+                accountCategory: formData.accountSubCategory || undefined,
+                accountSubCategory: formData.accountSubCategory || undefined,
+                currencyCode: formData.currencyCode,
+                isMultiCurrency: formData.isMultiCurrency,
+                isIFRSClassified: formData.isIFRSClassified,
+                isBaseFrameworkClassified: formData.isManagementClassified,
+                isLocalFrameworkClassified: formData.isLocalClassified,
+                isPostingAllowed: formData.allowDirectPosting,
+                isControlAccount: formData.isControlAccount,
+                budgetTrackingEnabled: formData.budgetTrackingEnabled,
+                status: formData.status,
                 isSegmented: true,  // Always segmented
                 segmentValues: segmentValueInputs,
             });
@@ -325,7 +413,7 @@ export default function NewAccountPage() {
                     value={value}
                     onValueChange={(v) => updateSegmentValue(segment.id, v)}
                 >
-                    <SelectTrigger>
+                    <SelectTrigger onBlur={() => validateSegmentOnBlur(segment)}>
                         <SelectValue placeholder={`Select ${segment.segmentName}...`} />
                     </SelectTrigger>
                     <SelectContent>
@@ -352,6 +440,7 @@ export default function NewAccountPage() {
                                 placeholder={`Enter ${segment.segmentName} value or select below...`}
                                 value={value}
                                 onChange={(e) => updateSegmentValue(segment.id, e.target.value)}
+                                onBlur={() => validateSegmentOnBlur(segment)}
                                 maxLength={segment.segmentLength}
                                 className="font-mono"
                             />
@@ -386,6 +475,7 @@ export default function NewAccountPage() {
                     placeholder={`Enter ${segment.segmentName} value...`}
                     value={value}
                     onChange={(e) => updateSegmentValue(segment.id, e.target.value)}
+                    onBlur={() => validateSegmentOnBlur(segment)}
                     maxLength={segment.segmentLength}
                     className="font-mono"
                 />
@@ -478,6 +568,9 @@ export default function NewAccountPage() {
                                                 </span>
                                             </div>
                                             {renderSegmentInput(segment)}
+                                            {segmentErrors[segment.id] && (
+                                                <p className="text-sm text-red-600">{segmentErrors[segment.id]}</p>
+                                            )}
                                         </div>
                                     ))}
 

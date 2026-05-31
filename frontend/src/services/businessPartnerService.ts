@@ -39,6 +39,7 @@ export interface BusinessPartnerDto {
   approvalStatus?: string; // Pending, Approved, Rejected
   isPreferred: boolean;
   isBlacklisted: boolean;
+  currency?: string;
   performanceRating?: number;
   createdAt: string;
   updatedAt?: string;

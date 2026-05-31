@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -175,6 +176,33 @@ public class BudgetService : IBudgetService
         {
             dtos.Add(await MapToReturnDto(r));
         }
+        return dtos;
+    }
+
+    public async Task<IEnumerable<BudgetReturnDto>> GetMyReturnsAsync()
+    {
+        var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId)
+            ? parsedUserId
+            : Guid.Empty;
+
+        if (currentUserId == Guid.Empty)
+        {
+            return Enumerable.Empty<BudgetReturnDto>();
+        }
+
+        var returns = await _repository.Query<BudgetReturn>()
+            .Include(r => r.BudgetScenario)
+            .Include(r => r.SegmentValue)
+            .Where(r => r.AssignedToUserId == currentUserId)
+            .OrderByDescending(r => r.UpdatedAt ?? r.CreatedAt)
+            .ToListAsync();
+
+        var dtos = new List<BudgetReturnDto>();
+        foreach (var r in returns)
+        {
+            dtos.Add(await MapToReturnDto(r));
+        }
+
         return dtos;
     }
 
@@ -370,6 +398,11 @@ public class BudgetService : IBudgetService
             SegmentValueName = r.SegmentValue?.SegmentValueDescription,
             SegmentValueCode = r.SegmentValue?.SegmentValue,
             AssignedToUserId = r.AssignedToUserId,
+            AssignedToUserName = await GetUserDisplayNameAsync(r.AssignedToUserId),
+            ApproverUserName = await GetUserDisplayNameAsync(r.ApproverUserId),
+            AssignedAt = r.AssignedAt,
+            AssignedByUserId = r.AssignedByUserId,
+            AssignmentNote = r.AssignmentNote,
             ApproverUserId = r.ApproverUserId,
             Status = r.Status,
             Notes = r.Notes,
@@ -378,6 +411,32 @@ public class BudgetService : IBudgetService
             ApprovedDate = r.ApprovedDate,
             TotalAmountBase = total
         };
+    }
+
+    private async Task<string?> GetUserDisplayNameAsync(Guid? userId)
+    {
+        if (!userId.HasValue || userId.Value == Guid.Empty)
+        {
+            return null;
+        }
+
+        var user = await _repository.Query<ApplicationUser>()
+            .Where(u => u.Id == userId.Value)
+            .Select(u => new { u.FirstName, u.LastName, u.UserName, u.Email })
+            .FirstOrDefaultAsync();
+
+        if (user == null)
+        {
+            return null;
+        }
+
+        var fullName = $"{user.FirstName} {user.LastName}".Trim();
+        if (!string.IsNullOrWhiteSpace(fullName))
+        {
+            return fullName;
+        }
+
+        return string.IsNullOrWhiteSpace(user.UserName) ? user.Email : user.UserName;
     }
     
     private BudgetEntryDto MapToEntryDto(BudgetEntry e)

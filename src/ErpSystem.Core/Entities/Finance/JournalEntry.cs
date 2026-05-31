@@ -378,6 +378,11 @@ public class JournalEntry : BusinessEntity
     public virtual ICollection<AccountTransaction> Transactions { get; set; } = new List<AccountTransaction>();
 
     /// <summary>
+    /// Collection of attachments linked to this journal entry.
+    /// </summary>
+    public virtual ICollection<JournalEntryAttachment> Attachments { get; set; } = new List<JournalEntryAttachment>();
+
+    /// <summary>
     /// The fiscal period this entry belongs to.
     /// Used for period locking and financial reporting.
     /// </summary>
@@ -397,4 +402,21 @@ public class JournalEntry : BusinessEntity
     /// </summary>
     [ForeignKey(nameof(OriginalJournalEntryId))]
     public virtual JournalEntry? OriginalJournalEntry { get; set; }
+}
+
+/// <summary>
+/// Link between a Journal Entry and a FileUploadRecord.
+/// </summary>
+[Table("JournalEntryAttachments")]
+public class JournalEntryAttachment : TenantEntity
+{
+    public Guid JournalEntryId { get; set; }
+    
+    [ForeignKey(nameof(JournalEntryId))]
+    public virtual JournalEntry JournalEntry { get; set; } = null!;
+
+    public Guid FileUploadRecordId { get; set; }
+    
+    [ForeignKey(nameof(FileUploadRecordId))]
+    public virtual FileUploadRecord FileUploadRecord { get; set; } = null!;
 }

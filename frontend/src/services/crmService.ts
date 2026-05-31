@@ -1971,6 +1971,350 @@ class CrmService {
       throw new Error(await getErrorMessage(response, 'Failed to delete CRM activity'));
     }
   }
+
+  // ── Lead Checklists ──
+
+  async getLeadChecklists(leadId: string): Promise<CrmLeadChecklistDto[]> {
+    const response = await fetch(`${API_BASE_URL}/sales/leads/${leadId}/checklists`, {
+      headers: getAuthHeaders(false),
+    });
+    return parseResponse<CrmLeadChecklistDto[]>(response, 'Failed to load checklists');
+  }
+
+  async createLeadChecklist(leadId: string, dto: CreateCrmLeadChecklistDto): Promise<CrmLeadChecklistDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/leads/${leadId}/checklists`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    return parseResponse<CrmLeadChecklistDto>(response, 'Failed to create checklist');
+  }
+
+  async toggleChecklistItem(checklistId: string, itemId: string, isDone: boolean): Promise<CrmLeadChecklistDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/checklists/${checklistId}/items/${itemId}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ isDone }),
+    });
+    return parseResponse<CrmLeadChecklistDto>(response, 'Failed to toggle checklist item');
+  }
+
+  async deleteChecklist(checklistId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/sales/checklists/${checklistId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(false),
+    });
+    if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to delete checklist'));
+  }
+
+  // ── Opportunity Cost Lines ──
+
+  async getOpportunityCostLines(opportunityId: string): Promise<CrmOpportunityCostLineDto[]> {
+    const response = await fetch(`${API_BASE_URL}/sales/opportunities/${opportunityId}/cost-lines`, {
+      headers: getAuthHeaders(false),
+    });
+    return parseResponse<CrmOpportunityCostLineDto[]>(response, 'Failed to load cost lines');
+  }
+
+  async createOpportunityCostLine(opportunityId: string, dto: CreateCrmOpportunityCostLineDto): Promise<CrmOpportunityCostLineDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/opportunities/${opportunityId}/cost-lines`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    return parseResponse<CrmOpportunityCostLineDto>(response, 'Failed to create cost line');
+  }
+
+  async deleteOpportunityCostLine(costLineId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/sales/cost-lines/${costLineId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(false),
+    });
+    if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to delete cost line'));
+  }
+
+  // ── SWOT Analysis ──
+
+  async getSwotAnalyses(entityType: string, entityId: string): Promise<CrmSwotAnalysisDto[]> {
+    const response = await fetch(`${API_BASE_URL}/sales/swot/${entityType}/${entityId}`, {
+      headers: getAuthHeaders(false),
+    });
+    return parseResponse<CrmSwotAnalysisDto[]>(response, 'Failed to load SWOT analyses');
+  }
+
+  async createSwotAnalysis(dto: CreateCrmSwotAnalysisDto): Promise<CrmSwotAnalysisDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/swot`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    return parseResponse<CrmSwotAnalysisDto>(response, 'Failed to create SWOT analysis');
+  }
+
+  async deleteSwotAnalysis(analysisId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/sales/swot/${analysisId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(false),
+    });
+    if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to delete SWOT analysis'));
+  }
+
+  // ── Commercial Quotes Hardening ──
+  async getQuotes(
+    page: number = 1,
+    pageSize: number = 20,
+    search?: string,
+    status?: string,
+    opportunityId?: string,
+    customerId?: string
+  ): Promise<PagedResult<QuoteSummaryDto>> {
+    const queryParams: Record<string, string | number | boolean | null | undefined> = {
+      page,
+      pageSize,
+      search,
+      status,
+      opportunityId,
+      customerId,
+    };
+    const response = await fetch(`${API_BASE_URL}/sales/quotes${buildQuery(queryParams)}`, {
+      headers: getAuthHeaders(false),
+      cache: 'no-store',
+    });
+    return parseResponse<PagedResult<QuoteSummaryDto>>(response, 'Failed to load quotes');
+  }
+
+  async getQuote(id: string): Promise<QuoteDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}`, {
+      headers: getAuthHeaders(false),
+      cache: 'no-store',
+    });
+    return parseResponse<QuoteDetailDto>(response, 'Failed to load quote detail');
+  }
+
+  async createQuote(dto: CreateQuoteDto): Promise<QuoteDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    return parseResponse<QuoteDetailDto>(response, 'Failed to create quote');
+  }
+
+  async updateQuote(id: string, dto: UpdateQuoteDto): Promise<QuoteDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    return parseResponse<QuoteDetailDto>(response, 'Failed to update quote');
+  }
+
+  async sendQuote(id: string): Promise<QuoteDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}/send`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    return parseResponse<QuoteDetailDto>(response, 'Failed to send quote');
+  }
+
+  async acceptQuote(id: string): Promise<QuoteDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}/accept`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    return parseResponse<QuoteDetailDto>(response, 'Failed to accept quote');
+  }
+
+  async rejectQuote(id: string, reason?: string): Promise<QuoteDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}/reject${reason ? `?reason=${encodeURIComponent(reason)}` : ''}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    return parseResponse<QuoteDetailDto>(response, 'Failed to reject quote');
+  }
+
+  async convertToSalesOrder(id: string): Promise<{ salesOrderId: string }> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}/convert-to-sales-order`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    return parseResponse<{ salesOrderId: string }>(response, 'Failed to convert quote to sales order');
+  }
 }
 
 export const crmService = new CrmService();
+
+// ── Lead Checklist Types ──
+
+export interface CrmLeadChecklistDto {
+  id: string;
+  leadId: string;
+  title: string;
+  description?: string;
+  isCompleted: boolean;
+  completedAt?: string;
+  createdAt: string;
+  items: CrmLeadChecklistItemDto[];
+}
+
+export interface CrmLeadChecklistItemDto {
+  id: string;
+  taskName: string;
+  isDone: boolean;
+  completedAt?: string;
+  sortOrder: number;
+}
+
+export interface CreateCrmLeadChecklistDto {
+  title: string;
+  description?: string;
+  items: { taskName: string; sortOrder: number }[];
+}
+
+// ── Opportunity Cost Line Types ──
+
+export interface CrmOpportunityCostLineDto {
+  id: string;
+  opportunityId: string;
+  expenseAccountId: string;
+  amount: number;
+  dateIncurred: string;
+  description: string;
+  isPostedToGL: boolean;
+  journalEntryId?: string;
+  postedDate?: string;
+  createdAt: string;
+}
+
+export interface CreateCrmOpportunityCostLineDto {
+  expenseAccountId: string;
+  amount: number;
+  dateIncurred: string;
+  description: string;
+}
+
+// ── SWOT Analysis Types ──
+
+export interface CrmSwotAnalysisDto {
+  id: string;
+  relatedEntityType: string;
+  relatedEntityId: string;
+  title: string;
+  analysisDate: string;
+  authorName?: string;
+  summary?: string;
+  createdAt: string;
+  entries: CrmSwotEntryDto[];
+}
+
+export interface CrmSwotEntryDto {
+  id: string;
+  category: string; // Strength | Weakness | Opportunity | Threat
+  description: string;
+  impactScore: number;
+  likelihoodScore: number;
+  mitigationAction?: string;
+  dateIdentified: string;
+}
+
+export interface CreateCrmSwotAnalysisDto {
+  relatedEntityType: string;
+  relatedEntityId: string;
+  title: string;
+  authorName?: string;
+  summary?: string;
+  entries: CreateCrmSwotEntryDto[];
+}
+
+export interface CreateCrmSwotEntryDto {
+  category: string;
+  description: string;
+  impactScore: number;
+  likelihoodScore: number;
+  mitigationAction?: string;
+}
+
+// ── Quote DTO Interfaces ──
+export interface QuoteSummaryDto {
+  id: string;
+  documentNumber: string;
+  quoteName: string;
+  quoteStatus: string;
+  opportunityId: string;
+  opportunityName?: string;
+  customerName?: string;
+  totalAmount: number;
+  taxAmount: number;
+  currency: string;
+  exchangeRate: number;
+  validUntil: string;
+  sentDate?: string;
+  acceptedDate?: string;
+  lineCount: number;
+  createdAt: string;
+}
+
+export interface QuoteDetailDto extends QuoteSummaryDto {
+  businessPartnerId?: string;
+  subTotal: number;
+  discountAmount: number;
+  shippingAmount: number;
+  proposal?: string;
+  convertedInvoiceId?: string;
+  convertedInvoiceNumber?: string;
+  taxGroupId?: string;
+  baseCurrencyAmount: number;
+  lineItems: QuoteLineItemDto[];
+}
+
+export interface QuoteLineItemDto {
+  id: string;
+  quoteId: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  productCode?: string;
+  unit?: string;
+  discountPercentage: number;
+  discountAmount: number;
+  taxAmount: number;
+  taxCode?: string;
+  taxGroupId?: string;
+}
+
+export interface CreateQuoteDto {
+  opportunityId: string;
+  businessPartnerId?: string;
+  quoteName: string;
+  validUntil: string;
+  shippingAmount?: number;
+  proposal?: string;
+  currency?: string;
+  exchangeRate?: number;
+  taxGroupId?: string;
+  lineItems: CreateQuoteLineItemDto[];
+}
+
+export interface CreateQuoteLineItemDto {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  productCode?: string;
+  unit?: string;
+  discountPercentage?: number;
+  taxAmount?: number;
+  taxCode?: string;
+  taxGroupId?: string;
+}
+
+export interface UpdateQuoteDto {
+  quoteName?: string;
+  validUntil?: string;
+  shippingAmount?: number;
+  proposal?: string;
+  currency?: string;
+  exchangeRate?: number;
+  taxGroupId?: string;
+}
+

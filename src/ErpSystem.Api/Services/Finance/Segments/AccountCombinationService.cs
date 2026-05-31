@@ -85,6 +85,53 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 .Include(lv => lv.SegmentStructure)
                 .ToListAsync(cancellationToken);
 
+            // Handle Natural Account segment specially since its values are Accounts, not SegmentLookupValues
+            var naturalAccountSegment = segments.FirstOrDefault(s => s.IsNaturalAccount);
+            if (naturalAccountSegment != null)
+            {
+                var naturalSelection = request.SegmentSelections.FirstOrDefault(s => s.SegmentStructureId == naturalAccountSegment.Id);
+                if (naturalSelection != null && naturalSelection.SelectedLookupValueIds.Any())
+                {
+                    var naturalAccounts = await _unitOfWork.Repository<Account>()
+                        .GetQueryable(a => naturalSelection.SelectedLookupValueIds.Contains(a.Id) && !a.IsDeleted)
+                        .Include(a => a.SegmentValues)
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var acc in naturalAccounts)
+                    {
+                        var segmentValue = acc.SegmentValues
+                            .FirstOrDefault(sv => sv.SegmentStructureId == naturalAccountSegment.Id)?
+                            .SegmentValue;
+
+                        if (string.IsNullOrEmpty(segmentValue))
+                        {
+                            var parts = acc.AccountNumber.Split(new[] { separator }, StringSplitOptions.None);
+                            var segIndex = segments.IndexOf(naturalAccountSegment);
+                            if (segIndex >= 0 && segIndex < parts.Length)
+                            {
+                                segmentValue = parts[segIndex];
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(segmentValue))
+                        {
+                            segmentValue = acc.AccountCode;
+                        }
+
+                        lookupValues.Add(new SegmentLookupValue
+                        {
+                            Id = acc.Id,
+                            TenantId = TenantId,
+                            SegmentStructureId = naturalAccountSegment.Id,
+                            SegmentStructure = naturalAccountSegment,
+                            SegmentValue = segmentValue,
+                            Description = acc.AccountName,
+                            DisplayOrder = 1
+                        });
+                    }
+                }
+            }
+
             // 4. Build segment value lists for Cartesian product (ordered by SegmentPosition)
             var segmentValueLists = new List<List<SegmentLookupValue>>();
             

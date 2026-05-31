@@ -229,14 +229,13 @@ namespace ErpSystem.Core.DTOs.Finance
     public class AccountSegmentValueCreateDto
     {
         /// <summary>
-        /// GL Account that this segment value belongs to.
+        /// GL Account that this segment value belongs to (optional on create, populated by server).
         /// 
         /// NOTE:
         /// - In many APIs, this might be taken from the route instead of the body.
         /// - Still included here for flexibility and self-contained payloads.
         /// </summary>
-        [Required]
-        public Guid AccountId { get; set; }
+        public Guid? AccountId { get; set; }
 
         /// <summary>
         /// Segment structure definition for this segment value.

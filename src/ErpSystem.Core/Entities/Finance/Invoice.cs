@@ -76,6 +76,12 @@ namespace ErpSystem.Core.Entities.Finance
         // Payment terms
         public int PaymentTermsDays { get; set; } = 30;
 
+        // Taxation
+        public Guid? TaxGroupId { get; set; }
+        
+        [ForeignKey(nameof(TaxGroupId))]
+        public virtual TaxGroup? TaxGroup { get; set; }
+
         // Multi-tenant
         public Guid TenantId { get; set; }
         public virtual Tenant Tenant { get; set; } = null!;
@@ -141,11 +147,16 @@ namespace ErpSystem.Core.Entities.Finance
         [Column(TypeName = "decimal(18,2)")]
         public decimal LineTotal => Quantity * UnitPrice;
 
+        public Guid? TaxGroupId { get; set; }
+        
+        [ForeignKey(nameof(TaxGroupId))]
+        public virtual TaxGroup? TaxGroup { get; set; }
+
         [Column(TypeName = "decimal(5,2)")]
         public decimal TaxRate { get; set; }
         
         [Column(TypeName = "decimal(18,2)")]
-        public decimal TaxAmount => LineTotal * (TaxRate / 100);
+        public decimal TaxAmount { get; set; }
 
         [MaxLength(50)]
         public string? TaxCode { get; set; }

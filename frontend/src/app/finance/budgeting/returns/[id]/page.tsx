@@ -198,7 +198,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     const isEditable = budgetReturn.status === 'Draft' || budgetReturn.status === 'Rejected';
 
     const renderGrid = (accountList: Account[]) => (
-        <div className="border rounded-md overflow-x-auto">
+        <div className="h-full min-h-0 border rounded-md overflow-auto">
             <Table>
                 <TableHeader>
                     <TableRow>
@@ -248,7 +248,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     );
 
     return (
-        <div className="flex flex-col h-[calc(100vh-4rem)]">
+        <div className="flex flex-col h-[calc(100vh-4rem)] min-h-0">
             {/* Header */}
             <div className="flex-none p-6 pb-2 space-y-4">
                 <Breadcrumb>
@@ -302,8 +302,8 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
             </div>
 
             {/* Content - Full Height Grid */}
-            <div className="flex-1 p-6 pt-2 overflow-hidden flex flex-col">
-                <Tabs defaultValue="Expenses" className="flex-1 flex flex-col" onValueChange={setActiveTab}>
+            <div className="flex-1 min-h-0 p-6 pt-2 overflow-hidden flex flex-col">
+                <Tabs defaultValue="Expenses" className="flex-1 min-h-0 flex flex-col" onValueChange={setActiveTab}>
                     <div className="flex items-center justify-between mb-2">
                         <TabsList>
                             <TabsTrigger value="Expenses">Expenses ({expenseAccounts.length})</TabsTrigger>
@@ -327,10 +327,10 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </div>
                     </div>
 
-                    <TabsContent value="Expenses" className="flex-1 overflow-auto border rounded-lg bg-white relative">
+                    <TabsContent value="Expenses" className="flex-1 min-h-0 overflow-auto bg-white relative">
                         {renderGrid(expenseAccounts)}
                     </TabsContent>
-                    <TabsContent value="Revenue" className="flex-1 overflow-auto border rounded-lg bg-white relative">
+                    <TabsContent value="Revenue" className="flex-1 min-h-0 overflow-auto bg-white relative">
                         {renderGrid(revenueAccounts)}
                     </TabsContent>
                 </Tabs>

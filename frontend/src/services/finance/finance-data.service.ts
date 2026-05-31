@@ -10,6 +10,7 @@ import type {
     FiscalYear,
     FiscalPeriod,
     JournalEntry,
+    JournalEntryAttachment,
     FinanceSettings,
     SegmentStructure,
     SegmentLookupValue,
@@ -33,6 +34,21 @@ import { apiService } from '@/services/api.service';
 // =============================================================================
 
 class FinanceDataService {
+    private resolveBackendFileUrl(url?: string): string {
+        if (!url) return '';
+        if (/^https?:\/\//i.test(url)) return url;
+
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api';
+        const backendBase = apiBase.replace(/\/api\/?$/, '');
+        const normalized = url.startsWith('/') ? url : `/${url}`;
+        return `${backendBase}${normalized}`;
+    }
+
+    // ===== DASHBOARD =====
+    async getDashboard(): Promise<FinanceDashboardData> {
+        return apiService.get<FinanceDashboardData>('/finance/dashboard');
+    }
+
     // ===== ACCOUNTS =====
 
     async getAccounts(filters?: {
@@ -259,6 +275,44 @@ class FinanceDataService {
 
     async rejectJournalEntry(id: string, reason: string): Promise<JournalEntry> {
         return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/reject`, { reason });
+    }
+
+    // ===== ATTACHMENTS =====
+
+    async uploadAttachment(file: File, referenceType: string, referenceId: string): Promise<{ fileId: string; url: string; name: string }> {
+        const formData = new FormData();
+        formData.append('file', file);
+        // Use the canonical single-file upload endpoint.
+        // Keep a specific category so backend policies/audits can distinguish finance journal attachments.
+        formData.append('category', 'finance-journal-attachments');
+        const response = await apiService.post<any>(`/fileupload/single`, formData);
+
+        const fileId = response.fileId || response.id || response.fileUploadRecordId;
+        if (!fileId) {
+            throw new Error('Upload succeeded but fileId was not returned by server.');
+        }
+
+        return {
+            fileId,
+            url: this.resolveBackendFileUrl(response.url || response.fileUrl || response.publicUrl || ''),
+            name: response.fileName || file.name,
+        };
+    }
+
+    async linkJournalEntryAttachment(journalEntryId: string, fileId: string): Promise<void> {
+        return apiService.post(`/finance/journal-entries/${journalEntryId}/attachments/${fileId}`, {});
+    }
+
+    async unlinkJournalEntryAttachment(journalEntryId: string, fileId: string): Promise<void> {
+        return apiService.delete(`/finance/journal-entries/${journalEntryId}/attachments/${fileId}`);
+    }
+
+    async getJournalEntryAttachments(journalEntryId: string): Promise<JournalEntryAttachment[]> {
+        const attachments = await apiService.get<JournalEntryAttachment[]>(`/finance/journal-entries/${journalEntryId}/attachments`);
+        return (attachments || []).map(a => ({
+            ...a,
+            fileUrl: this.resolveBackendFileUrl(a.fileUrl),
+        }));
     }
 
     // ===== FINANCE SETTINGS =====

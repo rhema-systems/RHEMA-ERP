@@ -296,8 +296,16 @@ class ApiService {
 
       // Create a proper error with the message from the API response
       // Only fall back to generic HTTP status message if no other message is available
+      const firstValidationError =
+        Array.isArray(errorData?.errors)
+          ? errorData.errors.find((e: unknown) => typeof e === 'string')
+          : (errorData?.errors && typeof errorData.errors === 'object'
+            ? Object.values(errorData.errors).flat().find((e: unknown) => typeof e === 'string')
+            : undefined);
+
       const errorMessage = errorData.message ||
         errorData.title ||
+        firstValidationError ||
         errorData.error ||
         `HTTP ${response.status}: ${response.statusText}`;
       const error = new Error(errorMessage);
@@ -711,7 +719,9 @@ class ApiService {
 
   public async post<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'POST' };
-    if (data) {
+    if (data instanceof FormData) {
+      options.body = data;
+    } else if (data !== undefined && data !== null) {
       options.body = JSON.stringify(data);
     }
     return this.privateRequest<T>(endpoint, options);
@@ -719,7 +729,9 @@ class ApiService {
 
   public async put<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PUT' };
-    if (data) {
+    if (data instanceof FormData) {
+      options.body = data;
+    } else if (data !== undefined && data !== null) {
       options.body = JSON.stringify(data);
     }
     return this.privateRequest<T>(endpoint, options);
@@ -731,7 +743,9 @@ class ApiService {
 
   public async patch<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PATCH' };
-    if (data) {
+    if (data instanceof FormData) {
+      options.body = data;
+    } else if (data !== undefined && data !== null) {
       options.body = JSON.stringify(data);
     }
     return this.privateRequest<T>(endpoint, options);

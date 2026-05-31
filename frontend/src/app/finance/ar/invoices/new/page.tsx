@@ -49,6 +49,8 @@ import {
 import { Calendar } from '@/components/ui/calendar';
 import { arService } from '@/services/ar-service';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import { taxDataService } from '@/services/finance/tax-data.service';
+import { financeService } from '@/services/finance.service';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
@@ -62,15 +64,19 @@ const lineItemSchema = z.object({
     quantity: z.coerce.number().min(0.01, 'Quantity must be positive'),
     unitPrice: z.coerce.number().min(0, 'Unit price must be positive'),
     discountPercentage: z.coerce.number().min(0).max(100).optional().default(0),
-    taxCode: z.string().optional(),
+    taxGroupId: z.string().optional(),
 });
 
 const invoiceSchema = z.object({
     customerId: z.string().min(1, 'Customer is required'),
     invoiceDate: z.date(),
     dueDate: z.date(),
-    currencyCode: z.string().default('USD'),
+    currencyCode: z.string().default('GHS'),
+    exchangeRate: z.coerce.number().min(0.0001).optional().default(1.0),
+    exchangeRateDate: z.date().optional(),
+    exchangeRateSource: z.string().optional().default('Daily'),
     notes: z.string().optional(),
+    taxGroupId: z.string().optional(),
     lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
 });
 
@@ -105,17 +111,10 @@ export default function NewInvoicePage() {
         },
     });
 
-    // Fetch active tax groups for line item tax selection
+    // Fetch active tax groups for line item tax selection using taxDataService
     const { data: taxGroupsData } = useQuery({
         queryKey: ['tax-groups-active'],
-        queryFn: async () => {
-            try {
-                const { apiService } = await import('@/services/api.service');
-                return apiService.get<any[]>('/finance/tax/groups/active');
-            } catch {
-                return [];
-            }
-        },
+        queryFn: () => taxDataService.getTaxGroups({ isActive: true, applicability: 'Sales' }),
     });
 
     // Filter customers based on search
@@ -154,13 +153,23 @@ export default function NewInvoicePage() {
             customerId: preselectedCustomerId || '',
             invoiceDate: new Date(),
             dueDate: addDays(new Date(), 30),
-            currencyCode: 'USD',
+            currencyCode: 'GHS',
+            exchangeRate: 1.0,
+            exchangeRateDate: new Date(),
+            exchangeRateSource: 'Daily',
             notes: '',
             lineItems: [
                 { lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0, taxCode: '' }
             ],
         },
     });
+
+    const watchInvoiceDate = form.watch('invoiceDate');
+    useEffect(() => {
+        if (watchInvoiceDate) {
+            form.setValue('exchangeRateDate', watchInvoiceDate);
+        }
+    }, [watchInvoiceDate]);
 
     const { fields, append, remove } = useFieldArray({
         control: form.control,
@@ -177,13 +186,77 @@ export default function NewInvoicePage() {
         return acc + lineTotal;
     }, 0);
 
-    // Tax will be calculated by backend based on tax code
-    const totalTax = 0;
+    const watchTaxGroupId = form.watch('taxGroupId');
+    const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
 
-    const totalAmount = subtotal + totalTax;
+    const getTaxBreakdown = () => {
+        let totalTaxAmount = 0;
+        const breakdowns: { [taxCode: string]: { name: string; rate: number; amount: number } } = {};
+
+        watchLineItems.forEach((item) => {
+            const qty = Number(item.quantity) || 0;
+            const price = Number(item.unitPrice) || 0;
+            const discount = Number(item.discountPercentage) || 0;
+            const lineSubtotal = qty * price * (1 - discount / 100);
+
+            // Resolve line tax group override or default to header
+            const activeGroupId = item.taxGroupId || watchTaxGroupId;
+            const activeGroup = taxGroupsData?.find(tg => tg.id === activeGroupId);
+
+            if (activeGroup && activeGroup.components) {
+                let cumulativeBase = lineSubtotal;
+                const sortedComponents = [...activeGroup.components].sort((a, b) => a.calculationOrder - b.calculationOrder);
+
+                sortedComponents.forEach(comp => {
+                    if (comp.taxCategory === 'Withholding') return; // output VAT/levies only
+
+                    let taxableBasis = lineSubtotal;
+                    if (comp.compoundBasis === 'Cumulative') {
+                        taxableBasis = cumulativeBase;
+                    }
+
+                    const taxAmt = taxableBasis * (Number(comp.taxRate) / 100);
+                    totalTaxAmount += taxAmt;
+
+                    if (comp.compoundBasis === 'Cumulative' || comp.compoundBasis === 'BaseOnly') {
+                        cumulativeBase += taxAmt;
+                    }
+
+                    if (breakdowns[comp.taxCode]) {
+                        breakdowns[comp.taxCode].amount += taxAmt;
+                    } else {
+                        breakdowns[comp.taxCode] = {
+                            name: comp.taxName,
+                            rate: comp.taxRate,
+                            amount: taxAmt
+                        };
+                    }
+                });
+            }
+        });
+
+        const grandTotal = subtotal + totalTaxAmount;
+
+        return {
+            totalTaxAmount,
+            grandTotal,
+            taxList: Object.entries(breakdowns).map(([code, data]) => ({ code, ...data }))
+        };
+    };
+
+    const taxEstimate = getTaxBreakdown();
+    const totalTax = taxEstimate.totalTaxAmount;
+    const totalAmount = taxEstimate.grandTotal;
+
+    const formatAmountWithCurrency = (amount: number) => {
+        if (watchCurrencyCode === 'GHS') {
+            return formatCurrency(amount);
+        }
+        return `${watchCurrencyCode} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
 
     // Update due date when customer is selected (based on payment terms)
-    const onCustomerChange = (customerId: string) => {
+    const onCustomerChange = async (customerId: string) => {
         form.setValue('customerId', customerId);
         if (!customersData?.items) return;
 
@@ -193,6 +266,30 @@ export default function NewInvoicePage() {
             const terms = customer.paymentTermsDays || 30;
             const invoiceDate = form.getValues('invoiceDate');
             form.setValue('dueDate', addDays(invoiceDate, terms));
+
+            if (customer.currency) {
+                form.setValue('currencyCode', customer.currency);
+                if (customer.currency === 'GHS') {
+                    form.setValue('exchangeRate', 1.0);
+                    form.setValue('exchangeRateSource', 'Daily');
+                } else {
+                    try {
+                        const rateObj = await financeService.getCurrentExchangeRate(customer.currency);
+                        const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
+                        const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
+                        form.setValue('exchangeRate', finalRate);
+                        form.setValue('exchangeRateSource', 'Daily');
+                    } catch (err) {
+                        console.error("Failed to fetch exchange rate for customer currency", err);
+                        form.setValue('exchangeRate', 1.0);
+                        form.setValue('exchangeRateSource', 'Custom');
+                    }
+                }
+            } else {
+                form.setValue('currencyCode', 'GHS');
+                form.setValue('exchangeRate', 1.0);
+                form.setValue('exchangeRateSource', 'Daily');
+            }
         }
     };
 
@@ -211,6 +308,8 @@ export default function NewInvoicePage() {
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
+                taxGroupId: data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
+                exchangeRate: Number(data.exchangeRate) || 1.0,
                 lineItems: data.lineItems.map(item => ({
                     lineItemType: item.lineItemType,
                     productId: item.productId,
@@ -219,7 +318,7 @@ export default function NewInvoicePage() {
                     quantity: Number(item.quantity),
                     unitPrice: Number(item.unitPrice),
                     discountPercentage: Number(item.discountPercentage),
-                    taxCode: item.taxCode
+                    taxGroupId: item.taxGroupId === 'none' ? null : (item.taxGroupId || null)
                 }))
             });
 
@@ -395,6 +494,136 @@ export default function NewInvoicePage() {
                             </div>
                         </div>
 
+                        {/* Default Tax Group removed from main top section to match premium line-driven model */}
+
+                        <div className="space-y-2">
+                            <Label>Currency</Label>
+                            <Controller
+                                control={form.control}
+                                name="currencyCode"
+                                render={({ field }) => (
+                                    <Select 
+                                        value={field.value} 
+                                        onValueChange={async (val) => {
+                                            field.onChange(val);
+                                            if (val === 'GHS') {
+                                                form.setValue('exchangeRate', 1.0);
+                                                form.setValue('exchangeRateSource', 'Daily');
+                                            } else {
+                                                try {
+                                                    const rateObj = await financeService.getCurrentExchangeRate(val);
+                                                    const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
+                                                    const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
+                                                    form.setValue('exchangeRate', finalRate);
+                                                    form.setValue('exchangeRateSource', 'Daily');
+                                                } catch (err) {
+                                                    console.error("Failed to fetch exchange rate for currency", err);
+                                                    form.setValue('exchangeRate', 1.0);
+                                                    form.setValue('exchangeRateSource', 'Custom');
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select Currency" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="GHS">GHS - Ghana Cedi</SelectItem>
+                                            <SelectItem value="USD">USD - US Dollar</SelectItem>
+                                            <SelectItem value="EUR">EUR - Euro</SelectItem>
+                                            <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            />
+                        </div>
+
+                        {watchCurrencyCode !== 'GHS' && (
+                            <div className="space-y-2">
+                                <Label className="text-amber-600 font-semibold">Exchange Rate to Base Currency</Label>
+                                <Input 
+                                    type="number" 
+                                    step="0.0001" 
+                                    min="0.0001" 
+                                    {...form.register('exchangeRate', {
+                                        onChange: () => form.setValue('exchangeRateSource', 'Custom')
+                                    })} 
+                                />
+                                <span className="text-[11px] text-muted-foreground block mt-1">1 {watchCurrencyCode} = {form.watch('exchangeRate')} GHS</span>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <Label>Default Tax Group (For new lines)</Label>
+                            <Controller
+                                control={form.control}
+                                name="taxGroupId"
+                                render={({ field }) => (
+                                    <Select value={field.value || ''} onValueChange={field.onChange}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="No Tax (Zero/Exempt)" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">No Tax (Zero/Exempt)</SelectItem>
+                                            {taxGroupsData?.map((tg: any) => (
+                                                <SelectItem key={tg.id} value={tg.id}>{tg.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            />
+                            <span className="text-[11px] text-muted-foreground block mt-1">Optional. Pre-populates new lines; can be overridden on each line.</span>
+                        </div>
+
+                        {watchCurrencyCode !== 'GHS' && (
+                            <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 space-y-4">
+                                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">Exchange Rate Date</Label>
+                                        <Controller
+                                            control={form.control}
+                                            name="exchangeRateDate"
+                                            render={({ field }) => (
+                                                <Popover>
+                                                    <PopoverTrigger asChild>
+                                                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
+                                                            <CalendarIcon className="mr-2 h-3 w-3" />
+                                                            {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-auto p-0">
+                                                        <Calendar mode="single" selected={field.value} onSelect={field.onChange} />
+                                                    </PopoverContent>
+                                                </Popover>
+                                            )}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">Exchange Rate Source</Label>
+                                        <Controller
+                                            control={form.control}
+                                            name="exchangeRateSource"
+                                            render={({ field }) => (
+                                                <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
+                                                    <SelectTrigger className="h-10 text-xs">
+                                                        <SelectValue placeholder="Select FX Source" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="Daily">Daily</SelectItem>
+                                                        <SelectItem value="Spot">Spot</SelectItem>
+                                                        <SelectItem value="Official">Official</SelectItem>
+                                                        <SelectItem value="Market">Market</SelectItem>
+                                                        <SelectItem value="Custom">Custom</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            )}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="md:col-span-2">
                             <Label htmlFor="notes">Notes/Memo</Label>
                             <Textarea
@@ -547,23 +776,28 @@ export default function NewInvoicePage() {
                                             <Input type="number" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
                                         </div>
                                         <div className="col-span-2 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Tax Code</Label>
+                                            <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
                                             <Controller
                                                 control={form.control}
-                                                name={`lineItems.${index}.taxCode`}
+                                                name={`lineItems.${index}.taxGroupId`}
                                                 render={({ field }) => (
-                                                    <Select
-                                                        value={field.value}
-                                                        onValueChange={field.onChange}
+                                                    <Select 
+                                                        value={field.value || 'inherit'} 
+                                                        onValueChange={(val) => field.onChange(val === 'inherit' ? '' : val)}
                                                     >
                                                         <SelectTrigger>
-                                                            <SelectValue placeholder="None" />
+                                                            <SelectValue placeholder="Inherit Default" />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="none">None</SelectItem>
+                                                            <SelectItem value="inherit">
+                                                                {watchTaxGroupId && watchTaxGroupId !== 'none'
+                                                                    ? `Inherited: ${taxGroupsData?.find((t: any) => t.id === watchTaxGroupId)?.name || ''}`
+                                                                    : 'Inherited: Zero-rated / Exempt'}
+                                                            </SelectItem>
+                                                            <SelectItem value="none">Zero-rated / Exempt</SelectItem>
                                                             {taxGroupsData?.map((group: any) => (
-                                                                <SelectItem key={group.code} value={group.code}>
-                                                                    {group.code}
+                                                                <SelectItem key={group.id} value={group.id}>
+                                                                    {group.name}
                                                                 </SelectItem>
                                                             ))}
                                                         </SelectContent>
@@ -581,20 +815,35 @@ export default function NewInvoicePage() {
                             })}
                         </div>
 
-                        {/* Totals Section */}
-                        <div className="mt-8 flex justify-end">
-                            <div className="w-1/3 space-y-2 text-right">
-                                <div className="flex justify-between">
-                                    <span className="text-muted-foreground">Subtotal:</span>
-                                    <span className="font-medium">{formatCurrency(subtotal)}</span>
+                        {/* Dynamic Tax and Totals Breakdown */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-8 border-t mt-8">
+                            <div>
+                                {taxEstimate.taxList.length > 0 && (
+                                    <div className="p-4 bg-muted/40 rounded-lg space-y-2 border">
+                                        <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Estimated Sales Levies & VAT Details</div>
+                                        <div className="space-y-1">
+                                            {taxEstimate.taxList.map(t => (
+                                                <div key={t.code} className="flex justify-between text-sm">
+                                                    <span>{t.name} ({t.rate}%)</span>
+                                                    <span className="font-medium">{formatAmountWithCurrency(t.amount)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex flex-col items-end space-y-2 text-right">
+                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
+                                    <span>Subtotal (Net):</span>
+                                    <span className="font-medium">{formatAmountWithCurrency(subtotal)}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-muted-foreground">Tax:</span>
-                                    <span className="font-medium">{formatCurrency(totalTax)}</span>
+                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
+                                    <span>Est. Sales Taxes:</span>
+                                    <span className="font-medium text-amber-600">+{formatAmountWithCurrency(totalTax)}</span>
                                 </div>
-                                <div className="flex justify-between text-lg font-bold border-t pt-2 mt-2">
-                                    <span>Total:</span>
-                                    <span>{formatCurrency(totalAmount)}</span>
+                                <div className="flex justify-between w-72 text-xl font-bold border-t pt-2 mt-2">
+                                    <span>Grand Total:</span>
+                                    <span className="text-primary">{formatAmountWithCurrency(totalAmount)}</span>
                                 </div>
                             </div>
                         </div>

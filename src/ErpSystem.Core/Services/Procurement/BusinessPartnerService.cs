@@ -95,7 +95,8 @@ public class BusinessPartnerService : IBusinessPartnerService
             IsActive = false,
             CreatedAt = DateTime.UtcNow,
             CreatedById = _currentUserProvider.UserId,
-            ParentId = dto.ParentId
+            ParentId = dto.ParentId,
+            Currency = dto.Currency
         };
 
         // Set customer-specific fields if partner type is Customer
@@ -104,7 +105,6 @@ public class BusinessPartnerService : IBusinessPartnerService
             partner.CustomerType = dto.CustomerType;
             partner.CreditLimit = dto.CreditLimit;
             partner.PaymentTerms = dto.PaymentTerms;
-            partner.Currency = dto.Currency;
             partner.DefaultDiscount = dto.DefaultDiscount;
             partner.PriceList = dto.PriceList;
             partner.SalesRepresentativeId = dto.SalesRepresentativeId;
@@ -139,6 +139,12 @@ public class BusinessPartnerService : IBusinessPartnerService
         partner.PhysicalPostalCode = dto.PostalCode;
         partner.UpdatedAt = DateTime.UtcNow;
         partner.ParentId = dto.ParentId;
+        partner.Currency = dto.Currency;
+        
+        if (!string.IsNullOrEmpty(dto.Status)) 
+        {
+            partner.RegistrationStatus = dto.Status;
+        }
 
         // Update customer-specific fields if partner type is Customer
         if (partner.PartnerType == "Customer")
@@ -146,7 +152,6 @@ public class BusinessPartnerService : IBusinessPartnerService
             partner.CustomerType = dto.CustomerType;
             partner.CreditLimit = dto.CreditLimit;
             partner.PaymentTerms = dto.PaymentTerms;
-            partner.Currency = dto.Currency;
             partner.DefaultDiscount = dto.DefaultDiscount;
             partner.PriceList = dto.PriceList;
             partner.SalesRepresentativeId = dto.SalesRepresentativeId;
@@ -668,6 +673,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             PerformanceRating = partner.PerformanceRating,
             IsPreferred = partner.IsPreferred,
             IsBlacklisted = partner.IsBlacklisted,
+            Currency = partner.Currency,
             CreatedAt = partner.CreatedAt,
             // Customer-specific fields for list view
             CustomerType = partner.CustomerType,

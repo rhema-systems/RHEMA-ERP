@@ -1,7 +1,10 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Sales;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Sales;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -15,6 +18,7 @@ public class QuoteService : IQuoteService
     private readonly ISalesOrderService _salesOrderService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ITaxCalculationEngine _taxEngine;
     private readonly ILogger<QuoteService> _logger;
 
     public QuoteService(
@@ -23,6 +27,7 @@ public class QuoteService : IQuoteService
         ISalesOrderService salesOrderService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ITaxCalculationEngine taxEngine,
         ILogger<QuoteService> logger)
     {
         _quoteRepo = quoteRepo;
@@ -30,6 +35,7 @@ public class QuoteService : IQuoteService
         _salesOrderService = salesOrderService;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _taxEngine = taxEngine;
         _logger = logger;
     }
 
@@ -51,6 +57,9 @@ public class QuoteService : IQuoteService
             QuoteStatus = "Draft",
             ShippingAmount = dto.ShippingAmount ?? 0,
             Proposal = dto.Proposal,
+            Currency = dto.Currency ?? "USD",
+            ExchangeRate = dto.ExchangeRate > 0 ? dto.ExchangeRate : 1.0m,
+            TaxGroupId = dto.TaxGroupId,
             TenantId = tenantId
         };
 
@@ -70,14 +79,39 @@ public class QuoteService : IQuoteService
                 ProductCode = lineDto.ProductCode,
                 Unit = lineDto.Unit,
                 DiscountPercentage = lineDto.DiscountPercentage ?? 0,
-                TaxAmount = lineDto.TaxAmount ?? 0,
-                TaxCode = lineDto.TaxCode,
                 TenantId = tenantId
             };
 
             line.DiscountAmount = line.LineTotal * (line.DiscountPercentage / 100);
-            subTotal += line.LineTotal - line.DiscountAmount;
-            totalTax += line.TaxAmount;
+            decimal lineNetAmount = line.LineTotal - line.DiscountAmount;
+
+            var lineTaxGroupId = lineDto.TaxGroupId ?? dto.TaxGroupId;
+            decimal lineTax = 0;
+
+            if (lineTaxGroupId.HasValue)
+            {
+                var taxRequest = new TaxCalculationRequestDto
+                {
+                    TransactionType = TaxTransactionType.SaleOfGoods,
+                    BaseAmount = lineNetAmount,
+                    TaxGroupId = lineTaxGroupId.Value,
+                    BusinessPartnerId = dto.BusinessPartnerId ?? Guid.Empty
+                };
+
+                var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest);
+                lineTax = taxResult.TotalTaxAmount;
+                line.TaxCode = taxResult.TaxGroupName ?? line.TaxCode;
+            }
+            else if (lineDto.TaxAmount.HasValue)
+            {
+                lineTax = lineDto.TaxAmount.Value;
+            }
+
+            line.TaxGroupId = lineTaxGroupId;
+            line.TaxAmount = lineTax;
+
+            subTotal += lineNetAmount;
+            totalTax += lineTax;
 
             await _lineRepo.AddAsync(line);
         }
@@ -126,14 +160,39 @@ public class QuoteService : IQuoteService
                     ProductCode = lineDto.ProductCode,
                     Unit = lineDto.Unit,
                     DiscountPercentage = lineDto.DiscountPercentage ?? 0,
-                    TaxAmount = lineDto.TaxAmount ?? 0,
-                    TaxCode = lineDto.TaxCode,
                     TenantId = quote.TenantId
                 };
 
                 line.DiscountAmount = line.LineTotal * (line.DiscountPercentage / 100);
-                subTotal += line.LineTotal - line.DiscountAmount;
-                totalTax += line.TaxAmount;
+                decimal lineNetAmount = line.LineTotal - line.DiscountAmount;
+
+                var lineTaxGroupId = lineDto.TaxGroupId ?? quote.TaxGroupId;
+                decimal lineTax = 0;
+
+                if (lineTaxGroupId.HasValue)
+                {
+                    var taxRequest = new TaxCalculationRequestDto
+                    {
+                        TransactionType = TaxTransactionType.SaleOfGoods,
+                        BaseAmount = lineNetAmount,
+                        TaxGroupId = lineTaxGroupId.Value,
+                        BusinessPartnerId = quote.BusinessPartnerId ?? Guid.Empty
+                    };
+
+                    var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest);
+                    lineTax = taxResult.TotalTaxAmount;
+                    line.TaxCode = taxResult.TaxGroupName ?? line.TaxCode;
+                }
+                else if (lineDto.TaxAmount.HasValue)
+                {
+                    lineTax = lineDto.TaxAmount.Value;
+                }
+
+                line.TaxGroupId = lineTaxGroupId;
+                line.TaxAmount = lineTax;
+
+                subTotal += lineNetAmount;
+                totalTax += lineTax;
 
                 await _lineRepo.AddAsync(line);
             }
@@ -316,6 +375,8 @@ public class QuoteService : IQuoteService
         CustomerName = q.Customer?.CustomerName,
         TotalAmount = q.TotalAmount,
         TaxAmount = q.TaxAmount,
+        Currency = q.Currency,
+        ExchangeRate = q.ExchangeRate,
         ValidUntil = q.ValidUntil,
         SentDate = q.SentDate,
         AcceptedDate = q.AcceptedDate,
@@ -338,6 +399,10 @@ public class QuoteService : IQuoteService
         SubTotal = q.SubTotal,
         DiscountAmount = q.DiscountAmount,
         ShippingAmount = q.ShippingAmount,
+        Currency = q.Currency,
+        ExchangeRate = q.ExchangeRate,
+        TaxGroupId = q.TaxGroupId,
+        BaseCurrencyAmount = q.BaseCurrencyAmount,
         ValidUntil = q.ValidUntil,
         SentDate = q.SentDate,
         AcceptedDate = q.AcceptedDate,
@@ -358,7 +423,8 @@ public class QuoteService : IQuoteService
             DiscountPercentage = li.DiscountPercentage,
             DiscountAmount = li.DiscountAmount,
             TaxAmount = li.TaxAmount,
-            TaxCode = li.TaxCode
+            TaxCode = li.TaxCode,
+            TaxGroupId = li.TaxGroupId
         }).ToList() ?? new()
     };
 

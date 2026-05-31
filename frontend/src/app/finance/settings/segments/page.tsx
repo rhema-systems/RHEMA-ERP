@@ -211,6 +211,7 @@ function SegmentConfigurationContent() {
                     segmentName: segmentForm.segmentName,
                     description: segmentForm.description,
                     isReportingDimension: segmentForm.isReportingDimension,
+                    isMandatory: segmentForm.isMandatory,
                     isActive: editingSegment.isActive,
                     // Other fields might be read-only on backend for updates, but sending what we can
                 };

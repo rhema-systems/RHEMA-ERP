@@ -27,6 +27,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? ApprovedByUserId { get; set; }
         public DateTime? ApprovedDate { get; set; }
         public string? RejectionReason { get; set; }
+        public bool HasAttachments { get; set; }
+        public int AttachmentCount { get; set; }
+        public List<Guid> AttachmentIds { get; set; } = new();
         public List<AccountTransactionDto> Transactions { get; set; } = new();
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
@@ -51,6 +54,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? SourceModule { get; set; }
         
         public Guid? FiscalPeriodId { get; set; }
+        
+        public List<Guid> AttachmentIds { get; set; } = new();
 
         public List<CreateAccountTransactionDto> Transactions { get; set; } = new();
     }
@@ -64,6 +69,8 @@ namespace ErpSystem.Core.DTOs.Finance
 
         [MaxLength(100)]
         public string? Reference { get; set; }
+        
+        public List<Guid>? AttachmentIds { get; set; }
 
         public List<CreateAccountTransactionDto>? Transactions { get; set; }
     }
@@ -77,5 +84,18 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Comments { get; set; }
         /// <summary>Rejection reason (required when rejecting).</summary>
         public string? Reason { get; set; }
+    }
+
+    public class JournalEntryAttachmentDto
+    {
+        public Guid Id { get; set; }
+        public Guid JournalEntryId { get; set; }
+        public Guid FileId { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string FileUrl { get; set; } = string.Empty;
+        public string ContentType { get; set; } = "application/octet-stream";
+        public long FileSize { get; set; }
+        public DateTime UploadedAt { get; set; }
+        public string UploadedBy { get; set; } = string.Empty;
     }
 }

@@ -342,7 +342,7 @@ export default function EditBusinessPartnerPage() {
                   <SelectContent>
                     {currencies.length > 0 ? (
                       currencies.map((curr) => (
-                        <SelectItem key={curr.id} value={curr.id}>
+                        <SelectItem key={curr.id} value={curr.code}>
                           {curr.code} - {curr.name} ({curr.symbol})
                         </SelectItem>
                       ))

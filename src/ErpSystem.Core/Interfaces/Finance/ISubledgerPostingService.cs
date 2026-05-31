@@ -10,7 +10,8 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// <summary>
         /// Posts a vendor invoice to the General Ledger, generating appropriate expense, inventory, and AP Control entries.
         /// </summary>
-        Task<JournalEntryDto> PostApInvoiceAsync(Guid vendorInvoiceId, CancellationToken cancellationToken = default);
+        Task<List<JournalEntryDto>> PostApInvoiceAsync(Guid vendorInvoiceId, CancellationToken cancellationToken = default);
+        Task<List<JournalEntryDto>> PostSupplierDebitNoteAsync(Guid debitNoteId, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Posts a vendor payment to the General Ledger, reducing AP Control and Bank balances.

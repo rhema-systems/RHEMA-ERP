@@ -16,21 +16,40 @@ namespace ErpSystem.Api.Services.Finance.GL
 {
     public class JournalEntryService : IJournalEntryService
     {
-        private readonly ApplicationDbContext _context;
+        private const string ManualOpeningBalanceSourceType = "ManualOpeningBalance";
+        private readonly IFinancialRepository _repository;
         private readonly ICurrentUserService _currentUserService;
         private readonly IGeneralLedgerService _generalLedgerService;
         private readonly IMapper _mapper;
+        private readonly IGLSegmentSecurityService _segmentSecurityService;
+        private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
+        private readonly IDocumentSplittingService _documentSplittingService;
+        private readonly IBookValidationService _bookValidationService;
+        private readonly INotificationService _notificationService;
+        private readonly IFileStorageService _fileStorageService;
 
         public JournalEntryService(
             ApplicationDbContext context,
             ICurrentUserService currentUserService,
             IGeneralLedgerService generalLedgerService,
-            IMapper mapper)
+            IMapper mapper,
+            IGLSegmentSecurityService segmentSecurityService,
+            Microsoft.Extensions.Configuration.IConfiguration configuration,
+            IDocumentSplittingService documentSplittingService,
+            IBookValidationService bookValidationService,
+            INotificationService notificationService,
+            IFileStorageService fileStorageService)
         {
             _context = context;
             _currentUserService = currentUserService;
             _generalLedgerService = generalLedgerService;
             _mapper = mapper;
+            _segmentSecurityService = segmentSecurityService;
+            _configuration = configuration;
+            _documentSplittingService = documentSplittingService;
+            _bookValidationService = bookValidationService;
+            _notificationService = notificationService;
+            _fileStorageService = fileStorageService;
         }
 
         public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default)
@@ -53,7 +72,13 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .ThenInclude(t => t.Account)
                 .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
 
-            return _mapper.Map<JournalEntryDto>(entry);
+            var dto = _mapper.Map<JournalEntryDto>(entry);
+            if (dto != null && entry != null)
+            {
+                dto.AttachmentIds = (await GetAttachmentIdsAsync(entry.Id, cancellationToken)).ToList();
+            }
+
+            return dto;
         }
 
         public async Task<JournalEntryDto?> GetJournalEntryByNumberAsync(string journalNumber, CancellationToken cancellationToken = default)
@@ -87,6 +112,46 @@ namespace ErpSystem.Api.Services.Finance.GL
             // Basic validation
             if (dto.Transactions == null || !dto.Transactions.Any())
                 throw new InvalidOperationException("Journal entry must have at least one transaction line.");
+
+            var isManualOpeningBalance = string.Equals(dto.SourceDocumentType, ManualOpeningBalanceSourceType, StringComparison.OrdinalIgnoreCase);
+            if (isManualOpeningBalance)
+            {
+                var settings = await _repository.Query<FinanceSettings>()
+                    .FirstOrDefaultAsync(s => s.TenantId == tenantId, cancellationToken);
+
+                var autoRoutingEnabled = settings?.OpeningBalanceAutoRoutingEnabled
+                    ?? _configuration.GetValue<bool>("Finance:OpeningBalanceMigration:EnableAutoRouting", true);
+
+                if (!autoRoutingEnabled)
+                {
+                    // Feature disabled at tenant settings level - skip migration auto-balancing behavior.
+                }
+                else
+                {
+                    if (settings?.MigrationClearingAccountId == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Migration Clearing Account is not configured in Finance Settings. " +
+                            "It is required for Manual Opening Balance journal entries.");
+                    }
+
+                    var openingDebitSum = dto.Transactions.Where(t => t.TransactionType == "Debit").Sum(t => t.Amount);
+                    var openingCreditSum = dto.Transactions.Where(t => t.TransactionType == "Credit").Sum(t => t.Amount);
+                    var delta = openingDebitSum - openingCreditSum;
+
+                    if (delta != 0)
+                    {
+                        dto.Transactions.Add(new CreateAccountTransactionDto
+                        {
+                            AccountId = settings.MigrationClearingAccountId.Value,
+                            Description = "Auto balancing line for Opening Balance migration",
+                            TransactionType = delta > 0 ? "Credit" : "Debit",
+                            Amount = Math.Abs(delta),
+                            Reference = dto.Reference ?? "OPENING-BALANCE-AUTO"
+                        });
+                    }
+                }
+            }
 
             var debitSum = dto.Transactions.Where(t => t.TransactionType == "Debit").Sum(t => t.Amount);
             var creditSum = dto.Transactions.Where(t => t.TransactionType == "Credit").Sum(t => t.Amount);
@@ -203,37 +268,95 @@ namespace ErpSystem.Api.Services.Finance.GL
             var credit = entry.Transactions.Sum(t => t.CreditAmount);
             if (debit != credit) throw new InvalidOperationException("Journal Entry must be balanced to post.");
 
+            // Enforce GL Segment Posting Security
+            var accountIds = entry.Transactions.Select(t => t.AccountId);
+            await _segmentSecurityService.ValidatePostingAccessAsync(accountIds);
+
+            // Enforce Book Classification Validation
+            await _bookValidationService.ValidateAccountsForBookAsync(accountIds, entry.BookClassification, cancellationToken);
+
+            // Validate Control Account & AllowDirectPosting restrictions at post time (defense-in-depth)
+            var postAccountIds = entry.Transactions.Select(t => t.AccountId);
+            await ValidateManualPostingAllowedAsync(entry.SourceModule, postAccountIds, cancellationToken);
+
+            var budgetExceededMessages = new List<string>();
+
             // Update Account Balances
             foreach (var txn in entry.Transactions)
             {
                 var account = await _context.Accounts.FindAsync(txn.AccountId);
                 if (account == null) throw new InvalidOperationException($"Account {txn.AccountId} not found.");
 
-                // Validate Control Account Posting
-                if (account.IsControlAccount)
-                {
-                    var allowedModules = new[] { "AP", "AR", "INVENTORY", "TAX", "BANK", "SYSTEM", "POS", "PAYROLL" };
-                    bool isSystemPosting = !string.IsNullOrEmpty(entry.SourceModule) && allowedModules.Contains(entry.SourceModule.ToUpper());
-                    
-                    if (!isSystemPosting)
-                    {
-                        throw new InvalidOperationException($"Direct manual posting to Control Account '{account.AccountName}' is not allowed.");
-                    }
-                }
-
+                decimal newBalance = account.Balance;
                 if (txn.DebitAmount > 0)
                 {
                      if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                            account.Balance += txn.DebitAmount;
+                            newBalance += txn.DebitAmount;
                         else
-                            account.Balance -= txn.DebitAmount;
+                            newBalance -= txn.DebitAmount;
                 }
                 else // Credit
                 {
                      if (account.AccountType == AccountType.Liability || account.AccountType == AccountType.Equity || account.AccountType == AccountType.Revenue)
-                            account.Balance += txn.CreditAmount;
+                            newBalance += txn.CreditAmount;
                         else
-                            account.Balance -= txn.CreditAmount;
+                            newBalance -= txn.CreditAmount;
+                }
+
+                // Check budget variance without blocking
+                if (account.BudgetTrackingEnabled && account.AccountType == AccountType.Expense)
+                {
+                    var activeBudget = await _repository.Query<BudgetEntry>()
+                        .Include(e => e.BudgetReturn)
+                        .ThenInclude(r => r!.BudgetScenario)
+                        .Where(e => e.AccountId == account.Id 
+                                 && e.FiscalPeriodId == entry.FiscalPeriodId 
+                                 && e.BudgetReturn!.BudgetScenario!.IsActive 
+                                 && e.BudgetReturn.Status == "Approved")
+                        .SumAsync(e => e.AmountBase, cancellationToken);
+
+                    if (activeBudget > 0 && newBalance > activeBudget)
+                    {
+                        var variance = newBalance - activeBudget;
+                        budgetExceededMessages.Add($"{account.AccountNumber} ({account.AccountName}): Budget {activeBudget:N2}, New Balance {newBalance:N2}, Variance -{variance:N2}");
+                    }
+                }
+
+                account.Balance = newBalance;
+            }
+
+            // Create notification if budget exceeded
+            if (budgetExceededMessages.Any())
+            {
+                var message = $"Budget exceeded after posting journal entry {entry.JournalEntryNumber}.\n\n" + string.Join("\n", budgetExceededMessages);
+                var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+                var userIdStr = _currentUserService.UserId;
+                Guid userId = Guid.TryParse(userIdStr, out var parsed) ? parsed : Guid.Empty;
+
+                if (userId != Guid.Empty && tenantId != Guid.Empty)
+                {
+                    // Generate idempotency key based on journal entry ID to avoid duplicate alerts if retried
+                    var alertData = new Dictionary<string, object> 
+                    { 
+                        { "JournalEntryId", entry.Id.ToString() },
+                        { "JournalEntryNumber", entry.JournalEntryNumber }
+                    };
+
+                    try
+                    {
+                        await _notificationService.CreateInAppNotificationAsync(
+                            userId,
+                            "Budget Exception Alert",
+                            message,
+                            "BudgetException",
+                            alertData,
+                            tenantId
+                        );
+                    }
+                    catch
+                    {
+                        // Swallow notification errors to ensure it doesn't block posting
+                    }
                 }
             }
 
@@ -383,6 +506,103 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        public async Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            
+            var entry = await _repository.GetByIdAsync<JournalEntry>(journalEntryId, cancellationToken);
+            if (entry == null || entry.TenantId != tenantId)
+                throw new ArgumentException($"Journal Entry {journalEntryId} not found.");
+
+            // Check if already linked
+            var existingLink = await _repository.Query<JournalEntryAttachment>()
+                .FirstOrDefaultAsync(a => a.JournalEntryId == journalEntryId && a.FileUploadRecordId == fileUploadRecordId, cancellationToken);
+
+            if (existingLink != null) return;
+
+            var attachment = new JournalEntryAttachment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryId = journalEntryId,
+                FileUploadRecordId = fileUploadRecordId
+            };
+
+            _repository.Add(attachment);
+
+            entry.AttachmentCount++;
+            entry.HasAttachments = true;
+
+            await _repository.SaveChangesAsync(cancellationToken);
+        }
+
+        public async Task UnlinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            
+            var entry = await _repository.GetByIdAsync<JournalEntry>(journalEntryId, cancellationToken);
+            if (entry == null || entry.TenantId != tenantId)
+                throw new ArgumentException($"Journal Entry {journalEntryId} not found.");
+
+            var attachment = await _repository.Query<JournalEntryAttachment>()
+                .FirstOrDefaultAsync(a => a.JournalEntryId == journalEntryId && a.FileUploadRecordId == fileUploadRecordId, cancellationToken);
+
+            if (attachment == null) return;
+
+            _repository.Remove(attachment);
+
+            entry.AttachmentCount = Math.Max(0, entry.AttachmentCount - 1);
+            entry.HasAttachments = entry.AttachmentCount > 0;
+
+            await _repository.SaveChangesAsync(cancellationToken);
+        }
+
+        public async Task<IReadOnlyList<Guid>> GetAttachmentIdsAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            
+            return await _repository.Query<JournalEntryAttachment>()
+                .Where(a => a.JournalEntryId == journalEntryId && a.TenantId == tenantId)
+                .Select(a => a.FileUploadRecordId)
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<IReadOnlyList<JournalEntryAttachmentDto>> GetAttachmentsAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+        {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+
+            var attachments = await _repository.Query<JournalEntryAttachment>()
+                .Include(a => a.FileUploadRecord)
+                .Where(a => a.JournalEntryId == journalEntryId && a.TenantId == tenantId)
+                .OrderByDescending(a => a.CreatedAt)
+                .ToListAsync(cancellationToken);
+
+            var result = new List<JournalEntryAttachmentDto>(attachments.Count);
+            foreach (var a in attachments)
+            {
+                var fileUrl = string.Empty;
+                if (!string.IsNullOrWhiteSpace(a.FileUploadRecord?.FilePath))
+                {
+                    fileUrl = await _fileStorageService.GetPublicUrlAsync(a.FileUploadRecord.FilePath);
+                }
+
+                result.Add(new JournalEntryAttachmentDto
+                {
+                    Id = a.Id,
+                    JournalEntryId = a.JournalEntryId,
+                    FileId = a.FileUploadRecordId,
+                    FileName = a.FileUploadRecord?.OriginalFileName ?? a.FileUploadRecord?.StoredFileName ?? a.FileUploadRecordId.ToString(),
+                    FileUrl = fileUrl,
+                    ContentType = a.FileUploadRecord?.ContentType ?? "application/octet-stream",
+                    FileSize = a.FileUploadRecord?.FileSize ?? 0,
+                    UploadedAt = a.CreatedAt,
+                    UploadedBy = a.FileUploadRecord?.CreatedBy ?? a.CreatedBy ?? string.Empty
+                });
+            }
+
+            return result;
         }
     }
 }

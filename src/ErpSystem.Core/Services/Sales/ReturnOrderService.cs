@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Sales;
@@ -20,6 +21,14 @@ public class ReturnOrderService : IReturnOrderService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<ReturnOrderService> _logger;
 
+    // Added for AR Cycle Hardening
+    private readonly IGenericRepository<Invoice> _invoiceRepo;
+    private readonly IGenericRepository<InvoiceLineItem> _invoiceLineRepo;
+    private readonly IGenericRepository<DeliveryNote> _deliveryNoteRepo;
+    private readonly IGenericRepository<SalesOrder> _salesOrderRepo;
+    private readonly ICreditNotePostingService _creditNotePostingService;
+    private readonly IInventoryReturnService _inventoryReturnService;
+
     public ReturnOrderService(
         IGenericRepository<ReturnOrder> returnRepo,
         IGenericRepository<ReturnOrderLine> returnLineRepo,
@@ -28,6 +37,12 @@ public class ReturnOrderService : IReturnOrderService
         IGenericRepository<Refund> refundRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IGenericRepository<Invoice> invoiceRepo,
+        IGenericRepository<InvoiceLineItem> invoiceLineRepo,
+        IGenericRepository<DeliveryNote> deliveryNoteRepo,
+        IGenericRepository<SalesOrder> salesOrderRepo,
+        ICreditNotePostingService creditNotePostingService,
+        IInventoryReturnService inventoryReturnService,
         ILogger<ReturnOrderService> logger)
     {
         _returnRepo = returnRepo;
@@ -37,8 +52,15 @@ public class ReturnOrderService : IReturnOrderService
         _refundRepo = refundRepo;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _invoiceRepo = invoiceRepo;
+        _invoiceLineRepo = invoiceLineRepo;
+        _deliveryNoteRepo = deliveryNoteRepo;
+        _salesOrderRepo = salesOrderRepo;
+        _creditNotePostingService = creditNotePostingService;
+        _inventoryReturnService = inventoryReturnService;
         _logger = logger;
     }
+
 
     // ═════════════════════════════════════
     //  RETURN ORDERS
@@ -46,8 +68,62 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<ReturnOrderDetailDto> CreateReturnOrderAsync(CreateReturnOrderDto dto)
     {
-        var docNumber = $"RO-{await _returnRepo.CountAsync() + 1:D6}";
         var tenantId = _currentUserProvider.TenantId;
+
+        // Eligibility boundaries and locked rates
+        Invoice? invoice = null;
+        SalesOrder? salesOrder = null;
+        DeliveryNote? deliveryNote = null;
+
+        string targetCurrency = "GHS";
+        decimal targetExchangeRate = 1.0m;
+
+        if (dto.InvoiceId.HasValue)
+        {
+            invoice = await _invoiceRepo.GetQueryable()
+                .Include(i => i.LineItems)
+                .FirstOrDefaultAsync(i => i.Id == dto.InvoiceId.Value && i.TenantId == tenantId)
+                ?? throw new ArgumentException($"Invoice {dto.InvoiceId.Value} not found.");
+
+            // Posted invoice states: Sent, PartiallyPaid, Paid, Overdue
+            if (invoice.Status == InvoiceStatus.Draft || invoice.Status == InvoiceStatus.Cancelled)
+                throw new ArgumentException("Invoice must be posted and not in Draft or Cancelled status.");
+
+            if (invoice.BusinessPartnerId != dto.BusinessPartnerId)
+                throw new ArgumentException("Business partner mismatch.");
+
+            targetCurrency = invoice.CurrencyCode;
+            targetExchangeRate = invoice.ExchangeRate;
+        }
+        else if (dto.DeliveryNoteId.HasValue)
+        {
+            deliveryNote = await _deliveryNoteRepo.GetQueryable()
+                .FirstOrDefaultAsync(d => d.Id == dto.DeliveryNoteId.Value && d.TenantId == tenantId)
+                ?? throw new ArgumentException($"Delivery Note {dto.DeliveryNoteId.Value} not found.");
+
+            // Completed delivery states: Delivered, PartiallyDelivered, Shipped
+            var dnStatus = deliveryNote.Status;
+            if (dnStatus == "Draft" || dnStatus == "Cancelled")
+                throw new ArgumentException("Delivery note must be completed and not in Draft or Cancelled status.");
+
+            salesOrder = await _salesOrderRepo.GetQueryable()
+                .FirstOrDefaultAsync(s => s.Id == dto.SalesOrderId && s.TenantId == tenantId)
+                ?? throw new ArgumentException($"Sales Order {dto.SalesOrderId} not found.");
+
+            targetCurrency = salesOrder.Currency ?? "GHS";
+            targetExchangeRate = salesOrder.ExchangeRate > 0 ? salesOrder.ExchangeRate : 1.0m;
+        }
+        else
+        {
+            salesOrder = await _salesOrderRepo.GetQueryable()
+                .FirstOrDefaultAsync(s => s.Id == dto.SalesOrderId && s.TenantId == tenantId)
+                ?? throw new ArgumentException($"Sales Order {dto.SalesOrderId} not found.");
+
+            targetCurrency = salesOrder.Currency ?? "GHS";
+            targetExchangeRate = salesOrder.ExchangeRate > 0 ? salesOrder.ExchangeRate : 1.0m;
+        }
+
+        var docNumber = $"RO-{await _returnRepo.CountAsync() + 1:D6}";
 
         var ro = new ReturnOrder
         {
@@ -55,22 +131,78 @@ public class ReturnOrderService : IReturnOrderService
             DocumentDate = DateTime.UtcNow,
             SalesOrderId = dto.SalesOrderId,
             DeliveryNoteId = dto.DeliveryNoteId,
-            CustomerId = dto.CustomerId,
+            InvoiceId = dto.InvoiceId,
+            BusinessPartnerId = dto.BusinessPartnerId,
             ReturnStatus = ReturnOrderStatus.Requested,
             ReasonCode = dto.ReasonCode,
             ReasonDescription = dto.ReasonDescription,
-            TenantId = tenantId
+            TenantId = tenantId,
+            Currency = targetCurrency,
+            ExchangeRate = targetExchangeRate
         };
 
         await _returnRepo.AddAsync(ro);
 
         decimal total = 0;
+        decimal totalTax = 0;
+
         foreach (var lineDto in dto.Lines)
         {
+            if (lineDto.QuantityReturned <= 0)
+                throw new ArgumentException("Returned quantity must be greater than zero.");
+
+            // Over-return prevention at line level
+            decimal previouslyReturned = 0;
+            
+            // Query all previously approved/received/inspected/creditIssued returns for this line
+            var returnLines = await _returnLineRepo.GetQueryable()
+                .Include(rl => rl.ReturnOrder)
+                .Where(rl => rl.TenantId == tenantId && 
+                             rl.ReturnOrder.SalesOrderId == dto.SalesOrderId &&
+                             rl.Description == lineDto.Description &&
+                             (rl.ReturnOrder.ReturnStatus == ReturnOrderStatus.Approved ||
+                              rl.ReturnOrder.ReturnStatus == ReturnOrderStatus.Received ||
+                              rl.ReturnOrder.ReturnStatus == ReturnOrderStatus.Inspected ||
+                              rl.ReturnOrder.ReturnStatus == ReturnOrderStatus.CreditIssued))
+                .ToListAsync();
+
+            previouslyReturned = returnLines.Sum(rl => rl.QuantityReturned);
+
+            decimal originalQuantity = 0;
+            decimal originalLineTax = 0;
+            Guid? invoiceLineItemId = null;
+
+            if (invoice != null)
+            {
+                var invLine = invoice.LineItems.FirstOrDefault(li => li.Id == lineDto.InvoiceLineItemId || li.Description == lineDto.Description)
+                    ?? throw new ArgumentException($"Matching line item not found in original Invoice for '{lineDto.Description}'");
+                originalQuantity = invLine.Quantity;
+                originalLineTax = invLine.TaxAmount;
+                invoiceLineItemId = invLine.Id;
+            }
+            else
+            {
+                // Standalone or delivery-linked
+                var soLine = await _salesOrderLineRepo.GetQueryable()
+                    .FirstOrDefaultAsync(sol => sol.Id == lineDto.SalesOrderLineId && sol.TenantId == tenantId);
+                originalQuantity = soLine?.Quantity ?? lineDto.QuantityReturned;
+            }
+
+            if (lineDto.QuantityReturned > (originalQuantity - previouslyReturned))
+                throw new ArgumentException($"Line over-return detected. Cannot return {lineDto.QuantityReturned} for '{lineDto.Description}'. Maximum returnable is {originalQuantity - previouslyReturned}.");
+
+            // Calculate historical proportional tax reversal
+            decimal lineTaxAmount = 0;
+            if (invoice != null && originalQuantity > 0)
+            {
+                lineTaxAmount = Math.Round(originalLineTax * (lineDto.QuantityReturned / originalQuantity), 2);
+            }
+
             var line = new ReturnOrderLine
             {
                 ReturnOrderId = ro.Id,
                 SalesOrderLineId = lineDto.SalesOrderLineId,
+                InvoiceLineItemId = invoiceLineItemId,
                 Description = lineDto.Description,
                 ProductCode = lineDto.ProductCode,
                 QuantityReturned = lineDto.QuantityReturned,
@@ -80,25 +212,29 @@ public class ReturnOrderService : IReturnOrderService
                 IsRestockable = lineDto.IsRestockable,
                 TenantId = tenantId
             };
+
             total += lineDto.QuantityReturned * lineDto.UnitPrice;
+            totalTax += lineTaxAmount;
+
             await _returnLineRepo.AddAsync(line);
         }
 
-        ro.TotalAmount = total;
-        await _returnRepo.UpdateAsync(ro);
+        ro.TotalAmount = total + totalTax;
+        ro.TaxAmount = totalTax;
         await _unitOfWork.SaveChangesAsync();
 
-        _logger.LogInformation("Created Return Order {DocNumber} for {Amount}", docNumber, total);
+        _logger.LogInformation("Created Return Order {DocNumber} for {Amount}", docNumber, ro.TotalAmount);
         return await GetReturnOrderByIdAsync(ro.Id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
     public async Task<ReturnOrderDetailDto?> GetReturnOrderByIdAsync(Guid id)
     {
-        var ro = await _returnRepo.GetByIdAsync(id,
-            r => r.SalesOrder,
-            r => r.Customer,
-            r => r.CreditNote!,
-            r => r.Lines);
+        var ro = await _returnRepo.GetQueryable(r => r.Id == id)
+            .Include(r => r.SalesOrder)
+            .Include(r => r.BusinessPartner)
+            .Include(r => r.CreditNote)
+            .Include(r => r.Lines)
+            .FirstOrDefaultAsync();
         return ro == null ? null : MapReturnOrderDetailDto(ro);
     }
 
@@ -140,24 +276,146 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<ReturnOrderDetailDto> ApproveReturnOrderAsync(Guid id)
     {
-        var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
+        var ro = await _returnRepo.GetQueryable(r => r.Id == id)
+            .Include(r => r.Lines)
+            .FirstOrDefaultAsync() ?? throw new InvalidOperationException($"Return Order {id} not found");
+
         if (ro.ReturnStatus != ReturnOrderStatus.Requested)
             throw new InvalidOperationException("Only requested return orders can be approved");
+
         ro.ReturnStatus = ReturnOrderStatus.Approved;
-        await _returnRepo.UpdateAsync(ro);
-        await _unitOfWork.SaveChangesAsync();
+
+        // Split Path: Invoice-Linked Return (Posted Invoice) -> Automatic CN Generation & Posting
+        if (ro.InvoiceId.HasValue)
+        {
+            var cnNumber = $"CN-{await _creditNoteRepo.CountAsync() + 1:D6}";
+            var cn = new CreditNote
+            {
+                DocumentNumber = cnNumber,
+                DocumentDate = DateTime.UtcNow,
+                BusinessPartnerId = ro.BusinessPartnerId,
+                ReturnOrderId = ro.Id,
+                OriginalInvoiceId = ro.InvoiceId.Value,
+                CreditNoteStatus = CreditNoteStatus.Approved,
+                Reason = $"Credit for Return Order {ro.DocumentNumber}",
+                TenantId = ro.TenantId,
+                Currency = ro.Currency,
+                ExchangeRate = ro.ExchangeRate
+            };
+
+            await _creditNoteRepo.AddAsync(cn);
+
+            decimal totalNet = 0;
+            decimal totalTax = 0;
+
+            foreach (var roLine in ro.Lines)
+            {
+                decimal proportionalTax = 0;
+                string? taxCode = null;
+
+                if (roLine.InvoiceLineItemId.HasValue)
+                {
+                    var invLine = await _invoiceLineRepo.GetByIdAsync(roLine.InvoiceLineItemId.Value);
+                    if (invLine != null && invLine.Quantity > 0)
+                    {
+                        proportionalTax = Math.Round(invLine.TaxAmount * (roLine.QuantityReturned / invLine.Quantity), 2);
+                        taxCode = invLine.TaxCode;
+                    }
+                }
+
+                var cnLine = new CreditNoteLine
+                {
+                    CreditNoteId = cn.Id,
+                    Description = roLine.Description,
+                    Quantity = roLine.QuantityReturned,
+                    UnitPrice = roLine.UnitPrice,
+                    TaxAmount = proportionalTax,
+                    TaxCode = taxCode,
+                    TenantId = ro.TenantId
+                };
+
+                totalNet += roLine.QuantityReturned * roLine.UnitPrice;
+                totalTax += proportionalTax;
+
+                await _creditLineRepo.AddAsync(cnLine);
+            }
+
+            cn.TotalAmount = totalNet + totalTax;
+            cn.TaxAmount = totalTax;
+            await _unitOfWork.SaveChangesAsync();
+
+            // Link Credit Note to Return Order and save changes
+            ro.CreditNoteId = cn.Id;
+            ro.ReturnStatus = ReturnOrderStatus.CreditIssued;
+            await _returnRepo.UpdateAsync(ro);
+            await _unitOfWork.SaveChangesAsync();
+
+            // Post Credit Note immediately
+            await _creditNotePostingService.PostCreditNoteAsync(cn.Id, ro.InvoiceId.Value);
+        }
+        else
+        {
+            await _returnRepo.UpdateAsync(ro);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
         return await GetReturnOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
     public async Task<ReturnOrderDetailDto> ReceiveReturnOrderAsync(Guid id)
     {
-        var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
-        if (ro.ReturnStatus != ReturnOrderStatus.Approved)
+        var ro = await _returnRepo.GetByIdAsync(id, r => r.Lines) ?? throw new InvalidOperationException($"Return Order {id} not found");
+        if (ro.ReturnStatus != ReturnOrderStatus.Approved && ro.ReturnStatus != ReturnOrderStatus.CreditIssued)
             throw new InvalidOperationException("Only approved return orders can be received");
         ro.ReturnStatus = ReturnOrderStatus.Received;
         ro.ReceivedDate = DateTime.UtcNow;
+        
+        // Process restockable lines into inventory using boundary service
+        var inventoryLines = new List<FinanceReceiptInventoryLine>();
+        foreach (var line in ro.Lines.Where(l => l.IsRestockable))
+        {
+            Guid? inventoryItemId = null;
+            Guid? warehouseId = null;
+
+            if (line.SalesOrderLineId.HasValue)
+            {
+                var soLine = await _salesOrderLineRepo.GetByIdAsync(line.SalesOrderLineId.Value);
+                inventoryItemId = soLine?.InventoryItemId;
+                warehouseId = soLine?.WarehouseId;
+            }
+            else if (line.InvoiceLineItemId.HasValue)
+            {
+                var invLine = await _invoiceLineRepo.GetByIdAsync(line.InvoiceLineItemId.Value);
+                inventoryItemId = invLine?.InventoryItemId;
+                warehouseId = invLine?.WarehouseId;
+            }
+
+            if (inventoryItemId.HasValue && warehouseId.HasValue)
+            {
+                inventoryLines.Add(new FinanceReceiptInventoryLine
+                {
+                    InventoryItemId = inventoryItemId.Value,
+                    WarehouseId = warehouseId.Value,
+                    QuantityReceived = line.QuantityReturned,
+                    Reference = ro.DocumentNumber
+                });
+            }
+        }
+
+        if (inventoryLines.Count > 0)
+        {
+            await _inventoryReturnService.ProcessCustomerReturnAsync(ro.TenantId, ro.Id, inventoryLines);
+        }
+        
         await _returnRepo.UpdateAsync(ro);
         await _unitOfWork.SaveChangesAsync();
+        
+        // Post COGS reversal GL entry (Only if it was an invoice-linked posted return)
+        if (ro.InvoiceId.HasValue)
+        {
+            await _subledgerPostingService.PostReturnOrderCOGSGLAsync(ro.Id);
+        }
+        
         return await GetReturnOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
@@ -179,6 +437,8 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<ReturnOrderDetailDto> RejectReturnOrderAsync(Guid id, string? reason = null)
     {
         var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
+        if (ro.ReturnStatus != ReturnOrderStatus.Requested && ro.ReturnStatus != ReturnOrderStatus.Approved)
+            throw new InvalidOperationException("Cannot reject return order at this stage");
         ro.ReturnStatus = ReturnOrderStatus.Rejected;
         ro.InspectionNotes = reason;
         await _returnRepo.UpdateAsync(ro);
@@ -189,6 +449,8 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<ReturnOrderDetailDto> CancelReturnOrderAsync(Guid id, string? reason = null)
     {
         var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
+        if (ro.ReturnStatus != ReturnOrderStatus.Requested)
+            throw new InvalidOperationException("Only requested returns can be cancelled");
         ro.ReturnStatus = ReturnOrderStatus.Cancelled;
         await _returnRepo.UpdateAsync(ro);
         await _unitOfWork.SaveChangesAsync();
@@ -204,6 +466,20 @@ public class ReturnOrderService : IReturnOrderService
         var docNumber = $"CN-{await _creditNoteRepo.CountAsync() + 1:D6}";
         var tenantId = _currentUserProvider.TenantId;
 
+        // Locked rates check if original invoice is provided
+        string targetCurrency = "GHS";
+        decimal targetExchangeRate = 1.0m;
+
+        if (dto.OriginalInvoiceId.HasValue)
+        {
+            var invoice = await _invoiceRepo.GetByIdAsync(dto.OriginalInvoiceId.Value)
+                ?? throw new ArgumentException($"Invoice {dto.OriginalInvoiceId.Value} not found.");
+            
+            // Lock currency and exchange rate to original invoice
+            targetCurrency = invoice.CurrencyCode;
+            targetExchangeRate = invoice.ExchangeRate;
+        }
+
         var cn = new CreditNote
         {
             DocumentNumber = docNumber,
@@ -213,7 +489,9 @@ public class ReturnOrderService : IReturnOrderService
             OriginalInvoiceId = dto.OriginalInvoiceId,
             CreditNoteStatus = CreditNoteStatus.Draft,
             Reason = dto.Reason,
-            TenantId = tenantId
+            TenantId = tenantId,
+            Currency = targetCurrency,
+            ExchangeRate = targetExchangeRate
         };
 
         await _creditNoteRepo.AddAsync(cn);
@@ -257,12 +535,15 @@ public class ReturnOrderService : IReturnOrderService
         {
             CustomerId = ro.CustomerId,
             ReturnOrderId = returnOrderId,
+            OriginalInvoiceId = ro.InvoiceId,
             Reason = $"Credit for Return Order {ro.DocumentNumber}",
             Lines = ro.Lines.Select(l => new CreateCreditNoteLineDto
             {
                 Description = l.Description,
                 Quantity = l.QuantityReturned,
-                UnitPrice = l.UnitPrice
+                UnitPrice = l.UnitPrice,
+                TaxAmount = 0m,
+                TaxCode = null
             }).ToList()
         };
 
@@ -276,6 +557,7 @@ public class ReturnOrderService : IReturnOrderService
 
         return cn;
     }
+
 
     public async Task<CreditNoteDetailDto?> GetCreditNoteByIdAsync(Guid id)
     {
@@ -473,7 +755,9 @@ public class ReturnOrderService : IReturnOrderService
         TotalAmount = r.TotalAmount,
         LineCount = r.Lines?.Count ?? 0,
         ReceivedDate = r.ReceivedDate,
-        CreatedAt = r.CreatedAt
+        CreatedAt = r.CreatedAt,
+        Currency = r.Currency,
+        ExchangeRate = r.ExchangeRate
     };
 
     private static ReturnOrderDetailDto MapReturnOrderDetailDto(ReturnOrder r) => new()
@@ -488,6 +772,8 @@ public class ReturnOrderService : IReturnOrderService
         LineCount = r.Lines?.Count ?? 0,
         ReceivedDate = r.ReceivedDate,
         CreatedAt = r.CreatedAt,
+        Currency = r.Currency,
+        ExchangeRate = r.ExchangeRate,
         SalesOrderId = r.SalesOrderId,
         DeliveryNoteId = r.DeliveryNoteId,
         CustomerId = r.CustomerId,

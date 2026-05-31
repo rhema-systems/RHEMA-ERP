@@ -35,11 +35,55 @@ namespace ErpSystem.Api.Controllers.Finance
     [Route("api/ar/invoices")]
     public class InvoiceController : ControllerBase
     {
+        private static readonly string[] PrivilegedRoles = ["admin", "superadmin", "tenantadmin"];
+        private static readonly string[] PermissionClaimTypes = ["permission", "permissions", ClaimTypes.Role];
+        private static readonly Dictionary<string, string[]> ActionPermissions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Create"] = ["Finance.AR.Invoices.Create", "Finance.AR.Invoices.Write"],
+            ["Edit"] = ["Finance.AR.Invoices.Edit", "Finance.AR.Invoices.Write"],
+            ["Delete"] = ["Finance.AR.Invoices.Delete", "Finance.AR.Invoices.Write"],
+            ["Send"] = ["Finance.AR.Invoices.Send"],
+            ["Void"] = ["Finance.AR.Invoices.Void"]
+        };
+
         private readonly IInvoiceService _invoiceService;
 
         public InvoiceController(IInvoiceService invoiceService)
         {
             _invoiceService = invoiceService;
+        }
+
+        private bool CurrentUserHasAnyPermission(params string[] permissions)
+        {
+            if (User?.Identity?.IsAuthenticated != true) return false;
+
+            var roles = User.FindAll(ClaimTypes.Role)
+                .Select(c => c.Value?.Trim().ToLowerInvariant())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToHashSet();
+
+            if (roles.Overlaps(PrivilegedRoles)) return true;
+
+            var granted = User.Claims
+                .Where(c => PermissionClaimTypes.Contains(c.Type, StringComparer.OrdinalIgnoreCase))
+                .SelectMany(c => c.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Select(v => v.Trim().ToLowerInvariant())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToHashSet();
+
+            if (granted.Contains("*")) return true;
+
+            return permissions
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim().ToLowerInvariant())
+                .Any(granted.Contains);
+        }
+
+        private ActionResult? EnsureActionPermission(string actionName)
+        {
+            if (!ActionPermissions.TryGetValue(actionName, out var permissions)) return null;
+            if (CurrentUserHasAnyPermission(permissions)) return null;
+            return StatusCode(StatusCodes.Status403Forbidden, $"You do not have permission to {actionName.ToLowerInvariant()} AR invoices.");
         }
 
         /// <summary>
@@ -136,6 +180,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost]
         public async Task<ActionResult<InvoiceDto>> Create([FromBody] InvoiceCreateDto dto)
         {
+            var permissionCheck = EnsureActionPermission("Create");
+            if (permissionCheck != null) return permissionCheck;
             try
             {
                 var invoice = await _invoiceService.CreateAsync(dto);
@@ -175,6 +221,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPut("{id}")]
         public async Task<ActionResult<InvoiceDto>> Update(Guid id, [FromBody] InvoiceUpdateDto dto)
         {
+            var permissionCheck = EnsureActionPermission("Edit");
+            if (permissionCheck != null) return permissionCheck;
             if (id != dto.Id) return BadRequest("ID mismatch");
             try { return Ok(await _invoiceService.UpdateAsync(dto)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
@@ -209,6 +257,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("Delete");
+            if (permissionCheck != null) return permissionCheck;
             try { await _invoiceService.DeleteAsync(id); return NoContent(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -245,6 +295,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/send")]
         public async Task<ActionResult<InvoiceDto>> Send(Guid id)
         {
+            var permissionCheck = EnsureActionPermission("Send");
+            if (permissionCheck != null) return permissionCheck;
             try { return Ok(await _invoiceService.SendInvoiceAsync(id)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -282,6 +334,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/void")]
         public async Task<ActionResult<InvoiceDto>> Void(Guid id, [FromBody] string reason)
         {
+            var permissionCheck = EnsureActionPermission("Void");
+            if (permissionCheck != null) return permissionCheck;
             try { return Ok(await _invoiceService.VoidInvoiceAsync(id, reason)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }

@@ -194,6 +194,10 @@ public class Quote : DocumentEntity
     public Guid? ConvertedInvoiceId { get; set; }
     public virtual Invoice? ConvertedInvoice { get; set; }
 
+    public Guid? TaxGroupId { get; set; }
+    [ForeignKey(nameof(TaxGroupId))]
+    public virtual TaxGroup? TaxGroup { get; set; }
+
     [StringLength(2000)]
     public string? Proposal { get; set; }
 
@@ -243,6 +247,10 @@ public class QuoteLineItem : BaseEntity
 
     [StringLength(50)]
     public string? TaxCode { get; set; }
+
+    public Guid? TaxGroupId { get; set; }
+    [ForeignKey(nameof(TaxGroupId))]
+    public virtual TaxGroup? TaxGroup { get; set; }
 
     // Multi-tenant
     public Guid TenantId { get; set; }
