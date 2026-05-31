@@ -385,68 +385,98 @@ public class FinanceDataSeeder
     private async Task SeedFiscalPeriodsAsync(Guid tenantId, DateTime baseDate)
     {
         var fy2024Id = Guid.Parse("00000003-0001-0001-0001-000000000002");
+        await EnsureFiscalPeriodAsync(
+            tenantId,
+            fy2024Id,
+            Guid.Parse("00000004-0001-0001-0001-000000000001"),
+            1,
+            "January 2024",
+            new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2024, 1, 31, 23, 59, 59, DateTimeKind.Utc),
+            "Closed",
+            isClosed: true,
+            isLocked: false,
+            createdAt: baseDate);
 
-        // January 2024 (Closed)
-        if (!await _context.FiscalPeriods.AnyAsync(fp => fp.PeriodNumber == 1 && fp.FiscalYearId == fy2024Id))
-        {
-            await _context.FiscalPeriods.AddAsync(new FiscalPeriod
-            {
-                Id = Guid.Parse("00000004-0001-0001-0001-000000000001"),
-                TenantId = tenantId,
-                FiscalYearId = fy2024Id,
-                PeriodNumber = 1,
-                PeriodName = "January 2024",
-                StartDate = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2024, 1, 31, 23, 59, 59, DateTimeKind.Utc),
-                Status = "Closed",
-                IsClosed = true,
-                IsLocked = false,
-                CreatedAt = baseDate,
-                CreatedBy = "System"
-            });
-        }
+        await EnsureFiscalPeriodAsync(
+            tenantId,
+            fy2024Id,
+            Guid.Parse("00000004-0001-0001-0001-000000000011"),
+            11,
+            "November 2024",
+            new DateTime(2024, 11, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2024, 11, 30, 23, 59, 59, DateTimeKind.Utc),
+            "Closed",
+            isClosed: true,
+            isLocked: true,
+            createdAt: new DateTime(2024, 11, 1, 0, 0, 0, DateTimeKind.Utc));
 
-        // November 2024 (Closed)
-        if (!await _context.FiscalPeriods.AnyAsync(fp => fp.PeriodNumber == 11 && fp.FiscalYearId == fy2024Id))
-        {
-            await _context.FiscalPeriods.AddAsync(new FiscalPeriod
-            {
-                Id = Guid.Parse("00000004-0001-0001-0001-000000000011"),
-                TenantId = tenantId,
-                FiscalYearId = fy2024Id,
-                PeriodNumber = 11,
-                PeriodName = "November 2024",
-                StartDate = new DateTime(2024, 11, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2024, 11, 30, 23, 59, 59, DateTimeKind.Utc),
-                Status = "Closed",
-                IsClosed = true,
-                IsLocked = true,
-                CreatedAt = new DateTime(2024, 11, 1, 0, 0, 0, DateTimeKind.Utc),
-                CreatedBy = "System"
-            });
-        }
-
-        // December 2024 (Open)
-        if (!await _context.FiscalPeriods.AnyAsync(fp => fp.PeriodNumber == 12 && fp.FiscalYearId == fy2024Id))
-        {
-            await _context.FiscalPeriods.AddAsync(new FiscalPeriod
-            {
-                Id = Guid.Parse("00000004-0001-0001-0001-000000000012"),
-                TenantId = tenantId,
-                FiscalYearId = fy2024Id,
-                PeriodNumber = 12,
-                PeriodName = "December 2024",
-                StartDate = new DateTime(2024, 12, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2024, 12, 31, 23, 59, 59, DateTimeKind.Utc),
-                Status = "Open",
-                IsClosed = false,
-                IsLocked = false,
-                CreatedAt = new DateTime(2024, 12, 1, 0, 0, 0, DateTimeKind.Utc),
-                CreatedBy = "System"
-            });
-        }
+        await EnsureFiscalPeriodAsync(
+            tenantId,
+            fy2024Id,
+            Guid.Parse("00000004-0001-0001-0001-000000000012"),
+            12,
+            "December 2024",
+            new DateTime(2024, 12, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2024, 12, 31, 23, 59, 59, DateTimeKind.Utc),
+            "Open",
+            isClosed: false,
+            isLocked: false,
+            createdAt: new DateTime(2024, 12, 1, 0, 0, 0, DateTimeKind.Utc));
 
         _logger.LogInformation("Fiscal periods seeded");
+    }
+
+    private async Task EnsureFiscalPeriodAsync(
+        Guid tenantId,
+        Guid fiscalYearId,
+        Guid preferredId,
+        int periodNumber,
+        string periodName,
+        DateTime startDate,
+        DateTime endDate,
+        string status,
+        bool isClosed,
+        bool isLocked,
+        DateTime createdAt)
+    {
+        var existing = await _context.FiscalPeriods
+            .FirstOrDefaultAsync(fp =>
+                fp.TenantId == tenantId
+                && fp.FiscalYearId == fiscalYearId
+                && fp.PeriodNumber == periodNumber);
+
+        if (existing != null)
+        {
+            existing.PeriodName = periodName;
+            existing.StartDate = startDate;
+            existing.EndDate = endDate;
+            existing.Status = status;
+            existing.IsClosed = isClosed;
+            existing.IsLocked = isLocked;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = "System";
+            return;
+        }
+
+        var idInUse = await _context.FiscalPeriods.AnyAsync(fp => fp.Id == preferredId);
+        var insertId = idInUse ? Guid.NewGuid() : preferredId;
+
+        await _context.FiscalPeriods.AddAsync(new FiscalPeriod
+        {
+            Id = insertId,
+            TenantId = tenantId,
+            FiscalYearId = fiscalYearId,
+            PeriodNumber = periodNumber,
+            PeriodName = periodName,
+            StartDate = startDate,
+            EndDate = endDate,
+            Status = status,
+            IsClosed = isClosed,
+            IsLocked = isLocked,
+            CreatedAt = createdAt,
+            CreatedBy = "System"
+        });
     }
 
     #endregion

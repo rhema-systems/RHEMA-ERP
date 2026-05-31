@@ -12,6 +12,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
+using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -1335,12 +1336,22 @@ namespace ErpSystem.Web.Services
 
         private async Task NormalizeProjectDemoFundingSourcesAsync(Guid tenantId)
         {
-            var projects = await _context.Projects
-                .Where(project =>
-                    project.TenantId == tenantId
-                    && !project.IsDeleted
-                    && (project.ProjectCode == "PRJ-DEMO-1001" || project.ProjectCode == "PRJ-DEMO-1002" || project.ProjectCode == "PRJ-DEMO-1003"))
-                .ToListAsync();
+            List<Project> projects;
+            try
+            {
+                projects = await _context.Projects
+                    .Where(project =>
+                        project.TenantId == tenantId
+                        && !project.IsDeleted
+                        && (project.ProjectCode == "PRJ-DEMO-1001" || project.ProjectCode == "PRJ-DEMO-1002" || project.ProjectCode == "PRJ-DEMO-1003"))
+                    .ToListAsync();
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogWarning(
+                    "Skipping demo project funding-source normalization because project schema appears behind code (missing columns). Apply latest migrations and rerun seeding.");
+                return;
+            }
 
             if (projects.Count == 0)
             {
