@@ -35,7 +35,11 @@ public sealed class FleetDashboardService : IFleetDashboardService
         if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
             tripsQ = tripsQ.Where(t => t.VehicleAssetId == vehicleAssetId.Value);
 
-        var tripsThisMonth = await tripsQ.CountAsync(t => t.CreatedAt >= monthStart);
+        var tripsThisMonth = await tripsQ.CountAsync(t =>
+            t.Status == FleetTripStatuses.Completed &&
+            t.CompletedAt.HasValue &&
+            t.CompletedAt.Value >= monthStart &&
+            t.CompletedAt.Value <= now);
 
         var defectsQ = _unitOfWork.Repository<FleetDefect>()
             .GetQueryable(d => d.TenantId == tenantId && !d.IsDeleted);

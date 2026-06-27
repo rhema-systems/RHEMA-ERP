@@ -110,7 +110,12 @@ public enum WorkflowOutcome
     /// <summary>
     /// Workflow was cancelled or failed
     /// </summary>
-    Rejected = 2
+    Rejected = 2,
+
+    /// <summary>
+    /// Workflow was recalled by the requester before completion
+    /// </summary>
+    Recalled = 3
 }
 
 /// <summary>

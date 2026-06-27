@@ -7,17 +7,23 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DollarSign, Search, RefreshCw, Plus, CheckCircle, Banknote } from 'lucide-react';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { DollarSign, Search, RefreshCw, Plus, Banknote } from 'lucide-react';
 import { toast } from 'sonner';
 import { returnOrderService, type RefundSummaryDto } from '@/services/returnOrderService';
 import { format } from 'date-fns';
 
 const STATUS_CONFIG: Record<string, { className: string }> = {
-  Requested: { className: 'bg-blue-100 text-blue-800' },
+  Draft: { className: 'bg-gray-100 text-gray-800' },
+  PendingApproval: { className: 'bg-blue-100 text-blue-800' },
   Approved: { className: 'bg-cyan-100 text-cyan-800' },
-  Processed: { className: 'bg-green-100 text-green-800' },
+  Processing: { className: 'bg-amber-100 text-amber-800' },
+  Completed: { className: 'bg-green-100 text-green-800' },
   Rejected: { className: 'bg-red-100 text-red-800' },
+  Cancelled: { className: 'bg-slate-100 text-slate-800' },
 };
+
+const formatStatus = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2');
 
 export default function RefundsPage() {
   const [refunds, setRefunds] = useState<RefundSummaryDto[]>([]);
@@ -40,9 +46,18 @@ export default function RefundsPage() {
   };
 
   const handleSearch = () => { setPage(1); loadRefunds(); };
-  const handleApprove = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try { await returnOrderService.approveRefund(id); toast.success('Approved'); loadRefunds(); } catch (err: any) { toast.error(err.message); }
+  const handleSubmitForApproval = async (id: string) => {
+    try { await returnOrderService.submitRefundForApproval(id); toast.success('Submitted for approval'); await loadRefunds(); } catch (err: any) { toast.error(err.message); }
+  };
+  const handleWorkflowApprove = async (id: string, comments: string) => {
+    try { await returnOrderService.processRefundApproval(id, { isApproved: true, comments }); toast.success('Approved'); await loadRefunds(); } catch (err: any) { toast.error(err.message); }
+  };
+  const handleWorkflowReject = async (id: string, comments: string) => {
+    try {
+      await returnOrderService.processRefundApproval(id, { isApproved: false, comments, rejectionReason: comments });
+      toast.success('Rejected');
+      await loadRefunds();
+    } catch (err: any) { toast.error(err.message); }
   };
   const handleProcess = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -66,9 +81,9 @@ export default function RefundsPage() {
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Total</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold">{totalCount}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Pending</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold text-blue-600">{refunds.filter(r => r.refundStatus === 'Requested' || r.refundStatus === 'Approved').length}</p></CardContent></Card>
+          <CardContent><p className="text-2xl font-bold text-blue-600">{refunds.filter(r => ['Draft', 'PendingApproval', 'Approved'].includes(r.refundStatus)).length}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Processed</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold text-green-600">{refunds.filter(r => r.refundStatus === 'Processed').length}</p></CardContent></Card>
+          <CardContent><p className="text-2xl font-bold text-green-600">{refunds.filter(r => r.refundStatus === 'Completed').length}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Total Value</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-rose-600">${refunds.reduce((s, r) => s + r.refundAmount, 0).toLocaleString()}</p></CardContent></Card>
       </div>
@@ -85,10 +100,13 @@ export default function RefundsPage() {
               <SelectTrigger><SelectValue placeholder="All Statuses" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All</SelectItem>
-                <SelectItem value="Requested">Requested</SelectItem>
+                <SelectItem value="Draft">Draft</SelectItem>
+                <SelectItem value="PendingApproval">Pending Approval</SelectItem>
                 <SelectItem value="Approved">Approved</SelectItem>
-                <SelectItem value="Processed">Processed</SelectItem>
+                <SelectItem value="Processing">Processing</SelectItem>
+                <SelectItem value="Completed">Completed</SelectItem>
                 <SelectItem value="Rejected">Rejected</SelectItem>
+                <SelectItem value="Cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
             <Button variant="outline" onClick={loadRefunds}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
@@ -118,10 +136,24 @@ export default function RefundsPage() {
                       <TableCell><Badge variant="outline">{r.refundMethod}</Badge></TableCell>
                       <TableCell className="font-semibold">${r.refundAmount.toLocaleString()}</TableCell>
                       <TableCell>{formatDate(r.processedDate)}</TableCell>
-                      <TableCell><Badge className={STATUS_CONFIG[r.refundStatus]?.className || ''}>{r.refundStatus}</Badge></TableCell>
+                      <TableCell><Badge className={STATUS_CONFIG[r.refundStatus]?.className || ''}>{formatStatus(r.refundStatus)}</Badge></TableCell>
                       <TableCell>
                         <div className="flex gap-1">
-                          {r.refundStatus === 'Requested' && <Button variant="outline" size="sm" onClick={(e) => handleApprove(r.id, e)}><CheckCircle className="h-3 w-3 mr-1" />Approve</Button>}
+                          <WorkflowApprovalActions
+                            entityType="Refund"
+                            entityId={r.id}
+                            entityLabel="Refund"
+                            entityNumber={r.documentNumber}
+                            status={r.refundStatus}
+                            loadWorkflowSummary
+                            canSubmit={r.refundStatus === 'Draft'}
+                            canApproveReject={r.refundStatus === 'PendingApproval'}
+                            onSubmit={() => handleSubmitForApproval(r.id)}
+                            onApprove={(comments) => handleWorkflowApprove(r.id, comments)}
+                            onReject={(comments) => handleWorkflowReject(r.id, comments)}
+                            onAfterAction={loadRefunds}
+                            onOpenWorkflows={() => { window.location.href = '/administration/workflow'; }}
+                          />
                           {r.refundStatus === 'Approved' && <Button variant="outline" size="sm" className="text-green-600" onClick={(e) => handleProcess(r.id, e)}><Banknote className="h-3 w-3 mr-1" />Process</Button>}
                         </div>
                       </TableCell>

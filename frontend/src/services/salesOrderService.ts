@@ -119,6 +119,7 @@ export interface CreateSalesOrderDto {
   priority?: string;
   expectedDeliveryDate?: string;
   paymentTerms?: string;
+  currency?: string;
   salesRepId?: string;
   propertyReference?: string;
   propertyType?: string;
@@ -127,19 +128,29 @@ export interface CreateSalesOrderDto {
   customerPoNumber?: string;
   notes?: string;
   internalNotes?: string;
+  quoteId?: string;
+  opportunityId?: string;
   lines: CreateSalesOrderLineDto[];
 }
 
 export interface CreateSalesOrderLineDto {
   itemId?: string;
+  productId?: string;
+  inventoryItemId?: string;
   itemCode?: string;
+  productCode?: string;
   itemName: string;
   description?: string;
   quantity: number;
   unitOfMeasure?: string;
+  unit?: string;
   unitPrice: number;
   discountPercent?: number;
+  discountPercentage?: number;
   taxPercent?: number;
+  taxRate?: number;
+  warehouseId?: string;
+  locationId?: string;
 }
 
 export interface UpdateSalesOrderDto {
@@ -350,6 +361,33 @@ function normalizeSalesOrderDetail(raw: any): SalesOrderDetailDto {
   };
 }
 
+function toBackendCreateSalesOrderDto(data: CreateSalesOrderDto) {
+  return {
+    ...data,
+    orderPriority: data.priority,
+    requestedDeliveryDate: data.expectedDeliveryDate,
+    promisedDeliveryDate: data.expectedDeliveryDate,
+    quoteId: data.quoteId,
+    opportunityId: data.opportunityId,
+    terms: data.paymentTerms,
+    externalNotes: data.notes,
+    referenceNumber: data.customerPoNumber,
+    lines: data.lines.map((line) => ({
+      productId: line.productId,
+      inventoryItemId: line.inventoryItemId,
+      description: line.description || line.itemName,
+      productCode: line.productCode || line.itemCode,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      discountPercentage: line.discountPercentage ?? line.discountPercent,
+      taxRate: line.taxRate ?? line.taxPercent,
+      unit: line.unit || line.unitOfMeasure,
+      warehouseId: line.warehouseId,
+      locationId: line.locationId,
+    })),
+  };
+}
+
 // ==================== API FUNCTIONS ====================
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -419,11 +457,23 @@ export const salesOrderService = {
     const response = await fetch(`${API_BASE_URL}/sales/orders`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify(toBackendCreateSalesOrderDto(data)),
     });
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to create sales order');
+    }
+    return normalizeSalesOrderDetail(await response.json());
+  },
+
+  async convertQuoteToSalesOrder(quoteId: string): Promise<SalesOrderDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/orders/convert-from-quote/${quoteId}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to convert quote to sales order');
     }
     return normalizeSalesOrderDetail(await response.json());
   },

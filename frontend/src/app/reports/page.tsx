@@ -167,6 +167,14 @@ export default function UserReportsPage() {
       reportCount: 10,
       color: 'bg-indigo-100 text-indigo-700 border-indigo-200'
     },
+    {
+      id: 'maintenance',
+      name: 'Maintenance Reports',
+      description: 'Asset movements, inspections, work orders, parts issues, and maintenance costs',
+      icon: 'Activity',
+      reportCount: 5,
+      color: 'bg-cyan-100 text-cyan-700 border-cyan-200'
+    },
   ];
 
   // Fetch published reports available to current user's role and tenant
@@ -483,6 +491,11 @@ export default function UserReportsPage() {
                   onClick={() => {
                     if (module.id === 'hr') {
                       router.push('/reports/hr');
+                      return;
+                    }
+
+                    if (module.id === 'maintenance') {
+                      router.push('/maintenance/reports');
                       return;
                     }
 

@@ -7,17 +7,21 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CreditCard, Search, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { CreditCard, Search, RefreshCw, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { returnOrderService, type CreditNoteSummaryDto } from '@/services/returnOrderService';
 import { format } from 'date-fns';
 
 const STATUS_CONFIG: Record<string, { className: string }> = {
   Draft: { className: 'bg-gray-100 text-gray-800' },
+  PendingApproval: { className: 'bg-blue-100 text-blue-800' },
   Approved: { className: 'bg-blue-100 text-blue-800' },
   Applied: { className: 'bg-green-100 text-green-800' },
   Voided: { className: 'bg-red-100 text-red-800' },
 };
+
+const formatStatus = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2');
 
 export default function CreditNotesPage() {
   const [notes, setNotes] = useState<CreditNoteSummaryDto[]>([]);
@@ -40,9 +44,18 @@ export default function CreditNotesPage() {
   };
 
   const handleSearch = () => { setPage(1); loadNotes(); };
-  const handleApprove = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try { await returnOrderService.approveCreditNote(id); toast.success('Approved'); loadNotes(); } catch (err: any) { toast.error(err.message); }
+  const handleSubmitForApproval = async (id: string) => {
+    try { await returnOrderService.submitCreditNoteForApproval(id); toast.success('Submitted for approval'); await loadNotes(); } catch (err: any) { toast.error(err.message); }
+  };
+  const handleWorkflowApprove = async (id: string, comments: string) => {
+    try { await returnOrderService.processCreditNoteApproval(id, { isApproved: true, comments }); toast.success('Approved'); await loadNotes(); } catch (err: any) { toast.error(err.message); }
+  };
+  const handleWorkflowReject = async (id: string, comments: string) => {
+    try {
+      await returnOrderService.processCreditNoteApproval(id, { isApproved: false, comments, rejectionReason: comments });
+      toast.success('Returned to draft');
+      await loadNotes();
+    } catch (err: any) { toast.error(err.message); }
   };
   const handleApply = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -69,7 +82,7 @@ export default function CreditNotesPage() {
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Total</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold">{totalCount}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Pending Approval</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold text-blue-600">{notes.filter(n => n.creditNoteStatus === 'Draft').length}</p></CardContent></Card>
+          <CardContent><p className="text-2xl font-bold text-blue-600">{notes.filter(n => ['Draft', 'PendingApproval'].includes(n.creditNoteStatus)).length}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Applied</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-green-600">{notes.filter(n => n.creditNoteStatus === 'Applied').length}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Total Value</CardTitle></CardHeader>
@@ -89,6 +102,7 @@ export default function CreditNotesPage() {
               <SelectContent>
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="Draft">Draft</SelectItem>
+                <SelectItem value="PendingApproval">Pending Approval</SelectItem>
                 <SelectItem value="Approved">Approved</SelectItem>
                 <SelectItem value="Applied">Applied</SelectItem>
                 <SelectItem value="Voided">Voided</SelectItem>
@@ -122,10 +136,24 @@ export default function CreditNotesPage() {
                       <TableCell>{n.lineCount}</TableCell>
                       <TableCell className="font-semibold">${n.totalAmount.toLocaleString()}</TableCell>
                       <TableCell>{formatDate(n.appliedDate)}</TableCell>
-                      <TableCell><Badge className={STATUS_CONFIG[n.creditNoteStatus]?.className || ''}>{n.creditNoteStatus}</Badge></TableCell>
+                      <TableCell><Badge className={STATUS_CONFIG[n.creditNoteStatus]?.className || ''}>{formatStatus(n.creditNoteStatus)}</Badge></TableCell>
                       <TableCell>
                         <div className="flex gap-1">
-                          {n.creditNoteStatus === 'Draft' && <Button variant="outline" size="sm" onClick={(e) => handleApprove(n.id, e)}><CheckCircle className="h-3 w-3 mr-1" />Approve</Button>}
+                          <WorkflowApprovalActions
+                            entityType="CreditNote"
+                            entityId={n.id}
+                            entityLabel="Credit Note"
+                            entityNumber={n.documentNumber}
+                            status={n.creditNoteStatus}
+                            loadWorkflowSummary
+                            canSubmit={n.creditNoteStatus === 'Draft'}
+                            canApproveReject={n.creditNoteStatus === 'PendingApproval'}
+                            onSubmit={() => handleSubmitForApproval(n.id)}
+                            onApprove={(comments) => handleWorkflowApprove(n.id, comments)}
+                            onReject={(comments) => handleWorkflowReject(n.id, comments)}
+                            onAfterAction={loadNotes}
+                            onOpenWorkflows={() => { window.location.href = '/administration/workflow'; }}
+                          />
                           {n.creditNoteStatus === 'Approved' && <Button variant="outline" size="sm" className="text-green-600" onClick={(e) => handleApply(n.id, e)}>Apply</Button>}
                           {n.creditNoteStatus !== 'Voided' && n.creditNoteStatus !== 'Applied' && <Button variant="outline" size="sm" className="text-red-600" onClick={(e) => handleVoid(n.id, e)}><XCircle className="h-3 w-3" /></Button>}
                         </div>

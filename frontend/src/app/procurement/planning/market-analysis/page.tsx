@@ -64,10 +64,10 @@ export default function MarketAnalysisPage() {
     try {
       if (analyses.length === 0) { toast.error('No data to export'); return; }
       const exportData = analyses.map(a => ({
-        'Analysis #': a.analysisNumber, 'Item Name': a.itemName, 'Category': a.itemCategory,
+        'Analysis #': a.analysisCode, 'Title': a.title, 'Item': a.itemDescription, 'Category': a.itemCategory,
         'Status': a.status, 'Current Price': a.currentMarketPrice, 'Avg Price': a.averagePrice ?? a.historicalAveragePrice,
         'Min Price': a.minimumPrice ?? a.currentMarketPrice, 'Max Price': a.maximumPrice ?? a.forecastedPrice, 'Trend': a.priceTrend,
-        'Forecast': a.forecastedPrice, 'Currency': a.currency,
+        'Variance %': a.priceVariancePercent ?? a.priceChangePercent, 'Forecast': a.forecastedPrice, 'Currency': a.currency,
         'Analysis Date': getAnalysisDate(a) ? format(new Date(getAnalysisDate(a) || ''), 'yyyy-MM-dd') : '',
       }));
       const ws = XLSX.utils.json_to_sheet(exportData);
@@ -83,8 +83,7 @@ export default function MarketAnalysisPage() {
   const getStatusBadge = (status: string) => {
     const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
       'Draft': { variant: 'secondary', className: 'bg-gray-100 text-gray-800' },
-      'InProgress': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
-      'Completed': { variant: 'default', className: 'bg-green-100 text-green-800' },
+      'Published': { variant: 'default', className: 'bg-green-100 text-green-800' },
       'Archived': { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
     };
     const c = config[status] || { variant: 'outline' as const, className: '' };
@@ -124,8 +123,7 @@ export default function MarketAnalysisPage() {
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="Draft">Draft</SelectItem>
-                <SelectItem value="InProgress">In Progress</SelectItem>
-                <SelectItem value="Completed">Completed</SelectItem>
+                <SelectItem value="Published">Published</SelectItem>
                 <SelectItem value="Archived">Archived</SelectItem>
               </SelectContent>
             </Select>
@@ -143,15 +141,16 @@ export default function MarketAnalysisPage() {
           {loading ? (<div className="text-center py-8">Loading analyses...</div>) : analyses.length === 0 ? (<div className="text-center py-8 text-gray-500">No analyses found</div>) : (
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader><TableRow><TableHead>Analysis #</TableHead><TableHead>Item</TableHead><TableHead>Category</TableHead><TableHead>Status</TableHead><TableHead>Current Price</TableHead><TableHead>Trend</TableHead><TableHead>Forecast</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Analysis #</TableHead><TableHead>Item</TableHead><TableHead>Category</TableHead><TableHead>Status</TableHead><TableHead>Current Price</TableHead><TableHead>Variance</TableHead><TableHead>Trend</TableHead><TableHead>Forecast</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {analyses.map((a) => (
                     <TableRow key={a.id}>
-                      <TableCell className="font-medium">{a.analysisNumber}</TableCell>
-                      <TableCell><div><div className="font-medium">{a.itemName}</div><div className="text-sm text-gray-500">{a.itemDescription?.substring(0, 50)}...</div></div></TableCell>
+                      <TableCell className="font-medium">{a.analysisCode}</TableCell>
+                      <TableCell><div><div className="font-medium">{a.title}</div><div className="text-sm text-gray-500">{a.itemDescription?.substring(0, 50) || 'No item description'}</div></div></TableCell>
                       <TableCell>{a.itemCategory}</TableCell>
                       <TableCell>{getStatusBadge(a.status)}</TableCell>
                       <TableCell>{formatCurrency(a.currentMarketPrice, a.currency)}</TableCell>
+                      <TableCell>{((a.priceVariancePercent ?? a.priceChangePercent) || 0).toFixed(1)}%</TableCell>
                       <TableCell><div className="flex items-center gap-2">{getTrendIcon(a.priceTrend)}<span>{a.priceTrend}</span></div></TableCell>
                       <TableCell>{formatCurrency(a.forecastedPrice, a.currency)}</TableCell>
                       <TableCell>

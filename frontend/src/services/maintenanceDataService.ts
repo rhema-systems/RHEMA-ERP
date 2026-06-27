@@ -36,6 +36,7 @@ export interface AssetCategory {
   name: string;
   code: string;
   description?: string;
+  assetType?: string;
   maintenanceType?: string;
   maintenanceFrequency?: string;
   isActive: boolean;
@@ -283,6 +284,7 @@ class MaintenanceDataService {
           name: category.name,
           code: category.code,
           description: category.description,
+          assetType: category.assetType,
           maintenanceType: category.maintenanceType,
           maintenanceFrequency: category.maintenanceFrequency,
           isActive: category.isActive ?? true

@@ -41,6 +41,12 @@ public interface IWorkflowService
     /// Cancels a workflow
     /// </summary>
     Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> CancelWorkflowAsync(string entityType, Guid entityId, string reason);
+
+    /// <summary>
+    /// Recalls an active workflow back to the requester-owned draft state.
+    /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
+    /// </summary>
+    Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> RecallWorkflowAsync(string entityType, Guid entityId, Guid userId, string? reason = null);
 }
 
 /// <summary>

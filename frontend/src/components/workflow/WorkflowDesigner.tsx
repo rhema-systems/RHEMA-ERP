@@ -185,6 +185,79 @@ const normalizeStepType = (stepType: unknown): WorkflowStepType => {
   return WorkflowStepType.Manual;
 };
 
+const normalizeAssignmentType = (assignmentType: unknown): WorkflowAssignmentType | undefined => {
+  if (typeof assignmentType === 'number') {
+    return assignmentType as WorkflowAssignmentType;
+  }
+
+  if (typeof assignmentType === 'string') {
+    const normalized = assignmentType.trim().toLowerCase();
+    switch (normalized) {
+      case 'user':
+      case '0':
+        return WorkflowAssignmentType.User;
+      case 'role':
+      case '1':
+        return WorkflowAssignmentType.Role;
+      case 'dynamic':
+      case '2':
+        return WorkflowAssignmentType.Dynamic;
+      case 'requestormanager':
+      case 'requestor_manager':
+      case 'requestor-manager':
+      case '3':
+        return WorkflowAssignmentType.RequestorManager;
+      case 'previousstepuser':
+      case 'previous_step_user':
+      case 'previous-step-user':
+      case '4':
+        return WorkflowAssignmentType.PreviousStepUser;
+      default:
+        return undefined;
+    }
+  }
+
+  return undefined;
+};
+
+const normalizeApprovalType = (approvalType: unknown): WorkflowApprovalType | undefined => {
+  if (typeof approvalType === 'number') {
+    return approvalType as WorkflowApprovalType;
+  }
+
+  if (typeof approvalType === 'string') {
+    const normalized = approvalType.trim().toLowerCase();
+    switch (normalized) {
+      case 'single':
+      case '0':
+        return WorkflowApprovalType.Single;
+      case 'multiple':
+      case '1':
+        return WorkflowApprovalType.Multiple;
+      case 'consensus':
+      case '2':
+        return WorkflowApprovalType.Consensus;
+      case 'majority':
+      case '3':
+        return WorkflowApprovalType.Majority;
+      default:
+        return undefined;
+    }
+  }
+
+  return undefined;
+};
+
+const normalizeStringList = (values: unknown): string[] => {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+};
+
 // Node palette for drag and drop
 const nodePalette = [
   { type: 'start', label: 'Start', icon: Play, color: 'bg-green-500' },
@@ -1102,10 +1175,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       const estimatedHours = Number.isFinite(estimatedHoursValue) && estimatedHoursValue > 0
         ? estimatedHoursValue
         : undefined;
+      const approverRoles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
       const requiredRole =
-        node.type === 'task' && node.data?.taskAssigneeType === 'role' && node.data?.taskAssigneeRole
-          ? node.data.taskAssigneeRole
-          : undefined;
+        node.type === 'approval' && approverRoles.length > 0
+          ? approverRoles[0]
+          : node.type === 'task' && node.data?.taskAssigneeType === 'role' && node.data?.taskAssigneeRole
+            ? node.data.taskAssigneeRole
+            : undefined;
       return {
         id: stepId,
         name: stepName,
@@ -1266,12 +1342,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     };
     if (normalizeStepType(step.stepType) === WorkflowStepType.Approval) {
       const approvalConfig = step.configuration?.approvalConfig;
-      const approverRoles = approvalConfig?.approverRules
-        ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.Role && rule.role)
+      const configuredApproverRoles = approvalConfig?.approverRules
+        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.Role && rule.role)
         .map(rule => rule.role ?? '')
         .filter(Boolean) ?? [];
+      const approverRoles = configuredApproverRoles.length > 0
+        ? configuredApproverRoles
+        : step.requiredRole
+          ? [step.requiredRole]
+          : [];
       const approverUsers = approvalConfig?.approverRules
-        ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.User && rule.userId)
+        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.User && rule.userId)
         .map(rule => rule.userId ?? '')
         .filter(Boolean) ?? [];
       return {
@@ -1299,7 +1380,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.Role && assignmentRule.role) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.Role && assignmentRule.role) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1311,7 +1392,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.User && assignmentRule.userId) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.User && assignmentRule.userId) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1323,7 +1404,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.Dynamic && assignmentRule.dynamicExpression) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.Dynamic && assignmentRule.dynamicExpression) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1335,7 +1416,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.RequestorManager) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.RequestorManager) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1346,7 +1427,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.PreviousStepUser) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.PreviousStepUser) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1380,8 +1461,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
   const buildStepConfiguration = (node: Node): WorkflowStepConfigurationDto | undefined => {
     if (node.type === 'approval') {
-      const approverRoles = (node.data?.approverRoles || node.data?.approvers || []).filter((role: string) => role);
-      const approverUsers = (node.data?.approverUsers || []).filter((userId: string) => userId);
+      const approverRoles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
+      const approverUsers = normalizeStringList(node.data?.approverUsers);
       const approverRules: WorkflowAssignmentRuleDto[] = [];
 
       approverRoles.forEach((role: string, index: number) => {
@@ -1514,8 +1595,12 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     return undefined;
   };
 
-  const mapApprovalTypeToEnum = (value?: string): WorkflowApprovalType => {
-    switch ((value || '').toLowerCase()) {
+  const mapApprovalTypeToEnum = (value?: unknown): WorkflowApprovalType => {
+    if (typeof value === 'number') {
+      return value as WorkflowApprovalType;
+    }
+
+    switch ((typeof value === 'string' ? value : '').toLowerCase()) {
       case 'all':
         return WorkflowApprovalType.Consensus;
       case 'sequence':
@@ -1526,8 +1611,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     }
   };
 
-  const mapApprovalTypeToLabel = (value?: WorkflowApprovalType): string => {
-    switch (value) {
+  const mapApprovalTypeToLabel = (value?: unknown): string => {
+    switch (normalizeApprovalType(value)) {
       case WorkflowApprovalType.Consensus:
         return 'all';
       case WorkflowApprovalType.Multiple:
@@ -1603,8 +1688,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
     const approvalNodes = nodes.filter(node => node.type === 'approval');
     approvalNodes.forEach(node => {
-      const roles = (node.data?.approverRoles || node.data?.approvers || []) as string[];
-      const users = (node.data?.approverUsers || []) as string[];
+      const roles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
+      const users = normalizeStringList(node.data?.approverUsers);
       if (roles.length === 0 && users.length === 0) {
         errors.push(`Approval step "${node.data?.label || 'Approval'}" must have at least one approver role or user`);
       }
@@ -1882,11 +1967,11 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
   const selectedApproverRoles =
     selectedNode?.type === 'approval'
-      ? ((selectedNode.data?.approverRoles || selectedNode.data?.approvers || []) as string[])
+      ? normalizeStringList(selectedNode.data?.approverRoles || selectedNode.data?.approvers)
       : [];
   const selectedApproverUsers =
     selectedNode?.type === 'approval'
-      ? ((selectedNode.data?.approverUsers || []) as string[])
+      ? normalizeStringList(selectedNode.data?.approverUsers)
       : [];
   const selectedApprovalChecklist =
     selectedNode?.type === 'approval'
@@ -2951,7 +3036,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                           disabled={selectedWorkflowHasLiveInstances}
                           onCheckedChange={(checked) => {
                             const currentRoles: string[] =
-                              selectedNode?.data?.approverRoles || selectedNode?.data?.approvers || [];
+                              normalizeStringList(selectedNode?.data?.approverRoles || selectedNode?.data?.approvers);
                             const nextRoles = checked
                               ? Array.from(new Set([...currentRoles, role.name]))
                               : currentRoles.filter((r: string) => r !== role.name);
@@ -2992,7 +3077,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                           checked={isChecked}
                           disabled={selectedWorkflowHasLiveInstances}
                           onCheckedChange={(checked) => {
-                            const currentUsers: string[] = selectedNode?.data?.approverUsers || [];
+                            const currentUsers: string[] = normalizeStringList(selectedNode?.data?.approverUsers);
                             const nextUsers = checked
                               ? Array.from(new Set([...currentUsers, user.id]))
                               : currentUsers.filter((u: string) => u !== user.id);

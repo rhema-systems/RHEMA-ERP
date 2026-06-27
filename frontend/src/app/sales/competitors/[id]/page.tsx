@@ -13,10 +13,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import {
   Swords, ArrowLeft, Plus, Trophy, XCircle, Clock, Globe, Building,
-  Shield, Target, DollarSign, BookOpen, CheckCircle, AlertTriangle
+  Shield, Target, BookOpen, AlertTriangle, Pencil
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { competitorService, type CompetitorDetail, type CompetitorDeal, type CreateCompetitorDeal } from '@/services/competitorService';
+import { competitorService, type CompetitorDetail, type CompetitorDeal, type CreateCompetitor, type CreateCompetitorDeal } from '@/services/competitorService';
 import { format } from 'date-fns';
 
 const THREAT_CONFIG: Record<string, { className: string; icon: React.ReactNode }> = {
@@ -36,6 +36,11 @@ const EMPTY_DEAL: CreateCompetitorDeal = {
   competitorId: '', threatLevel: 'Medium', dealValue: 0,
 };
 
+const formatAmount = (amount?: number) => {
+  if (amount === undefined || amount === null) return '$0.00';
+  return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 export default function CompetitorDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -43,6 +48,13 @@ export default function CompetitorDetailPage() {
 
   const [competitor, setCompetitor] = useState<CompetitorDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState<CreateCompetitor>({
+    name: '',
+    estimatedMarketShare: 0,
+    threatLevel: 'Medium',
+  });
 
   // Track Deal dialog state
   const [showTrackDeal, setShowTrackDeal] = useState(false);
@@ -80,6 +92,42 @@ export default function CompetitorDetailPage() {
       loadCompetitor();
     } catch (error: any) { toast.error(error.message || 'Failed to track deal'); }
     finally { setTracking(false); }
+  };
+
+  const openEditProfile = () => {
+    if (!competitor) return;
+    setProfileForm({
+      name: competitor.name,
+      website: competitor.website || '',
+      industry: competitor.industry || '',
+      description: competitor.description || '',
+      strengths: competitor.strengths || '',
+      weaknesses: competitor.weaknesses || '',
+      keyProducts: competitor.keyProducts || '',
+      pricingStrategy: competitor.pricingStrategy || '',
+      estimatedMarketShare: competitor.estimatedMarketShare,
+      threatLevel: competitor.threatLevel || 'Medium',
+    });
+    setShowEditProfile(true);
+  };
+
+  const handleUpdateProfile = async () => {
+    if (!profileForm.name.trim()) {
+      toast.error('Competitor name is required');
+      return;
+    }
+
+    try {
+      setSavingProfile(true);
+      const result = await competitorService.updateCompetitor(competitorId, profileForm);
+      setCompetitor(result.data);
+      toast.success('Competitor profile updated');
+      setShowEditProfile(false);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update competitor profile');
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const openOutcomeDialog = (deal: CompetitorDeal) => {
@@ -154,15 +202,22 @@ export default function CompetitorDetailPage() {
             </div>
           </div>
         </div>
-        <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => setShowTrackDeal(true)}>
-          <Plus className="h-4 w-4 mr-2" />Track Deal
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={openEditProfile}>
+            <Pencil className="h-4 w-4 mr-2" />Edit Profile
+          </Button>
+          <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => setShowTrackDeal(true)}>
+            <Plus className="h-4 w-4 mr-2" />Track Deal
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Market Share</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold">{competitor.estimatedMarketShare}%</p></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Open Deals</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold text-amber-600">{competitor.openDeals}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Total Deals</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-blue-600"><Clock className="h-5 w-5 inline" /> {competitor.dealCount}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">We Won</CardTitle></CardHeader>
@@ -170,9 +225,7 @@ export default function CompetitorDetailPage() {
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">We Lost</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-red-600"><XCircle className="h-5 w-5 inline" /> {competitor.lostDeals}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Win Rate</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold text-purple-600">
-            {competitor.dealCount > 0 ? Math.round((competitor.wonDeals / (competitor.wonDeals + competitor.lostDeals || 1)) * 100) : 0}%
-          </p></CardContent></Card>
+          <CardContent><p className="text-2xl font-bold text-purple-600">{competitor.winRate}%</p></CardContent></Card>
       </div>
 
       {/* Intelligence Profile */}
@@ -239,7 +292,7 @@ export default function CompetitorDetailPage() {
                     <TableCell className="font-medium">{deal.opportunityName || '-'}</TableCell>
                     <TableCell>{deal.customerName || '-'}</TableCell>
                     <TableCell><Badge className={THREAT_CONFIG[deal.threatLevel]?.className || ''}>{deal.threatLevel}</Badge></TableCell>
-                    <TableCell className="font-semibold">${deal.dealValue.toLocaleString()}</TableCell>
+                    <TableCell className="font-semibold">{formatAmount(deal.dealValue)}</TableCell>
                     <TableCell className="max-w-[200px] truncate text-sm">{deal.competitorProposal || '-'}</TableCell>
                     <TableCell className="max-w-[200px] truncate text-sm text-green-700">{deal.ourDifferentiator || '-'}</TableCell>
                     <TableCell className="text-sm">{formatDate(deal.reportedDate)}</TableCell>
@@ -286,11 +339,11 @@ export default function CompetitorDetailPage() {
                     </TableCell>
                     <TableCell className="font-medium">{deal.opportunityName || '-'}</TableCell>
                     <TableCell>{deal.customerName || '-'}</TableCell>
-                    <TableCell className="font-semibold">${deal.dealValue.toLocaleString()}</TableCell>
+                    <TableCell className="font-semibold">{formatAmount(deal.dealValue)}</TableCell>
                     <TableCell className="max-w-[150px] truncate text-sm">{deal.competitorProposal || '-'}</TableCell>
                     <TableCell className="max-w-[150px] truncate text-sm text-green-700">{deal.ourDifferentiator || '-'}</TableCell>
                     <TableCell className="max-w-[200px] text-sm italic text-amber-700">{deal.lessonsLearned || '-'}</TableCell>
-                    <TableCell className="text-sm">{formatDate(deal.reportedDate)}</TableCell>
+                    <TableCell className="text-sm">{formatDate(deal.resolvedDate || deal.reportedDate)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -298,6 +351,86 @@ export default function CompetitorDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={showEditProfile} onOpenChange={setShowEditProfile}>
+        <DialogContent className="sm:max-w-[650px]">
+          <DialogHeader>
+            <DialogTitle>Edit Competitor Profile</DialogTitle>
+            <DialogDescription>Maintain products, pricing, strengths, and market positioning for this competitor.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Company Name *</Label>
+                <Input value={profileForm.name} onChange={(e) => setProfileForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Industry</Label>
+                <Input value={profileForm.industry || ''} onChange={(e) => setProfileForm(f => ({ ...f, industry: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Threat Level</Label>
+                <Select value={profileForm.threatLevel} onValueChange={(v) => setProfileForm(f => ({ ...f, threatLevel: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Low">Low</SelectItem>
+                    <SelectItem value="Medium">Medium</SelectItem>
+                    <SelectItem value="High">High</SelectItem>
+                    <SelectItem value="Critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Market Share (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={profileForm.estimatedMarketShare}
+                  onChange={(e) => setProfileForm(f => ({ ...f, estimatedMarketShare: Number(e.target.value) || 0 }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Website</Label>
+              <Input value={profileForm.website || ''} onChange={(e) => setProfileForm(f => ({ ...f, website: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Key Products / Services</Label>
+                <Textarea rows={2} value={profileForm.keyProducts || ''} onChange={(e) => setProfileForm(f => ({ ...f, keyProducts: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Pricing Strategy</Label>
+                <Textarea rows={2} value={profileForm.pricingStrategy || ''} onChange={(e) => setProfileForm(f => ({ ...f, pricingStrategy: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Strengths</Label>
+                <Textarea rows={2} value={profileForm.strengths || ''} onChange={(e) => setProfileForm(f => ({ ...f, strengths: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Weaknesses</Label>
+                <Textarea rows={2} value={profileForm.weaknesses || ''} onChange={(e) => setProfileForm(f => ({ ...f, weaknesses: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Market Activity Notes</Label>
+              <Textarea rows={3} value={profileForm.description || ''} onChange={(e) => setProfileForm(f => ({ ...f, description: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditProfile(false)}>Cancel</Button>
+            <Button onClick={handleUpdateProfile} disabled={savingProfile || !profileForm.name.trim()}>
+              {savingProfile ? 'Saving...' : 'Save Profile'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Track Deal Dialog */}
       <Dialog open={showTrackDeal} onOpenChange={setShowTrackDeal}>
@@ -345,7 +478,7 @@ export default function CompetitorDetailPage() {
           <DialogHeader>
             <DialogTitle>Record Deal Outcome</DialogTitle>
             <DialogDescription>
-              {outcomeTarget && <>Record the result for "{outcomeTarget.opportunityName || 'this deal'}" (${outcomeTarget?.dealValue.toLocaleString()})</>}
+              {outcomeTarget && <>Record the result for "{outcomeTarget.opportunityName || 'this deal'}" ({formatAmount(outcomeTarget?.dealValue)})</>}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">

@@ -14,12 +14,12 @@ const isMatch = (candidate: WorkflowEntityTypeInfo, key: string) => {
 export const moduleEntityTypeMap: Record<string, string[]> = {
   // Maintenance module includes Fleet (vehicles/trips/inspections/defects) as well as core work management.
   maintenance: ['WorkOrder', 'JobCard', 'Asset', 'FleetTrip', 'FleetVehicle', 'FleetTripInspection', 'FleetDefect'],
-  procurement: ['PurchaseOrder', 'PurchaseRequisition', 'Vendor'],
+  procurement: ['ProcurementPlan', 'PurchaseOrder', 'PurchaseRequisition', 'Tender', 'Vendor'],
   inventory: ['Inventory', 'Asset'],
   hr: ['Employee', 'PayrollRun', 'PayrollSalaryAdvance', 'PayrollBonusSetup', 'PayrollBackpaySetup'],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],
-  sales: ['Customer'],
+  sales: ['Customer', 'SalesOrder', 'SalesAgreement', 'SalesAllocation', 'PlotAllocation', 'Refund', 'CreditNote'],
   quality: ['Quality']
 };
 

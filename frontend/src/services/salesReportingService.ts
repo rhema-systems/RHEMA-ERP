@@ -10,9 +10,19 @@ export interface SalesReportSummary {
   conversionRate: number; openOpportunities: number;
   pipelineValue: number; weightedPipelineValue: number;
   activeCampaigns: number; campaignSpend: number;
+  activeAllocations: number; reservedAllocations: number;
+  soldAllocations: number; leasedAllocations: number; releasedAllocations: number;
+  allocationTrackedValue: number; reservationExposure: number;
+  activeSalesAgreements: number; agreementsExpiringSoon: number;
+  pendingRefunds: number; refundExposure: number;
+  competitorOpenDeals: number; competitorOpenDealValue: number;
+  competitorWinRate: number; highThreatCompetitors: number;
   topProducts: TopProduct[]; topSalesReps: TopSalesRep[];
   monthlySales: MonthlySales[];
+  allocationBySource: SalesMetricBreakdown[];
+  allocationByStatus: SalesMetricBreakdown[];
 }
+export interface SalesMetricBreakdown { label: string; count: number; amount: number; }
 export interface TopProduct { productName: string; orderCount: number; totalRevenue: number; }
 export interface TopSalesRep { salesRepName: string; orderCount: number; totalRevenue: number; commissionEarned: number; }
 export interface MonthlySales { year: number; month: number; monthName: string; revenue: number; orderCount: number; }

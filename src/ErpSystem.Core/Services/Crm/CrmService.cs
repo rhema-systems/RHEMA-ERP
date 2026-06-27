@@ -237,6 +237,12 @@ public class CrmService : ICrmService
         var tenderInvitationRepository = _unitOfWork.Repository<TenderInvitation>();
         var tenderBidRepository = _unitOfWork.Repository<TenderBid>();
         var tenderAwardRepository = _unitOfWork.Repository<TenderAward>();
+        var salesOrderRepository = _unitOfWork.Repository<SalesOrder>();
+        var salesAgreementRepository = _unitOfWork.Repository<SalesAgreement>();
+        var salesAllocationRepository = _unitOfWork.Repository<SalesAllocation>();
+        var returnOrderRepository = _unitOfWork.Repository<ReturnOrder>();
+        var creditNoteRepository = _unitOfWork.Repository<CreditNote>();
+        var refundRepository = _unitOfWork.Repository<Refund>();
 
         var account = await businessPartnerRepository.GetByIdAsync(businessPartnerId, x => x.Contacts);
         if (account == null || account.TenantId != tenantId)
@@ -309,6 +315,42 @@ public class CrmService : ICrmService
                 x.TenantId == tenantId
                 && x.BusinessPartnerId == businessPartnerId))
             .ToList();
+        var salesOrders = (await salesOrderRepository.FindAsync(x =>
+                x.TenantId == tenantId
+                && x.BusinessPartnerId == businessPartnerId))
+            .ToList();
+        var salesAgreements = (await salesAgreementRepository.FindAsync(x =>
+                x.TenantId == tenantId
+                && x.BusinessPartnerId == businessPartnerId))
+            .ToList();
+        var salesAllocations = (await salesAllocationRepository.FindAsync(x =>
+                x.TenantId == tenantId
+                && x.BusinessPartnerId.HasValue
+                && x.BusinessPartnerId.Value == businessPartnerId))
+            .ToList();
+        var salesOrderIds = salesOrders.Select(x => x.Id).ToHashSet();
+        var returnOrders = salesOrderIds.Count == 0
+            ? new List<ReturnOrder>()
+            : (await returnOrderRepository.FindAsync(x =>
+                    x.TenantId == tenantId
+                    && salesOrderIds.Contains(x.SalesOrderId)))
+                .ToList();
+        var returnOrderIds = returnOrders.Select(x => x.Id).ToHashSet();
+        var creditNotes = returnOrderIds.Count == 0
+            ? new List<CreditNote>()
+            : (await creditNoteRepository.FindAsync(x =>
+                    x.TenantId == tenantId
+                    && x.ReturnOrderId.HasValue
+                    && returnOrderIds.Contains(x.ReturnOrderId.Value)))
+                .ToList();
+        var creditNoteIds = creditNotes.Select(x => x.Id).ToHashSet();
+        var refunds = (returnOrderIds.Count == 0 && creditNoteIds.Count == 0)
+            ? new List<Refund>()
+            : (await refundRepository.FindAsync(x =>
+                    x.TenantId == tenantId
+                    && ((x.ReturnOrderId.HasValue && returnOrderIds.Contains(x.ReturnOrderId.Value))
+                        || (x.CreditNoteId.HasValue && creditNoteIds.Contains(x.CreditNoteId.Value)))))
+                .ToList();
         var relatedTenderIds = tenderInvitations.Select(x => x.TenderId)
             .Concat(tenderBids.Select(x => x.TenderId))
             .Concat(tenderAwards.Select(x => x.TenderId))
@@ -428,14 +470,23 @@ public class CrmService : ICrmService
                     leadLookup))
                 .ToList(),
             Activities = relatedActivities
-                .OrderBy(x => x.DueDate ?? DateTime.MaxValue)
-                .ThenByDescending(x => x.ActivityDate)
-                .Take(take)
                 .Select(x => MapActivitySummary(
                     x,
                     new Dictionary<Guid, Opportunity>(relatedOpportunities.ToDictionary(y => y.Id)),
                     new Dictionary<Guid, string> { [businessPartnerId] = account.PartnerName },
                     leadLookup))
+                .Concat(BuildSalesMilestoneActivities(
+                    salesOrders,
+                    salesAgreements,
+                    salesAllocations,
+                    returnOrders,
+                    creditNotes,
+                    refunds,
+                    account))
+                .OrderByDescending(x => x.ActivityDate)
+                .ThenByDescending(x => x.DueDate ?? DateTime.MinValue)
+                .ThenBy(x => x.Subject)
+                .Take(take)
                 .ToList(),
             Projects = projects
                 .OrderByDescending(x => x.TargetEndDate)
@@ -2824,6 +2875,7 @@ public class CrmService : ICrmService
         var quoteRepository = _unitOfWork.Repository<Quote>();
         var contractRepository = _unitOfWork.Repository<Contract>();
         var projectRepository = _unitOfWork.Repository<Project>();
+        var salesOrderRepository = _unitOfWork.Repository<SalesOrder>();
 
         var opportunity = await opportunityRepository.GetByIdAsync(opportunityId);
         if (opportunity == null || opportunity.TenantId != tenantId)
@@ -2855,6 +2907,12 @@ public class CrmService : ICrmService
 
         var listItem = MapOpportunityListItem(opportunity, businessPartnerLookup, leadLookup);
         var quotes = (await quoteRepository.FindAsync(x => x.TenantId == tenantId && x.OpportunityId == opportunityId)).ToList();
+        var quoteIds = quotes.Select(x => x.Id).ToHashSet();
+        var relatedSalesOrders = (await salesOrderRepository.FindAsync(x =>
+                x.TenantId == tenantId
+                && ((x.OpportunityId.HasValue && x.OpportunityId.Value == opportunityId)
+                    || (x.QuoteId.HasValue && quoteIds.Contains(x.QuoteId.Value)))))
+            .ToList();
         var relatedContracts = relatedBusinessPartnerId.HasValue
             ? (await contractRepository.FindAsync(x =>
                     x.TenantId == tenantId
@@ -2922,6 +2980,7 @@ public class CrmService : ICrmService
                 quotes,
                 relatedContracts,
                 relatedProjects,
+                relatedSalesOrders,
                 businessPartnerLookup,
                 leadLookup)
         };
@@ -3395,6 +3454,7 @@ public class CrmService : ICrmService
         var businessPartnerRepository = _unitOfWork.Repository<BusinessPartner>();
         var contractRepository = _unitOfWork.Repository<Contract>();
         var projectRepository = _unitOfWork.Repository<Project>();
+        var salesOrderRepository = _unitOfWork.Repository<SalesOrder>();
 
         var quote = await quoteRepository.GetByIdAsync(quoteId, x => x.LineItems);
         if (quote == null || quote.TenantId != tenantId)
@@ -3449,6 +3509,12 @@ public class CrmService : ICrmService
                 x.TenantId == tenantId
                 && x.OpportunityId == quote.OpportunityId))
             .ToList();
+        var opportunityQuoteIds = opportunityQuotes.Select(x => x.Id).ToHashSet();
+        var relatedSalesOrders = (await salesOrderRepository.FindAsync(x =>
+                x.TenantId == tenantId
+                && ((x.OpportunityId.HasValue && x.OpportunityId.Value == opportunity.Id)
+                    || (x.QuoteId.HasValue && opportunityQuoteIds.Contains(x.QuoteId.Value)))))
+            .ToList();
         var opportunityLookup = new Dictionary<Guid, Opportunity> { [opportunity.Id] = opportunity };
         var listItem = MapQuoteListItem(quote, opportunityLookup, businessPartnerLookup, leadLookup);
 
@@ -3494,6 +3560,7 @@ public class CrmService : ICrmService
                 opportunityQuotes,
                 relatedContracts,
                 relatedProjects,
+                relatedSalesOrders,
                 businessPartnerLookup,
                 leadLookup)
         };
@@ -4784,6 +4851,7 @@ public class CrmService : ICrmService
         var contractRepository = _unitOfWork.Repository<Contract>();
         var projectRepository = _unitOfWork.Repository<Project>();
         var businessPartnerRepository = _unitOfWork.Repository<BusinessPartner>();
+        var salesOrderRepository = _unitOfWork.Repository<SalesOrder>();
 
         var allLeads = (await leadRepository.FindAsync(x => x.TenantId == tenantId)).ToList();
         var leadLookup = allLeads.ToDictionary(x => x.Id);
@@ -4850,9 +4918,30 @@ public class CrmService : ICrmService
             ? new List<Quote>()
             : (await quoteRepository.FindAsync(x => x.TenantId == tenantId && horizonOpportunityIds.Contains(x.OpportunityId)))
                 .ToList();
+        var quoteLookup = quotes.ToDictionary(x => x.Id);
+        var quoteIds = quoteLookup.Keys.ToHashSet();
         var quotesByOpportunityId = quotes
             .GroupBy(x => x.OpportunityId)
             .ToDictionary(x => x.Key, x => x.ToList());
+        var salesOrders = horizonOpportunityIds.Count == 0 && quoteIds.Count == 0
+            ? new List<SalesOrder>()
+            : (await salesOrderRepository.FindAsync(x =>
+                    x.TenantId == tenantId
+                    && ((x.OpportunityId.HasValue && horizonOpportunityIds.Contains(x.OpportunityId.Value))
+                        || (x.QuoteId.HasValue && quoteIds.Contains(x.QuoteId.Value)))))
+                .ToList();
+        var salesOrdersByOpportunityId = salesOrders
+            .Select(order => new
+            {
+                Order = order,
+                OpportunityId = order.OpportunityId
+                    ?? (order.QuoteId.HasValue && quoteLookup.TryGetValue(order.QuoteId.Value, out var linkedQuote)
+                        ? linkedQuote.OpportunityId
+                        : (Guid?)null)
+            })
+            .Where(x => x.OpportunityId.HasValue)
+            .GroupBy(x => x.OpportunityId!.Value)
+            .ToDictionary(x => x.Key, x => x.Select(y => y.Order).ToList());
 
         var relevantBusinessPartnerIds = horizonOpportunities
             .Select(x => ResolveOpportunityBusinessPartnerId(x, quotesByOpportunityId.GetValueOrDefault(x.Id), leadLookup))
@@ -4918,6 +5007,7 @@ public class CrmService : ICrmService
                 var relatedProjects = resolvedBusinessPartnerId.HasValue
                     ? projectsByResolvedPartnerId.GetValueOrDefault(resolvedBusinessPartnerId.Value) ?? new List<Project>()
                     : new List<Project>();
+                var relatedSalesOrders = salesOrdersByOpportunityId.GetValueOrDefault(opportunity.Id) ?? new List<SalesOrder>();
                 var leakageReason = ResolveConversionJourneyLeakageReason(
                     opportunity,
                     relatedQuotes.Count,
@@ -4963,6 +5053,7 @@ public class CrmService : ICrmService
                             relatedQuotes,
                             relatedContracts,
                             relatedProjects,
+                            relatedSalesOrders,
                             businessPartnerNameLookup,
                             leadLookup)
                     }
@@ -6901,6 +6992,132 @@ public class CrmService : ICrmService
             : null;
     }
 
+    private static IEnumerable<CrmActivitySummaryDto> BuildSalesMilestoneActivities(
+        IReadOnlyCollection<SalesOrder> salesOrders,
+        IReadOnlyCollection<SalesAgreement> salesAgreements,
+        IReadOnlyCollection<SalesAllocation> salesAllocations,
+        IReadOnlyCollection<ReturnOrder> returnOrders,
+        IReadOnlyCollection<CreditNote> creditNotes,
+        IReadOnlyCollection<Refund> refunds,
+        BusinessPartner account)
+    {
+        var items = new List<CrmActivitySummaryDto>();
+
+        items.AddRange(salesOrders.Select(order => BuildSalesMilestoneActivity(
+            order.Id,
+            $"Sales Order {ResolveDocumentReference(order.DocumentNumber, order.Id)}",
+            "Sales Order",
+            order.OrderStatus.ToString(),
+            order.DocumentDate,
+            account.Id,
+            account.PartnerName,
+            order.OpportunityId,
+            "SalesOrder",
+            $"/sales/orders/{order.Id}")));
+
+        items.AddRange(salesAgreements.Select(agreement => BuildSalesMilestoneActivity(
+            agreement.Id,
+            $"Sales Agreement {ResolveDocumentReference(agreement.DocumentNumber, agreement.Id)}",
+            "Sales Agreement",
+            agreement.AgreementStatus.ToString(),
+            agreement.StartDate,
+            account.Id,
+            account.PartnerName,
+            null,
+            "SalesAgreement",
+            $"/sales/agreements/{agreement.Id}")));
+
+        items.AddRange(salesAllocations.Select(allocation => BuildSalesMilestoneActivity(
+            allocation.Id,
+            $"Sales Allocation {allocation.SourceItemName}",
+            "Sales Allocation",
+            allocation.Status,
+            allocation.EffectiveDate ?? allocation.CreatedAt,
+            account.Id,
+            account.PartnerName,
+            allocation.OpportunityId,
+            "SalesAllocation",
+            $"/sales/allocations/{allocation.Id}")));
+
+        items.AddRange(returnOrders.Select(returnOrder => BuildSalesMilestoneActivity(
+            returnOrder.Id,
+            $"Return Order {ResolveDocumentReference(returnOrder.DocumentNumber, returnOrder.Id)}",
+            "Return Order",
+            returnOrder.ReturnStatus.ToString(),
+            returnOrder.DocumentDate,
+            account.Id,
+            account.PartnerName,
+            null,
+            "ReturnOrder",
+            $"/sales/return-orders?returnOrderId={returnOrder.Id}")));
+
+        items.AddRange(creditNotes.Select(creditNote => BuildSalesMilestoneActivity(
+            creditNote.Id,
+            $"Credit Note {ResolveDocumentReference(creditNote.DocumentNumber, creditNote.Id)}",
+            "Credit Note",
+            creditNote.CreditNoteStatus.ToString(),
+            creditNote.AppliedDate ?? creditNote.DocumentDate,
+            account.Id,
+            account.PartnerName,
+            null,
+            "CreditNote",
+            $"/sales/credit-notes?creditNoteId={creditNote.Id}")));
+
+        items.AddRange(refunds.Select(refund => BuildSalesMilestoneActivity(
+            refund.Id,
+            $"Refund {ResolveDocumentReference(refund.DocumentNumber, refund.Id)}",
+            "Refund",
+            refund.RefundStatus.ToString(),
+            refund.ProcessedDate ?? refund.DocumentDate,
+            account.Id,
+            account.PartnerName,
+            null,
+            "Refund",
+            $"/sales/refunds?refundId={refund.Id}")));
+
+        return items;
+    }
+
+    private static CrmActivitySummaryDto BuildSalesMilestoneActivity(
+        Guid entityId,
+        string subject,
+        string activityType,
+        string status,
+        DateTime activityDate,
+        Guid businessPartnerId,
+        string businessPartnerName,
+        Guid? opportunityId,
+        string relatedEntityType,
+        string relatedEntityHref)
+        => new()
+        {
+            ActivityId = entityId,
+            Subject = subject,
+            ActivityType = activityType,
+            ActivityStatus = status,
+            ActivityDate = activityDate,
+            RequiresFollowUp = IsSalesMilestoneFollowUpStatus(status),
+            Priority = 3,
+            BusinessPartnerId = businessPartnerId,
+            BusinessPartnerName = businessPartnerName,
+            OpportunityId = opportunityId,
+            RelatedEntityType = relatedEntityType,
+            RelatedEntityId = entityId,
+            RelatedEntityHref = relatedEntityHref
+        };
+
+    private static string ResolveDocumentReference(string? documentNumber, Guid fallbackId)
+        => string.IsNullOrWhiteSpace(documentNumber)
+            ? fallbackId.ToString("N")[..8].ToUpperInvariant()
+            : documentNumber.Trim();
+
+    private static bool IsSalesMilestoneFollowUpStatus(string status)
+        => ContainsText(status, "Pending")
+            || ContainsText(status, "Submitted")
+            || ContainsText(status, "Draft")
+            || ContainsText(status, "Reserved")
+            || ContainsText(status, "Processing");
+
     private static CrmActivitySummaryDto MapActivitySummary(
         Activity activity,
         IReadOnlyDictionary<Guid, Opportunity> opportunityLookup,
@@ -6962,6 +7179,9 @@ public class CrmService : ICrmService
             LeadName = summary.LeadName,
             OpportunityId = summary.OpportunityId,
             OpportunityName = summary.OpportunityName,
+            RelatedEntityType = summary.RelatedEntityType,
+            RelatedEntityId = summary.RelatedEntityId,
+            RelatedEntityHref = summary.RelatedEntityHref,
             IsOverdue = !IsClosedActivityStatus(activity.ActivityStatus)
                 && dueDate.HasValue
                 && dueDate.Value < DateTime.UtcNow,
@@ -6995,6 +7215,9 @@ public class CrmService : ICrmService
             LeadName = listItem.LeadName,
             OpportunityId = listItem.OpportunityId,
             OpportunityName = listItem.OpportunityName,
+            RelatedEntityType = listItem.RelatedEntityType,
+            RelatedEntityId = listItem.RelatedEntityId,
+            RelatedEntityHref = listItem.RelatedEntityHref,
             IsOverdue = listItem.IsOverdue,
             CreatedAt = listItem.CreatedAt,
             Description = activity.Description,
@@ -7311,6 +7534,7 @@ public class CrmService : ICrmService
         IReadOnlyCollection<Quote> quotes,
         IReadOnlyCollection<Contract> contracts,
         IReadOnlyCollection<Project> projects,
+        IReadOnlyCollection<SalesOrder> salesOrders,
         IReadOnlyDictionary<Guid, string> businessPartnerLookup,
         IReadOnlyDictionary<Guid, Lead> leadLookup)
     {
@@ -7368,6 +7592,26 @@ public class CrmService : ICrmService
                 ReferenceDate = x.AcceptedDate ?? x.SentDate ?? x.ValidUntil,
                 RelationshipType = "Direct",
                 RelationshipNote = "Quote is directly linked to this opportunity.",
+                ReferenceCode = x.DocumentNumber
+            }));
+
+        nodes.AddRange(salesOrders
+            .OrderByDescending(x => x.DocumentDate)
+            .ThenByDescending(x => x.CreatedAt)
+            .Select(x => new CrmConversionChainNodeDto
+            {
+                Stage = "Sales Order",
+                EntityType = "SalesOrder",
+                EntityId = x.Id,
+                Title = $"Sales Order {ResolveDocumentReference(x.DocumentNumber, x.Id)}",
+                Status = x.OrderStatus.ToString(),
+                Amount = x.TotalAmount,
+                Currency = NormalizeCurrencyCode(x.Currency, "USD"),
+                ReferenceDate = x.DocumentDate,
+                RelationshipType = x.QuoteId.HasValue ? "Quote" : "Opportunity",
+                RelationshipNote = x.QuoteId.HasValue
+                    ? "Sales order was created from a CRM quote in this opportunity."
+                    : "Sales order is directly linked to this opportunity.",
                 ReferenceCode = x.DocumentNumber
             }));
 

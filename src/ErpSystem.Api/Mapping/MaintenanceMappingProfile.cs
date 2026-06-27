@@ -18,7 +18,9 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.ChildAssets, opt => opt.MapFrom(src => src.ChildAssets))
             .ForMember(dest => dest.PurchaseDate, opt => opt.MapFrom(src => src.PurchaseDate))
             .ForMember(dest => dest.WarrantyEndDate, opt => opt.MapFrom(src => src.WarrantyEndDate))
-            .ForMember(dest => dest.WarrantyStartDate, opt => opt.MapFrom(src => src.WarrantyStartDate));
+            .ForMember(dest => dest.WarrantyStartDate, opt => opt.MapFrom(src => src.WarrantyStartDate))
+            .ForMember(dest => dest.CurrentProjectName, opt => opt.MapFrom(src => src.CurrentProject != null ? src.CurrentProject.Title : null))
+            .ForMember(dest => dest.CurrentSiteLocationName, opt => opt.MapFrom(src => src.CurrentSiteLocation != null ? src.CurrentSiteLocation.Name : null));
 
         CreateMap<CreateMaintenanceAssetDto, MaintenanceAsset>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -30,12 +32,15 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
             .ForMember(dest => dest.AssetCategory, opt => opt.Ignore())
             .ForMember(dest => dest.Employee, opt => opt.Ignore())
+            .ForMember(dest => dest.CurrentProject, opt => opt.Ignore())
+            .ForMember(dest => dest.CurrentSiteLocation, opt => opt.Ignore())
             .ForMember(dest => dest.ParentAsset, opt => opt.Ignore())
             .ForMember(dest => dest.ChildAssets, opt => opt.Ignore())
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore())
             .ForMember(dest => dest.MaintenanceSchedules, opt => opt.Ignore())
             .ForMember(dest => dest.Inspections, opt => opt.Ignore())
-            .ForMember(dest => dest.Downtimes, opt => opt.Ignore());
+            .ForMember(dest => dest.Downtimes, opt => opt.Ignore())
+            .ForMember(dest => dest.Movements, opt => opt.Ignore());
 
         CreateMap<UpdateMaintenanceAssetDto, MaintenanceAsset>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -50,12 +55,17 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.Mileage, opt => opt.Ignore())
             .ForMember(dest => dest.LastMileageUpdate, opt => opt.Ignore())
             .ForMember(dest => dest.AssetCategory, opt => opt.Ignore())
+            .ForMember(dest => dest.CurrentProject, opt => opt.Ignore())
+            .ForMember(dest => dest.CurrentSiteLocation, opt => opt.Ignore())
             .ForMember(dest => dest.ParentAsset, opt => opt.Ignore())
             .ForMember(dest => dest.ChildAssets, opt => opt.Ignore())
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore())
             .ForMember(dest => dest.MaintenanceSchedules, opt => opt.Ignore())
             .ForMember(dest => dest.Inspections, opt => opt.Ignore())
-            .ForMember(dest => dest.Downtimes, opt => opt.Ignore());
+            .ForMember(dest => dest.Downtimes, opt => opt.Ignore())
+            .ForMember(dest => dest.Movements, opt => opt.Ignore());
+
+        CreateMap<MaintenanceAssetMovement, MaintenanceAssetMovementDto>();
 
         CreateMap<MaintenanceAssetCategory, MaintenanceAssetCategoryDto>()
             .ForMember(dest => dest.AssetCount, opt => opt.MapFrom(src => src.Assets.Count))

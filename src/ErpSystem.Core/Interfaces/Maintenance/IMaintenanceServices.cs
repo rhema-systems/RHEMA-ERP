@@ -30,6 +30,11 @@ public interface IMaintenanceAssetService
     Task UpdateAssetMileageAsync(Guid assetId, double mileage);
     Task<string> GenerateAssetNumberAsync(Guid categoryId);
     Task<IEnumerable<MaintenanceAssetDto>> GetAvailableVehiclesAsync();
+    Task<MaintenanceAssetDto> MoveAssetAsync(Guid assetId, MoveMaintenanceAssetDto moveDto);
+    Task<IReadOnlyList<MaintenanceAssetMovementDto>> GetMovementHistoryAsync(Guid assetId);
+    Task<MaintenanceAssetLifecycleHistoryDto> GetLifecycleHistoryAsync(Guid assetId);
+    Task<MaintenanceAssetImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName);
+    Task<byte[]> GenerateImportTemplateAsync();
 }
 
 public interface IMaintenanceAssetCategoryService
@@ -478,6 +483,8 @@ public interface IInspectionTemplateService
     Task<IEnumerable<InspectionTemplateDto>> GetAllTemplatesAsync();
     Task<IEnumerable<InspectionTemplateDto>> GetTemplatesByCategoryAsync(string category);
     Task<IEnumerable<InspectionTemplateDto>> GetActiveTemplatesAsync();
+    Task<IEnumerable<InspectionTemplateDto>> GetTemplatesAsync(InspectionTemplateFilterDto filter);
+    Task<InspectionTemplateQrPackageDto> GetQrPackageAsync(Guid id, InspectionTemplateQrPackageRequestDto request);
 }
 
 public interface IAssetInspectionService

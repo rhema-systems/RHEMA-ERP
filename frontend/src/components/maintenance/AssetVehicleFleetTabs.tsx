@@ -41,6 +41,27 @@ function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
   );
 }
 
+function getComplianceStatus(expiryDateIso?: string | null): 'Not set' | 'Overdue' | 'Due soon' | 'OK' {
+  if (!expiryDateIso) return 'Not set';
+  const expiry = new Date(expiryDateIso);
+  if (Number.isNaN(expiry.getTime())) return 'Not set';
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const expiryUtc = Date.UTC(expiry.getFullYear(), expiry.getMonth(), expiry.getDate());
+  const days = Math.floor((expiryUtc - todayUtc) / 86_400_000);
+  if (days < 0) return 'Overdue';
+  if (days <= 7) return 'Due soon';
+  return 'OK';
+}
+
+function ComplianceStatusBadge({ expiryDate }: { expiryDate?: string | null }) {
+  const status = getComplianceStatus(expiryDate);
+  if (status === 'OK') return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">OK</Badge>;
+  if (status === 'Due soon') return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">Due soon</Badge>;
+  if (status === 'Overdue') return <Badge variant="destructive">Overdue</Badge>;
+  return <Badge variant="outline">Not set</Badge>;
+}
+
 export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAssetId: string }) {
   const router = useRouter();
   const pageSize = 10;
@@ -206,7 +227,7 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Trips (This Month)</CardTitle>
+                <CardTitle className="text-sm font-medium">Completed Trips (This Month)</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{summary.data.tripsThisMonth}</div>
@@ -386,6 +407,7 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                 <TableHead>Type</TableHead>
                 <TableHead>Issue Date</TableHead>
                 <TableHead>Expiry Date</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Critical</TableHead>
               </TableRow>
             </TableHeader>
@@ -395,10 +417,11 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                   <TableCell className="text-sm">{c.complianceType}</TableCell>
                   <TableCell className="text-sm">{c.issueDate ? formatFleetDate(c.issueDate) : '-'}</TableCell>
                   <TableCell className="text-sm">{formatFleetDate(c.expiryDate)}</TableCell>
+                  <TableCell><ComplianceStatusBadge expiryDate={c.expiryDate} /></TableCell>
                   <TableCell>{c.isCritical ? <Badge className="bg-red-100 text-red-800">Yes</Badge> : <Badge variant="outline">No</Badge>}</TableCell>
                 </TableRow>
               ))}
-              {(compliance.data.items || []).length === 0 && <EmptyRow colSpan={4} message="No compliance records found for this vehicle." />}
+              {(compliance.data.items || []).length === 0 && <EmptyRow colSpan={5} message="No compliance records found for this vehicle." />}
             </TableBody>
           </Table>
         )}

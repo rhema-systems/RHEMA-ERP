@@ -1,6 +1,7 @@
 using System.Linq;
 using ErpSystem.Core.DTOs.Workflow;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -15,6 +16,8 @@ namespace ErpSystem.Api.Services.Workflow;
 /// </summary>
 public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workflow.IWorkflowDefinitionService
 {
+    private static readonly JsonSerializerOptions WorkflowJsonOptions = CreateWorkflowJsonOptions();
+
     private readonly ErpSystem.Core.Interfaces.Services.IWorkflowDefinitionService _coreService;
     private readonly ICurrentUserService _currentUserService;
     private readonly IWorkflowDefinitionRepository _workflowDefinitionRepository;
@@ -323,7 +326,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
                 IsStartStep = i == 0,
                 IsEndStep = i == orderedSteps.Count - 1,
                 Configuration = stepDto.Configuration != null
-                    ? JsonSerializer.Serialize(stepDto.Configuration)
+                    ? JsonSerializer.Serialize(stepDto.Configuration, WorkflowJsonOptions)
                     : null,
                 TenantId = tenantId
             };
@@ -354,7 +357,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
                     Name = transitionDto.Name,
                     Description = transitionDto.Description,
                     Condition = transitionDto.Condition != null
-                        ? JsonSerializer.Serialize(transitionDto.Condition)
+                        ? JsonSerializer.Serialize(transitionDto.Condition, WorkflowJsonOptions)
                         : null,
                     IsDefault = transitionDto.IsDefault,
                     Priority = transitionDto.Priority,
@@ -466,6 +469,17 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         return NormalizeEntityTypeKey(entityType.Code) == requested ||
                NormalizeEntityTypeKey(entityType.Name) == requested ||
                NormalizeEntityTypeKey(entityType.DisplayName) == requested;
+    }
+
+    private static JsonSerializerOptions CreateWorkflowJsonOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
     }
 
     private static string NormalizeEntityTypeKey(string? value)

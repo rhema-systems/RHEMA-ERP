@@ -15,7 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatFleetDateTime } from '@/lib/date-format';
 
 import fleetService, {
-  EmployeeDto,
+  FleetDriverDto,
   FleetVehicleAssignmentDto,
   FleetVehicleListDto,
   PagedResult,
@@ -79,7 +79,7 @@ export default function FleetVehiclesPage() {
   const [assignOpen, setAssignOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [selectedVehicle, setSelectedVehicle] = React.useState<FleetVehicleListDto | null>(null);
-  const [employees, setEmployees] = React.useState<EmployeeDto[]>([]);
+  const [drivers, setDrivers] = React.useState<FleetDriverDto[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = React.useState<string>('none');
   const [assignmentHistory, setAssignmentHistory] = React.useState<FleetVehicleAssignmentDto[]>([]);
 
@@ -192,12 +192,18 @@ export default function FleetVehiclesPage() {
 
   const totalPages = Math.max(1, Math.ceil((result.totalCount || 0) / pageSize));
 
-  const loadEmployees = React.useCallback(async () => {
+  const loadEligibleDrivers = React.useCallback(async (vehicleAssetId?: string) => {
     try {
-      const emps = await fleetService.getEmployees({ page: 1, pageSize: 100 });
-      setEmployees(emps || []);
+      const directory = await fleetService.getDrivers({ page: 1, pageSize: 100 });
+      setDrivers((directory.items || []).filter((driver) =>
+        driver.isActive &&
+        driver.isLicenseVerified &&
+        ['valid', 'expiring'].includes(driver.licenseStatus.toLowerCase()) &&
+        driver.availabilityStatus !== 'Engaged' &&
+        (!driver.isAssigned || driver.currentVehicleAssetId === vehicleAssetId)
+      ));
     } catch (e: any) {
-      toast({ title: 'Failed to load employees', description: e?.message || String(e), variant: 'destructive' });
+      toast({ title: 'Failed to load eligible drivers', description: e?.message || String(e), variant: 'destructive' });
     }
   }, [toast]);
 
@@ -213,7 +219,7 @@ export default function FleetVehiclesPage() {
     setSelectedVehicle(v);
     setSelectedEmployeeId('none');
     setAssignOpen(true);
-    await loadEmployees();
+    await loadEligibleDrivers(v.id);
   };
 
   const submitAssign = async () => {
@@ -393,20 +399,24 @@ export default function FleetVehiclesPage() {
           </DialogHeader>
 
           <div className="space-y-2">
-            <Label>Employee</Label>
+            <Label>Eligible driver</Label>
             <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
               <SelectTrigger>
                 <SelectValue placeholder="Select employee" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Select employee</SelectItem>
-                {employees.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.firstName} {e.lastName} ({e.employeeNumber})
+                {drivers.map((driver) => (
+                  <SelectItem key={driver.employeeId} value={driver.employeeId}>
+                    {driver.fullName} ({driver.employeeNumber}) · {driver.licenseStatus} licence
                   </SelectItem>
                 ))}
+                {drivers.length === 0 && <SelectItem value="no-eligible-drivers" disabled>No eligible drivers available</SelectItem>}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              Only available drivers with a verified, current HR driver licence are listed.
+            </p>
           </div>
 
           <DialogFooter>

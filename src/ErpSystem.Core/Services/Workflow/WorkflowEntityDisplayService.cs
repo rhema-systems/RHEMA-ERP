@@ -18,6 +18,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
     private readonly IPurchaseRequisitionRepository _purchaseRequisitionRepository;
     private readonly IPurchaseOrderRepository _purchaseOrderRepository;
     private readonly ITenderRepository _tenderRepository;
+    private readonly IProcurementPlanRepository _procurementPlanRepository;
     private readonly IProjectRepository _projectRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IJobCardRepository _jobCardRepository;
@@ -30,6 +31,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
         IPurchaseRequisitionRepository purchaseRequisitionRepository,
         IPurchaseOrderRepository purchaseOrderRepository,
         ITenderRepository tenderRepository,
+        IProcurementPlanRepository procurementPlanRepository,
         IProjectRepository projectRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         IJobCardRepository jobCardRepository,
@@ -41,6 +43,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
         _purchaseRequisitionRepository = purchaseRequisitionRepository;
         _purchaseOrderRepository = purchaseOrderRepository;
         _tenderRepository = tenderRepository;
+        _procurementPlanRepository = procurementPlanRepository;
         _projectRepository = projectRepository;
         _businessPartnerRepository = businessPartnerRepository;
         _jobCardRepository = jobCardRepository;
@@ -152,6 +155,35 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("FleetTripInspection") || key == Normalize("FLEET_TRIP_INSPECTION") || key == Normalize("Fleet Trip Inspection"))
+            {
+                var inspection = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTripInspection>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.VehicleAsset, x => x.InspectionTemplate);
+                info.EntityType = "FleetTripInspection";
+                info.EntityNumber = $"FI-{entityId.ToString()[..8].ToUpperInvariant()}";
+                info.EntityName = inspection == null
+                    ? null
+                    : $"{inspection.VehicleAsset?.Name ?? "Asset"} / {inspection.InspectionTemplate?.Name ?? inspection.InspectionKind}";
+                info.ActionUrl = inspection?.FleetTripId.HasValue == true
+                    ? $"/maintenance/fleet/trips?id={inspection.FleetTripId}&inspectionId={entityId}"
+                    : $"/maintenance/assets?id={inspection?.VehicleAssetId}&tab=inspections&inspectionId={entityId}";
+                return info;
+            }
+
+            if (key == Normalize("ProcurementPlan") || key == Normalize("PROCUREMENT_PLAN") || key == Normalize("Procurement Plan"))
+            {
+                var plan = await _procurementPlanRepository.GetWithFullDetailsAsync(entityId);
+                info.EntityType = "ProcurementPlan";
+                info.EntityNumber = plan?.PlanNumber;
+                info.EntityName = plan == null
+                    ? null
+                    : string.IsNullOrWhiteSpace(plan.Department?.Name)
+                        ? plan.Title
+                        : $"{plan.Title} ({plan.Department.Name})";
+                info.ActionUrl = $"/procurement/planning/plans/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("Project") || key == Normalize("PROJECT"))
             {
                 var project = await _projectRepository.GetByIdAsync(entityId);
@@ -185,6 +217,47 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                     ? null
                     : $"{closure.Project?.Title ?? "Project"} / Closure";
                 info.ActionUrl = closure == null ? null : $"/development/projects/{closure.ProjectId}";
+                return info;
+            }
+
+            if (key == Normalize("SalesOrder") || key == Normalize("SALES_ORDER") || key == Normalize("Sales Order"))
+            {
+                var order = await _unitOfWork.Repository<ErpSystem.Core.Entities.Sales.SalesOrder>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "SalesOrder";
+                info.EntityNumber = order?.DocumentNumber;
+                info.EntityName = order?.CustomerName;
+                info.ActionUrl = $"/sales/orders/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("SalesAgreement") || key == Normalize("SALES_AGREEMENT") || key == Normalize("Sales Agreement"))
+            {
+                var agreement = await _unitOfWork.Repository<ErpSystem.Core.Entities.Sales.SalesAgreement>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "SalesAgreement";
+                info.EntityNumber = agreement?.DocumentNumber;
+                info.EntityName = agreement == null
+                    ? null
+                    : string.IsNullOrWhiteSpace(agreement.CustomerName)
+                        ? agreement.AgreementTitle
+                        : $"{agreement.AgreementTitle} ({agreement.CustomerName})";
+                info.ActionUrl = $"/sales/agreements/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("SalesAllocation") || key == Normalize("SALES_ALLOCATION") || key == Normalize("Sales Allocation") || key == Normalize("PlotAllocation"))
+            {
+                var allocation = await _unitOfWork.Repository<ErpSystem.Core.Entities.Sales.SalesAllocation>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "SalesAllocation";
+                info.EntityNumber = allocation?.SourceItemCode ?? allocation?.SourceItemId;
+                info.EntityName = allocation == null
+                    ? null
+                    : string.IsNullOrWhiteSpace(allocation.CustomerName)
+                        ? allocation.SourceItemName
+                        : $"{allocation.SourceItemName} ({allocation.CustomerName})";
+                info.ActionUrl = $"/sales/allocations/{entityId}";
                 return info;
             }
 

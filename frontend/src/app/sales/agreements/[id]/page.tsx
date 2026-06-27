@@ -13,9 +13,11 @@ import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import {
-  FileText, ArrowLeft, CheckCircle, XCircle, Send, Pause, Play,
-  RefreshCw, Ban, AlertTriangle, Clock, Calendar, Building2, Home
+  FileText, ArrowLeft, Pause, Play,
+  RefreshCw, Ban, AlertTriangle, Calendar, Building2, Home
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -52,8 +54,6 @@ export default function SalesAgreementDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
 
   // Dialog states
-  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
-  const [approvalComments, setApprovalComments] = useState('');
   const [terminateDialogOpen, setTerminateDialogOpen] = useState(false);
   const [terminateReason, setTerminateReason] = useState('');
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
@@ -90,9 +90,21 @@ export default function SalesAgreementDetailPage() {
     }
   };
 
-  const handleSubmit = () => handleAction(() => salesAgreementService.submitForApproval(agreementId), 'Submitted for approval');
-  const handleApprove = () => handleAction(() => salesAgreementService.processApproval(agreementId, { isApproved: true, comments: approvalComments }), 'Agreement approved').then(() => setApprovalDialogOpen(false));
-  const handleReject = () => handleAction(() => salesAgreementService.processApproval(agreementId, { isApproved: false, comments: approvalComments }), 'Agreement rejected').then(() => setApprovalDialogOpen(false));
+  const handleWorkflowSubmit = async () => {
+    const updated = await salesAgreementService.submitForApproval(agreementId);
+    setAgreement(updated);
+  };
+
+  const handleWorkflowApprove = async (comments: string) => {
+    const updated = await salesAgreementService.processApproval(agreementId, { isApproved: true, comments });
+    setAgreement(updated);
+  };
+
+  const handleWorkflowReject = async (comments: string) => {
+    const updated = await salesAgreementService.processApproval(agreementId, { isApproved: false, comments });
+    setAgreement(updated);
+  };
+
   const handleSuspend = () => handleAction(() => salesAgreementService.suspend(agreementId, suspendReason), 'Agreement suspended').then(() => setSuspendDialogOpen(false));
   const handleResume = () => handleAction(() => salesAgreementService.resume(agreementId), 'Agreement resumed');
   const handleTerminate = () => handleAction(() => salesAgreementService.terminate(agreementId, terminateReason), 'Agreement terminated').then(() => setTerminateDialogOpen(false));
@@ -147,20 +159,22 @@ export default function SalesAgreementDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {canSubmit && <Button onClick={handleSubmit} disabled={actionLoading}><Send className="h-4 w-4 mr-2" />Submit</Button>}
-          {canApprove && (
-            <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
-              <DialogTrigger asChild><Button><CheckCircle className="h-4 w-4 mr-2" />Review</Button></DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>Review Agreement</DialogTitle></DialogHeader>
-                <Textarea placeholder="Comments..." value={approvalComments} onChange={(e) => setApprovalComments(e.target.value)} />
-                <DialogFooter>
-                  <Button variant="destructive" onClick={handleReject} disabled={actionLoading}><XCircle className="h-4 w-4 mr-2" />Reject</Button>
-                  <Button onClick={handleApprove} disabled={actionLoading}><CheckCircle className="h-4 w-4 mr-2" />Approve</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+          <WorkflowApprovalActions
+            entityType="SalesAgreement"
+            entityId={agreementId}
+            entityLabel="Sales Agreement"
+            entityNumber={agreement.documentNumber}
+            status={agreement.agreementStatus}
+            showStepBadge
+            loadWorkflowSummary
+            canSubmit={canSubmit}
+            canApproveReject={canApprove}
+            onSubmit={handleWorkflowSubmit}
+            onApprove={handleWorkflowApprove}
+            onReject={handleWorkflowReject}
+            onAfterAction={loadAgreement}
+            onOpenWorkflows={() => router.push('/administration/workflow')}
+          />
           {canRenew && (
             <Dialog open={renewDialogOpen} onOpenChange={setRenewDialogOpen}>
               <DialogTrigger asChild><Button variant="outline"><RefreshCw className="h-4 w-4 mr-2" />Renew</Button></DialogTrigger>
@@ -314,6 +328,22 @@ export default function SalesAgreementDetailPage() {
           )}
         </div>
       </div>
+
+      <WorkflowApprovalHistoryPanel
+        entityType="SalesAgreement"
+        entityId={agreementId}
+        entityLabel="Sales Agreement"
+        entityNumber={agreement.documentNumber}
+        status={agreement.agreementStatus}
+        canSubmit={canSubmit}
+        canApproveReject={canApprove}
+        onSubmit={handleWorkflowSubmit}
+        onApprove={handleWorkflowApprove}
+        onReject={handleWorkflowReject}
+        onAfterAction={loadAgreement}
+        onOpenWorkflows={() => router.push('/administration/workflow')}
+        showActions={false}
+      />
 
       {/* Milestones */}
       {agreement.milestones.length > 0 && (

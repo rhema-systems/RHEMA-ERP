@@ -376,4 +376,85 @@ public class MaintenanceAssetsController : ControllerBase
             return StatusCode(500, "An error occurred while validating asset number");
         }
     }
+
+    [HttpPost("import")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<ActionResult<MaintenanceAssetImportResultDto>> ImportAssets(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest("Select a non-empty Excel file");
+        }
+
+        var extension = Path.GetExtension(file.FileName);
+        if (!string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Only .xlsx asset import files are supported");
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _maintenanceAssetService.ImportAssetsFromExcelAsync(stream, file.FileName));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error importing maintenance assets from {FileName}", file.FileName);
+            return StatusCode(500, "An error occurred while importing maintenance assets");
+        }
+    }
+
+    [HttpGet("import-template")]
+    public async Task<IActionResult> DownloadImportTemplate()
+    {
+        var bytes = await _maintenanceAssetService.GenerateImportTemplateAsync();
+        return File(
+            bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "maintenance-asset-import-template.xlsx");
+    }
+
+    [HttpPost("{assetId:guid}/move")]
+    public async Task<ActionResult<MaintenanceAssetDto>> MoveAsset(Guid assetId, [FromBody] MoveMaintenanceAssetDto moveDto)
+    {
+        try
+        {
+            return Ok(await _maintenanceAssetService.MoveAssetAsync(assetId, moveDto));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{assetId:guid}/movements")]
+    public async Task<ActionResult<IReadOnlyList<MaintenanceAssetMovementDto>>> GetMovementHistory(Guid assetId)
+    {
+        try
+        {
+            return Ok(await _maintenanceAssetService.GetMovementHistoryAsync(assetId));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+    }
+
+    [HttpGet("{assetId:guid}/lifecycle-history")]
+    public async Task<ActionResult<MaintenanceAssetLifecycleHistoryDto>> GetLifecycleHistory(Guid assetId)
+    {
+        try
+        {
+            return Ok(await _maintenanceAssetService.GetLifecycleHistoryAsync(assetId));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+    }
+
 }

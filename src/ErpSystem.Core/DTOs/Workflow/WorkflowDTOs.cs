@@ -438,6 +438,7 @@ public class WorkflowEntitySummaryDto
     public WorkflowStepType? CurrentStepType { get; set; }
 
     public bool CanCurrentUserApprove { get; set; }
+    public bool CanCurrentUserRecall { get; set; }
     public bool CanCurrentUserComplete { get; set; }
     public List<WorkflowPendingApproverDto> PendingApprovers { get; set; } = new();
     public List<WorkflowQualityCheckDto> CurrentStepChecklist { get; set; } = new();

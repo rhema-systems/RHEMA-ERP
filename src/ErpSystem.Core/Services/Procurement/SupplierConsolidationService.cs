@@ -267,6 +267,8 @@ public class SupplierConsolidationService : ISupplierConsolidationService
             PreparedByName = consolidation.PreparedBy?.FullName,
             PreparedDate = consolidation.PreparedDate,
             Status = consolidation.Status,
+            ImplementationDate = consolidation.ImplementationDate,
+            ActualSavings = consolidation.ActualSavings,
             CreatedAt = consolidation.CreatedAt
         };
     }
@@ -293,6 +295,8 @@ public class SupplierConsolidationService : ISupplierConsolidationService
             PreparedByName = consolidation.PreparedBy?.FullName,
             PreparedDate = consolidation.PreparedDate,
             Status = consolidation.Status,
+            ImplementationDate = consolidation.ImplementationDate,
+            ActualSavings = consolidation.ActualSavings,
             CreatedAt = consolidation.CreatedAt,
             PreparedById = consolidation.PreparedById,
             PreferredSupplierIds = consolidation.PreferredSupplierIds,

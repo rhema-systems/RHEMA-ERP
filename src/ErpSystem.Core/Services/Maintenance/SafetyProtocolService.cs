@@ -775,15 +775,15 @@ public class SafetyProtocolService : ISafetyProtocolService
             Description = protocol.Description,
             Category = protocol.Category,
             RiskLevel = protocol.RiskLevel,
-            Procedures = JsonSerializer.Deserialize<List<string>>(protocol.Procedures) ?? new List<string>(),
-            RequiredPPE = JsonSerializer.Deserialize<List<string>>(protocol.RequiredPPE) ?? new List<string>(),
-            RequiredCertifications = JsonSerializer.Deserialize<List<string>>(protocol.RequiredCertifications) ?? new List<string>(),
-            EmergencyProcedures = JsonSerializer.Deserialize<List<string>>(protocol.EmergencyProcedures) ?? new List<string>(),
-            ComplianceCheckpoints = JsonSerializer.Deserialize<List<string>>(protocol.ComplianceCheckpoints) ?? new List<string>(),
-            RegulatorySources = JsonSerializer.Deserialize<List<string>>(protocol.RegulatorySources) ?? new List<string>(),
-            ApplicableEnvironments = JsonSerializer.Deserialize<List<string>>(protocol.ApplicableEnvironments) ?? new List<string>(),
-            EquipmentTypes = JsonSerializer.Deserialize<List<string>>(protocol.EquipmentTypes) ?? new List<string>(),
-            MaintenanceTypes = JsonSerializer.Deserialize<List<string>>(protocol.MaintenanceTypes) ?? new List<string>(),
+            Procedures = DeserializeStringList(protocol.Procedures),
+            RequiredPPE = DeserializeStringList(protocol.RequiredPPE),
+            RequiredCertifications = DeserializeStringList(protocol.RequiredCertifications),
+            EmergencyProcedures = DeserializeStringList(protocol.EmergencyProcedures),
+            ComplianceCheckpoints = DeserializeStringList(protocol.ComplianceCheckpoints),
+            RegulatorySources = DeserializeStringList(protocol.RegulatorySources),
+            ApplicableEnvironments = DeserializeStringList(protocol.ApplicableEnvironments),
+            EquipmentTypes = DeserializeStringList(protocol.EquipmentTypes),
+            MaintenanceTypes = DeserializeStringList(protocol.MaintenanceTypes),
             MinimumTrainingLevel = protocol.MinimumTrainingLevel,
             ReviewFrequencyMonths = protocol.ReviewFrequencyMonths,
             LastReviewDate = protocol.LastReviewDate,
@@ -815,8 +815,8 @@ public class SafetyProtocolService : ISafetyProtocolService
             TechnicianId = record.TechnicianId,
             ComplianceDate = record.CheckDate,
             ComplianceStatus = record.ComplianceStatus,
-            ChecklistItems = JsonSerializer.Deserialize<List<ComplianceChecklistItemDto>>(record.ChecklistItems) ?? new List<ComplianceChecklistItemDto>(),
-            Violations = JsonSerializer.Deserialize<List<ComplianceViolationDto>>(record.Violations) ?? new List<ComplianceViolationDto>(),
+            ChecklistItems = DeserializeDtoList<ComplianceChecklistItemDto>(record.ChecklistItems),
+            Violations = DeserializeDtoList<ComplianceViolationDto>(record.Violations),
             CorrectiveActions = record.CorrectiveActions,
             Notes = record.Notes,
             InspectorId = record.InspectorId,
@@ -836,8 +836,7 @@ public class SafetyProtocolService : ISafetyProtocolService
             {
                 var compliantCount = recentRecords.Count(r => r.ComplianceStatus == "Compliant");
                 var complianceScore = (decimal)compliantCount / recentRecords.Count * 100;
-                var totalViolations = recentRecords.Sum(r =>
-                    JsonSerializer.Deserialize<List<ComplianceViolationDto>>(r.Violations ?? "[]")?.Count ?? 0);
+                var totalViolations = recentRecords.Sum(r => DeserializeDtoList<ComplianceViolationDto>(r.Violations).Count);
 
                 var protocol = await _protocolRepository.GetByIdAsync(protocolId);
                 if (protocol != null)
@@ -852,6 +851,53 @@ public class SafetyProtocolService : ISafetyProtocolService
         {
             _logger.LogError(ex, "Error updating compliance stats for protocol {ProtocolId}", protocolId);
             // Don't throw here as this is a background operation
+        }
+    }
+
+    private static List<string> DeserializeStringList(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return new List<string>();
+        }
+
+        var trimmed = value.Trim();
+        if (string.Equals(trimmed, "null", StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<string>();
+        }
+
+        try
+        {
+            var values = JsonSerializer.Deserialize<List<string>>(trimmed);
+            return values?
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .ToList() ?? new List<string>();
+        }
+        catch (JsonException)
+        {
+            return trimmed
+                .Split(new[] { "\r\n", "\n", "\r", ";", "|", "," }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToList();
+        }
+    }
+
+    private static List<T> DeserializeDtoList<T>(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return new List<T>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<T>>(value) ?? new List<T>();
+        }
+        catch (JsonException)
+        {
+            return new List<T>();
         }
     }
 

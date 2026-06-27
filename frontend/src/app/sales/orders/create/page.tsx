@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,33 +10,61 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
-import { ShoppingCart, ArrowLeft, Plus, Trash2, Save, Building2 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
+import { Loader2, ShoppingCart, ArrowLeft, Plus, Trash2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { salesOrderService, type CreateSalesOrderDto, type CreateSalesOrderLineDto } from '@/services/salesOrderService';
-import { projectService, type ProjectReleasedUnitSalesLookupDto } from '@/services/projectService';
+import { salesAllocationService } from '@/services/salesAllocationService';
+import { projectService } from '@/services/projectService';
 import { apiService } from '@/services/api.service';
+import {
+  parseSaleableSourceContextFromParams,
+  saleableItemToContext,
+  SaleableSourceQuickStart,
+  type SalesLinkedSourceContext,
+} from '../../components/SaleableSourceQuickStart';
+import {
+  salesSetupService,
+  type SalesSaleableItemDto,
+  type SalesSaleableSourceDto,
+} from '@/services/salesSetupService';
 
 interface LineItem extends CreateSalesOrderLineDto {
   key: string;
 }
 
-interface LinkedProjectContext {
-  projectId: string;
-  projectCode?: string;
-  projectTitle?: string;
-  projectUnitId?: string;
-  projectUnitCode?: string;
-  projectUnitName?: string;
+interface CrmHandoffContext {
+  contextLabel?: string;
+  quoteId?: string;
+  quoteName?: string;
+  opportunityId?: string;
+  opportunityName?: string;
+  leadId?: string;
+  leadName?: string;
+  currency?: string;
+  estimatedValue?: number;
 }
+
+const buildCrmReferenceText = (context: CrmHandoffContext | null) => {
+  if (!context) {
+    return '';
+  }
+
+  return [
+    context.contextLabel ? `CRM Context: ${context.contextLabel}` : undefined,
+    context.quoteName ? `Quote: ${context.quoteName}` : undefined,
+    context.opportunityName ? `Opportunity: ${context.opportunityName}` : undefined,
+    context.leadName ? `Lead: ${context.leadName}` : undefined,
+  ].filter(Boolean).join(' | ');
+};
 
 export default function CreateSalesOrderPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
-  const [linkedProjectContext, setLinkedProjectContext] = useState<LinkedProjectContext | null>(null);
-  const [releasedUnits, setReleasedUnits] = useState<ProjectReleasedUnitSalesLookupDto[]>([]);
-  const [releasedUnitsLoading, setReleasedUnitsLoading] = useState(false);
-  const [releasedUnitsSearch, setReleasedUnitsSearch] = useState('');
-  const [selectedReleasedUnitId, setSelectedReleasedUnitId] = useState('');
+  const [linkedSourceContext, setLinkedSourceContext] = useState<SalesLinkedSourceContext | null>(null);
+  const [lineSearchSource, setLineSearchSource] = useState<SalesSaleableSourceDto | null>(null);
+  const [crmHandoffContext, setCrmHandoffContext] = useState<CrmHandoffContext | null>(null);
 
   // Form state
   const [businessPartnerId, setBusinessPartnerId] = useState('');
@@ -52,6 +80,7 @@ export default function CreateSalesOrderPage() {
   const [propertyType, setPropertyType] = useState('');
   const [shippingAddress, setShippingAddress] = useState('');
   const [billingAddress, setBillingAddress] = useState('');
+  const [currency, setCurrency] = useState('GHS');
   const [notes, setNotes] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
 
@@ -59,6 +88,17 @@ export default function CreateSalesOrderPage() {
   const [lines, setLines] = useState<LineItem[]>([
     { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0, taxPercent: 0 },
   ]);
+  const [activeLinePicker, setActiveLinePicker] = useState<string | null>(null);
+  const [lineItemSearch, setLineItemSearch] = useState<Record<string, string>>({});
+  const [lineItemResults, setLineItemResults] = useState<Record<string, SalesSaleableItemDto[]>>({});
+  const [lineItemLoading, setLineItemLoading] = useState<Record<string, boolean>>({});
+
+  const activeLineSearchSourceId = linkedSourceContext?.sourceId || lineSearchSource?.id;
+  const activeLineSearchSourceName =
+    linkedSourceContext?.sourceDisplayName
+    || lineSearchSource?.displayName
+    || linkedSourceContext?.sourceCode
+    || lineSearchSource?.code;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -66,26 +106,49 @@ export default function CreateSalesOrderPage() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    const projectId = params.get('projectId');
-    const projectCode = params.get('projectCode') || undefined;
-    const projectTitle = params.get('projectTitle') || undefined;
-    const projectUnitId = params.get('projectUnitId') || undefined;
-    const projectUnitCode = params.get('projectUnitCode') || undefined;
-    const projectUnitName = params.get('projectUnitName') || undefined;
     const customerId = params.get('customerId');
     const customerName = params.get('customerName');
     const propertyReferenceParam = params.get('propertyReference');
     const orderTypeParam = params.get('orderType');
+    const sourceContext = parseSaleableSourceContextFromParams(params);
+    const crmContext: CrmHandoffContext = {
+      contextLabel: params.get('crmContext') || undefined,
+      quoteId: params.get('quoteId') || undefined,
+      quoteName: params.get('quoteName') || undefined,
+      opportunityId: params.get('opportunityId') || undefined,
+      opportunityName: params.get('opportunityName') || undefined,
+      leadId: params.get('leadId') || undefined,
+      leadName: params.get('leadName') || undefined,
+      currency: params.get('currency') || undefined,
+      estimatedValue: params.get('estimatedValue') ? Number(params.get('estimatedValue')) : undefined,
+    };
+    const hasCrmContext = Object.values(crmContext).some((value) => value !== undefined && value !== null && value !== '');
 
-    if (projectId) {
-      setLinkedProjectContext({
-        projectId,
-        projectCode,
-        projectTitle,
-        projectUnitId,
-        projectUnitCode,
-        projectUnitName,
-      });
+    if (sourceContext) {
+      setLinkedSourceContext(sourceContext);
+      if (sourceContext.itemName || sourceContext.projectUnitName) {
+        setLines((current) => {
+          const first = current[0];
+          const itemName = sourceContext.itemName || sourceContext.projectUnitName || '';
+          const itemCode = sourceContext.itemCode || sourceContext.projectUnitCode || undefined;
+          const updatedFirst: LineItem = {
+            ...first,
+            itemName,
+            itemCode,
+            productCode: itemCode,
+            description: sourceContext.propertyReference ? `${itemName} - ${sourceContext.propertyReference}` : itemName,
+            inventoryItemId: sourceContext.inventoryItemId,
+            warehouseId: sourceContext.warehouseId,
+            locationId: sourceContext.locationId,
+            quantity: 1,
+            unitPrice: sourceContext.estimatedValue ?? first.unitPrice,
+            unitOfMeasure: sourceContext.unitOfMeasure || (sourceContext.areaSquareMeters ? 'Unit' : (first.unitOfMeasure || 'EA')),
+            unit: sourceContext.unitOfMeasure || first.unit,
+          };
+
+          return current.map((line, index) => index === 0 ? { ...updatedFirst, key: line.key } : line);
+        });
+      }
     }
 
     if (customerId) {
@@ -104,47 +167,34 @@ export default function CreateSalesOrderPage() {
     if (orderTypeParam) {
       setOrderType(orderTypeParam);
     }
-  }, []);
 
-  useEffect(() => {
-    if (linkedProjectContext) {
-      return;
+    if (sourceContext?.currency) {
+      // Currency is accepted by the backend create DTO even though it is not edited directly on this compact form.
+      setCurrency(sourceContext.currency);
     }
 
-    const timer = setTimeout(async () => {
-      try {
-        setReleasedUnitsLoading(true);
-        const items = await projectService.getReleasedProjectUnitsForSales(releasedUnitsSearch, 50);
-        setReleasedUnits(items.filter((item) => item.canCreateSalesOrder));
-      } catch {
-        setReleasedUnits([]);
-      } finally {
-        setReleasedUnitsLoading(false);
+    if (hasCrmContext) {
+      setCrmHandoffContext(crmContext);
+      if (crmContext.currency && !sourceContext?.currency) {
+        setCurrency(crmContext.currency);
       }
-    }, 250);
+      setInternalNotes((current) => current || buildCrmReferenceText(crmContext));
+    }
+  }, []);
 
-    return () => clearTimeout(timer);
-  }, [linkedProjectContext, releasedUnitsSearch]);
-
-  const selectedReleasedUnit = releasedUnits.find((item) => item.projectUnitId === selectedReleasedUnitId);
-
-  const applyReleasedUnit = (unit: ProjectReleasedUnitSalesLookupDto) => {
-    setLinkedProjectContext({
-      projectId: unit.projectId,
-      projectCode: unit.projectCode,
-      projectTitle: unit.projectTitle,
-      projectUnitId: unit.projectUnitId,
-      projectUnitCode: unit.projectUnitCode,
-      projectUnitName: unit.projectUnitName,
-    });
-    setBusinessPartnerId(unit.customerBusinessPartnerId || '');
-    setCustomerSearch(unit.customerBusinessPartnerName || '');
-    setSelectedCustomer(unit.customerBusinessPartnerId && unit.customerBusinessPartnerName
-      ? { id: unit.customerBusinessPartnerId, companyName: unit.customerBusinessPartnerName, name: unit.customerBusinessPartnerName }
+  const applySaleableItem = (item: SalesSaleableItemDto, source: SalesSaleableSourceDto) => {
+    const context = saleableItemToContext(item, source);
+    setLinkedSourceContext(context);
+    setLineSearchSource(source);
+    setCurrency(item.currency || source.defaultCurrency || 'GHS');
+    setBusinessPartnerId(item.customerId || '');
+    setCustomerSearch(item.customerName || '');
+    setSelectedCustomer(item.customerId && item.customerName
+      ? { id: item.customerId, companyName: item.customerName, name: item.customerName }
       : null);
-    setPropertyReference(unit.propertyReference || '');
-    setPropertyType(unit.suggestedPropertyType || '');
-    setOrderType(unit.suggestedOrderType || 'PropertySale');
+    setPropertyReference(item.propertyReference || '');
+    setPropertyType(item.itemType || '');
+    setOrderType(item.suggestedOrderType || 'PropertySale');
     setLines((current) => {
       const first = current[0];
       const shouldReplaceFirst = current.length === 1
@@ -154,11 +204,17 @@ export default function CreateSalesOrderPage() {
 
       const updatedFirst: LineItem = {
         ...(shouldReplaceFirst ? first : current[0]),
-        description: unit.suggestedSalesOrderLineDescription || first.description,
-        itemName: unit.projectUnitCode || unit.projectUnitName,
+        description: item.propertyReference ? `${item.itemName} - ${item.propertyReference}` : item.itemName,
+        inventoryItemId: item.inventoryItemId || first.inventoryItemId,
+        warehouseId: item.warehouseId || first.warehouseId,
+        locationId: item.locationId || first.locationId,
+        itemCode: item.itemCode || first.itemCode,
+        productCode: item.itemCode || first.productCode,
+        itemName: item.itemName,
         quantity: 1,
-        unitPrice: unit.basePrice ?? first.unitPrice,
-        unitOfMeasure: unit.areaSquareMeters ? 'Unit' : (first.unitOfMeasure || 'Lot'),
+        unitPrice: item.estimatedValue ?? first.unitPrice,
+        unitOfMeasure: item.unitOfMeasure || (item.areaSquareMeters ? 'Unit' : (first.unitOfMeasure || 'Lot')),
+        unit: item.unitOfMeasure || first.unit,
       };
 
       if (shouldReplaceFirst) {
@@ -203,6 +259,84 @@ export default function CreateSalesOrderPage() {
     setLines(lines.map(l => l.key === key ? { ...l, [field]: value } : l));
   };
 
+  const updateLineFields = (key: string, changes: Partial<LineItem>) => {
+    setLines((current) => current.map((line) => line.key === key ? { ...line, ...changes } : line));
+  };
+
+  const searchSaleableLineItems = useCallback(async (lineKey: string, query: string) => {
+    if (!activeLineSearchSourceId) {
+      return;
+    }
+
+    try {
+      setLineItemLoading((current) => ({ ...current, [lineKey]: true }));
+      const results = await salesSetupService.searchSaleableItems(
+        activeLineSearchSourceId,
+        query.trim() || undefined,
+        25,
+      );
+      setLineItemResults((current) => ({
+        ...current,
+        [lineKey]: results.filter((item) => item.canCreateSalesOrder),
+      }));
+    } catch {
+      setLineItemResults((current) => ({ ...current, [lineKey]: [] }));
+    } finally {
+      setLineItemLoading((current) => ({ ...current, [lineKey]: false }));
+    }
+  }, [activeLineSearchSourceId]);
+
+  useEffect(() => {
+    if (!activeLinePicker || !activeLineSearchSourceId) {
+      return;
+    }
+
+    const query = lineItemSearch[activeLinePicker] ?? lines.find((line) => line.key === activeLinePicker)?.itemName ?? '';
+    const timer = window.setTimeout(() => {
+      void searchSaleableLineItems(activeLinePicker, query);
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [activeLinePicker, activeLineSearchSourceId, lineItemSearch, lines, searchSaleableLineItems]);
+
+  const handleLineItemSearchChange = (line: LineItem, value: string) => {
+    setActiveLinePicker(line.key);
+    setLineItemSearch((current) => ({ ...current, [line.key]: value }));
+    updateLineFields(line.key, {
+      itemName: value,
+      description: value || undefined,
+      itemId: undefined,
+      productId: undefined,
+      inventoryItemId: undefined,
+      warehouseId: undefined,
+      locationId: undefined,
+      itemCode: undefined,
+      productCode: undefined,
+    });
+  };
+
+  const selectSaleableLineItem = (lineKey: string, item: SalesSaleableItemDto) => {
+    updateLineFields(lineKey, {
+      itemName: item.itemName,
+      description: item.propertyReference ? `${item.itemName} - ${item.propertyReference}` : item.itemName,
+      inventoryItemId: item.inventoryItemId || undefined,
+      warehouseId: item.warehouseId || undefined,
+      locationId: item.locationId || undefined,
+      itemCode: item.itemCode || undefined,
+      productCode: item.itemCode || undefined,
+      quantity: 1,
+      unitPrice: item.estimatedValue ?? 0,
+      unitOfMeasure: item.unitOfMeasure || (item.areaSquareMeters ? 'Unit' : 'EA'),
+      unit: item.unitOfMeasure || undefined,
+    });
+    if (item.currency) {
+      setCurrency(item.currency);
+    }
+    setLineItemSearch((current) => ({ ...current, [lineKey]: item.itemName }));
+    setLineItemResults((current) => ({ ...current, [lineKey]: [] }));
+    setActiveLinePicker(null);
+  };
+
   const calcLineTotal = (line: LineItem) => {
     const base = line.quantity * line.unitPrice;
     const discounted = base * (1 - (line.discountPercent || 0) / 100);
@@ -230,6 +364,7 @@ export default function CreateSalesOrderPage() {
       priority,
       expectedDeliveryDate: expectedDeliveryDate || undefined,
       paymentTerms: paymentTerms || undefined,
+      currency,
       customerPoNumber: customerPoNumber || undefined,
       propertyReference: propertyReference || undefined,
       propertyType: propertyType || undefined,
@@ -237,13 +372,21 @@ export default function CreateSalesOrderPage() {
       billingAddress: billingAddress || undefined,
       notes: notes || undefined,
       internalNotes: internalNotes || undefined,
+      quoteId: crmHandoffContext?.quoteId,
+      opportunityId: crmHandoffContext?.opportunityId,
       lines: lines.map(l => ({
         itemName: l.itemName,
         itemCode: l.itemCode || undefined,
         itemId: l.itemId || undefined,
+        productId: l.productId || undefined,
+        inventoryItemId: l.inventoryItemId || undefined,
+        productCode: l.productCode || l.itemCode || undefined,
+        warehouseId: l.warehouseId || undefined,
+        locationId: l.locationId || undefined,
         description: l.description || undefined,
         quantity: l.quantity,
         unitOfMeasure: l.unitOfMeasure || 'EA',
+        unit: l.unit || l.unitOfMeasure || 'EA',
         unitPrice: l.unitPrice,
         discountPercent: l.discountPercent || 0,
         taxPercent: l.taxPercent || 0,
@@ -252,15 +395,48 @@ export default function CreateSalesOrderPage() {
 
     try {
       setSaving(true);
+      if (linkedSourceContext?.sourceId && linkedSourceContext.sourceItemId && linkedSourceContext.shouldCreateSalesAllocation !== false) {
+        const activeCheck = await salesAllocationService.hasActiveAllocation(
+          linkedSourceContext.sourceId,
+          linkedSourceContext.sourceItemId,
+        );
+        if (activeCheck.hasActiveAllocation) {
+          toast.error('This saleable item already has an active reservation or allocation.');
+          return;
+        }
+      }
+
       const result = await salesOrderService.createSalesOrder(dto);
-      if (linkedProjectContext?.projectUnitId) {
+      if (linkedSourceContext?.projectUnitId) {
         try {
-          await projectService.linkSalesOrderToProjectUnit(linkedProjectContext.projectUnitId, result.id);
+          await projectService.linkSalesOrderToProjectUnit(linkedSourceContext.projectUnitId, result.id);
         } catch (linkError: any) {
           toast.warning(linkError?.message || 'Sales order created, but the project unit could not be linked automatically.');
         }
       }
-      toast.success(`Sales Order ${result.orderNumber} created`);
+      if (linkedSourceContext?.sourceId && linkedSourceContext.sourceItemId && linkedSourceContext.shouldCreateSalesAllocation !== false) {
+        try {
+          await salesAllocationService.createAllocation({
+            saleableSourceId: linkedSourceContext.sourceId,
+            sourceItemId: linkedSourceContext.sourceItemId,
+            sourceItemCode: linkedSourceContext.itemCode || linkedSourceContext.projectUnitCode,
+            sourceItemName: linkedSourceContext.itemName || linkedSourceContext.projectUnitName || propertyReference || 'Saleable item',
+            sourceItemType: linkedSourceContext.itemType || propertyType || undefined,
+            businessPartnerId,
+            customerName: selectedCustomer?.companyName || selectedCustomer?.name || customerSearch || linkedSourceContext.customerName,
+            salesOrderId: result.id,
+            allocationType: orderType === 'Lease' ? 'Lease' : 'Reservation',
+            status: 'Reserved',
+            estimatedValue: linkedSourceContext.estimatedValue,
+            agreedValue: result.totalAmount || grandTotal,
+            currency,
+            notes: `Reserved from Sales Order ${result.orderNumber || result.id}`,
+          });
+        } catch (allocationError: any) {
+          toast.warning(allocationError?.message || 'Sales order created, but the saleable item reservation could not be recorded.');
+        }
+      }
+      toast.success(`Sales Order ${result.orderNumber || result.id} created`);
       router.push(`/sales/orders/${result.id}`);
     } catch (error: any) {
       toast.error(error.message || 'Failed to create sales order');
@@ -290,91 +466,30 @@ export default function CreateSalesOrderPage() {
         </Button>
       </div>
 
-      {linkedProjectContext && (
-        <Card className="border-emerald-200 bg-emerald-50/40">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
-              <Building2 className="h-4 w-4" />
-              Creating Order For Project-Linked Unit
-            </div>
-            <div className="mt-2 text-sm text-slate-700">
-              <p className="font-semibold">
-                {linkedProjectContext.projectCode}
-                {linkedProjectContext.projectTitle ? ` • ${linkedProjectContext.projectTitle}` : ''}
-              </p>
-              <p>
-                {linkedProjectContext.projectUnitCode || linkedProjectContext.projectUnitName || 'Linked project unit'}
-                {linkedProjectContext.projectUnitCode && linkedProjectContext.projectUnitName
-                  ? ` • ${linkedProjectContext.projectUnitName}`
-                  : ''}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <SaleableSourceQuickStart
+        mode="order"
+        linkedContext={linkedSourceContext}
+        onSourceSelected={setLineSearchSource}
+        onUseOrder={applySaleableItem}
+      />
 
-      {!linkedProjectContext && (
-        <Card className="border-dashed border-emerald-200">
-          <CardHeader>
-            <CardTitle className="text-base">Start From Released Project Unit</CardTitle>
-            <CardDescription>Pick a released unit to prefill customer and property context before drafting the order.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-              <Input
-                placeholder="Search by project code, title, unit, or customer..."
-                value={releasedUnitsSearch}
-                onChange={(event) => setReleasedUnitsSearch(event.target.value)}
-              />
-              <Select value={selectedReleasedUnitId || 'none'} onValueChange={(value) => setSelectedReleasedUnitId(value === 'none' ? '' : value)}>
-                <SelectTrigger><SelectValue placeholder="Select released unit" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Select released unit</SelectItem>
-                  {releasedUnits.map((unit) => (
-                    <SelectItem key={unit.projectUnitId} value={unit.projectUnitId}>
-                      {unit.projectCode} - {unit.projectUnitCode || unit.projectUnitName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {crmHandoffContext ? (
+        <Card className="border-blue-200 bg-blue-50/60">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+            <div>
+              <div className="font-medium text-blue-900">Started from CRM</div>
+              <div className="text-blue-700">
+                {buildCrmReferenceText(crmHandoffContext) || 'CRM context will be carried into this order.'}
+              </div>
             </div>
-            {releasedUnitsLoading ? (
-              <p className="text-sm text-muted-foreground">Loading released units...</p>
-            ) : null}
-            {!releasedUnitsLoading && releasedUnits.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No released project units are currently ready for sales-order handoff.</p>
-            ) : null}
-            {selectedReleasedUnit ? (
-              <div className="rounded-lg border bg-slate-50 p-4 text-sm text-slate-700">
-                <div className="font-semibold text-slate-900">
-                  {selectedReleasedUnit.projectCode}
-                  {selectedReleasedUnit.projectTitle ? ` • ${selectedReleasedUnit.projectTitle}` : ''}
-                </div>
-                <div className="mt-1">
-                  {selectedReleasedUnit.projectUnitCode || selectedReleasedUnit.projectUnitName}
-                  {selectedReleasedUnit.projectUnitCode && selectedReleasedUnit.projectUnitName
-                    ? ` • ${selectedReleasedUnit.projectUnitName}`
-                    : ''}
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {selectedReleasedUnit.customerBusinessPartnerName || 'No customer assigned'}
-                  {selectedReleasedUnit.basePrice != null ? ` • ${selectedReleasedUnit.currency} ${selectedReleasedUnit.basePrice.toLocaleString()}` : ''}
-                  {selectedReleasedUnit.suggestedOrderType ? ` • ${selectedReleasedUnit.suggestedOrderType}` : ''}
-                </div>
+            {crmHandoffContext.estimatedValue ? (
+              <div className="font-medium text-blue-900">
+                {(crmHandoffContext.currency || currency)} {crmHandoffContext.estimatedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </div>
             ) : null}
-            <div className="flex justify-end">
-              <Button
-                variant="outline"
-                disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateSalesOrder}
-                onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit)}
-              >
-                Use Released Unit
-              </Button>
-            </div>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       {/* Customer Selection */}
       <Card>
@@ -413,10 +528,17 @@ export default function CreateSalesOrderPage() {
         </CardContent>
       </Card>
 
-      {/* Order Details */}
-      <Card>
-        <CardHeader><CardTitle>Order Details</CardTitle></CardHeader>
-        <CardContent>
+      <Tabs defaultValue="details" className="space-y-4">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="details">Order Details</TabsTrigger>
+          <TabsTrigger value="lines">Order Lines</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="details" className="mt-0">
+          {/* Order Details */}
+          <Card>
+            <CardHeader><CardTitle>Order Details</CardTitle></CardHeader>
+            <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label>Order Type</Label>
@@ -481,18 +603,20 @@ export default function CreateSalesOrderPage() {
               <Textarea placeholder="Internal notes (not visible to customer)" value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} rows={2} />
             </div>
           </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* Order Lines */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Order Lines</CardTitle>
-            <Button variant="outline" size="sm" onClick={addLine}><Plus className="h-4 w-4 mr-2" />Add Line</Button>
-          </div>
-        </CardHeader>
-        <CardContent>
+        <TabsContent value="lines" className="mt-0 min-h-[420px]">
+          {/* Order Lines */}
+          <Card className="overflow-visible">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Order Lines</CardTitle>
+                <Button variant="outline" size="sm" onClick={addLine}><Plus className="h-4 w-4 mr-2" />Add Line</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="overflow-visible pb-10">
           <Table>
             <TableHeader>
               <TableRow>
@@ -511,7 +635,89 @@ export default function CreateSalesOrderPage() {
               {lines.map((line) => (
                 <TableRow key={line.key}>
                   <TableCell>
-                    <Input placeholder="Item name" value={line.itemName} onChange={(e) => updateLine(line.key, 'itemName', e.target.value)} />
+                    <Popover
+                      open={Boolean(activeLineSearchSourceId && activeLinePicker === line.key)}
+                      onOpenChange={(open) => {
+                        if (!open && activeLinePicker === line.key) {
+                          setActiveLinePicker(null);
+                        }
+                      }}
+                    >
+                      <PopoverAnchor asChild>
+                        <Input
+                          className="min-w-64"
+                          placeholder={activeLineSearchSourceId
+                            ? `Search ${activeLineSearchSourceName || 'source'} items`
+                            : 'Item name'}
+                          value={activeLinePicker === line.key ? (lineItemSearch[line.key] ?? line.itemName) : line.itemName}
+                          onFocus={() => {
+                            setActiveLinePicker(line.key);
+                            setLineItemSearch((current) => ({ ...current, [line.key]: current[line.key] ?? line.itemName }));
+                            if (activeLineSearchSourceId) {
+                              void searchSaleableLineItems(line.key, line.itemName);
+                            }
+                          }}
+                          onChange={(e) => {
+                            if (activeLineSearchSourceId) {
+                              handleLineItemSearchChange(line, e.target.value);
+                            } else {
+                              updateLine(line.key, 'itemName', e.target.value);
+                            }
+                          }}
+                        />
+                      </PopoverAnchor>
+                      {activeLineSearchSourceId ? (
+                        <PopoverContent
+                          align="start"
+                          side="bottom"
+                          sideOffset={6}
+                          className="z-[80] max-h-80 w-[var(--radix-popper-anchor-width)] min-w-80 overflow-y-auto p-0"
+                          onOpenAutoFocus={(event) => event.preventDefault()}
+                        >
+                          {lineItemLoading[line.key] ? (
+                            <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Searching items...
+                            </div>
+                          ) : (lineItemResults[line.key] || []).length > 0 ? (
+                            <div className="divide-y">
+                              {lineItemResults[line.key].map((item) => (
+                                <button
+                                  key={item.sourceItemId}
+                                  type="button"
+                                  className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => selectSaleableLineItem(line.key, item)}
+                                >
+                                  <div className="font-medium">{item.itemName}</div>
+                                  <div className="mt-0.5 text-xs text-muted-foreground">
+                                    {[item.itemCode, item.warehouseName, item.locationName]
+                                      .filter(Boolean)
+                                      .join(' - ')}
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap gap-1 text-xs text-muted-foreground">
+                                    {item.availableQuantity !== undefined ? (
+                                      <span>
+                                        Available: {item.availableQuantity.toLocaleString()} {item.unitOfMeasure || ''}
+                                      </span>
+                                    ) : null}
+                                    {item.estimatedValue !== undefined ? (
+                                      <span>
+                                        {item.currency || currency} {item.estimatedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="px-3 py-3 text-sm text-muted-foreground">
+                              No source items found.
+                            </div>
+                          )}
+                        </PopoverContent>
+                      ) : null}
+                    </Popover>
                   </TableCell>
                   <TableCell>
                     <Input placeholder="Code" value={line.itemCode || ''} onChange={(e) => updateLine(line.key, 'itemCode', e.target.value)} />
@@ -554,8 +760,10 @@ export default function CreateSalesOrderPage() {
               <div className="flex justify-between font-bold text-lg"><span>Total</span><span className="text-blue-600">GHS {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

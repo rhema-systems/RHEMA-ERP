@@ -22,4 +22,11 @@ public class MaintenanceSettings : TenantEntity
     /// When enabled, dispatch requires selecting a predefined FleetTripDestination (trip template/route).
     /// </summary>
     public bool RequirePredefinedFleetTripDestinationOnDispatch { get; set; } = false;
+
+    public Guid? DefaultFleetDefectWorkOrderTypeId { get; set; }
+    public Guid? DefaultFleetDefectMaintenanceTypeId { get; set; }
+    public Guid? DefaultFleetDefectPriorityLevelId { get; set; }
+
+    [MaxLength(20)]
+    public string DefaultFleetDefectBillingType { get; set; } = "Repairs";
 }

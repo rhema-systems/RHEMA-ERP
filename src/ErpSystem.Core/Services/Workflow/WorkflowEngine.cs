@@ -563,7 +563,9 @@ public class WorkflowEngine : IWorkflowEngine
                 AssignedToName = si.AssignedTo?.UserName
                     ?? (pendingApproverNamesByStepInstanceId.TryGetValue(si.Id, out var pendingApprovers)
                         ? pendingApprovers
-                        : null),
+                        : si.WorkflowStep == null
+                            ? null
+                            : FormatApproverList(GetConfiguredApproverLabels(si.WorkflowStep))),
                 StartedDate = si.StartedDate,
                 CompletedDate = si.CompletedDate,
                 DueDate = si.DueDate,

@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatFleetDateTime } from '@/lib/date-format';
+import maintenanceSettingsService from '@/services/maintenanceSettingsService';
 
 export default function FleetDefectsPage() {
   type BillingType = 'Maintenance' | 'Repairs';
@@ -86,14 +87,21 @@ export default function FleetDefectsPage() {
     setWoForm({ workOrderTypeId: '', maintenanceTypeId: '', priorityLevelId: '', billingType: 'Repairs' });
     setOpenWo(true);
     try {
-      const [types, mtypes, pri] = await Promise.all([
+      const [types, mtypes, pri, settings] = await Promise.all([
         maintenanceApiService.getWorkOrderTypes(),
         maintenanceApiService.getMaintenanceTypes(),
         maintenanceApiService.getPriorityLevels(),
+        maintenanceSettingsService.getSettings(),
       ]);
       setWorkOrderTypes(types ?? []);
       setMaintenanceTypes(mtypes ?? []);
       setPriorityLevels(pri ?? []);
+      setWoForm({
+        workOrderTypeId: settings.defaultFleetDefectWorkOrderTypeId || '',
+        maintenanceTypeId: settings.defaultFleetDefectMaintenanceTypeId || '',
+        priorityLevelId: settings.defaultFleetDefectPriorityLevelId || '',
+        billingType: settings.defaultFleetDefectBillingType === 'Maintenance' ? 'Maintenance' : 'Repairs',
+      });
     } catch (e) {
       console.error(e);
     }
@@ -212,7 +220,7 @@ export default function FleetDefectsPage() {
                 <thead>
                   <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                     <th className="py-2">Reported</th>
-                    <th className="py-2">Vehicle</th>
+                    <th className="py-2">Asset</th>
                     <th className="py-2">Title</th>
                     <th className="py-2">Severity</th>
                     <th className="py-2">Status</th>

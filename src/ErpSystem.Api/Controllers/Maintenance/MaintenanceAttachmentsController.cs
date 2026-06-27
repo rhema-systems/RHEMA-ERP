@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Models;
@@ -54,17 +55,7 @@ public class MaintenanceAttachmentsController : ControllerBase
                 return BadRequest("No files provided");
             }
 
-            var allowedTypes = new[]
-            {
-                "WorkOrder",
-                "Asset",
-                "Inspection",
-                "FleetCompliance",
-                "FleetIncident",
-                "FleetTrip",
-                "FleetFuelTransaction",
-                "FleetCostEntry"
-            };
+            var allowedTypes = Enum.GetNames<AttachmentEntityType>();
             if (!allowedTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
             {
                 return BadRequest($"Entity type must be one of: {string.Join(", ", allowedTypes)}");
@@ -242,9 +233,9 @@ public class MaintenanceAttachmentsController : ControllerBase
             }
 
             // Log access
-            if (Guid.TryParse(_currentUserService.UserId, out var downloadUserId))
+            if (_currentUserService.EmployeeId is { } downloadEmployeeId && downloadEmployeeId != Guid.Empty)
             {
-                await _attachmentService.LogAttachmentAccessAsync(id, downloadUserId, "Download");
+                await _attachmentService.LogAttachmentAccessAsync(id, downloadEmployeeId, "Download");
             }
 
             // Get file stream from storage
@@ -284,9 +275,9 @@ public class MaintenanceAttachmentsController : ControllerBase
             }
 
             // Log access
-            if (Guid.TryParse(_currentUserService.UserId, out var previewUserId))
+            if (_currentUserService.EmployeeId is { } previewEmployeeId && previewEmployeeId != Guid.Empty)
             {
-                await _attachmentService.LogAttachmentAccessAsync(id, previewUserId, "Preview");
+                await _attachmentService.LogAttachmentAccessAsync(id, previewEmployeeId, "Preview");
             }
 
             var fileStream = await _storageService.DownloadFileAsync(attachment.ThumbnailPath, id);

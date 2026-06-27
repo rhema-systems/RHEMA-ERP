@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { CheckCircle, Send, Upload, XCircle } from 'lucide-react';
+import { CheckCircle, RotateCcw, Send, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -101,11 +101,13 @@ export function WorkflowApprovalActions({
   const [submitOpen, setSubmitOpen] = React.useState(false);
   const [approvalOpen, setApprovalOpen] = React.useState(false);
   const [approvalMode, setApprovalMode] = React.useState<WorkflowApprovalDialogMode>('approve');
+  const [recallOpen, setRecallOpen] = React.useState(false);
   const [taskOpen, setTaskOpen] = React.useState(false);
   const [taskComments, setTaskComments] = React.useState('');
   const [taskFile, setTaskFile] = React.useState<File | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
   const [processing, setProcessing] = React.useState(false);
+  const [recalling, setRecalling] = React.useState(false);
   const [taskProcessing, setTaskProcessing] = React.useState(false);
 
   const [summaryLoading, setSummaryLoading] = React.useState(false);
@@ -116,6 +118,7 @@ export function WorkflowApprovalActions({
   const [summaryTaskConfig, setSummaryTaskConfig] = React.useState<WorkflowTaskConfigDto | undefined>(undefined);
   const [summaryTaskAttachments, setSummaryTaskAttachments] = React.useState<WorkflowTaskAttachmentDto[]>([]);
   const [canCurrentUserApprove, setCanCurrentUserApprove] = React.useState<boolean | undefined>(undefined);
+  const [canCurrentUserRecall, setCanCurrentUserRecall] = React.useState<boolean | undefined>(undefined);
   const [canCurrentUserComplete, setCanCurrentUserComplete] = React.useState<boolean | undefined>(undefined);
   const [summaryPendingApprovers, setSummaryPendingApprovers] = React.useState<WorkflowPendingApproverDto[]>([]);
 
@@ -137,6 +140,8 @@ export function WorkflowApprovalActions({
 
   const effectiveCanApproveFlag =
     hasActiveSummary ? workflowSummary?.canCurrentUserApprove : canCurrentUserApprove;
+  const effectiveCanRecallFlag =
+    hasActiveSummary ? workflowSummary?.canCurrentUserRecall : canCurrentUserRecall;
   const effectiveCanCompleteFlag =
     hasActiveSummary ? workflowSummary?.canCurrentUserComplete : canCurrentUserComplete;
 
@@ -157,6 +162,12 @@ export function WorkflowApprovalActions({
   const canShowApprovalActions = approveRejectEnabledByStatus && (!hasKnownStepType || isCurrentApprovalStep);
   const effectiveCanApprove =
     effectiveCanApproveFlag === undefined ? canShowApprovalActions : canShowApprovalActions && effectiveCanApproveFlag;
+  const normalizedStatus = (status || '').trim().toLowerCase().replace(/\s+/g, '');
+  const recallEnabledByStatus =
+    hasActiveSummary ||
+    ['submitted', 'pendingapproval', 'underreview', 'inreview'].includes(normalizedStatus);
+  const canShowRecall = recallEnabledByStatus && effectiveCanRecallFlag === true && !effectiveCanApprove;
+  const showApproveRejectControls = canShowApprovalActions && !canShowRecall;
   const canCompleteTask = isCurrentTaskStep && effectiveCanCompleteFlag === true && !!effectiveStepInstanceId;
   const normalizedTaskAction = effectiveTaskConfig?.taskActionType?.trim().toLowerCase();
   const isDocumentTask =
@@ -204,12 +215,14 @@ export function WorkflowApprovalActions({
         setSummaryTaskConfig(s.currentStepTaskConfig || undefined);
         setSummaryTaskAttachments(s.currentStepTaskAttachments || []);
         setCanCurrentUserApprove(!!s.canCurrentUserApprove);
+        setCanCurrentUserRecall(!!s.canCurrentUserRecall);
         setCanCurrentUserComplete(!!s.canCurrentUserComplete);
         setSummaryPendingApprovers(s.pendingApprovers || []);
       } catch (e: any) {
         // Summary is best-effort; actions still work and will show API error if forbidden.
         if (!mounted) return;
         setCanCurrentUserApprove(undefined);
+        setCanCurrentUserRecall(undefined);
         setCanCurrentUserComplete(undefined);
       } finally {
         if (mounted) setSummaryLoading(false);
@@ -233,6 +246,7 @@ export function WorkflowApprovalActions({
         setSummaryTaskConfig(s.currentStepTaskConfig || undefined);
         setSummaryTaskAttachments(s.currentStepTaskAttachments || []);
         setCanCurrentUserApprove(!!s.canCurrentUserApprove);
+        setCanCurrentUserRecall(!!s.canCurrentUserRecall);
         setCanCurrentUserComplete(!!s.canCurrentUserComplete);
         setSummaryPendingApprovers(s.pendingApprovers || []);
       } catch {
@@ -313,6 +327,23 @@ export function WorkflowApprovalActions({
     }
   };
 
+  const confirmRecall = async () => {
+    try {
+      setRecalling(true);
+      await workflowApiService.recallWorkflowEntity(entityType, entityId);
+      toast.success(`${entityLabel} recalled`, {
+        description: entityNumber ? `${entityNumber} has been returned to draft.` : undefined,
+      });
+      await runAfter();
+      return true;
+    } catch (e: any) {
+      toast.error(`Failed to recall ${entityLabel.toLowerCase()}`, { description: e?.message || undefined });
+      return false;
+    } finally {
+      setRecalling(false);
+    }
+  };
+
   const completeTask = async () => {
     if (!effectiveStepInstanceId) {
       toast.error('Cannot complete workflow task', {
@@ -386,7 +417,7 @@ export function WorkflowApprovalActions({
           </DropdownMenuItem>
         )}
 
-        {canShowApprovalActions && (
+        {showApproveRejectControls && (
           <>
             <DropdownMenuItem
               className="text-green-600 focus:text-green-700"
@@ -411,6 +442,20 @@ export function WorkflowApprovalActions({
               Reject
             </DropdownMenuItem>
           </>
+        )}
+
+        {canShowRecall && (
+          <DropdownMenuItem
+            className="text-amber-600 focus:text-amber-700"
+            onSelect={(event) => {
+              event.preventDefault();
+              setRecallOpen(true);
+            }}
+            disabled={recalling || summaryLoading}
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            Recall
+          </DropdownMenuItem>
         )}
 
         {canCompleteTask && (
@@ -449,6 +494,26 @@ export function WorkflowApprovalActions({
           cancelText="Cancel"
           onConfirm={confirmSubmit}
           isLoading={submitting}
+        />
+
+        <ConfirmationDialog
+          open={recallOpen}
+          onOpenChange={setRecallOpen}
+          title={`Recall ${entityLabel}?`}
+          description={
+            <div className="space-y-2">
+              <div>
+                You are about to recall <strong>{entityNumber || entityLabel}</strong>.
+              </div>
+              <div className="text-xs text-muted-foreground">
+                The active workflow will be stopped and the record will return to draft so it can be edited and resubmitted.
+              </div>
+            </div>
+          }
+          confirmText={recalling ? 'Recalling...' : 'Recall'}
+          cancelText="Cancel"
+          onConfirm={confirmRecall}
+          isLoading={recalling}
         />
 
         <WorkflowApprovalCommentDialog
@@ -573,7 +638,7 @@ export function WorkflowApprovalActions({
           </Button>
         )}
 
-        {canShowApprovalActions && (
+        {showApproveRejectControls && (
           <>
             <Button
               size={size}
@@ -600,6 +665,21 @@ export function WorkflowApprovalActions({
               {!iconOnly && 'Reject'}
             </Button>
           </>
+        )}
+
+        {canShowRecall && (
+          <Button
+            size={size}
+            variant="outline"
+            className="text-amber-600"
+            onClick={() => setRecallOpen(true)}
+            disabled={recalling || summaryLoading}
+            title={iconOnly ? `Recall ${entityLabel}` : undefined}
+            aria-label={iconOnly ? `Recall ${entityLabel}` : undefined}
+          >
+            <RotateCcw className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
+            {!iconOnly && 'Recall'}
+          </Button>
         )}
 
         {canCompleteTask && (
@@ -640,6 +720,26 @@ export function WorkflowApprovalActions({
         cancelText="Cancel"
         onConfirm={confirmSubmit}
         isLoading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={recallOpen}
+        onOpenChange={setRecallOpen}
+        title={`Recall ${entityLabel}?`}
+        description={
+          <div className="space-y-2">
+            <div>
+              You are about to recall <strong>{entityNumber || entityLabel}</strong>.
+            </div>
+            <div className="text-xs text-muted-foreground">
+              The active workflow will be stopped and the record will return to draft so it can be edited and resubmitted.
+            </div>
+          </div>
+        }
+        confirmText={recalling ? 'Recalling...' : 'Recall'}
+        cancelText="Cancel"
+        onConfirm={confirmRecall}
+        isLoading={recalling}
       />
 
       <WorkflowApprovalCommentDialog

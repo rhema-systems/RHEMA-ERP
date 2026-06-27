@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,9 @@ import {
   type CrmQuoteListItemDto,
   type PagedResult,
 } from '@/services/crmService';
-import { CalendarClock, FileText, RefreshCw, Search, ShieldCheck, TrendingUp } from 'lucide-react';
+import { salesOrderService } from '@/services/salesOrderService';
+import { SalesHandoffActions } from '../components/SalesHandoffActions';
+import { CalendarClock, FileText, Loader2, RefreshCw, Search, ShieldCheck, ShoppingCart, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 
 const QUOTE_STATUS_OPTIONS = ['Draft', 'Sent', 'Accepted', 'Rejected', 'Expired'];
@@ -34,6 +36,8 @@ const resolveChainHref = (entityType: string, entityId: string) => {
       return `/crm/opportunities?opportunityId=${entityId}`;
     case 'Quote':
       return `/crm/quotes?quoteId=${entityId}`;
+    case 'SalesOrder':
+      return `/sales/orders/${entityId}`;
     case 'Contract':
       return `/procurement/contracts/${entityId}`;
     case 'Project':
@@ -44,6 +48,7 @@ const resolveChainHref = (entityType: string, entityId: string) => {
 };
 
 export default function CrmQuotesPage() {
+  const router = useRouter();
   const searchParams = useSearchParams() ?? new URLSearchParams();
   const scopedBusinessPartnerId = searchParams.get('businessPartnerId') || '';
   const scopedOpportunityId = searchParams.get('opportunityId') || '';
@@ -59,6 +64,7 @@ export default function CrmQuotesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedQuoteId, setSelectedQuoteId] = useState(requestedQuoteId);
   const [selectedQuote, setSelectedQuote] = useState<CrmQuoteDetailDto | null>(null);
+  const [convertingQuoteId, setConvertingQuoteId] = useState<string | null>(null);
 
   const loadQuotes = async (requestedPage: number = page) => {
     try {
@@ -166,6 +172,39 @@ export default function CrmQuotesPage() {
   const scopedLeadName = selectedQuote?.leadId === scopedLeadId
     ? selectedQuote.leadName
     : result?.items.find((item) => item.leadId === scopedLeadId)?.leadName;
+  const selectedQuoteSalesOrderNode = selectedQuote?.conversionChain.nodes.find((node) => node.entityType === 'SalesOrder');
+
+  const handleConvertSelectedQuote = async () => {
+    if (!selectedQuote) {
+      return;
+    }
+
+    if (selectedQuoteSalesOrderNode) {
+      router.push(`/sales/orders/${selectedQuoteSalesOrderNode.entityId}`);
+      return;
+    }
+
+    if (!selectedQuote.isAccepted) {
+      toast.error('Only accepted quotes can be converted to Sales Orders.');
+      return;
+    }
+
+    if (!selectedQuote.businessPartnerId) {
+      toast.error('Link this quote to a BusinessPartner account before converting it.');
+      return;
+    }
+
+    try {
+      setConvertingQuoteId(selectedQuote.quoteId);
+      const order = await salesOrderService.convertQuoteToSalesOrder(selectedQuote.quoteId);
+      toast.success(`Sales Order ${order.orderNumber || order.id} is ready`);
+      router.push(`/sales/orders/${order.id}`);
+    } catch (error: unknown) {
+      toast.error(getMessage(error, 'Failed to convert quote to Sales Order'));
+    } finally {
+      setConvertingQuoteId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -374,6 +413,33 @@ export default function CrmQuotesPage() {
                   <Button asChild variant="outline">
                     <Link href={`/crm/opportunities?opportunityId=${selectedQuote.opportunityId}`}>Open Opportunity</Link>
                   </Button>
+                  <Button
+                    onClick={handleConvertSelectedQuote}
+                    disabled={convertingQuoteId === selectedQuote.quoteId || (!selectedQuote.isAccepted && !selectedQuoteSalesOrderNode)}
+                  >
+                    {convertingQuoteId === selectedQuote.quoteId ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <ShoppingCart className="mr-2 h-4 w-4" />
+                    )}
+                    {selectedQuoteSalesOrderNode ? 'Open Sales Order' : 'Convert to Sales Order'}
+                  </Button>
+                  <SalesHandoffActions
+                    context={{
+                      businessPartnerId: selectedQuote.businessPartnerId,
+                      businessPartnerName: selectedQuote.businessPartnerName,
+                      leadId: selectedQuote.leadId,
+                      leadName: selectedQuote.leadName,
+                      opportunityId: selectedQuote.opportunityId,
+                      opportunityName: selectedQuote.opportunityName,
+                      quoteId: selectedQuote.quoteId,
+                      quoteName: selectedQuote.quoteName,
+                      currency: selectedQuote.currency,
+                      estimatedValue: selectedQuote.value,
+                      contextLabel: 'Quote',
+                    }}
+                    showSalesOrder={false}
+                  />
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">

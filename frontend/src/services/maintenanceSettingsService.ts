@@ -14,6 +14,10 @@ export interface MaintenanceSettingsDto {
   fleetComplianceDueSoonDays: number;
   blockFleetDispatchWhenComplianceDueSoon: boolean;
   requirePredefinedFleetTripDestinationOnDispatch: boolean;
+  defaultFleetDefectWorkOrderTypeId?: string | null;
+  defaultFleetDefectMaintenanceTypeId?: string | null;
+  defaultFleetDefectPriorityLevelId?: string | null;
+  defaultFleetDefectBillingType: 'Repairs' | 'Maintenance' | string;
   createdAt: string;
   createdById?: string;
   updatedAt?: string;
@@ -23,6 +27,10 @@ export interface UpdateMaintenanceSettingsDto {
   fleetComplianceDueSoonDays: number;
   blockFleetDispatchWhenComplianceDueSoon: boolean;
   requirePredefinedFleetTripDestinationOnDispatch: boolean;
+  defaultFleetDefectWorkOrderTypeId?: string | null;
+  defaultFleetDefectMaintenanceTypeId?: string | null;
+  defaultFleetDefectPriorityLevelId?: string | null;
+  defaultFleetDefectBillingType: 'Repairs' | 'Maintenance' | string;
 }
 
 export const maintenanceSettingsService = {

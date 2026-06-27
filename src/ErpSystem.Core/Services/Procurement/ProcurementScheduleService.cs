@@ -41,9 +41,10 @@ public class ProcurementScheduleService : IProcurementScheduleService
 
     public async Task<PagedResult<ProcurementScheduleDto>> GetSchedulesAsync(
         int page, int pageSize, string? search = null, string? status = null,
-        Guid? departmentId = null, Guid? planId = null)
+        Guid? departmentId = null, Guid? planId = null,
+        DateTime? startDate = null, DateTime? endDate = null)
     {
-        var result = await _scheduleRepository.GetSchedulesAsync(page, pageSize, search, status, departmentId, planId);
+        var result = await _scheduleRepository.GetSchedulesAsync(page, pageSize, search, status, departmentId, planId, startDate, endDate);
         return new PagedResult<ProcurementScheduleDto>
         {
             Items = result.Items.Select(MapToDto).ToList(),

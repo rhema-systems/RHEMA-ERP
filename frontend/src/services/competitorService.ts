@@ -7,7 +7,8 @@ function getAuthHeaders(): Record<string, string> {
 export interface CompetitorSummary {
   id: string; name: string; industry?: string; threatLevel: string;
   estimatedMarketShare: number; isActive: boolean;
-  dealCount: number; wonDeals: number; lostDeals: number; createdAt: string;
+  dealCount: number; openDeals: number; wonDeals: number; lostDeals: number;
+  totalDealValue: number; openDealValue: number; winRate: number; createdAt: string;
 }
 export interface CompetitorDetail extends CompetitorSummary {
   website?: string; description?: string; strengths?: string; weaknesses?: string;
@@ -17,7 +18,7 @@ export interface CompetitorDeal {
   id: string; opportunityName?: string; customerName?: string;
   threatLevel: string; outcome: string; dealValue: number;
   competitorProposal?: string; ourDifferentiator?: string;
-  lessonsLearned?: string; reportedDate: string;
+  lessonsLearned?: string; reportedDate: string; resolvedDate?: string;
 }
 export interface CreateCompetitor {
   name: string; website?: string; industry?: string; description?: string;
@@ -29,6 +30,22 @@ export interface CreateCompetitorDeal {
   customerName?: string; threatLevel: string; dealValue: number;
   competitorProposal?: string; ourDifferentiator?: string;
 }
+export interface CompetitorThreatBreakdown {
+  threatLevel: string; competitorCount: number; dealCount: number; openDealValue: number;
+}
+export interface CompetitorIndustryBreakdown {
+  industry: string; competitorCount: number; averageMarketShare: number;
+}
+export interface CompetitorAnalytics {
+  totalCompetitors: number; activeCompetitors: number;
+  highThreatCompetitors: number; criticalThreatCompetitors: number;
+  openCompetitiveDeals: number; wonDeals: number; lostDeals: number;
+  totalCompetitiveDealValue: number; openCompetitiveDealValue: number;
+  winRate: number; averageMarketShare: number;
+  threatBreakdown: CompetitorThreatBreakdown[];
+  industryBreakdown: CompetitorIndustryBreakdown[];
+  recentDeals: CompetitorDeal[];
+}
 
 export const competitorService = {
   async getCompetitors(page = 1, pageSize = 20, search?: string, threatLevel?: string) {
@@ -38,6 +55,12 @@ export const competitorService = {
     const res = await fetch(`${API_BASE_URL}/sales/competitors?${params}`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to fetch competitors');
     return { data: await res.json() };
+  },
+  async getAnalytics() {
+    const res = await fetch(`${API_BASE_URL}/sales/competitors/analytics`, { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch competitor analytics');
+    const data = (await res.json()) as CompetitorAnalytics;
+    return { data };
   },
   async getCompetitorById(id: string) {
     const res = await fetch(`${API_BASE_URL}/sales/competitors/${id}`, { headers: getAuthHeaders() });

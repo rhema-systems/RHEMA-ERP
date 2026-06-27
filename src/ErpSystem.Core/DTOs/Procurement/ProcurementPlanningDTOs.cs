@@ -16,6 +16,8 @@ public class ProcurementPlanDto
     public Guid DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
     public int FiscalYear { get; set; }
+    public string PlanningCycle { get; set; } = "Annual";
+    public string? PlanningQuarter { get; set; }
     public DateTime PlanStartDate { get; set; }
     public DateTime PlanEndDate { get; set; }
     public int PlanDurationYears { get; set; }
@@ -27,6 +29,9 @@ public class ProcurementPlanDto
     public DateTime? PreparedDate { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedDate { get; set; }
+    public string? PublishedByName { get; set; }
+    public DateTime? PublishedDate { get; set; }
+    public bool IsPublished { get; set; }
     public int RevisionNumber { get; set; }
     public int ItemCount { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -44,6 +49,8 @@ public class ProcurementPlanDetailDto : ProcurementPlanDto
     public string? ReviewComments { get; set; }
     public Guid? ApprovedById { get; set; }
     public string? ApprovalComments { get; set; }
+    public Guid? PublishedById { get; set; }
+    public string? PublishComments { get; set; }
     public Guid? PreviousVersionId { get; set; }
     public string? Notes { get; set; }
     public List<ProcurementPlanItemDto> Items { get; set; } = new();
@@ -68,6 +75,12 @@ public class CreateProcurementPlanDto
 
     [Required]
     public int FiscalYear { get; set; }
+
+    [MaxLength(20)]
+    public string PlanningCycle { get; set; } = "Annual";
+
+    [MaxLength(10)]
+    public string? PlanningQuarter { get; set; }
 
     [Required]
     public DateTime PlanStartDate { get; set; }
@@ -105,6 +118,12 @@ public class UpdateProcurementPlanDto
 
     [Required]
     public int FiscalYear { get; set; }
+
+    [MaxLength(20)]
+    public string PlanningCycle { get; set; } = "Annual";
+
+    [MaxLength(10)]
+    public string? PlanningQuarter { get; set; }
 
     [Required]
     public DateTime PlanStartDate { get; set; }
@@ -163,6 +182,207 @@ public class ApproveProcurementPlanDto
     public bool AutoLinkBudget { get; set; } = true;
 }
 
+/// <summary>
+/// Publish an approved procurement plan to procurement execution.
+/// </summary>
+public class PublishProcurementPlanDto
+{
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+}
+
+/// <summary>
+/// Create a controlled amendment/version from an approved or active procurement plan.
+/// </summary>
+public class CreateProcurementPlanAmendmentDto
+{
+    [Required]
+    [MaxLength(2000)]
+    public string Reason { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    public string? Title { get; set; }
+
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+}
+
+/// <summary>
+/// Consolidation opportunity generated from approved/active plan items.
+/// </summary>
+public class ProcurementPlanConsolidationOpportunityDto
+{
+    public string OpportunityKey { get; set; } = string.Empty;
+    public string ItemCategory { get; set; } = string.Empty;
+    public string ItemDescription { get; set; } = string.Empty;
+    public string? Specifications { get; set; }
+    public string UnitOfMeasure { get; set; } = "EA";
+    public string Currency { get; set; } = "USD";
+    public int PlanCount { get; set; }
+    public int DepartmentCount { get; set; }
+    public int ItemCount { get; set; }
+    public decimal TotalQuantity { get; set; }
+    public decimal EstimatedTotalCost { get; set; }
+    public decimal AverageUnitPrice { get; set; }
+    public decimal PotentialSavings { get; set; }
+    public string OpportunityLevel { get; set; } = "Low";
+    public string RecommendedStrategy { get; set; } = "Maintain";
+    public string? PreferredSupplierName { get; set; }
+    public List<ProcurementPlanConsolidationItemDto> Items { get; set; } = new();
+}
+
+public class ProcurementPlanConsolidationItemDto
+{
+    public Guid PlanId { get; set; }
+    public string PlanNumber { get; set; } = string.Empty;
+    public Guid PlanItemId { get; set; }
+    public Guid DepartmentId { get; set; }
+    public string? DepartmentName { get; set; }
+    public string ItemDescription { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal EstimatedTotalCost { get; set; }
+    public string? PlannedQuarter { get; set; }
+    public DateTime? RequiredDate { get; set; }
+    public string? PreferredSupplierName { get; set; }
+}
+
+public class ProcurementPlanningDashboardDto
+{
+    public int FiscalYear { get; set; }
+    public string? PlanningQuarter { get; set; }
+    public int TotalPlans { get; set; }
+    public int DraftPlans { get; set; }
+    public int SubmittedPlans { get; set; }
+    public int ApprovedPlans { get; set; }
+    public int ActivePlans { get; set; }
+    public int CompletedPlans { get; set; }
+    public int TotalItems { get; set; }
+    public int CriticalItems { get; set; }
+    public decimal EstimatedBudget { get; set; }
+    public decimal ApprovedBudget { get; set; }
+    public decimal BudgetUtilizationPercent { get; set; }
+    public decimal ConsolidationPotentialSavings { get; set; }
+    public string Currency { get; set; } = "USD";
+    public List<ProcurementPlanningDepartmentSummaryDto> DepartmentSummaries { get; set; } = new();
+    public List<ProcurementPlanningCategorySummaryDto> CategorySummaries { get; set; } = new();
+    public List<ProcurementPlanningQuarterSummaryDto> QuarterSummaries { get; set; } = new();
+    public ProcurementPlanningStrategicAnalyticsDto StrategicAnalytics { get; set; } = new();
+}
+
+public class ProcurementPlanningStrategicAnalyticsDto
+{
+    public ProcurementPlanningMarketAnalyticsDto Market { get; set; } = new();
+    public ProcurementPlanningSupplierAnalyticsDto Supplier { get; set; } = new();
+}
+
+public class ProcurementPlanningMarketAnalyticsDto
+{
+    public decimal AverageMarketPrice { get; set; }
+    public decimal AveragePriceIncreasePercent { get; set; }
+    public int HighInflationCategoryCount { get; set; }
+    public int HighRiskCategoryCount { get; set; }
+    public int LongLeadTimeItemCount { get; set; }
+    public decimal MarketRiskIndex { get; set; }
+    public decimal InflationImpactPercent { get; set; }
+    public List<ProcurementPlanningMarketCategoryRiskDto> HighRiskCategories { get; set; } = new();
+}
+
+public class ProcurementPlanningMarketCategoryRiskDto
+{
+    public string CategoryName { get; set; } = string.Empty;
+    public int AnalysisCount { get; set; }
+    public decimal AveragePriceIncreasePercent { get; set; }
+    public int LongLeadTimeCount { get; set; }
+    public string HighestRiskLevel { get; set; } = "Low";
+}
+
+public class ProcurementPlanningSupplierAnalyticsDto
+{
+    public int ActiveSuppliers { get; set; }
+    public int PreferredSuppliers { get; set; }
+    public int ConsolidationOpportunities { get; set; }
+    public decimal SupplierRiskScore { get; set; }
+    public decimal TotalSupplierSpend { get; set; }
+    public string ConcentrationRisk { get; set; } = "Low";
+    public List<ProcurementPlanningSupplierSpendSummaryDto> SpendBySupplier { get; set; } = new();
+    public List<ProcurementPlanningSupplierRiskSummaryDto> HighRiskSuppliers { get; set; } = new();
+}
+
+public class ProcurementPlanningSupplierSpendSummaryDto
+{
+    public Guid SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public decimal TotalSpend { get; set; }
+    public decimal PercentageOfTotalSpend { get; set; }
+    public bool IsPreferred { get; set; }
+    public string? RiskLevel { get; set; }
+}
+
+public class ProcurementPlanningSupplierRiskSummaryDto
+{
+    public Guid SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public string RiskLevel { get; set; } = "Unknown";
+    public decimal TotalSpend { get; set; }
+    public decimal PercentageOfTotalSpend { get; set; }
+    public List<string> RiskFactors { get; set; } = new();
+}
+
+public class ProcurementPlanningDepartmentSummaryDto
+{
+    public Guid DepartmentId { get; set; }
+    public string DepartmentName { get; set; } = string.Empty;
+    public int PlanCount { get; set; }
+    public int ItemCount { get; set; }
+    public decimal EstimatedBudget { get; set; }
+    public decimal ApprovedBudget { get; set; }
+}
+
+public class ProcurementPlanningCategorySummaryDto
+{
+    public string CategoryName { get; set; } = string.Empty;
+    public int ItemCount { get; set; }
+    public decimal EstimatedCost { get; set; }
+    public decimal ApprovedBudget { get; set; }
+}
+
+public class ProcurementPlanningQuarterSummaryDto
+{
+    public string Quarter { get; set; } = string.Empty;
+    public int ItemCount { get; set; }
+    public decimal EstimatedCost { get; set; }
+}
+
+public class ProcurementPlanningReportDto
+{
+    public string ReportType { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public int? FiscalYear { get; set; }
+    public string? PlanningQuarter { get; set; }
+    public DateTime GeneratedAt { get; set; }
+    public string Currency { get; set; } = "USD";
+    public List<ProcurementPlanningReportRowDto> Rows { get; set; } = new();
+}
+
+public class ProcurementPlanningReportRowDto
+{
+    public string PlanNumber { get; set; } = string.Empty;
+    public string PlanTitle { get; set; } = string.Empty;
+    public string? DepartmentName { get; set; }
+    public int FiscalYear { get; set; }
+    public string? PlanningCycle { get; set; }
+    public string? PlanningQuarter { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? ItemCategory { get; set; }
+    public string? ItemDescription { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal EstimatedCost { get; set; }
+    public decimal ApprovedBudget { get; set; }
+    public decimal Variance { get; set; }
+    public string? PublishedByName { get; set; }
+    public DateTime? PublishedDate { get; set; }
+}
+
 #endregion
 
 #region Procurement Plan Item DTOs
@@ -177,6 +397,14 @@ public class ProcurementPlanItemDto
     public Guid? InventoryItemId { get; set; }
     public string? InventoryItemCode { get; set; }
     public string? InventoryItemName { get; set; }
+    public Guid? ProcurementBudgetId { get; set; }
+    public Guid? ProcurementBudgetAllocationId { get; set; }
+    public Guid? MarketAnalysisId { get; set; }
+    public string? MarketAnalysisTitle { get; set; }
+    public string? BudgetLineCode { get; set; }
+    public string? BudgetCategoryName { get; set; }
+    public decimal? ApprovedBudgetAmount { get; set; }
+    public string? BudgetNotes { get; set; }
     public string ItemDescription { get; set; } = string.Empty;
     public string? Specifications { get; set; }
     public string? ItemCategory { get; set; }
@@ -216,6 +444,23 @@ public class CreateProcurementPlanItemDto
     /// </summary>
     public Guid? InventoryItemId { get; set; }
 
+    public Guid? ProcurementBudgetId { get; set; }
+
+    public Guid? ProcurementBudgetAllocationId { get; set; }
+
+    public Guid? MarketAnalysisId { get; set; }
+
+    [MaxLength(50)]
+    public string? BudgetLineCode { get; set; }
+
+    [MaxLength(100)]
+    public string? BudgetCategoryName { get; set; }
+
+    public decimal? ApprovedBudgetAmount { get; set; }
+
+    [MaxLength(500)]
+    public string? BudgetNotes { get; set; }
+
     [Required]
     [MaxLength(200)]
     public string ItemDescription { get; set; } = string.Empty;
@@ -229,6 +474,7 @@ public class CreateProcurementPlanItemDto
     [Required]
     public decimal EstimatedQuantity { get; set; }
 
+    [Required]
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA";
 
@@ -677,11 +923,18 @@ public class MarketAnalysisDto
     public DateTime AnalysisPeriodStart { get; set; }
     public DateTime AnalysisPeriodEnd { get; set; }
     public decimal HistoricalAveragePrice { get; set; }
+    public decimal? PreviousPrice { get; set; }
     public decimal CurrentMarketPrice { get; set; }
     public decimal ForecastedPrice { get; set; }
     public string PriceTrend { get; set; } = "Stable";
     public decimal PriceChangePercent { get; set; }
+    public decimal? PriceVariancePercent { get; set; }
     public string Currency { get; set; } = "USD";
+    public int? LeadTimeDays { get; set; }
+    public string MarketAvailability { get; set; } = "Medium";
+    public string SupplyRiskLevel { get; set; } = "Medium";
+    public decimal InflationImpactPercent { get; set; }
+    public decimal RecommendedBudgetAdjustmentPercent { get; set; }
     public string MarketRiskLevel { get; set; } = "Medium";
     public string? RiskFactors { get; set; }
     public string? Opportunities { get; set; }
@@ -751,6 +1004,7 @@ public class CreateMarketAnalysisDto
     public DateTime AnalysisPeriodEnd { get; set; }
 
     public decimal HistoricalAveragePrice { get; set; }
+    public decimal? PreviousPrice { get; set; }
     public decimal CurrentMarketPrice { get; set; }
     public decimal ForecastedPrice { get; set; }
 
@@ -758,9 +1012,21 @@ public class CreateMarketAnalysisDto
     public string PriceTrend { get; set; } = "Stable";
 
     public decimal PriceChangePercent { get; set; }
+    public decimal? PriceVariancePercent { get; set; }
 
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
+
+    public int? LeadTimeDays { get; set; }
+
+    [MaxLength(20)]
+    public string MarketAvailability { get; set; } = "Medium";
+
+    [MaxLength(20)]
+    public string SupplyRiskLevel { get; set; } = "Medium";
+
+    public decimal InflationImpactPercent { get; set; }
+    public decimal RecommendedBudgetAdjustmentPercent { get; set; }
 
     [MaxLength(20)]
     public string MarketRiskLevel { get; set; } = "Medium";
@@ -807,6 +1073,21 @@ public class PriceHistoryDto
     public string? Notes { get; set; }
 }
 
+public class MarketSurveySummaryDto
+{
+    public Guid MarketAnalysisId { get; set; }
+    public int QuoteCount { get; set; }
+    public decimal AverageMarketPrice { get; set; }
+    public decimal LowestPrice { get; set; }
+    public decimal HighestPrice { get; set; }
+    public decimal RecommendedPlanningEstimate { get; set; }
+    public string Currency { get; set; } = "USD";
+    public Guid? LowestPriceSupplierId { get; set; }
+    public string? LowestPriceSupplierName { get; set; }
+    public DateTime? LatestQuoteDate { get; set; }
+    public List<PriceHistoryDto> Quotes { get; set; } = new();
+}
+
 /// <summary>
 /// Create price history DTO
 /// </summary>
@@ -834,6 +1115,7 @@ public class CreatePriceHistoryDto
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
 
+    [Required]
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA";
 
@@ -874,6 +1156,8 @@ public class SupplierConsolidationDto
     public string? PreparedByName { get; set; }
     public DateTime? PreparedDate { get; set; }
     public string Status { get; set; } = "Draft";
+    public DateTime? ImplementationDate { get; set; }
+    public decimal ActualSavings { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -1067,6 +1351,7 @@ public class CreateEmergencyProcurementItemDto
     public decimal CurrentStockLevel { get; set; }
     public decimal EmergencyOrderQuantity { get; set; }
 
+    [Required]
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA";
 
@@ -1170,4 +1455,3 @@ public class BudgetValidationResultDto
 }
 
 #endregion
-

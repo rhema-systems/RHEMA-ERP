@@ -274,6 +274,7 @@ export interface WorkflowEntitySummaryDto {
   currentStepInstanceId?: string;
   currentStepType?: WorkflowStepType;
   canCurrentUserApprove: boolean;
+  canCurrentUserRecall?: boolean;
   canCurrentUserComplete?: boolean;
   pendingApprovers: WorkflowPendingApproverDto[];
   currentStepChecklist?: WorkflowQualityCheckDto[];
@@ -425,6 +426,10 @@ export interface ExecuteStepRequest {
 
 export interface CancelWorkflowRequest {
   reason: string;
+}
+
+export interface RecallWorkflowRequest {
+  reason?: string;
 }
 
 export interface ProcessStepRequest {

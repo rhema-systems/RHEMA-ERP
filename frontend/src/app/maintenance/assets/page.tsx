@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin, Upload, Download, ArrowRightLeft, QrCode, Printer, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -35,11 +35,18 @@ import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 import { useRouter } from 'next/navigation';
 import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 import AssetVehicleFleetTabs from '@/components/maintenance/AssetVehicleFleetTabs';
+import { QRCodeSVG } from 'qrcode.react';
+import { inspectionTemplateService, InspectionTemplate, InspectionTemplateQrPackage } from '@/services/inspectionTemplateService';
+import { projectService, ProjectLookupDto } from '@/services/projectService';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { fleetService, type FleetTripInspectionDto } from '@/services/fleetService';
+import { printQrLabel } from '@/lib/print-qr-label';
 
 import { format } from 'date-fns';
 
 interface Asset {
   id: string;
+  assetCategoryId: string;
   assetNumber: string;
   name: string;
   description: string;
@@ -63,18 +70,108 @@ interface Asset {
   criticality: 'Low' | 'Medium' | 'High' | 'Critical';
   value: number;
   currentValue?: number;
+  currentProjectId?: string | null;
+  currentProjectName?: string | null;
+  currentSiteLocationId?: string | null;
+  currentSiteLocationName?: string | null;
 }
 
-interface MaintenanceHistory {
+interface AssetMovementHistory {
   id: string;
-  assetId: string;
-  workOrderId: string;
-  date: string;
-  type: string;
-  technician: string;
-  description: string;
+  fromProjectName?: string | null;
+  toProjectName?: string | null;
+  fromSiteLocationName?: string | null;
+  toSiteLocationName?: string | null;
+  fromLocation?: string | null;
+  toLocation?: string | null;
+  effectiveDate: string;
+  reason: string;
+  notes?: string | null;
+}
+
+interface AssetWorkOrderHistory {
+  id: string;
+  workOrderNumber: string;
+  title: string;
   status: string;
-  cost: number;
+  workOrderType?: string | null;
+  maintenanceType?: string | null;
+  createdAt: string;
+  actualCompletionDate?: string | null;
+  actualCost: number;
+}
+
+interface AssetInspectionHistory {
+  id: string;
+  templateName: string;
+  inspectionDate: string;
+  status: string;
+  overallResult?: string | null;
+  notes?: string | null;
+  failedItemCount: number;
+  flaggedItemCount: number;
+  generatedWorkOrderId?: string | null;
+  workflowEntityType?: string | null;
+}
+
+interface AssetLifecycleHistory {
+  assetId: string;
+  movements: AssetMovementHistory[];
+  serviceHistory: AssetWorkOrderHistory[];
+  workOrderHistory: AssetWorkOrderHistory[];
+  inspectionHistory: AssetInspectionHistory[];
+}
+
+interface LocationLookup {
+  id: string;
+  name: string;
+  code?: string | null;
+  isActive?: boolean;
+}
+
+const currentLocalDateTimeInput = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
+
+interface AssetImportResult {
+  totalRows: number;
+  successCount: number;
+  errorCount: number;
+  successfulAssetNumbers: string[];
+  errors: Array<{ rowNumber: number; assetNumber?: string | null; field: string; error: string }>;
+}
+
+type InspectionReviewRow = {
+  id: string;
+  item: string;
+  type: string;
+  required: boolean;
+  order: number;
+  value: string;
+  photo?: string | null;
+};
+
+function parseInspectionRows(inspectionData?: string | null): InspectionReviewRow[] {
+  if (!inspectionData) return [];
+  try {
+    const parsed = JSON.parse(inspectionData);
+    if (!parsed || !Array.isArray(parsed.checklist)) return [];
+    return parsed.checklist
+      .filter((row: any) => row?.id)
+      .map((row: any, index: number): InspectionReviewRow => ({
+        id: String(row.id),
+        item: String(row.item || `Checklist item ${index + 1}`),
+        type: String(row.type || 'checklist'),
+        required: !!row.required,
+        order: Number(row.order ?? index + 1),
+        value: row.value != null ? String(row.value) : '',
+        photo: row.photo ? String(row.photo) : null,
+      }))
+      .sort((a: InspectionReviewRow, b: InspectionReviewRow) => (a.order ?? 0) - (b.order ?? 0));
+  } catch {
+    return [];
+  }
 }
 
 type AssetFormState = {
@@ -127,7 +224,6 @@ function AssetsPageContent() {
   const searchParams = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
-  const [maintenanceHistory, setMaintenanceHistory] = useState<MaintenanceHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -139,8 +235,34 @@ function AssetsPageContent() {
   const [assetTypes, setAssetTypes] = useState<Array<{ id: string; name: string; description?: string; assetType?: string | null; isActive?: boolean }>>([]);
   const initialCreateHandledRef = useRef(false);
   const initialEditHandledRef = useRef(false);
+  const initialInspectionHandledRef = useRef(false);
+  const assetQrLabelRef = useRef<HTMLDivElement>(null);
   const [vehiclePicturesOpen, setVehiclePicturesOpen] = useState(false);
   const [assetViewTab, setAssetViewTab] = useState<string>('details');
+  const [lifecycleHistory, setLifecycleHistory] = useState<AssetLifecycleHistory | null>(null);
+  const [lifecycleLoading, setLifecycleLoading] = useState(false);
+  const [projects, setProjects] = useState<ProjectLookupDto[]>([]);
+  const [locations, setLocations] = useState<LocationLookup[]>([]);
+  const [locationLookupError, setLocationLookupError] = useState<string | null>(null);
+  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+  const [moveForm, setMoveForm] = useState({ projectId: 'none', siteLocationId: 'none', location: '', reason: '', notes: '', effectiveDate: currentLocalDateTimeInput() });
+  const [movingAsset, setMovingAsset] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<AssetImportResult | null>(null);
+  const [isQrDialogOpen, setIsQrDialogOpen] = useState(false);
+  const [qrTemplates, setQrTemplates] = useState<InspectionTemplate[]>([]);
+  const [selectedQrTemplateId, setSelectedQrTemplateId] = useState('');
+  const [qrPackage, setQrPackage] = useState<InspectionTemplateQrPackage | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [assetInspections, setAssetInspections] = useState<FleetTripInspectionDto[]>([]);
+  const [assetInspectionsLoading, setAssetInspectionsLoading] = useState(false);
+  const [assetInspectionsError, setAssetInspectionsError] = useState<string | null>(null);
+  const [assetInspectionDialogOpen, setAssetInspectionDialogOpen] = useState(false);
+  const [selectedAssetInspection, setSelectedAssetInspection] = useState<FleetTripInspectionDto | null>(null);
+  const [assetInspectionTemplate, setAssetInspectionTemplate] = useState<InspectionTemplate | null>(null);
+  const [assetInspectionTemplateLoading, setAssetInspectionTemplateLoading] = useState(false);
 
   const [newAsset, setNewAsset] = useState<AssetFormState>(createEmptyAssetForm());
 
@@ -193,6 +315,7 @@ function AssetsPageContent() {
 
       const mapped = {
         ...asset,
+        assetCategoryId: asset.assetCategoryId || asset.AssetCategoryId || asset.assetCategory?.id || '',
         assetNumber: asset.assetNumber || asset.AssetNumber || 'N/A',
         value: asset.currentValue || asset.CurrentValue || 0,
         currentValue: asset.currentValue || asset.CurrentValue || 0,
@@ -211,6 +334,10 @@ function AssetsPageContent() {
         ownershipType: asset.ownershipType || asset.OwnershipType || 'Owned',
         serialNumber: asset.serialNumber || asset.SerialNumber || '',
         location: asset.location || asset.Location || '',
+        currentProjectId: asset.currentProjectId || asset.CurrentProjectId || null,
+        currentProjectName: asset.currentProjectName || asset.CurrentProjectName || null,
+        currentSiteLocationId: asset.currentSiteLocationId || asset.CurrentSiteLocationId || null,
+        currentSiteLocationName: asset.currentSiteLocationName || asset.CurrentSiteLocationName || null,
         description: asset.description || asset.Description || '',
         name: asset.name || asset.Name || '',
         status: mappedStatus,
@@ -232,11 +359,101 @@ function AssetsPageContent() {
 
   const showVehicleFields = isVehicleCategoryName(newAsset.category);
   const selectedAssetIsVehicle = selectedAsset ? isVehicleCategoryName(selectedAsset.category) : false;
+  const selectedAssetSupportsPreStart = !!selectedAsset && (selectedAsset.isFleetAsset || selectedAssetIsVehicle);
 
   useEffect(() => {
     if (!isViewDialogOpen) return;
-    setAssetViewTab('details');
-  }, [isViewDialogOpen, selectedAsset?.id]);
+    const requestedTab = searchParams?.get('tab');
+    setAssetViewTab(requestedTab === 'inspections' ? 'inspections' : 'details');
+  }, [isViewDialogOpen, searchParams, selectedAsset?.id]);
+
+  useEffect(() => {
+    const loadMovementLookups = async () => {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      setLocationLookupError(null);
+      try {
+        const [projectItems, locationsResponse] = await Promise.all([
+          projectService.lookupProjects(),
+          fetch(`${API_URL}/Location/summary`, { headers: { Authorization: token ? `Bearer ${token}` : '' } }),
+        ]);
+        setProjects(projectItems || []);
+        if (!locationsResponse.ok) {
+          throw new Error(`Site lookup returned HTTP ${locationsResponse.status}`);
+        }
+
+        const locationPayload = await locationsResponse.json();
+        const locationItems: LocationLookup[] = Array.isArray(locationPayload)
+          ? locationPayload
+          : Array.isArray(locationPayload?.items)
+            ? locationPayload.items
+            : Array.isArray(locationPayload?.data)
+              ? locationPayload.data
+              : [];
+        setLocations(locationItems.filter((item) => item.isActive !== false));
+      } catch (lookupError) {
+        console.error('Failed to load project/site lookups', lookupError);
+        setLocations([]);
+        setLocationLookupError(lookupError instanceof Error ? lookupError.message : 'Sites could not be loaded.');
+      }
+    };
+    void loadMovementLookups();
+  }, [API_URL]);
+
+  useEffect(() => {
+    if (!isViewDialogOpen || !selectedAsset?.id) return;
+    const loadLifecycleHistory = async () => {
+      setLifecycleLoading(true);
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      try {
+        const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}/lifecycle-history`, {
+          headers: { Authorization: token ? `Bearer ${token}` : '' },
+        });
+        if (!response.ok) throw new Error(await response.text());
+        setLifecycleHistory(await response.json());
+      } catch (historyError) {
+        console.error('Failed to load asset lifecycle history', historyError);
+        setLifecycleHistory(null);
+      } finally {
+        setLifecycleLoading(false);
+      }
+    };
+    void loadLifecycleHistory();
+  }, [API_URL, isViewDialogOpen, selectedAsset?.id]);
+
+  const loadAssetInspections = React.useCallback(async (assetId?: string | null) => {
+    if (!assetId) {
+      setAssetInspections([]);
+      return;
+    }
+
+    setAssetInspectionsLoading(true);
+    setAssetInspectionsError(null);
+    try {
+      setAssetInspections(await fleetService.getAssetInspections(assetId, 100));
+    } catch (inspectionError) {
+      console.error('Failed to load asset inspections', inspectionError);
+      setAssetInspections([]);
+      setAssetInspectionsError(inspectionError instanceof Error ? inspectionError.message : 'The inspection records could not be loaded.');
+    } finally {
+      setAssetInspectionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isViewDialogOpen || !selectedAsset?.id) return;
+    void loadAssetInspections(selectedAsset.id);
+  }, [isViewDialogOpen, loadAssetInspections, selectedAsset?.id]);
+
+  useEffect(() => {
+    if (initialInspectionHandledRef.current || !isViewDialogOpen || assetInspectionsLoading) return;
+    const inspectionId = searchParams?.get('inspectionId');
+    if (!inspectionId) return;
+    const inspection = assetInspections.find((item) => item.id === inspectionId);
+    if (!inspection) return;
+    initialInspectionHandledRef.current = true;
+    setAssetViewTab('inspections');
+    void openAssetInspectionReview(inspection);
+  }, [assetInspections, assetInspectionsLoading, isViewDialogOpen, searchParams]);
 
   // Load assets and maintenance history from API
   useEffect(() => {
@@ -244,14 +461,8 @@ function AssetsPageContent() {
       setLoading(true);
       try {
         const token = localStorage.getItem('authToken');
-        const [assetsResponse, historyResponse, categoriesResponse] = await Promise.all([
+        const [assetsResponse, categoriesResponse] = await Promise.all([
           fetch(`${API_URL}/maintenance/assets`, {
-            headers: {
-              'Authorization': token ? `Bearer ${token}` : '',
-              'Content-Type': 'application/json'
-            }
-          }),
-          fetch(`${API_URL}/maintenance/assets/history`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
@@ -269,11 +480,6 @@ function AssetsPageContent() {
           const assetsData = await assetsResponse.json();
           const rawAssets = assetsData.data || assetsData.items || assetsData || [];
           setAssets(mapAssets(rawAssets));
-        }
-
-        if (historyResponse.ok) {
-          const historyData = await historyResponse.json();
-          setMaintenanceHistory(historyData.data || historyData.items || historyData || []);
         }
 
         console.log('Asset categories response status:', categoriesResponse.status);
@@ -302,7 +508,6 @@ function AssetsPageContent() {
       } catch (error) {
         console.error('Failed to load assets data:', error);
         setAssets([]);
-        setMaintenanceHistory([]);
 
         // Add some default asset types for testing if API fails
         console.warn('Using fallback asset types for testing');
@@ -773,8 +978,151 @@ function AssetsPageContent() {
     );
   };
 
-  const getAssetMaintenanceHistory = (assetId: string) => {
-    return maintenanceHistory.filter(record => record.assetId === assetId);
+  const refreshAssets = async () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+    const response = await fetch(`${API_URL}/maintenance/assets?pageSize=100`, {
+      headers: { Authorization: token ? `Bearer ${token}` : '' },
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    setAssets(mapAssets(data.data || data.items || data || []));
+  };
+
+  const downloadImportTemplate = async () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+    const response = await fetch(`${API_URL}/maintenance/assets/import-template`, {
+      headers: { Authorization: token ? `Bearer ${token}` : '' },
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'maintenance-asset-import-template.xlsx';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importAssets = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    setImportResult(null);
+    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+    const data = new FormData();
+    data.append('file', importFile);
+    try {
+      const response = await fetch(`${API_URL}/maintenance/assets/import`, {
+        method: 'POST',
+        headers: { Authorization: token ? `Bearer ${token}` : '' },
+        body: data,
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const result: AssetImportResult = await response.json();
+      setImportResult(result);
+      await refreshAssets();
+      toast({ title: 'Asset upload completed', description: `${result.successCount} imported, ${result.errorCount} failed.` });
+    } catch (importError) {
+      toast({ title: 'Asset upload failed', description: importError instanceof Error ? importError.message : 'The asset file could not be uploaded.', variant: 'destructive' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const openMoveDialog = () => {
+    if (!selectedAsset) return;
+    setIsViewDialogOpen(false);
+    setMoveForm({
+      projectId: selectedAsset.currentProjectId || 'none',
+      siteLocationId: selectedAsset.currentSiteLocationId || 'none',
+      location: selectedAsset.location || '',
+      reason: '',
+      notes: '',
+      effectiveDate: currentLocalDateTimeInput(),
+    });
+    setIsMoveDialogOpen(true);
+  };
+
+  const moveAsset = async () => {
+    if (!selectedAsset || !moveForm.reason.trim()) return;
+    setMovingAsset(true);
+    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+    try {
+      const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}/move`, {
+        method: 'POST',
+        headers: { Authorization: token ? `Bearer ${token}` : '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: moveForm.projectId === 'none' ? null : moveForm.projectId,
+          siteLocationId: moveForm.siteLocationId === 'none' ? null : moveForm.siteLocationId,
+          location: moveForm.location.trim() || null,
+          reason: moveForm.reason.trim(),
+          notes: moveForm.notes.trim() || null,
+          effectiveDate: new Date(moveForm.effectiveDate).toISOString(),
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const updated = mapAssets([await response.json()])[0];
+      setSelectedAsset(updated);
+      setAssets((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setIsMoveDialogOpen(false);
+      const historyResponse = await fetch(`${API_URL}/maintenance/assets/${updated.id}/lifecycle-history`, { headers: { Authorization: token ? `Bearer ${token}` : '' } });
+      if (historyResponse.ok) setLifecycleHistory(await historyResponse.json());
+      toast({ title: 'Asset moved', description: 'The current assignment and movement history were updated.' });
+    } catch (moveError) {
+      toast({ title: 'Asset move failed', description: moveError instanceof Error ? moveError.message : 'The asset could not be moved.', variant: 'destructive' });
+    } finally {
+      setMovingAsset(false);
+    }
+  };
+
+  const generateAssetQr = async (templateId: string, templateOverride?: InspectionTemplate) => {
+    if (!selectedAsset || !templateId) return;
+    const template = templateOverride || qrTemplates.find(item => item.id === templateId);
+    const inspectionKind = template?.templateScope === 'Fleet'
+      ? (template.fleetInspectionKind && template.fleetInspectionKind !== 'Any' ? template.fleetInspectionKind : 'PreTrip')
+      : template?.sheetType === 'ServiceSheet'
+        ? 'Service'
+        : template?.sheetType === 'WeeklyChecklist'
+          ? 'Weekly'
+          : template?.sheetType === 'PreventiveMaintenanceForm'
+            ? 'PreventiveMaintenance'
+            : 'Inspection';
+    setQrLoading(true);
+    setSelectedQrTemplateId(templateId);
+    try {
+      setQrPackage(await inspectionTemplateService.getQrPackage(templateId, {
+        assetId: selectedAsset.id,
+        assetCategoryId: selectedAsset.assetCategoryId,
+        inspectionKind,
+        includeEmbeddedPayload: true,
+        maxQrPayloadBytes: 2500,
+      }));
+    } catch (qrError) {
+      toast({ title: 'QR generation failed', description: qrError instanceof Error ? qrError.message : 'The QR package could not be generated.', variant: 'destructive' });
+      setQrPackage(null);
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const openQrDialog = async () => {
+    if (!selectedAsset) return;
+    setIsViewDialogOpen(false);
+    setIsQrDialogOpen(true);
+    setQrLoading(true);
+    setQrPackage(null);
+    try {
+      const templates = await inspectionTemplateService.getAllTemplates({
+        activeOnly: true,
+        assignedAssetCategoryId: selectedAsset.assetCategoryId,
+        assignedAssetId: selectedAsset.id,
+        isQrEnabled: true,
+      });
+      setQrTemplates(templates);
+      if (templates.length > 0) await generateAssetQr(templates[0].id, templates[0]);
+    } catch (templateError) {
+      toast({ title: 'Checklist lookup failed', description: templateError instanceof Error ? templateError.message : 'No checklist could be loaded.', variant: 'destructive' });
+    } finally {
+      setQrLoading(false);
+    }
   };
 
   const formatDate = (value: string | Date | null | undefined) => {
@@ -784,12 +1132,86 @@ function AssetsPageContent() {
     return format(d, 'MMM dd, yyyy');
   };
 
+  const formatDateTime = (value: string | Date | null | undefined) => {
+    if (!value) return '';
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return format(d, 'MMM dd, yyyy HH:mm');
+  };
+
+  const getInspectionStatusBadge = (status?: string | null) => {
+    const normalized = status || 'Unknown';
+    const variant = normalized === 'Rejected' || normalized === 'Failed' ? 'destructive' : 'outline';
+    return <Badge variant={variant}>{normalized}</Badge>;
+  };
+
+  const getInspectionResultBadge = (result?: string | null) => {
+    if (!result) return <Badge variant="outline">Pending</Badge>;
+    const variant = result === 'Fail' ? 'destructive' : 'outline';
+    return <Badge variant={variant}>{result}</Badge>;
+  };
+
+  const getSheetTypeLabel = (sheetType?: string | null) => {
+    switch (sheetType) {
+      case 'ServiceSheet':
+        return 'Service Sheet';
+      case 'WeeklyChecklist':
+        return 'Weekly Checklist';
+      case 'PreventiveMaintenanceForm':
+        return 'Preventive Maintenance';
+      default:
+        return 'Inspection Sheet';
+    }
+  };
+
+  const openAssetInspectionReview = async (inspection: FleetTripInspectionDto) => {
+    setSelectedAssetInspection(inspection);
+    setAssetInspectionDialogOpen(true);
+    setAssetInspectionTemplate(null);
+    setAssetInspectionTemplateLoading(true);
+    try {
+      setAssetInspectionTemplate(await inspectionTemplateService.getTemplateById(inspection.inspectionTemplateId));
+    } catch (templateError) {
+      console.error('Failed to load inspection template for review', templateError);
+      setAssetInspectionTemplate(null);
+    } finally {
+      setAssetInspectionTemplateLoading(false);
+    }
+  };
+
+  const refreshSelectedAssetInspection = async (updated?: FleetTripInspectionDto) => {
+    if (updated) setSelectedAssetInspection(updated);
+    if (selectedAsset?.id) {
+      await loadAssetInspections(selectedAsset.id);
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}/lifecycle-history`, {
+        headers: { Authorization: token ? `Bearer ${token}` : '' },
+      });
+      if (response.ok) setLifecycleHistory(await response.json());
+    }
+  };
+
   const isMaintenanceOverdue = (nextMaintenanceDate: string | Date | null | undefined) => {
     if (!nextMaintenanceDate) return false;
     const d = nextMaintenanceDate instanceof Date ? nextMaintenanceDate : new Date(nextMaintenanceDate);
     if (Number.isNaN(d.getTime())) return false;
     return d < new Date();
   };
+
+  const selectedAssetInspectionRows = selectedAssetInspection ? parseInspectionRows(selectedAssetInspection.inspectionData) : [];
+  const selectedAssetTemplateRows = assetInspectionTemplate?.checklistItems
+    ?.slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((item, index) => ({
+      id: item.id,
+      item: item.item || `Checklist item ${index + 1}`,
+      type: item.type || 'checklist',
+      required: !!item.required,
+      order: item.order ?? index + 1,
+      value: '',
+      photo: null,
+    })) || [];
+  const assetInspectionReviewRows = selectedAssetInspectionRows.length ? selectedAssetInspectionRows : selectedAssetTemplateRows;
 
   return (
     <div className="space-y-6">
@@ -821,7 +1243,50 @@ function AssetsPageContent() {
       </Breadcrumb>
 
       <div className="flex items-center justify-between">
-        <div></div>
+        <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline"><Upload className="mr-2 h-4 w-4" />Upload Assets</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Upload Asset Master Data</DialogTitle>
+              <DialogDescription>Import maintenance assets from the standard Excel template.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Button type="button" variant="outline" onClick={() => void downloadImportTemplate()}>
+                <Download className="mr-2 h-4 w-4" />Download Template
+              </Button>
+              <div className="space-y-2">
+                <Label htmlFor="asset-import-file">Excel File</Label>
+                <Input id="asset-import-file" type="file" accept=".xlsx" onChange={(event) => setImportFile(event.target.files?.[0] || null)} />
+              </div>
+              {importResult && (
+                <div className="rounded-md border p-3 text-sm">
+                  <div className="mb-2 flex gap-4">
+                    <span>{importResult.successCount} imported</span>
+                    <span>{importResult.errorCount} failed</span>
+                    <span>{importResult.totalRows} total</span>
+                  </div>
+                  {importResult.errors.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto border-t pt-2">
+                      {importResult.errors.map((item, index) => (
+                        <p key={`${item.rowNumber}-${item.field}-${index}`} className="text-red-700">
+                          Row {item.rowNumber}: {item.field} - {item.error}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsImportDialogOpen(false)}>Close</Button>
+              <Button onClick={() => void importAssets()} disabled={!importFile || importing}>
+                {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Upload
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -1545,8 +2010,11 @@ function AssetsPageContent() {
               <div className="h-[60vh] flex flex-col">
                 <TabsList className="flex flex-wrap justify-start gap-1 h-auto">
                   <TabsTrigger value="details">Asset Details</TabsTrigger>
+                  <TabsTrigger value="movement">Movement</TabsTrigger>
+                  <TabsTrigger value="service">Service History</TabsTrigger>
+                  <TabsTrigger value="inspections">Inspections</TabsTrigger>
+                  <TabsTrigger value="work-orders">Work Orders</TabsTrigger>
                   <TabsTrigger value="schedule">Maintenance Schedule</TabsTrigger>
-                  <TabsTrigger value="history">Maintenance History</TabsTrigger>
                   {selectedAssetIsVehicle && (
                     <TabsTrigger value="fleet">Fleet</TabsTrigger>
                   )}
@@ -1571,6 +2039,14 @@ function AssetsPageContent() {
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Location</Label>
                       <p className="text-sm">{selectedAsset.location || 'Not specified'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Current Project</Label>
+                      <p className="text-sm">{selectedAsset.currentProjectName || 'Not assigned'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Current Site</Label>
+                      <p className="text-sm">{selectedAsset.currentSiteLocationName || 'Not assigned'}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Category</Label>
@@ -1685,7 +2161,11 @@ function AssetsPageContent() {
                         </p>
                       </div>
                       <div className="flex space-x-2">
-                        <Button size="sm" variant="outline">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => router.push(`/maintenance/scheduled?create=1&assetId=${selectedAsset.id}`)}
+                        >
                           <Calendar className="h-4 w-4 mr-2" />
                           Schedule Maintenance
                         </Button>
@@ -1695,36 +2175,115 @@ function AssetsPageContent() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="history">
-                <div className="space-y-4">
-                  <h4 className="text-sm font-medium">Maintenance History</h4>
-                  <div className="space-y-3">
-                    {getAssetMaintenanceHistory(selectedAsset.id).map((record) => (
-                      <div key={record.id} className="border rounded-lg p-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-medium text-sm">{record.description}</p>
-                            <div className="flex items-center space-x-4 mt-2 text-xs text-muted-foreground">
-                              <span>{formatDate(record.date)}</span>
-                              <span>{record.type}</span>
-                              <span>{record.technician}</span>
-                              <span>WO: {record.workOrderId}</span>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <Badge variant="outline" className="mb-1">{record.status}</Badge>
-                            <p className="text-sm font-medium">{formatMoney(record.cost)}</p>
-                          </div>
-                        </div>
+              <TabsContent value="movement" className="space-y-3">
+                {lifecycleLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : lifecycleHistory?.movements.length ? lifecycleHistory.movements.map((movement) => (
+                  <div key={movement.id} className="rounded-md border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{movement.toProjectName || 'Unassigned project'} / {movement.toSiteLocationName || movement.toLocation || 'Unassigned site'}</p>
+                        <p className="text-sm text-muted-foreground">From {movement.fromProjectName || 'unassigned'} / {movement.fromSiteLocationName || movement.fromLocation || 'unassigned'}</p>
+                        <p className="mt-2 text-sm">{movement.reason}</p>
                       </div>
-                    ))}
-                    {getAssetMaintenanceHistory(selectedAsset.id).length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-8">
-                        No maintenance history found for this asset.
-                      </p>
-                    )}
+                      <span className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(movement.effectiveDate)}</span>
+                    </div>
                   </div>
-                </div>
+                )) : <p className="py-8 text-center text-sm text-muted-foreground">No movement history.</p>}
+              </TabsContent>
+
+              <TabsContent value="service" className="space-y-3">
+                {lifecycleLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : lifecycleHistory?.serviceHistory.length ? lifecycleHistory.serviceHistory.map((record) => (
+                  <div key={record.id} className="flex items-start justify-between rounded-md border p-3">
+                    <div><p className="font-medium">{record.title}</p><p className="text-sm text-muted-foreground">{record.workOrderNumber} · {record.maintenanceType || record.workOrderType}</p></div>
+                    <div className="text-right"><Badge variant="outline">{record.status}</Badge><p className="mt-1 text-xs text-muted-foreground">{formatDate(record.actualCompletionDate || record.createdAt)}</p></div>
+                  </div>
+                )) : <p className="py-8 text-center text-sm text-muted-foreground">No completed service history.</p>}
+              </TabsContent>
+
+              <TabsContent value="inspections" className="space-y-3">
+                {assetInspectionsLoading ? (
+                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading inspections...
+                  </div>
+                ) : assetInspectionsError ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                    <p className="font-medium">Inspection records could not be loaded.</p>
+                    <p className="mt-1">{assetInspectionsError}</p>
+                    <Button className="mt-3" size="sm" variant="outline" onClick={() => void loadAssetInspections(selectedAsset.id)}>
+                      Try Again
+                    </Button>
+                  </div>
+                ) : assetInspections.length ? (
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date / Time</TableHead>
+                          <TableHead>Sheet</TableHead>
+                          <TableHead>Kind</TableHead>
+                          <TableHead>Result</TableHead>
+                          <TableHead>Workflow</TableHead>
+                          <TableHead>Follow-up</TableHead>
+                          <TableHead className="text-right">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {assetInspections.map((inspection) => (
+                          <TableRow
+                            key={inspection.id}
+                            className="cursor-pointer"
+                            onClick={() => void openAssetInspectionReview(inspection)}
+                          >
+                            <TableCell className="whitespace-nowrap">
+                              {formatDateTime(inspection.completedAtUtc || inspection.startedAtUtc) || '-'}
+                              {inspection.capturedOfflineAtUtc ? (
+                                <div className="text-xs text-muted-foreground">Offline: {formatDateTime(inspection.capturedOfflineAtUtc)}</div>
+                              ) : null}
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-medium">{inspection.inspectionTemplateName}</div>
+                              <div className="text-xs text-muted-foreground">{getSheetTypeLabel(inspection.sheetType)}</div>
+                            </TableCell>
+                            <TableCell>{inspection.inspectionKind || '-'}</TableCell>
+                            <TableCell>{getInspectionResultBadge(inspection.overallResult)}</TableCell>
+                            <TableCell>{getInspectionStatusBadge(inspection.status)}</TableCell>
+                            <TableCell>
+                              {inspection.workOrderId ? (
+                                <span className="text-xs">Work Order linked</span>
+                              ) : inspection.defectId ? (
+                                <span className="text-xs">Defect linked</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">None</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void openAssetInspectionReview(inspection);
+                                }}
+                              >
+                                Review
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No inspection history.</p>
+                )}
+              </TabsContent>
+
+              <TabsContent value="work-orders" className="space-y-3">
+                {lifecycleLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : lifecycleHistory?.workOrderHistory.length ? lifecycleHistory.workOrderHistory.map((record) => (
+                  <div key={record.id} className="flex items-start justify-between rounded-md border p-3">
+                    <div><p className="font-medium">{record.title}</p><p className="text-sm text-muted-foreground">{record.workOrderNumber} · {record.workOrderType || 'Work order'}</p></div>
+                    <div className="text-right"><Badge variant="outline">{record.status}</Badge><p className="mt-1 text-xs text-muted-foreground">{formatMoney(record.actualCost || 0)}</p></div>
+                  </div>
+                )) : <p className="py-8 text-center text-sm text-muted-foreground">No work-order history.</p>}
               </TabsContent>
 
               {selectedAssetIsVehicle && (
@@ -1737,9 +2296,260 @@ function AssetsPageContent() {
             </Tabs>
           )}
           <DialogFooter>
+            {selectedAssetSupportsPreStart && (
+              <Button variant="outline" onClick={() => void openQrDialog()}>
+                <QrCode className="mr-2 h-4 w-4" />QR Checklist
+              </Button>
+            )}
+            <Button variant="outline" onClick={openMoveDialog}>
+              <ArrowRightLeft className="mr-2 h-4 w-4" />Move Asset
+            </Button>
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
               Close
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isMoveDialogOpen} onOpenChange={setIsMoveDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Move Asset</DialogTitle>
+            <DialogDescription>{selectedAsset?.assetNumber} · {selectedAsset?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Project</Label>
+              <Select value={moveForm.projectId} onValueChange={(value) => setMoveForm((current) => ({ ...current, projectId: value }))}>
+                <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                <SelectContent><SelectItem value="none">Unassigned</SelectItem>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.projectCode} · {project.title}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Site</Label>
+              <Select value={moveForm.siteLocationId} onValueChange={(value) => {
+                const site = locations.find((item) => item.id === value);
+                setMoveForm((current) => ({ ...current, siteLocationId: value, location: value === 'none' ? current.location : (site?.name || current.location) }));
+              }}>
+                <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Unassigned</SelectItem>
+                  {locations.map((location) => <SelectItem key={location.id} value={location.id}>{location.code ? `${location.code} · ` : ''}{location.name}</SelectItem>)}
+                  {locations.length === 0 && <SelectItem value="no-sites" disabled>No active HR locations configured</SelectItem>}
+                </SelectContent>
+              </Select>
+              <p className={`text-xs ${locationLookupError ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {locationLookupError || 'Sites come from active HR Location master records (/api/Location/summary).'}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="move-location">Location Detail</Label>
+              <Input id="move-location" value={moveForm.location} onChange={(event) => setMoveForm((current) => ({ ...current, location: event.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="move-date">Effective Date / Time</Label>
+              <Input id="move-date" type="datetime-local" value={moveForm.effectiveDate} onChange={(event) => setMoveForm((current) => ({ ...current, effectiveDate: event.target.value }))} />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="move-reason">Reason *</Label>
+              <Input id="move-reason" value={moveForm.reason} onChange={(event) => setMoveForm((current) => ({ ...current, reason: event.target.value }))} />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="move-notes">Notes</Label>
+              <Textarea id="move-notes" value={moveForm.notes} onChange={(event) => setMoveForm((current) => ({ ...current, notes: event.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsMoveDialogOpen(false)}>Cancel</Button>
+            <Button onClick={() => void moveAsset()} disabled={!moveForm.reason.trim() || movingAsset}>{movingAsset && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Move</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={assetInspectionDialogOpen} onOpenChange={setAssetInspectionDialogOpen}>
+        <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-4xl flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Inspection Review</DialogTitle>
+            <DialogDescription>
+              {selectedAssetInspection?.vehicleAssetNumber || selectedAsset?.assetNumber || 'Asset'} · {selectedAssetInspection?.inspectionTemplateName || 'Inspection'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto pr-1">
+            {selectedAssetInspection ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 rounded-md border p-3 text-sm md:grid-cols-4">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Date / Time</div>
+                    <div className="font-medium">{formatDateTime(selectedAssetInspection.completedAtUtc || selectedAssetInspection.startedAtUtc) || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Sheet</div>
+                    <div className="font-medium">{getSheetTypeLabel(selectedAssetInspection.sheetType)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Result</div>
+                    <div>{getInspectionResultBadge(selectedAssetInspection.overallResult)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Workflow</div>
+                    <div>{getInspectionStatusBadge(selectedAssetInspection.status)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Inspector</div>
+                    <div className="font-medium">{selectedAssetInspection.inspectorEmployeeName || 'Mobile user'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Kind</div>
+                    <div className="font-medium">{selectedAssetInspection.inspectionKind || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Offline Captured</div>
+                    <div className="font-medium">{formatDateTime(selectedAssetInspection.capturedOfflineAtUtc) || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Synced</div>
+                    <div className="font-medium">{formatDateTime(selectedAssetInspection.syncedAtUtc) || '-'}</div>
+                  </div>
+                </div>
+
+                <div className="rounded-md border">
+                  <div className="border-b px-3 py-2 text-sm font-medium">Checklist Answers</div>
+                  {assetInspectionTemplateLoading ? (
+                    <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading checklist context...
+                    </div>
+                  ) : assetInspectionReviewRows.length ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-16">#</TableHead>
+                          <TableHead>Item</TableHead>
+                          <TableHead className="w-44">Response</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {assetInspectionReviewRows.map((row, index) => (
+                          <TableRow key={row.id || index}>
+                            <TableCell>{index + 1}</TableCell>
+                            <TableCell>
+                              <div className="font-medium">{row.item}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {row.type}{row.required ? ' · Required' : ''}
+                              </div>
+                              {row.photo ? (
+                                <div className="mt-2 overflow-hidden rounded-md border bg-muted/30">
+                                  <img src={row.photo} alt={`${row.item} evidence`} className="max-h-56 w-full object-contain" />
+                                </div>
+                              ) : null}
+                            </TableCell>
+                            <TableCell>
+                              {row.value ? (
+                                <Badge variant={['Fail', 'Failed', 'No'].includes(row.value) ? 'destructive' : 'outline'}>{row.value}</Badge>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">No response</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="p-4 text-sm text-muted-foreground">No checklist answers were stored for this inspection.</div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Notes</div>
+                    <div className="mt-1 whitespace-pre-wrap text-sm">{selectedAssetInspection.notes || 'No notes.'}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Follow-up</div>
+                    <div className="mt-1 text-sm">
+                      {selectedAssetInspection.workOrderId ? 'Linked Work Order created.' : selectedAssetInspection.defectId ? 'Linked Fleet Defect created.' : 'No defect or Work Order was created.'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-sm text-muted-foreground">No inspection selected.</div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:space-x-0">
+            {selectedAssetInspection && !['InProgress', 'Cancelled'].includes(selectedAssetInspection.status) ? (
+              <WorkflowApprovalActions
+                entityType="FleetTripInspection"
+                entityId={selectedAssetInspection.id}
+                entityLabel="Asset Inspection"
+                entityNumber={selectedAssetInspection.vehicleAssetNumber || selectedAsset?.assetNumber}
+                status={selectedAssetInspection.status}
+                loadWorkflowSummary
+                canSubmit={selectedAssetInspection.status === 'Completed' || selectedAssetInspection.status === 'Rejected'}
+                canApproveReject={selectedAssetInspection.status === 'Submitted'}
+                onSubmit={async () => {
+                  await refreshSelectedAssetInspection(await fleetService.submitInspectionApproval(selectedAssetInspection.id));
+                }}
+                onApprove={async (comments) => {
+                  await refreshSelectedAssetInspection(await fleetService.approveInspection(selectedAssetInspection.id, comments));
+                }}
+                onReject={async (comments) => {
+                  await refreshSelectedAssetInspection(await fleetService.rejectInspection(selectedAssetInspection.id, comments));
+                }}
+                onAfterAction={async () => {
+                  await refreshSelectedAssetInspection();
+                }}
+              />
+            ) : <div />}
+            <Button variant="outline" onClick={() => setAssetInspectionDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isQrDialogOpen} onOpenChange={setIsQrDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Asset Pre-Start QR</DialogTitle>
+            <DialogDescription>{selectedAsset?.assetNumber} · {selectedAsset?.name}</DialogDescription>
+          </DialogHeader>
+          {qrTemplates.length > 1 && (
+            <div className="space-y-2">
+              <Label>Checklist</Label>
+              <Select value={selectedQrTemplateId} onValueChange={(value) => void generateAssetQr(value)}>
+                <SelectTrigger><SelectValue placeholder="Select checklist" /></SelectTrigger>
+                <SelectContent>{qrTemplates.map((template) => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="flex min-h-72 items-center justify-center rounded-md border bg-white p-5 text-black">
+            {qrLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : qrPackage ? (
+              <div ref={assetQrLabelRef} className="text-center">
+                <div className="label-kicker text-xs font-semibold uppercase text-muted-foreground">Fleet Asset Inspection</div>
+                <QRCodeSVG value={qrPackage.mobileUrl} size={220} level="M" includeMargin />
+                <div className="label-title mt-2 font-semibold">
+                  {qrPackage.assetName || selectedAsset?.name || 'Fleet asset'}
+                </div>
+                <div className="label-description text-sm">
+                  Asset No: {qrPackage.assetNumber || selectedAsset?.assetNumber || 'Not assigned'}
+                </div>
+                <div className="label-description text-sm">
+                  Asset Type: {qrPackage.assetCategoryName || selectedAsset?.category || 'Fleet asset'}
+                </div>
+                <div className="label-description text-sm">Checklist: {qrPackage.templateName}</div>
+              </div>
+            ) : <p className="text-sm text-muted-foreground">No active QR-enabled pre-start checklist matches this asset.</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsQrDialogOpen(false)}>Close</Button>
+            <Button
+              onClick={() => {
+                if (!printQrLabel(assetQrLabelRef.current, qrPackage?.assetNumber || 'Asset QR Label')) {
+                  toast({ title: 'Print window blocked', description: 'Allow pop-ups for this site and try again.', variant: 'destructive' });
+                }
+              }}
+              disabled={!qrPackage}
+            ><Printer className="mr-2 h-4 w-4" />Print</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

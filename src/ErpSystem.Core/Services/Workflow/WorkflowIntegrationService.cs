@@ -44,6 +44,17 @@ public class WorkflowIntegrationService : IWorkflowIntegrationService
     public Task<WorkflowExecutionResult> CancelWorkflowAsync(string entityType, Guid entityId, string reason)
         => _workflowService.CancelWorkflowAsync(entityType, entityId, reason);
 
+    public async Task<WorkflowIntegrationResult> RecallAsync(string entityType, Guid entityId, Guid userId, string? reason = null)
+    {
+        var executionResult = await _workflowService.RecallWorkflowAsync(entityType, entityId, userId, reason);
+        if (!executionResult.Success)
+        {
+            return CreateResult(entityType, entityId, executionResult, "recall");
+        }
+
+        return new WorkflowIntegrationResult(executionResult, WorkflowOutcome.Recalled);
+    }
+
     private WorkflowIntegrationResult CreateResult(
         string entityType,
         Guid entityId,

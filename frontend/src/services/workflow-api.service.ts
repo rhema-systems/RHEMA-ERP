@@ -19,6 +19,7 @@ import type {
   StartWorkflowRequest,
   ExecuteStepRequest,
   CancelWorkflowRequest,
+  RecallWorkflowRequest,
   ProcessStepRequest,
   AssignStepRequest,
   ProcessApprovalRequest,
@@ -306,6 +307,16 @@ export class WorkflowApiService {
   async cancelWorkflow(instanceId: string, request: CancelWorkflowRequest): Promise<void> {
     await apiService.post<ApiResponse<void>>(
       `${this.basePath}/instances/${instanceId}/cancel`,
+      request
+    );
+  }
+
+  /**
+   * Recalls the active workflow for an entity record back to draft.
+   */
+  async recallWorkflowEntity(entityType: string, entityId: string, request: RecallWorkflowRequest = {}): Promise<void> {
+    await apiService.post<ApiResponse<void>>(
+      `${this.basePath}/entity/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}/recall`,
       request
     );
   }

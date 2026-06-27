@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Procurement;
@@ -120,6 +121,61 @@ public class ProcurementPlansController : ControllerBase
         }
     }
 
+    [HttpGet("consolidation-opportunities")]
+    public async Task<ActionResult<IEnumerable<ProcurementPlanConsolidationOpportunityDto>>> GetConsolidationOpportunities(
+        [FromQuery] int? fiscalYear = null,
+        [FromQuery] string? planningQuarter = null,
+        [FromQuery] Guid? departmentId = null)
+    {
+        try
+        {
+            var opportunities = await _planService.GetConsolidationOpportunitiesAsync(fiscalYear, planningQuarter, departmentId);
+            return Ok(opportunities);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting procurement plan consolidation opportunities");
+            return StatusCode(500, "An error occurred while retrieving consolidation opportunities");
+        }
+    }
+
+    [HttpGet("dashboard")]
+    public async Task<ActionResult<ProcurementPlanningDashboardDto>> GetDashboard(
+        [FromQuery] int? fiscalYear = null,
+        [FromQuery] string? planningQuarter = null,
+        [FromQuery] Guid? departmentId = null)
+    {
+        try
+        {
+            var dashboard = await _planService.GetDashboardAsync(fiscalYear, planningQuarter, departmentId);
+            return Ok(dashboard);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting procurement planning dashboard");
+            return StatusCode(500, "An error occurred while retrieving procurement planning dashboard");
+        }
+    }
+
+    [HttpGet("reports/{reportType}")]
+    public async Task<ActionResult<ProcurementPlanningReportDto>> GetReport(
+        string reportType,
+        [FromQuery] int? fiscalYear = null,
+        [FromQuery] string? planningQuarter = null,
+        [FromQuery] Guid? departmentId = null)
+    {
+        try
+        {
+            var report = await _planService.GetReportAsync(reportType, fiscalYear, planningQuarter, departmentId);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting procurement planning report {ReportType}", reportType);
+            return StatusCode(500, "An error occurred while retrieving procurement planning report");
+        }
+    }
+
     [HttpPost]
     public async Task<ActionResult<ProcurementPlanDetailDto>> CreatePlan([FromBody] CreateProcurementPlanDto dto)
     {
@@ -167,6 +223,7 @@ public class ProcurementPlansController : ControllerBase
             return Ok(plan);
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, ex.Message); }
         catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
@@ -184,11 +241,62 @@ public class ProcurementPlansController : ControllerBase
             return Ok(plan);
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, ex.Message); }
         catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error approving procurement plan {PlanId}", id);
             return StatusCode(500, "An error occurred while approving the procurement plan");
+        }
+    }
+
+    [HttpPost("{id}/publish")]
+    public async Task<ActionResult<ProcurementPlanDetailDto>> Publish(Guid id, [FromBody] PublishProcurementPlanDto dto)
+    {
+        try
+        {
+            var plan = await _planService.PublishAsync(id, dto);
+            return Ok(plan);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error publishing procurement plan {PlanId}", id);
+            return StatusCode(500, "An error occurred while publishing the procurement plan");
+        }
+    }
+
+    [HttpGet("{id}/versions")]
+    public async Task<ActionResult<IEnumerable<ProcurementPlanDto>>> GetVersionHistory(Guid id)
+    {
+        try
+        {
+            var versions = await _planService.GetVersionHistoryAsync(id);
+            return Ok(versions);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting version history for procurement plan {PlanId}", id);
+            return StatusCode(500, "An error occurred while retrieving the procurement plan version history");
+        }
+    }
+
+    [HttpPost("{id}/amendments")]
+    public async Task<ActionResult<ProcurementPlanDetailDto>> CreateAmendment(Guid id, [FromBody] CreateProcurementPlanAmendmentDto dto)
+    {
+        try
+        {
+            var plan = await _planService.CreateAmendmentAsync(id, dto);
+            return CreatedAtAction(nameof(GetPlan), new { id = plan.Id }, plan);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating amendment for procurement plan {PlanId}", id);
+            return StatusCode(500, "An error occurred while creating the procurement plan amendment");
         }
     }
 

@@ -268,8 +268,7 @@ const navigationItems: NavItem[] = [
       // { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
       { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
       { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
-      // Reports temporarily hidden
-      // { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
+      { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
       // Asset Analytics temporarily hidden
       // { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
     ],
@@ -282,6 +281,7 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Dashboard', href: '/maintenance/fleet/dashboard', icon: LayoutDashboard },
       { title: 'Fleets', href: '/maintenance/fleet/vehicles', icon: Truck },
+      { title: 'Drivers', href: '/maintenance/fleet/drivers', icon: UserCheck },
       { title: 'Trips', href: '/maintenance/fleet/trips', icon: MapPin },
       { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
       { title: 'Fuel (Reports)', href: '/maintenance/fleet/fuel', icon: Droplet },
@@ -355,12 +355,14 @@ const navigationItems: NavItem[] = [
         href: '/procurement/planning',
         icon: Target,
         children: [
+          { title: 'Overview', href: '/procurement/planning', icon: LayoutDashboard },
           { title: 'Procurement Plans', href: '/procurement/planning/plans', icon: Target },
           { title: 'Budgets', href: '/procurement/planning/budgets', icon: DollarSign },
           { title: 'Schedules', href: '/procurement/planning/schedules', icon: Calendar },
           { title: 'Market Analysis', href: '/procurement/planning/market-analysis', icon: TrendingUp },
           { title: 'Supplier Consolidation', href: '/procurement/planning/supplier-consolidation', icon: Users },
           { title: 'Emergency Plans', href: '/procurement/planning/emergency-plans', icon: AlertCircle },
+          { title: 'Reports', href: '/procurement/planning/reports', icon: FileText },
         ],
       },
       // { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
@@ -430,7 +432,9 @@ const navigationItems: NavItem[] = [
     href: '/sales',
     icon: ShoppingCart,
     children: [
+      { title: 'Sales Overview', href: '/sales', icon: LayoutDashboard },
       { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
+      { title: 'Allocations', href: '/sales/allocations', icon: MapPin },
       { title: 'Delivery Notes', href: '/sales/deliveries', icon: Truck },
       { title: 'Sales Agreements', href: '/sales/agreements', icon: FileText },
       {
@@ -651,6 +655,7 @@ const navigationItems: NavItem[] = [
         href: '/administration/sales',
         icon: ShoppingCart,
         children: [
+          { title: 'Sales Setup', href: '/administration/sales', icon: Settings },
           { title: 'Customer Categories', href: '/administration/sales/customer-categories', icon: Users },
           { title: 'Sales Territories', href: '/administration/sales/territories', icon: Building },
           { title: 'Price Lists', href: '/administration/sales/price-lists', icon: CreditCard },
@@ -1127,7 +1132,7 @@ export function Sidebar({ className }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-0 p-2">
+        <nav className="flex-1 space-y-0 overflow-y-auto p-2">
         {filterNavItems(navigationItems).map((item) => {
           const Icon = item.icon;
           const hasChildren = item.children && item.children.length > 0;

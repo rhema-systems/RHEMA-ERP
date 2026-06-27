@@ -749,6 +749,9 @@ export interface CrmActivitySummaryDto {
   leadName?: string;
   opportunityId?: string;
   opportunityName?: string;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
+  relatedEntityHref?: string;
 }
 
 export interface CrmActivityListItemDto extends CrmActivitySummaryDto {

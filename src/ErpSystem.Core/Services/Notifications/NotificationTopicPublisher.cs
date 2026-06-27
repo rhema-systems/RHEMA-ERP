@@ -52,6 +52,8 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
             t => t.Recipients,
             t => t.EmailTemplate);
 
+        topic = await EnsureRequiredWorkflowTopicAsync(evt, key, topic);
+
         if (topic == null || !topic.IsActive)
         {
             return;
@@ -656,6 +658,116 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 _logger.LogWarning(ex, "Failed to enqueue topic notifications for {TopicKey}", topic.Key);
             }
         }
+    }
+
+    private async Task<NotificationTopic?> EnsureRequiredWorkflowTopicAsync(
+        NotificationTopicEvent evt,
+        string key,
+        NotificationTopic? topic)
+    {
+        var segments = key.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length < 3) return topic;
+
+        var activity = segments[1];
+        var isApprovalRequest = string.Equals(activity, "WorkflowApprovalRequest", StringComparison.OrdinalIgnoreCase);
+        var isStepAssignment = string.Equals(activity, "WorkflowStepAssignment", StringComparison.OrdinalIgnoreCase);
+        if (!isApprovalRequest && !isStepAssignment) return topic;
+
+        var changed = false;
+        if (topic == null)
+        {
+            topic = new NotificationTopic
+            {
+                Id = Guid.NewGuid(),
+                TenantId = evt.TenantId,
+                Key = key,
+                Name = isApprovalRequest ? $"{segments[0]} approval required" : $"{segments[0]} workflow assignment",
+                Description = isApprovalRequest ? "A workflow request is waiting for approval." : "A workflow step has been assigned.",
+                EntityType = evt.EntityType ?? segments[0],
+                IsSystem = true,
+                IsRequired = true,
+                IsActive = true,
+                EnableInApp = true,
+                EnableEmail = false,
+                EnableSms = false,
+                InAppTitleTemplate = "{{Title}}",
+                InAppBodyTemplate = "{{Message}}",
+                ActionUrlTemplate = "{{ActionUrl}}",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "System"
+            };
+            await _unitOfWork.Repository<NotificationTopic>().AddAsync(topic);
+            changed = true;
+        }
+        else
+        {
+            if (!topic.IsSystem) { topic.IsSystem = true; changed = true; }
+            if (!topic.IsRequired) { topic.IsRequired = true; changed = true; }
+            if (!topic.IsActive) { topic.IsActive = true; changed = true; }
+            if (!topic.EnableInApp) { topic.EnableInApp = true; changed = true; }
+            if (string.IsNullOrWhiteSpace(topic.InAppTitleTemplate)) { topic.InAppTitleTemplate = "{{Title}}"; changed = true; }
+            if (string.IsNullOrWhiteSpace(topic.InAppBodyTemplate)) { topic.InAppBodyTemplate = "{{Message}}"; changed = true; }
+            if (string.IsNullOrWhiteSpace(topic.ActionUrlTemplate)) { topic.ActionUrlTemplate = "{{ActionUrl}}"; changed = true; }
+            if (changed)
+            {
+                topic.UpdatedAt = DateTime.UtcNow;
+                await _unitOfWork.Repository<NotificationTopic>().UpdateAsync(topic);
+            }
+        }
+
+        var requiredRules = isApprovalRequest
+            ? new[] { (Kind: "UserFromData", Value: "TargetUserId"), (Kind: "RoleFromData", Value: "TargetRole") }
+            : new[] { (Kind: "UserFromData", Value: "TargetUserId") };
+        var activeRecipients = (topic.Recipients ?? new List<NotificationTopicRecipient>())
+            .Where(recipient => !recipient.IsDeleted)
+            .ToList();
+        var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
+
+        foreach (var rule in requiredRules)
+        {
+            var matchingRecipient = activeRecipients.FirstOrDefault(recipient =>
+                    string.Equals(recipient.RecipientKind, rule.Kind, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(recipient.RecipientValue, rule.Value, StringComparison.OrdinalIgnoreCase));
+            if (matchingRecipient != null)
+            {
+                var recipientChanged = false;
+                if (!matchingRecipient.IsSystem) { matchingRecipient.IsSystem = true; recipientChanged = true; }
+                if (!matchingRecipient.SendInApp) { matchingRecipient.SendInApp = true; recipientChanged = true; }
+                if (recipientChanged)
+                {
+                    matchingRecipient.UpdatedAt = DateTime.UtcNow;
+                    await recipientRepo.UpdateAsync(matchingRecipient);
+                    changed = true;
+                }
+                continue;
+            }
+
+            var recipient = new NotificationTopicRecipient
+            {
+                Id = Guid.NewGuid(),
+                TenantId = evt.TenantId,
+                TopicId = topic.Id,
+                RecipientKind = rule.Kind,
+                RecipientValue = rule.Value,
+                IsSystem = true,
+                SendInApp = true,
+                SendEmail = false,
+                SendSms = false,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "System"
+            };
+            await recipientRepo.AddAsync(recipient);
+            topic.Recipients.Add(recipient);
+            activeRecipients.Add(recipient);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        return topic;
     }
 
     private static bool TryGetGuidFromData(Dictionary<string, object> data, string key, out Guid id)

@@ -812,6 +812,7 @@ public class WorkflowController : ControllerBase
                 CurrentStepInstanceId = currentStepInstanceId,
                 CurrentStepType = currentStepType,
                 CanCurrentUserApprove = canApprove,
+                CanCurrentUserRecall = CanCurrentUserRecall(activeInstance, currentUserId.Value),
                 CanCurrentUserComplete = canComplete,
                 PendingApprovers = pendingApprovalsForCurrentStep,
                 CurrentStepChecklist = currentStepChecklist,
@@ -982,6 +983,7 @@ public class WorkflowController : ControllerBase
                     CurrentStepInstanceId = currentStepInstanceId,
                     CurrentStepType = currentStepType,
                     CanCurrentUserApprove = canApprove,
+                    CanCurrentUserRecall = CanCurrentUserRecall(activeInstance, currentUserId.Value),
                     CanCurrentUserComplete = canComplete,
                     PendingApprovers = pendingApprovalsForCurrentStep,
                     CurrentStepChecklist = currentStepChecklist,
@@ -1104,7 +1106,7 @@ public class WorkflowController : ControllerBase
                     StartedDate = step.StartedDate,
                     CompletedDate = step.CompletedDate,
                     AssignedToId = step.AssignedToId,
-                    AssignedToName = step.AssignedTo?.UserName,
+                    AssignedToName = step.AssignedTo?.UserName ?? FormatApprovalOwnerList(approvalAudits),
                     Comments = step.Comments,
                     Checklist = GetChecklistFromStepConfiguration(step.WorkflowStep?.Configuration),
                     TaskConfig = GetTaskConfigFromStepConfiguration(step.WorkflowStep?.Configuration),
@@ -1135,6 +1137,93 @@ public class WorkflowController : ControllerBase
         {
             _logger.LogError(ex, "Error retrieving workflow entity audit for {EntityType} {EntityId}", entityType, entityId);
             return StatusCode(500, "An error occurred while retrieving workflow audit");
+        }
+    }
+
+    /// <summary>
+    /// Recalls the active workflow for an entity record. Only the requester can recall.
+    /// </summary>
+    [HttpPost("entity/{entityType}/{entityId:guid}/recall")]
+    public async Task<ActionResult> RecallEntityWorkflow(string entityType, Guid entityId, [FromBody] RecallWorkflowRequest? request)
+    {
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            return BadRequest("Entity type is required");
+        }
+
+        if (entityId == Guid.Empty)
+        {
+            return BadRequest("Entity id is required");
+        }
+
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            if (tenantId == Guid.Empty)
+            {
+                return Unauthorized();
+            }
+
+            var entityTypeRecord = await ResolveWorkflowEntityTypeRecordAsync(entityType, tenantId);
+            if (entityTypeRecord == null)
+            {
+                return NotFound($"Workflow entity type '{entityType}' is not configured");
+            }
+
+            var activeInstance = await ResolveActiveWorkflowInstanceAsync(entityTypeRecord, entityId);
+            if (activeInstance == null)
+            {
+                return BadRequest("No active workflow found for this record");
+            }
+
+            if (!CanCurrentUserRecall(activeInstance, currentUserId.Value))
+            {
+                return Forbid();
+            }
+
+            var reason = string.IsNullOrWhiteSpace(request?.Reason)
+                ? "Recalled by requester"
+                : request.Reason.Trim();
+
+            var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? entityType;
+            var result = await _workflowService.RecallWorkflowAsync(canonicalEntityType, entityId, currentUserId.Value, reason);
+            if (!result.Success)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.Message
+                });
+            }
+
+            var entityStatusUpdated = await TryApplyRecallStatusAsync(
+                canonicalEntityType,
+                entityId,
+                currentUserId.Value,
+                reason,
+                HttpContext.RequestAborted);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Workflow recalled successfully",
+                data = new
+                {
+                    workflowInstanceId = result.WorkflowInstanceId,
+                    entityStatusUpdated
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error recalling workflow for {EntityType} {EntityId}", entityType, entityId);
+            return StatusCode(500, "An error occurred while recalling workflow");
         }
     }
 
@@ -1311,7 +1400,9 @@ public class WorkflowController : ControllerBase
             new("WorkOrder", "Maintenance work orders", "Settings", "#3B82F6", 10),
             new("JobCard", "Maintenance job cards", "FileText", "#8B5CF6", 20),
             new("FleetTrip", "Fleet trip requests and dispatch", "MapPin", "#0EA5E9", 25),
+            new("FleetTripInspection", "Fleet pre-start, post-trip, inspection, and service sheet approvals", "ClipboardCheck", "#14B8A6", 26),
             new("PurchaseOrder", "Procurement purchase orders", "FileText", "#F59E0B", 30),
+            new("ProcurementPlan", "Annual, quarterly, and amended procurement plans", "ClipboardList", "#2563EB", 35),
             new("PurchaseRequisition", "Procurement requisitions", "FileText", "#F97316", 40),
             new("Tender", "Procurement tenders (RFQ/RFP/ITB/EOI)", "FileText", "#06B6D4", 45),
             new("RFQ", "Requests for Quotation (RFQs)", "FileText", "#06B6D4", 46),
@@ -1332,7 +1423,12 @@ public class WorkflowController : ControllerBase
             new("ProjectDeliverable", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Project closure approval and close-out governance", "Flag", "#15803D", 84),
             new("Customer", "Sales customers", "User", "#0EA5E9", 90),
-            new("BusinessPartner", "Business partner onboarding/approvals (suppliers/contractors/customers)", "Building", "#64748B", 95),
+            new("SalesOrder", "Sales orders and customer sales transactions", "ShoppingCart", "#2563EB", 91),
+            new("SalesAgreement", "Sales, lease, tenancy, and plot allocation agreements", "FileText", "#7C3AED", 92),
+            new("SalesAllocation", "Sales reservations, plot allocations, and saleable source holds", "MapPinned", "#0891B2", 93),
+            new("Refund", "Customer refund requests and approvals", "RotateCcw", "#F97316", 94),
+            new("CreditNote", "Customer credit notes and adjustments", "ReceiptText", "#14B8A6", 95),
+            new("BusinessPartner", "Business partner onboarding/approvals (suppliers/contractors/customers)", "Building", "#64748B", 96),
             new("Vendor", "Business partners and vendors", "Building", "#64748B", 100),
             new("Quality", "Quality inspections", "CheckCircle", "#EF4444", 110),
             new("ServiceRequest", "Service catalog requests", "ClipboardList", "#10B981", 115)
@@ -1403,6 +1499,97 @@ public class WorkflowController : ControllerBase
             .Where(char.IsLetterOrDigit)
             .Select(char.ToUpperInvariant)
             .ToArray());
+
+    private async Task<WorkflowEntityType?> ResolveWorkflowEntityTypeRecordAsync(string entityType, Guid tenantId)
+    {
+        var entityTypeRecord = await _workflowEntityTypeRepository.GetByNameAsync(entityType, tenantId);
+        if (entityTypeRecord != null)
+        {
+            return entityTypeRecord;
+        }
+
+        var activeTypes = await _workflowEntityTypeRepository.GetActiveEntityTypesAsync(tenantId);
+        return activeTypes.FirstOrDefault(et => EntityTypeMatches(et, entityType));
+    }
+
+    private async Task<WorkflowInstance?> ResolveActiveWorkflowInstanceAsync(WorkflowEntityType entityTypeRecord, Guid entityId)
+    {
+        var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString());
+        return instances
+            .Where(i =>
+                i.Status == WorkflowInstanceStatus.Created ||
+                i.Status == WorkflowInstanceStatus.InProgress ||
+                i.Status == WorkflowInstanceStatus.Waiting ||
+                i.Status == WorkflowInstanceStatus.Suspended)
+            .OrderByDescending(i => i.UpdatedAt ?? i.CreatedAt)
+            .FirstOrDefault();
+    }
+
+    private static bool CanCurrentUserRecall(WorkflowInstance instance, Guid currentUserId)
+        => instance.InitiatedById == currentUserId || instance.StartedById == currentUserId;
+
+    private async Task<bool> TryApplyRecallStatusAsync(
+        string entityType,
+        Guid entityId,
+        Guid userId,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        if (!_workflowStatusAdapterRegistry.TryGetAdapter(entityType, out var adapter))
+        {
+            _logger.LogWarning("Workflow recall status was not applied because no adapter exists for {EntityType}", entityType);
+            return false;
+        }
+
+        var entity = await ResolveWorkflowEntityForAdapterAsync(adapter, entityType, entityId, cancellationToken);
+        if (entity == null)
+        {
+            _logger.LogWarning(
+                "Workflow recall status was not applied because entity {EntityType} {EntityId} was not found",
+                entityType,
+                entityId);
+            return false;
+        }
+
+        adapter.ApplyRecallOutcome(entity, userId, reason);
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task<object?> ResolveWorkflowEntityForAdapterAsync(
+        IWorkflowStatusAdapter adapter,
+        string entityType,
+        Guid entityId,
+        CancellationToken cancellationToken)
+    {
+        var aliases = adapter.EntityTypes
+            .Append(entityType)
+            .Select(NormalizeEntityTypeKey)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var modelEntityType = _db.Model
+            .GetEntityTypes()
+            .Where(et => et.FindPrimaryKey()?.Properties.Count == 1)
+            .FirstOrDefault(et =>
+                aliases.Contains(NormalizeEntityTypeKey(et.ClrType.Name)) ||
+                aliases.Contains(NormalizeEntityTypeKey(et.GetTableName())) ||
+                aliases.Contains(NormalizeEntityTypeKey(GetWorkflowEntityAliasForClr(et.ClrType))));
+
+        if (modelEntityType == null)
+        {
+            return null;
+        }
+
+        return await _db.FindAsync(modelEntityType.ClrType, new object?[] { entityId }, cancellationToken);
+    }
+
+    private static string? GetWorkflowEntityAliasForClr(Type clrType)
+        => clrType.Name switch
+        {
+            "EhcServiceRequest" => "ServiceRequest",
+            _ => null
+        };
 
     /// <summary>
     /// Gets workflow instance status by ID
@@ -2236,8 +2423,7 @@ public class WorkflowController : ControllerBase
             IsRequired = step.IsRequired,
             RequiredRole = step.RequiredRole,
             EstimatedHours = step.EstimatedHours,
-            Configuration = step.Configuration != null ?
-                System.Text.Json.JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(step.Configuration) : null
+            Configuration = DeserializeWorkflowJson<WorkflowStepConfigurationDto>(step.Configuration)
         };
     }
 
@@ -2255,9 +2441,25 @@ public class WorkflowController : ControllerBase
             Description = transition.Description,
             IsDefault = transition.IsDefault,
             Priority = transition.Priority,
-            Condition = transition.Condition != null ?
-                System.Text.Json.JsonSerializer.Deserialize<WorkflowConditionDto>(transition.Condition) : null
+            Condition = DeserializeWorkflowJson<WorkflowConditionDto>(transition.Condition)
         };
+    }
+
+    private static T? DeserializeWorkflowJson<T>(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return default;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, WorkflowJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
     }
 
     private static IQueryable<WorkflowInstance> ApplyInstanceSorting(
@@ -2284,6 +2486,27 @@ public class WorkflowController : ControllerBase
         var role = approval.ApproverRole?.Trim() ?? string.Empty;
         var name = approval.ApproverName?.Trim() ?? string.Empty;
         return $"{approverId}|{role}|{name}";
+    }
+
+    private static string? FormatApprovalOwnerList(IEnumerable<WorkflowApprovalAuditDto> approvals)
+    {
+        var owners = approvals
+            .Select(a => !string.IsNullOrWhiteSpace(a.ApproverName)
+                ? a.ApproverName
+                : !string.IsNullOrWhiteSpace(a.ApproverRole)
+                    ? a.ApproverRole
+                    : a.ApproverId?.ToString())
+            .Where(owner => !string.IsNullOrWhiteSpace(owner))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return owners.Count switch
+        {
+            0 => null,
+            1 => owners[0],
+            2 => string.Join(", ", owners),
+            _ => $"{string.Join(", ", owners.Take(2))} +{owners.Count - 2}"
+        };
     }
 
     private async Task<WorkflowStepInstance?> GetStepInstanceForSummaryAsync(Guid? stepInstanceId, CancellationToken cancellationToken)
@@ -2587,6 +2810,14 @@ public class ExecuteStepRequest
 public class CancelWorkflowRequest
 {
     public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request DTO for recalling an active workflow back to draft.
+/// </summary>
+public class RecallWorkflowRequest
+{
+    public string? Reason { get; set; }
 }
 
 /// <summary>

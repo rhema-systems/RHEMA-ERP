@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { DateRange } from 'react-day-picker';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -94,6 +94,7 @@ export default function ScheduledMaintenancePage() {
   const [maintenanceTypes, setMaintenanceTypes] = useState<MaintenanceType[]>([]);
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const assetCreateLinkHandledRef = useRef(false);
 
   // Form state for creating new scheduled maintenance
   const [formData, setFormData] = useState({
@@ -500,7 +501,7 @@ export default function ScheduledMaintenancePage() {
   // Handle asset selection and auto-populate type & default schedule based on category config
   const handleAssetSelection = async (value: string) => {
     console.log('=== Asset selected:', value);
-    setFormData({ ...formData, assetId: value });
+    setFormData(prev => ({ ...prev, assetId: value }));
 
     try {
       const [assetType, categorySchedule] = await Promise.all([
@@ -619,6 +620,30 @@ export default function ScheduledMaintenancePage() {
       setFormData(prev => ({ ...prev, assetId: value }));
     }
   };
+
+  useEffect(() => {
+    if (assetCreateLinkHandledRef.current || loadingData || assets.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const create = (params.get('create') || '').toLowerCase();
+    const assetId = params.get('assetId') || '';
+    if (!['1', 'true'].includes(create) || !assetId) return;
+
+    assetCreateLinkHandledRef.current = true;
+    const asset = assets.find((item) => item.id === assetId);
+    if (!asset) {
+      toast({ title: 'Asset not found', description: 'The selected asset is not available for maintenance scheduling.', variant: 'destructive' });
+      return;
+    }
+
+    setIsCreateDialogOpen(true);
+    void handleAssetSelection(assetId).then(() => {
+      setFormData(prev => ({
+        ...prev,
+        assetId,
+        title: prev.title || `${asset.assetName} scheduled maintenance`,
+      }));
+    });
+  }, [assets, loadingData, toast]);
 
   const handleCompleteSchedule = (id: string) => {
     // Find the schedule to show in confirmation dialog

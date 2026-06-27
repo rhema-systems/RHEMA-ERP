@@ -11,9 +11,11 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import {
-  ShoppingCart, ArrowLeft, CheckCircle, XCircle, Send, Pause, Play,
-  Lock, Truck, Clock, FileText, AlertTriangle, Printer, Building2, Home
+  ShoppingCart, ArrowLeft, CheckCircle, XCircle, Pause, Play,
+  Lock, Truck, Clock, AlertTriangle, Building2, Home
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { salesOrderService, type SalesOrderDetailDto } from '@/services/salesOrderService';
@@ -45,10 +47,8 @@ export default function SalesOrderDetailPage() {
 
   // Dialog states
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [holdDialogOpen, setHoldDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [approvalComments, setApprovalComments] = useState('');
   const [holdReason, setHoldReason] = useState('');
 
   useEffect(() => {
@@ -81,20 +81,20 @@ export default function SalesOrderDetailPage() {
     }
   };
 
-  const handleSubmit = () => handleAction(
-    () => salesOrderService.submitForApproval(orderId),
-    'Order submitted for approval'
-  );
+  const handleWorkflowSubmit = async () => {
+    const updated = await salesOrderService.submitForApproval(orderId);
+    setOrder(updated);
+  };
 
-  const handleApprove = () => handleAction(
-    () => salesOrderService.processApproval(orderId, { isApproved: true, comments: approvalComments }),
-    'Order approved'
-  ).then(() => setApprovalDialogOpen(false));
+  const handleWorkflowApprove = async (comments: string) => {
+    const updated = await salesOrderService.processApproval(orderId, { isApproved: true, comments });
+    setOrder(updated);
+  };
 
-  const handleReject = () => handleAction(
-    () => salesOrderService.processApproval(orderId, { isApproved: false, comments: approvalComments }),
-    'Order rejected'
-  ).then(() => setApprovalDialogOpen(false));
+  const handleWorkflowReject = async (comments: string) => {
+    const updated = await salesOrderService.processApproval(orderId, { isApproved: false, comments });
+    setOrder(updated);
+  };
 
   const handleConfirm = () => handleAction(
     () => salesOrderService.confirmSalesOrder(orderId),
@@ -192,33 +192,22 @@ export default function SalesOrderDetailPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
-          {canSubmit && (
-            <Button onClick={handleSubmit} disabled={actionLoading}>
-              <Send className="h-4 w-4 mr-2" />Submit for Approval
-            </Button>
-          )}
-          {canApprove && (
-            <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="default"><CheckCircle className="h-4 w-4 mr-2" />Review</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Review Sales Order</DialogTitle>
-                  <DialogDescription>Approve or reject this sales order.</DialogDescription>
-                </DialogHeader>
-                <Textarea placeholder="Comments..." value={approvalComments} onChange={(e) => setApprovalComments(e.target.value)} />
-                <DialogFooter>
-                  <Button variant="destructive" onClick={handleReject} disabled={actionLoading}>
-                    <XCircle className="h-4 w-4 mr-2" />Reject
-                  </Button>
-                  <Button onClick={handleApprove} disabled={actionLoading}>
-                    <CheckCircle className="h-4 w-4 mr-2" />Approve
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+          <WorkflowApprovalActions
+            entityType="SalesOrder"
+            entityId={orderId}
+            entityLabel="Sales Order"
+            entityNumber={order.orderNumber}
+            status={order.status}
+            showStepBadge
+            loadWorkflowSummary
+            canSubmit={canSubmit}
+            canApproveReject={canApprove}
+            onSubmit={handleWorkflowSubmit}
+            onApprove={handleWorkflowApprove}
+            onReject={handleWorkflowReject}
+            onAfterAction={loadOrder}
+            onOpenWorkflows={() => router.push('/administration/workflow')}
+          />
           {canConfirm && (
             <Button onClick={handleConfirm} disabled={actionLoading}>
               <CheckCircle className="h-4 w-4 mr-2" />Confirm Order
@@ -543,6 +532,22 @@ export default function SalesOrderDetailPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <WorkflowApprovalHistoryPanel
+        entityType="SalesOrder"
+        entityId={orderId}
+        entityLabel="Sales Order"
+        entityNumber={order.orderNumber}
+        status={order.status}
+        canSubmit={canSubmit}
+        canApproveReject={canApprove}
+        onSubmit={handleWorkflowSubmit}
+        onApprove={handleWorkflowApprove}
+        onReject={handleWorkflowReject}
+        onAfterAction={loadOrder}
+        onOpenWorkflows={() => router.push('/administration/workflow')}
+        showActions={false}
+      />
 
       {/* Status History */}
       {order.statusHistory && order.statusHistory.length > 0 && (

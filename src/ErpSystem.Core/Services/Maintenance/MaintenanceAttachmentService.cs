@@ -390,6 +390,16 @@ public class MaintenanceAttachmentService : IMaintenanceAttachmentService
     {
         try
         {
+            var employeeId = await ResolveEmployeeIdForAccessAsync(userId);
+            if (!employeeId.HasValue)
+            {
+                _logger.LogDebug(
+                    "Skipping attachment access log for {AttachmentId}: actor {ActorId} is not linked to an employee",
+                    attachmentId,
+                    userId);
+                return;
+            }
+
             var accessRepo = _unitOfWork.Repository<MaintenanceAttachmentAccess>();
 
             var accessEnum = ParseEnumOrDefault<AttachmentAccessType>(accessType, AttachmentAccessType.View);
@@ -397,7 +407,7 @@ public class MaintenanceAttachmentService : IMaintenanceAttachmentService
             var entity = new MaintenanceAttachmentAccess
             {
                 AttachmentId = attachmentId,
-                AccessedByUserId = userId,
+                AccessedByUserId = employeeId.Value,
                 AccessedDate = DateTime.UtcNow,
                 AccessType = accessEnum,
                 UserAgent = _currentUserService.UserAgent,
@@ -412,6 +422,27 @@ public class MaintenanceAttachmentService : IMaintenanceAttachmentService
             // Access logging should never block file operations
             _logger.LogWarning(ex, "Failed to log attachment access for {AttachmentId}", attachmentId);
         }
+    }
+
+    private async Task<Guid?> ResolveEmployeeIdForAccessAsync(Guid actorId)
+    {
+        var employeeId = _currentUserService.EmployeeId;
+        if (employeeId.HasValue && employeeId.Value != Guid.Empty)
+        {
+            return employeeId.Value;
+        }
+
+        if (actorId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var isEmployeeId = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Employee>()
+            .GetQueryable()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == actorId);
+
+        return isEmployeeId ? actorId : null;
     }
 
     public async Task<IEnumerable<AttachmentAccessLogDto>> GetAttachmentAccessLogsAsync(Guid attachmentId)
@@ -510,4 +541,3 @@ public class MaintenanceAttachmentService : IMaintenanceAttachmentService
         };
     }
 }
-

@@ -144,6 +144,18 @@ export interface CreateRefundDto {
   reason?: string;
 }
 
+export interface CreditNoteApprovalDto {
+  isApproved: boolean;
+  comments?: string;
+  rejectionReason?: string;
+}
+
+export interface RefundApprovalDto {
+  isApproved: boolean;
+  comments?: string;
+  rejectionReason?: string;
+}
+
 export const returnOrderService = {
   // ── Return Orders ──
   async getReturnOrders(page = 1, pageSize = 20, search?: string, status?: string): Promise<PagedResult<ReturnOrderSummaryDto>> {
@@ -221,6 +233,22 @@ export const returnOrderService = {
     return res.json();
   },
 
+  async submitCreditNoteForApproval(id: string): Promise<CreditNoteDetailDto> {
+    const res = await fetch(`${API_BASE_URL}/sales/credit-notes/${id}/submit`, { method: 'POST', headers: getAuthHeaders() });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to submit credit note');
+    return res.json();
+  },
+
+  async processCreditNoteApproval(id: string, data: CreditNoteApprovalDto): Promise<CreditNoteDetailDto> {
+    const res = await fetch(`${API_BASE_URL}/sales/credit-notes/${id}/workflow-approval`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to process credit note approval');
+    return res.json();
+  },
+
   async applyCreditNote(id: string, invoiceId?: string): Promise<CreditNoteDetailDto> {
     const params = invoiceId ? `?invoiceId=${invoiceId}` : '';
     const res = await fetch(`${API_BASE_URL}/sales/credit-notes/${id}/apply${params}`, { method: 'POST', headers: getAuthHeaders() });
@@ -263,10 +291,33 @@ export const returnOrderService = {
     return res.json();
   },
 
+  async submitRefundForApproval(id: string): Promise<RefundDetailDto> {
+    const res = await fetch(`${API_BASE_URL}/sales/refunds/${id}/submit`, { method: 'POST', headers: getAuthHeaders() });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to submit refund');
+    return res.json();
+  },
+
+  async processRefundApproval(id: string, data: RefundApprovalDto): Promise<RefundDetailDto> {
+    const res = await fetch(`${API_BASE_URL}/sales/refunds/${id}/workflow-approval`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to process refund approval');
+    return res.json();
+  },
+
   async processRefund(id: string, paymentReference?: string): Promise<RefundDetailDto> {
     const params = paymentReference ? `?paymentReference=${encodeURIComponent(paymentReference)}` : '';
     const res = await fetch(`${API_BASE_URL}/sales/refunds/${id}/process${params}`, { method: 'POST', headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to process refund');
+    return res.json();
+  },
+
+  async rejectRefund(id: string, reason?: string): Promise<RefundDetailDto> {
+    const params = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+    const res = await fetch(`${API_BASE_URL}/sales/refunds/${id}/reject${params}`, { method: 'POST', headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to reject refund');
     return res.json();
   },
 };

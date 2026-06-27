@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { procurementPlanService, commonService, type CreateProcurementPlanDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import { FiscalYearSelect } from '../../components/FiscalYearSelect';
 
 export default function NewProcurementPlanPage() {
   const router = useRouter();
@@ -22,6 +23,8 @@ export default function NewProcurementPlanPage() {
     description: '',
     departmentId: '',
     fiscalYear: new Date().getFullYear(),
+    planningCycle: 'Annual',
+    planningQuarter: '',
     planStartDate: new Date().toISOString().split('T')[0],
     planEndDate: new Date(new Date().getFullYear(), 11, 31).toISOString().split('T')[0],
     planDurationYears: 1,
@@ -158,18 +161,55 @@ export default function NewProcurementPlanPage() {
               <CardDescription>Define the fiscal year and planning period</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="fiscalYear">Fiscal Year *</Label>
-                  <Input
-                    id="fiscalYear"
-                    type="number"
+                  <FiscalYearSelect
                     value={formData.fiscalYear}
-                    onChange={(e) => handleInputChange('fiscalYear', parseInt(e.target.value))}
-                    min={2020}
-                    max={2050}
-                    required
+                    onValueChange={(year) => handleInputChange('fiscalYear', year)}
+                    autoSelectFirstAvailable
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="planningCycle">Cycle</Label>
+                  <Select
+                    value={formData.planningCycle || 'Annual'}
+                    onValueChange={(value) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        planningCycle: value,
+                        planningQuarter: value === 'Quarterly' ? prev.planningQuarter : '',
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select cycle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Annual">Annual</SelectItem>
+                      <SelectItem value="Quarterly">Quarterly</SelectItem>
+                      <SelectItem value="MultiYear">Multi-Year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="planningQuarter">Quarter</Label>
+                  <Select
+                    value={formData.planningQuarter || 'none'}
+                    onValueChange={(value) => handleInputChange('planningQuarter', value === 'none' ? '' : value)}
+                    disabled={(formData.planningCycle || 'Annual') !== 'Quarterly'}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select quarter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not applicable</SelectItem>
+                      <SelectItem value="Q1">Q1</SelectItem>
+                      <SelectItem value="Q2">Q2</SelectItem>
+                      <SelectItem value="Q3">Q3</SelectItem>
+                      <SelectItem value="Q4">Q4</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="planStartDate">Start Date *</Label>
@@ -273,4 +313,3 @@ export default function NewProcurementPlanPage() {
     </div>
   );
 }
-
