@@ -252,12 +252,12 @@ function MobileHomeContent() {
         </div>
 
         {message ? (
-          <div className="mb-4 rounded-md border border-emerald-400/40 bg-emerald-400/15 px-3 py-2 text-sm text-emerald-100">
+          <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 shadow-sm">
             {message}
           </div>
         ) : null}
         {error ? (
-          <div className="mb-4 rounded-md border border-red-400/40 bg-red-400/15 px-3 py-2 text-sm text-red-100">
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 shadow-sm">
             {error}
           </div>
         ) : null}

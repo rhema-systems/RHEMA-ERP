@@ -152,6 +152,12 @@ type InspectionReviewRow = {
   photo?: string | null;
 };
 
+type InspectionPhotoPreview = {
+  url: string;
+  item: string;
+  index: number;
+};
+
 function parseInspectionRows(inspectionData?: string | null): InspectionReviewRow[] {
   if (!inspectionData) return [];
   try {
@@ -172,6 +178,32 @@ function parseInspectionRows(inspectionData?: string | null): InspectionReviewRo
   } catch {
     return [];
   }
+}
+
+function getInspectionPhotoExtension(photoUrl: string) {
+  const match = /^data:image\/([^;]+)/i.exec(photoUrl);
+  const extension = (match?.[1] || 'jpg').toLowerCase();
+  return extension === 'jpeg' ? 'jpg' : extension.replace(/[^a-z0-9]/g, '') || 'jpg';
+}
+
+function getInspectionPhotoFileName(item: string, index: number, photoUrl: string) {
+  const safeItem = item
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50) || `item-${index + 1}`;
+
+  return `inspection-photo-${index + 1}-${safeItem}.${getInspectionPhotoExtension(photoUrl)}`;
+}
+
+function downloadInspectionPhoto(photoUrl: string, item: string, index: number) {
+  const link = document.createElement('a');
+  link.href = photoUrl;
+  link.download = getInspectionPhotoFileName(item, index, photoUrl);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 type AssetFormState = {
@@ -263,6 +295,7 @@ function AssetsPageContent() {
   const [selectedAssetInspection, setSelectedAssetInspection] = useState<FleetTripInspectionDto | null>(null);
   const [assetInspectionTemplate, setAssetInspectionTemplate] = useState<InspectionTemplate | null>(null);
   const [assetInspectionTemplateLoading, setAssetInspectionTemplateLoading] = useState(false);
+  const [inspectionPhotoPreview, setInspectionPhotoPreview] = useState<InspectionPhotoPreview | null>(null);
 
   const [newAsset, setNewAsset] = useState<AssetFormState>(createEmptyAssetForm());
 
@@ -2366,7 +2399,13 @@ function AssetsPageContent() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={assetInspectionDialogOpen} onOpenChange={setAssetInspectionDialogOpen}>
+      <Dialog
+        open={assetInspectionDialogOpen}
+        onOpenChange={(open) => {
+          setAssetInspectionDialogOpen(open);
+          if (!open) setInspectionPhotoPreview(null);
+        }}
+      >
         <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-4xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>Inspection Review</DialogTitle>
@@ -2438,8 +2477,38 @@ function AssetsPageContent() {
                                 {row.type}{row.required ? ' · Required' : ''}
                               </div>
                               {row.photo ? (
-                                <div className="mt-2 overflow-hidden rounded-md border bg-muted/30">
-                                  <img src={row.photo} alt={`${row.item} evidence`} className="max-h-56 w-full object-contain" />
+                                <div className="mt-2 space-y-2">
+                                  <button
+                                    type="button"
+                                    className="group relative block w-full overflow-hidden rounded-md border bg-muted/30 text-left"
+                                    onClick={() => setInspectionPhotoPreview({ url: row.photo as string, item: row.item, index })}
+                                    title={`View ${row.item} photo evidence`}
+                                  >
+                                    <img src={row.photo} alt={`${row.item} evidence`} className="max-h-56 w-full object-contain transition group-hover:scale-[1.01]" />
+                                    <span className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-xs font-medium text-white opacity-0 transition group-hover:opacity-100">
+                                      Click to enlarge
+                                    </span>
+                                  </button>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setInspectionPhotoPreview({ url: row.photo as string, item: row.item, index })}
+                                    >
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      View photo
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => downloadInspectionPhoto(row.photo as string, row.item, index)}
+                                    >
+                                      <Download className="mr-2 h-4 w-4" />
+                                      Download
+                                    </Button>
+                                  </div>
                                 </div>
                               ) : null}
                             </TableCell>
@@ -2503,6 +2572,47 @@ function AssetsPageContent() {
               />
             ) : <div />}
             <Button variant="outline" onClick={() => setAssetInspectionDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!inspectionPhotoPreview} onOpenChange={(open) => {
+        if (!open) setInspectionPhotoPreview(null);
+      }}>
+        <DialogContent className="flex max-h-[92vh] w-[95vw] max-w-5xl flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Inspection Photo Evidence</DialogTitle>
+            <DialogDescription>
+              {inspectionPhotoPreview?.item || 'Checklist item'} · Original mobile attachment
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto rounded-lg border bg-slate-950 p-3">
+            {inspectionPhotoPreview ? (
+              <img
+                src={inspectionPhotoPreview.url}
+                alt={`${inspectionPhotoPreview.item} evidence preview`}
+                className="mx-auto max-h-[70vh] max-w-full object-contain"
+              />
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            {inspectionPhotoPreview ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => downloadInspectionPhoto(
+                  inspectionPhotoPreview.url,
+                  inspectionPhotoPreview.item,
+                  inspectionPhotoPreview.index,
+                )}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download photo
+              </Button>
+            ) : null}
+            <Button type="button" onClick={() => setInspectionPhotoPreview(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
