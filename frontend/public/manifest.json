@@ -29,7 +29,7 @@
       "name": "Asset Inspection",
       "short_name": "Inspection",
       "description": "Open the mobile asset inspection scanner",
-      "url": "/mobile/fleet/inspection",
+      "url": "/mobile/fleet/inspection?scan=1",
       "icons": [
         {
           "src": "/icon-192.png",

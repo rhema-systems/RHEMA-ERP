@@ -1,14 +1,16 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, ArrowLeft, Camera, Check, Cloud, CloudOff, Loader2, QrCode, RotateCw, Save, X } from 'lucide-react';
+import jsQR from 'jsqr';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { hasValidMobileSession } from '@/lib/mobile-session';
 import {
   inspectionTemplateService,
   InspectionTemplate,
@@ -211,6 +213,12 @@ function FleetInspectionMobilePage() {
   const scannedAssetName = searchParams.get('assetName') || '';
   const scannedAssetNumber = searchParams.get('assetNumber') || '';
   const draftKey = `${DRAFT_KEY_PREFIX}:${templateId}:${assetId}`;
+  const shouldStartScanner = searchParams.get('scan') === '1';
+
+  const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scannerStreamRef = useRef<MediaStream | null>(null);
+  const scannerTimerRef = useRef<number | null>(null);
 
   const [packagePayload, setPackagePayload] = useState<PackagePayload | null>(null);
   const [responses, setResponses] = useState<Record<string, string>>({});
@@ -230,9 +238,12 @@ function FleetInspectionMobilePage() {
   const [refreshingSubmittedId, setRefreshingSubmittedId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scannerStarting, setScannerStarting] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
   const hasStoredToken = typeof window === 'undefined'
     ? true
-    : !!(localStorage.getItem('authToken') || localStorage.getItem('token'));
+    : !!(localStorage.getItem('authToken') || localStorage.getItem('token')) && hasValidMobileSession();
 
   const syncCatalog = useCallback(async (showFeedback = false) => {
     if (!navigator.onLine) {
@@ -354,8 +365,25 @@ function FleetInspectionMobilePage() {
     }
   }, []);
 
-  const openQrValue = () => {
-    const value = manualQrValue.trim();
+  const stopScanner = useCallback(() => {
+    if (scannerTimerRef.current !== null) {
+      window.clearInterval(scannerTimerRef.current);
+      scannerTimerRef.current = null;
+    }
+
+    scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
+    scannerStreamRef.current = null;
+
+    if (scannerVideoRef.current) {
+      scannerVideoRef.current.srcObject = null;
+    }
+
+    setScannerActive(false);
+    setScannerStarting(false);
+  }, []);
+
+  const openQrLink = useCallback((rawValue: string) => {
+    const value = rawValue.trim();
     if (!value) {
       setError('Enter or paste an asset QR link.');
       return;
@@ -364,15 +392,77 @@ function FleetInspectionMobilePage() {
     try {
       const url = new URL(value, window.location.origin);
       if (url.pathname.startsWith('/mobile/fleet/inspection')) {
+        stopScanner();
         router.push(`${url.pathname}${url.search}`);
         return;
       }
 
+      stopScanner();
       window.location.href = url.toString();
     } catch {
       setError('The QR link could not be opened.');
     }
-  };
+  }, [router, stopScanner]);
+
+  const openQrValue = useCallback(() => {
+    openQrLink(manualQrValue);
+  }, [manualQrValue, openQrLink]);
+
+  const startScanner = useCallback(async () => {
+    setScannerError(null);
+    setError(null);
+
+    if (!window.isSecureContext) {
+      setScannerError('Camera scanning requires HTTPS. Use the secure mobile URL on the phone.');
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScannerError('This browser does not expose camera scanning. Paste the QR link below instead.');
+      return;
+    }
+
+    setScannerStarting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+        },
+      });
+
+      scannerStreamRef.current = stream;
+      if (scannerVideoRef.current) {
+        scannerVideoRef.current.srcObject = stream;
+        await scannerVideoRef.current.play();
+      }
+
+      scannerTimerRef.current = window.setInterval(() => {
+        const video = scannerVideoRef.current;
+        const canvas = scannerCanvasRef.current;
+        if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) return;
+
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) return;
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+        if (code?.data) openQrLink(code.data);
+      }, 350);
+
+      setScannerActive(true);
+    } catch (cameraError) {
+      stopScanner();
+      setScannerError(cameraError instanceof Error
+        ? cameraError.message
+        : 'Camera permission was not granted. Paste the QR link below instead.');
+    } finally {
+      setScannerStarting(false);
+    }
+  }, [openQrLink, stopScanner]);
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -408,6 +498,14 @@ function FleetInspectionMobilePage() {
       void syncPending();
     }
   }, [loadPackage, searchParams, syncCatalog, syncPending]);
+
+  useEffect(() => () => stopScanner(), [stopScanner]);
+
+  useEffect(() => {
+    if (shouldStartScanner && hasStoredToken && !templateId && !packagePayload && !scannerActive && !scannerStarting) {
+      void startScanner();
+    }
+  }, [hasStoredToken, packagePayload, scannerActive, scannerStarting, shouldStartScanner, startScanner, templateId]);
 
   useEffect(() => {
     try {
@@ -719,9 +817,54 @@ function FleetInspectionMobilePage() {
 
         <Card className="rounded-2xl border-emerald-100 bg-white text-slate-950 shadow-xl shadow-slate-200/70">
           <CardContent className="space-y-4 p-5">
-            <div className="flex h-20 items-center justify-center rounded-md bg-emerald-600 text-white shadow-lg shadow-emerald-200">
-              <QrCode className="h-10 w-10" />
+            <div className="space-y-3 text-center">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg shadow-emerald-200">
+                <QrCode className="h-10 w-10" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold">Scan asset QR</h2>
+                <p className="mt-1 text-sm text-slate-500">Point the phone camera at the asset label to open its checklist.</p>
+              </div>
             </div>
+
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950">
+              <video
+                ref={scannerVideoRef}
+                muted
+                playsInline
+                className={`aspect-[4/3] w-full object-cover ${scannerActive || scannerStarting ? 'block' : 'hidden'}`}
+              />
+              <canvas ref={scannerCanvasRef} className="hidden" />
+              {!scannerActive && !scannerStarting ? (
+                <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 bg-slate-900 px-6 text-center text-white">
+                  <Camera className="h-10 w-10 text-emerald-300" />
+                  <p className="text-sm text-slate-200">Tap Start camera to scan with this browser.</p>
+                </div>
+              ) : null}
+            </div>
+
+            {scannerError ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {scannerError}
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button className="h-11 w-full" onClick={() => void startScanner()} disabled={scannerStarting || scannerActive}>
+                {scannerStarting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
+                {scannerActive ? 'Scanning...' : 'Start camera'}
+              </Button>
+              <Button type="button" variant="outline" className="h-11 w-full" onClick={stopScanner} disabled={!scannerActive && !scannerStarting}>
+                Stop camera
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              Paste fallback
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="asset-qr-link" className="text-slate-700">Asset QR link</Label>
               <Input

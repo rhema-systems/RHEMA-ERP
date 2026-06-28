@@ -2,11 +2,12 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ClipboardCheck, ClipboardList, Cloud, Download, Loader2, LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ClipboardCheck, ClipboardList, Cloud, Download, Loader2, LogOut, RefreshCw, Truck, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { clearMobileSession, hasValidMobileSession, rememberMobileSession } from '@/lib/mobile-session';
 import { PWAManager } from '@/lib/pwa';
 import authService from '@/services/auth';
 import { TenantService } from '@/services/tenant';
@@ -42,8 +43,11 @@ function MobileHomeContent() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (authService.isAuthenticated()) {
+    if (authService.isAuthenticated() && hasValidMobileSession()) {
       setUser(getStoredUser());
+    } else if (authService.isAuthenticated()) {
+      clearMobileSession();
+      authService.clearTokens();
     }
 
     const flash = localStorage.getItem(MOBILE_FLASH_KEY);
@@ -89,6 +93,7 @@ function MobileHomeContent() {
       }
 
       const stored = getStoredUser() || response.user || null;
+      rememberMobileSession();
       setUser(stored);
       setMessage('Ready');
       if (redirectTarget.startsWith('/mobile/')) {
@@ -102,6 +107,7 @@ function MobileHomeContent() {
   };
 
   const logout = async () => {
+    clearMobileSession();
     await authService.logout();
     setUser(null);
     setMessage(null);
@@ -137,12 +143,17 @@ function MobileHomeContent() {
     return (
       <main className="light min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-100 px-4 py-6 text-slate-950" style={{ colorScheme: 'light' }}>
         <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-md flex-col justify-center">
-          <div className="mb-8">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-lg shadow-emerald-200">
-              <ShieldCheck className="h-8 w-8" />
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-emerald-600 to-cyan-600 text-white shadow-xl shadow-emerald-200">
+              <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15">
+                <Truck className="h-9 w-9" />
+                <span className="absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-amber-400 text-slate-900 shadow-sm">
+                  <Wrench className="h-4 w-4" />
+                </span>
+              </div>
             </div>
-            <h1 className="text-3xl font-semibold tracking-normal">Mobile Inspection</h1>
-            <p className="mt-2 text-sm text-slate-600">Fleet and maintenance checks</p>
+            <h1 className="text-3xl font-semibold tracking-normal">Fleet Maintenance</h1>
+            <p className="mt-2 text-sm text-slate-600">Scan assets, inspect equipment, and sync findings</p>
           </div>
 
           <Card className="rounded-2xl border-emerald-100 bg-white text-slate-950 shadow-xl shadow-slate-200/70">
@@ -233,7 +244,7 @@ function MobileHomeContent() {
 
           <button
             type="button"
-            onClick={() => router.push('/mobile/fleet/inspection')}
+            onClick={() => router.push('/mobile/fleet/inspection?scan=1')}
             className="flex min-h-28 items-center gap-4 rounded-lg border border-emerald-200 bg-emerald-600 p-5 text-left text-white shadow-lg shadow-emerald-200"
           >
             <span className="flex h-12 w-12 items-center justify-center rounded-md bg-white/15 text-white">
