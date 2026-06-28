@@ -2,17 +2,19 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ClipboardCheck, ClipboardList, Cloud, Loader2, LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ClipboardCheck, ClipboardList, Cloud, Download, Loader2, LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { PWAManager } from '@/lib/pwa';
 import authService from '@/services/auth';
 import { TenantService } from '@/services/tenant';
 import type { User } from '@/types';
 
 const tenantService = new TenantService();
 const MOBILE_FLASH_KEY = 'erp.mobile.flash.v1';
+const mobileInputClass = 'bg-white text-slate-950 placeholder:text-slate-400 [color-scheme:light]';
 
 type LoginForm = {
   username: string;
@@ -35,6 +37,7 @@ function MobileHomeContent() {
   const [user, setUser] = useState<User | null>(null);
   const [form, setForm] = useState<LoginForm>({ username: '', password: '', tenantCode: '' });
   const [loggingIn, setLoggingIn] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,35 +108,62 @@ function MobileHomeContent() {
     setError(null);
   };
 
+  const installApp = async () => {
+    setInstalling(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const isLocal = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+      if (!window.isSecureContext && !isLocal) {
+        setError('Install requires HTTPS. Once the IP/domain is on HTTPS, open this page again and tap Install App.');
+        return;
+      }
+
+      const accepted = await PWAManager.getInstance().showInstallPrompt();
+      if (accepted) {
+        setMessage('Mobile app installed. You can open it from your phone home screen.');
+      } else {
+        setMessage('If no prompt appears, use your browser menu and choose Add to Home Screen.');
+      }
+    } catch {
+      setMessage('Use your browser menu and choose Add to Home Screen.');
+    } finally {
+      setInstalling(false);
+    }
+  };
+
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 px-4 py-6 text-white">
+      <main className="light min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-100 px-4 py-6 text-slate-950" style={{ colorScheme: 'light' }}>
         <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-md flex-col justify-center">
           <div className="mb-8">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-500 text-slate-950">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-lg shadow-emerald-200">
               <ShieldCheck className="h-8 w-8" />
             </div>
             <h1 className="text-3xl font-semibold tracking-normal">Mobile Inspection</h1>
-            <p className="mt-2 text-sm text-slate-300">Fleet and maintenance checks</p>
+            <p className="mt-2 text-sm text-slate-600">Fleet and maintenance checks</p>
           </div>
 
-          <Card className="rounded-lg border-slate-800 bg-white text-slate-950 shadow-xl">
+          <Card className="rounded-2xl border-emerald-100 bg-white text-slate-950 shadow-xl shadow-slate-200/70">
             <CardContent className="space-y-4 p-5">
               <div className="space-y-2">
-                <Label htmlFor="mobile-username">Username</Label>
+                <Label htmlFor="mobile-username" className="text-slate-700">Username</Label>
                 <Input
                   id="mobile-username"
                   autoComplete="username"
+                  className={mobileInputClass}
                   value={form.username}
                   onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="mobile-password">Password</Label>
+                <Label htmlFor="mobile-password" className="text-slate-700">Password</Label>
                 <Input
                   id="mobile-password"
                   type="password"
                   autoComplete="current-password"
+                  className={mobileInputClass}
                   value={form.password}
                   onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                   onKeyDown={(event) => {
@@ -148,6 +178,11 @@ function MobileHomeContent() {
                 {loggingIn ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
                 Login
               </Button>
+
+              <Button type="button" variant="outline" className="h-11 w-full border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" onClick={() => void installApp()} disabled={installing}>
+                {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Install app on this phone
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -156,15 +191,15 @@ function MobileHomeContent() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-5 text-white">
+    <main className="light min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-100 px-4 py-5 text-slate-950" style={{ colorScheme: 'light' }}>
       <div className="mx-auto max-w-md">
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm text-slate-300">Signed in as</p>
+            <p className="text-sm text-slate-600">Signed in as</p>
             <h1 className="text-2xl font-semibold tracking-normal">{displayName}</h1>
-            <p className="text-sm text-slate-400">{user.currentTenantName || 'Mobile workspace'}</p>
+            <p className="text-sm text-slate-500">{user.currentTenantName || 'Mobile workspace'}</p>
           </div>
-          <Button variant="outline" size="icon" className="border-slate-700 bg-transparent text-white hover:bg-slate-900" onClick={() => void logout()}>
+          <Button variant="outline" size="icon" className="border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50" onClick={() => void logout()}>
             <LogOut className="h-4 w-4" />
           </Button>
         </div>
@@ -183,57 +218,72 @@ function MobileHomeContent() {
         <div className="grid grid-cols-1 gap-3">
           <button
             type="button"
-            onClick={() => router.push('/mobile/fleet/inspection')}
-            className="flex min-h-28 items-center gap-4 rounded-lg border border-emerald-400/30 bg-emerald-400 p-5 text-left text-slate-950 shadow-lg"
+            onClick={() => void installApp()}
+            disabled={installing}
+            className="flex min-h-20 items-center gap-4 rounded-lg border border-slate-200 bg-white p-4 text-left text-slate-900 shadow-sm disabled:opacity-70"
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-md bg-slate-950 text-emerald-300">
+            <span className="flex h-11 w-11 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+              {installing ? <Loader2 className="h-6 w-6 animate-spin" /> : <Download className="h-6 w-6" />}
+            </span>
+            <span>
+              <span className="block text-lg font-semibold">Install App</span>
+              <span className="block text-sm text-slate-500">Open from your phone home screen</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push('/mobile/fleet/inspection')}
+            className="flex min-h-28 items-center gap-4 rounded-lg border border-emerald-200 bg-emerald-600 p-5 text-left text-white shadow-lg shadow-emerald-200"
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-md bg-white/15 text-white">
               <ClipboardCheck className="h-7 w-7" />
             </span>
             <span>
               <span className="block text-xl font-semibold">Asset Inspection</span>
-              <span className="block text-sm text-slate-800">Scan QR and submit checklist</span>
+              <span className="block text-sm text-emerald-50">Scan QR and submit checklist</span>
             </span>
           </button>
 
           <button
             type="button"
             onClick={() => router.push('/mobile/fleet/inspection?sync=1')}
-            className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-800 bg-slate-900 p-5 text-left shadow"
+            className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm"
           >
-            <span className="flex h-11 w-11 items-center justify-center rounded-md bg-slate-800 text-cyan-300">
+            <span className="flex h-11 w-11 items-center justify-center rounded-md bg-cyan-50 text-cyan-700">
               <RefreshCw className="h-6 w-6" />
             </span>
             <span>
               <span className="block text-lg font-semibold">Sync Checklists</span>
-              <span className="block text-sm text-slate-400">Refresh offline sheets</span>
+              <span className="block text-sm text-slate-500">Refresh offline sheets</span>
             </span>
           </button>
 
           <button
             type="button"
             onClick={() => router.push('/mobile/fleet/inspection?pending=1')}
-            className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-800 bg-slate-900 p-5 text-left shadow"
+            className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm"
           >
-            <span className="flex h-11 w-11 items-center justify-center rounded-md bg-slate-800 text-blue-300">
+            <span className="flex h-11 w-11 items-center justify-center rounded-md bg-blue-50 text-blue-700">
               <Cloud className="h-6 w-6" />
             </span>
             <span>
               <span className="block text-lg font-semibold">Pending Uploads</span>
-              <span className="block text-sm text-slate-400">Submit saved inspections</span>
+              <span className="block text-sm text-slate-500">Submit saved inspections</span>
             </span>
           </button>
 
           <button
             type="button"
             onClick={() => router.push('/mobile/fleet/inspection?submitted=1')}
-            className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-800 bg-slate-900 p-5 text-left shadow"
+            className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm"
           >
-            <span className="flex h-11 w-11 items-center justify-center rounded-md bg-slate-800 text-violet-300">
+            <span className="flex h-11 w-11 items-center justify-center rounded-md bg-violet-50 text-violet-700">
               <ClipboardList className="h-6 w-6" />
             </span>
             <span>
               <span className="block text-lg font-semibold">Submitted Requests</span>
-              <span className="block text-sm text-slate-400">Check inspection status</span>
+              <span className="block text-sm text-slate-500">Check inspection status</span>
             </span>
           </button>
         </div>
@@ -244,7 +294,7 @@ function MobileHomeContent() {
 
 export default function MobileHomePage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-slate-950 text-white"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+    <Suspense fallback={<div className="light flex min-h-screen items-center justify-center bg-slate-50 text-slate-900" style={{ colorScheme: 'light' }}><Loader2 className="h-6 w-6 animate-spin" /></div>}>
       <MobileHomeContent />
     </Suspense>
   );
