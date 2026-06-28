@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ClipboardCheck, ClipboardList, Cloud, Download, Loader2, LogOut, RefreshCw, Truck, Wrench } from 'lucide-react';
+import { ClipboardCheck, ClipboardList, Cloud, Download, Eye, EyeOff, Loader2, LogOut, RefreshCw, Truck, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -31,12 +31,28 @@ function getStoredUser(): User | null {
   }
 }
 
+function isIosLikeDevice() {
+  if (typeof window === 'undefined') return false;
+
+  const userAgent = window.navigator.userAgent || '';
+  return /iPad|iPhone|iPod/.test(userAgent)
+    || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+}
+
+function isInstalledPwa() {
+  if (typeof window === 'undefined') return false;
+
+  const standaloneNavigator = window.navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia('(display-mode: standalone)').matches || standaloneNavigator.standalone === true;
+}
+
 function MobileHomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTarget = searchParams.get('redirect') || '';
   const [user, setUser] = useState<User | null>(null);
   const [form, setForm] = useState<LoginForm>({ username: '', password: '', tenantCode: '' });
+  const [showPassword, setShowPassword] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -120,9 +136,19 @@ function MobileHomeContent() {
     setMessage(null);
 
     try {
+      if (isInstalledPwa()) {
+        setMessage('This mobile app is already installed on this phone.');
+        return;
+      }
+
       const isLocal = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
       if (!window.isSecureContext && !isLocal) {
         setError('Install requires HTTPS. Once the IP/domain is on HTTPS, open this page again and tap Install App.');
+        return;
+      }
+
+      if (isIosLikeDevice()) {
+        setMessage('On iPhone/iPad, open this page in Safari, tap Share, then choose Add to Home Screen. Apple does not allow this button to install directly.');
         return;
       }
 
@@ -170,17 +196,27 @@ function MobileHomeContent() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="mobile-password" className="text-slate-700">Password</Label>
-                <Input
-                  id="mobile-password"
-                  type="password"
-                  autoComplete="current-password"
-                  className={mobileInputClass}
-                  value={form.password}
-                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && form.username && form.password) void login();
-                  }}
-                />
+                <div className="relative">
+                  <Input
+                    id="mobile-password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    className={`${mobileInputClass} pr-12`}
+                    value={form.password}
+                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && form.username && form.password) void login();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-md text-slate-500 hover:text-slate-900"
+                    onClick={() => setShowPassword((current) => !current)}
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
               </div>
               {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
               {message ? <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div> : null}
