@@ -302,7 +302,7 @@ function MobileHomeContent() {
             </span>
             <span>
               <span className="block text-lg font-semibold">Sync Checklists</span>
-              <span className="block text-sm text-slate-500">Refresh offline sheets</span>
+              <span className="block text-sm text-slate-500">Download sheets for offline use</span>
             </span>
           </button>
 
@@ -316,7 +316,7 @@ function MobileHomeContent() {
             </span>
             <span>
               <span className="block text-lg font-semibold">Pending Uploads</span>
-              <span className="block text-sm text-slate-500">Submit saved inspections</span>
+              <span className="block text-sm text-slate-500">Send saved inspections to server</span>
             </span>
           </button>
 

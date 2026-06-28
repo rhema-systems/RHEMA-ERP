@@ -209,6 +209,8 @@ function FleetInspectionMobilePage() {
   const assetId = searchParams.get('assetId') || '';
   const assetCategoryId = searchParams.get('assetCategoryId') || '';
   const inspectionKind = searchParams.get('inspectionKind') || 'PreTrip';
+  const showChecklistSync = searchParams.get('sync') === '1';
+  const showPendingUploads = searchParams.get('pending') === '1';
   const showSubmitted = searchParams.get('submitted') === '1';
   const scannedAssetName = searchParams.get('assetName') || '';
   const scannedAssetNumber = searchParams.get('assetNumber') || '';
@@ -219,6 +221,9 @@ function FleetInspectionMobilePage() {
   const scannerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerTimerRef = useRef<number | null>(null);
+  const scannerWarmupTimerRef = useRef<number | null>(null);
+  const scannerFrameSeenRef = useRef(false);
+  const autoScannerStartedRef = useRef(false);
 
   const [packagePayload, setPackagePayload] = useState<PackagePayload | null>(null);
   const [responses, setResponses] = useState<Record<string, string>>({});
@@ -228,6 +233,8 @@ function FleetInspectionMobilePage() {
   const [online, setOnline] = useState(true);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingItems, setPendingItems] = useState<PendingSubmission[]>([]);
+  const [catalogItems, setCatalogItems] = useState<InspectionTemplate[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [catalogCount, setCatalogCount] = useState(0);
   const [catalogSyncedAt, setCatalogSyncedAt] = useState<string | null>(null);
@@ -241,6 +248,8 @@ function FleetInspectionMobilePage() {
   const [scannerActive, setScannerActive] = useState(false);
   const [scannerStarting, setScannerStarting] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
+  const [scannerFacingMode, setScannerFacingMode] = useState<'environment' | 'user'>('environment');
+  const [scannerHasVideo, setScannerHasVideo] = useState(false);
   const hasStoredToken = typeof window === 'undefined'
     ? true
     : !!(localStorage.getItem('authToken') || localStorage.getItem('token')) && hasValidMobileSession();
@@ -256,6 +265,7 @@ function FleetInspectionMobilePage() {
       const templates = await inspectionTemplateService.getOfflineCatalog();
       writeCatalog(templates);
       setCatalogCount(templates.length);
+      setCatalogItems(templates);
       setCatalogSyncedAt(localStorage.getItem(CATALOG_SYNC_KEY));
       if (showFeedback) setMessage(`${templates.length} inspection and service sheet(s) are available offline.`);
       return templates;
@@ -328,8 +338,10 @@ function FleetInspectionMobilePage() {
   const syncPending = useCallback(async () => {
     if (!navigator.onLine) return;
     const queue = readQueue();
+    setPendingItems(queue);
     if (queue.length === 0) {
       setPendingCount(0);
+      setPendingItems([]);
       return;
     }
 
@@ -358,6 +370,7 @@ function FleetInspectionMobilePage() {
     }
     writeQueue(remaining);
     setPendingCount(remaining.length);
+    setPendingItems(remaining);
     setSubmittedItems(readSubmitted());
     if (remaining.length < queue.length) {
       localStorage.setItem(MOBILE_FLASH_KEY, `${queue.length - remaining.length} pending inspection(s) sent.`);
@@ -370,16 +383,23 @@ function FleetInspectionMobilePage() {
       window.clearInterval(scannerTimerRef.current);
       scannerTimerRef.current = null;
     }
+    if (scannerWarmupTimerRef.current !== null) {
+      window.clearTimeout(scannerWarmupTimerRef.current);
+      scannerWarmupTimerRef.current = null;
+    }
 
     scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
     scannerStreamRef.current = null;
+    scannerFrameSeenRef.current = false;
 
     if (scannerVideoRef.current) {
+      scannerVideoRef.current.pause();
       scannerVideoRef.current.srcObject = null;
     }
 
     setScannerActive(false);
     setScannerStarting(false);
+    setScannerHasVideo(false);
   }, []);
 
   const openQrLink = useCallback((rawValue: string) => {
@@ -408,9 +428,12 @@ function FleetInspectionMobilePage() {
     openQrLink(manualQrValue);
   }, [manualQrValue, openQrLink]);
 
-  const startScanner = useCallback(async () => {
+  const startScanner = useCallback(async (preferredFacingMode: 'environment' | 'user' = scannerFacingMode) => {
+    stopScanner();
+    setScannerFacingMode(preferredFacingMode);
     setScannerError(null);
     setError(null);
+    setScannerHasVideo(false);
 
     if (!window.isSecureContext) {
       setScannerError('Camera scanning requires HTTPS. Use the secure mobile URL on the phone.');
@@ -427,20 +450,34 @@ function FleetInspectionMobilePage() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
-          facingMode: { ideal: 'environment' },
+          facingMode: { ideal: preferredFacingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
       });
 
       scannerStreamRef.current = stream;
       if (scannerVideoRef.current) {
         scannerVideoRef.current.srcObject = stream;
+        scannerVideoRef.current.muted = true;
+        scannerVideoRef.current.playsInline = true;
         await scannerVideoRef.current.play();
       }
+
+      scannerWarmupTimerRef.current = window.setTimeout(() => {
+        const video = scannerVideoRef.current;
+        if (!scannerFrameSeenRef.current || !video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || video.paused) {
+          setScannerError('The camera opened but the preview is not showing video. Tap Restart camera, or Switch camera if the view stays black.');
+        }
+      }, 3500);
 
       scannerTimerRef.current = window.setInterval(() => {
         const video = scannerVideoRef.current;
         const canvas = scannerCanvasRef.current;
         if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) return;
+        scannerFrameSeenRef.current = true;
+        setScannerHasVideo(true);
+        setScannerError((current) => current?.startsWith('The camera opened but') ? null : current);
 
         const context = canvas.getContext('2d', { willReadFrequently: true });
         if (!context) return;
@@ -462,11 +499,18 @@ function FleetInspectionMobilePage() {
     } finally {
       setScannerStarting(false);
     }
-  }, [openQrLink, stopScanner]);
+  }, [openQrLink, scannerFacingMode, stopScanner]);
+
+  const switchScannerCamera = useCallback(() => {
+    const nextMode = scannerFacingMode === 'environment' ? 'user' : 'environment';
+    void startScanner(nextMode);
+  }, [scannerFacingMode, startScanner]);
 
   useEffect(() => {
     setOnline(navigator.onLine);
-    setPendingCount(readQueue().length);
+    const initialQueue = readQueue();
+    setPendingItems(initialQueue);
+    setPendingCount(initialQueue.length);
     setSubmittedItems(readSubmitted());
     const handleOnline = () => {
       setOnline(true);
@@ -477,6 +521,7 @@ function FleetInspectionMobilePage() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     const catalog = readCatalog();
+    setCatalogItems(catalog);
     setCatalogCount(catalog.length);
     setCatalogSyncedAt(localStorage.getItem(CATALOG_SYNC_KEY));
     void (async () => {
@@ -502,7 +547,8 @@ function FleetInspectionMobilePage() {
   useEffect(() => () => stopScanner(), [stopScanner]);
 
   useEffect(() => {
-    if (shouldStartScanner && hasStoredToken && !templateId && !packagePayload && !scannerActive && !scannerStarting) {
+    if (shouldStartScanner && hasStoredToken && !templateId && !packagePayload && !scannerActive && !scannerStarting && !autoScannerStartedRef.current) {
+      autoScannerStartedRef.current = true;
       void startScanner();
     }
   }, [hasStoredToken, packagePayload, scannerActive, scannerStarting, shouldStartScanner, startScanner, templateId]);
@@ -665,6 +711,7 @@ function FleetInspectionMobilePage() {
       }
       writeQueue(queue);
       setPendingCount(queue.length);
+      setPendingItems(queue);
       rememberSubmitted({
         assetId: resolvedAssetId,
         assetName: packagePayload.assetName || null,
@@ -786,6 +833,123 @@ function FleetInspectionMobilePage() {
     );
   }
 
+  if (showChecklistSync && !templateId && !packagePayload) {
+    return (
+      <main className={mobileShellClass} style={{ colorScheme: 'light' }}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">OFFLINE CATALOG</p>
+            <h1 className="text-xl font-semibold">Sync Checklists</h1>
+          </div>
+          <Button variant="outline" onClick={() => router.push('/mobile')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back
+          </Button>
+        </div>
+
+        {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">{message}</div>}
+        {error && <div className="mb-4 flex gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
+
+        <Card className="rounded-2xl border-emerald-100 bg-white text-slate-950 shadow-xl shadow-slate-200/70">
+          <CardContent className="space-y-4 p-5">
+            <div className="rounded-xl bg-emerald-50 p-4">
+              <div className="text-3xl font-semibold text-emerald-800">{catalogCount}</div>
+              <div className="mt-1 text-sm text-emerald-900">Fleet inspection/service sheets stored on this phone for offline use.</div>
+              <div className="mt-2 text-xs text-emerald-700">
+                Last updated: {catalogSyncedAt ? new Date(catalogSyncedAt).toLocaleString() : 'Never synced on this device'}
+              </div>
+            </div>
+
+            <Button className="h-11 w-full" onClick={() => void syncCatalog(true)} disabled={!online || syncingCatalog}>
+              {syncingCatalog ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCw className="mr-2 h-4 w-4" />}
+              {online ? 'Refresh offline checklists' : 'Connect to sync checklists'}
+            </Button>
+
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              Sync Checklists downloads checklist templates. It does not submit inspection results.
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="mt-4 space-y-3">
+          {catalogItems.length === 0 ? (
+            <div className="rounded-md border border-slate-200 bg-white p-5 text-center text-sm text-slate-500 shadow-sm">
+              No checklists are stored on this phone yet. Tap Refresh offline checklists while online.
+            </div>
+          ) : catalogItems.map((template) => (
+            <div key={template.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-slate-950">{template.name}</div>
+                  <div className="mt-1 text-sm text-slate-500">{template.code} · {template.sheetType || 'Inspection Sheet'}</div>
+                  <div className="mt-1 text-xs text-slate-500">{template.checklistItems?.length || 0} item(s)</div>
+                </div>
+                <Badge variant="outline">{template.fleetInspectionKind || 'Any'}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+    );
+  }
+
+  if (showPendingUploads && !templateId && !packagePayload) {
+    return (
+      <main className={mobileShellClass} style={{ colorScheme: 'light' }}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">OFFLINE SUBMISSIONS</p>
+            <h1 className="text-xl font-semibold">Pending Uploads</h1>
+          </div>
+          <Button variant="outline" onClick={() => router.push('/mobile')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back
+          </Button>
+        </div>
+
+        {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">{message}</div>}
+        {error && <div className="mb-4 flex gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
+
+        <Card className="rounded-2xl border-blue-100 bg-white text-slate-950 shadow-xl shadow-slate-200/70">
+          <CardContent className="space-y-4 p-5">
+            <div className="rounded-xl bg-blue-50 p-4">
+              <div className="text-3xl font-semibold text-blue-800">{pendingCount}</div>
+              <div className="mt-1 text-sm text-blue-900">Inspection submission(s) waiting to upload to the server.</div>
+            </div>
+
+            <Button className="h-11 w-full" onClick={() => void syncPending()} disabled={!online || pendingCount === 0}>
+              <Cloud className="mr-2 h-4 w-4" />
+              {online ? 'Upload pending inspections' : 'Connect to upload pending inspections'}
+            </Button>
+
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              Pending Uploads sends completed inspections captured while offline or during a failed connection.
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="mt-4 space-y-3">
+          {pendingItems.length === 0 ? (
+            <div className="rounded-md border border-slate-200 bg-white p-5 text-center text-sm text-slate-500 shadow-sm">
+              No pending uploads on this phone.
+            </div>
+          ) : pendingItems.map((item) => (
+            <div key={item.dto.clientSubmissionId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-slate-950">{item.assetNumber || item.assetName || 'Asset inspection'}</div>
+                  <div className="mt-1 truncate text-sm text-slate-500">{item.templateName || 'Inspection sheet'}</div>
+                  <div className="mt-1 text-xs text-slate-500">Saved {new Date(item.savedAtUtc).toLocaleString()}</div>
+                </div>
+                <Badge variant={item.overallResult === 'Fail' ? 'destructive' : 'secondary'}>{item.overallResult || 'Queued'}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+    );
+  }
+
   if (!templateId && !packagePayload) {
     return (
       <main className={mobileShellClass} style={{ colorScheme: 'light' }}>
@@ -832,9 +996,16 @@ function FleetInspectionMobilePage() {
                 ref={scannerVideoRef}
                 muted
                 playsInline
-                className={`aspect-[4/3] w-full object-cover ${scannerActive || scannerStarting ? 'block' : 'hidden'}`}
+                className={`aspect-[4/3] w-full object-cover ${(scannerActive || scannerStarting) && scannerHasVideo ? 'block' : 'hidden'}`}
               />
               <canvas ref={scannerCanvasRef} className="hidden" />
+              {(scannerActive || scannerStarting) && !scannerHasVideo ? (
+                <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 bg-slate-900 px-6 text-center text-white">
+                  <Loader2 className="h-8 w-8 animate-spin text-emerald-300" />
+                  <p className="text-sm text-slate-200">Starting camera preview...</p>
+                  <p className="text-xs text-slate-400">If this stays black, use Restart camera or Switch camera.</p>
+                </div>
+              ) : null}
               {!scannerActive && !scannerStarting ? (
                 <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 bg-slate-900 px-6 text-center text-white">
                   <Camera className="h-10 w-10 text-emerald-300" />
@@ -849,10 +1020,13 @@ function FleetInspectionMobilePage() {
               </div>
             ) : null}
 
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button className="h-11 w-full" onClick={() => void startScanner()} disabled={scannerStarting || scannerActive}>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <Button className="h-11 w-full" onClick={() => void startScanner(scannerFacingMode)} disabled={scannerStarting}>
                 {scannerStarting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
-                {scannerActive ? 'Scanning...' : 'Start camera'}
+                {scannerActive ? 'Restart camera' : 'Start camera'}
+              </Button>
+              <Button type="button" variant="outline" className="h-11 w-full" onClick={switchScannerCamera} disabled={scannerStarting}>
+                Switch camera
               </Button>
               <Button type="button" variant="outline" className="h-11 w-full" onClick={stopScanner} disabled={!scannerActive && !scannerStarting}>
                 Stop camera
