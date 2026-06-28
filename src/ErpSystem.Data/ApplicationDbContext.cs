@@ -3417,7 +3417,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(wot => wot.Checkout)
                 .WithMany()
                 .HasForeignKey(wot => wot.CheckoutId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // Configure AssetDowntime entity
