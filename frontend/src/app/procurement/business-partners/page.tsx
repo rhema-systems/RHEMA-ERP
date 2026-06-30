@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -251,7 +252,14 @@ export default function BusinessPartnersPage() {
                 <TableBody>
                   {partners.map((partner) => (
                     <TableRow key={partner.id}>
-                      <TableCell className="font-mono text-sm">{partner.partnerCode}</TableCell>
+                      <TableCell className="font-mono text-sm">
+                        <Link
+                          href={`/procurement/business-partners/${partner.id}`}
+                          className="font-medium text-blue-600 underline-offset-2 hover:underline"
+                        >
+                          {partner.partnerCode}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {partner.isPreferred && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}

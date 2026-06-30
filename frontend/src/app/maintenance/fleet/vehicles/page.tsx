@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { Plus, Search, Edit } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -349,7 +350,14 @@ export default function FleetVehiclesPage() {
                 ) : (
                   result.items.map((v, idx) => (
                     <TableRow key={v.id} className={idx % 2 === 1 ? 'bg-muted/10 hover:bg-muted/30' : 'hover:bg-muted/30'}>
-                      <TableCell className="font-medium font-mono">{v.assetNumber}</TableCell>
+                      <TableCell className="font-medium font-mono">
+                        <Link
+                          href={`/maintenance/assets?id=${v.id}`}
+                          className="text-blue-600 underline-offset-2 hover:underline"
+                        >
+                          {v.assetNumber}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
                           <span className="font-medium">{v.name}</span>

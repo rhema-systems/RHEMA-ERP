@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   BadgeCheck,
@@ -10,6 +11,8 @@ import {
   ShieldCheck,
   Truck,
   UserCheck,
+  UserMinus,
+  UserPlus,
   Users,
 } from 'lucide-react';
 
@@ -20,10 +23,12 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
@@ -31,6 +36,7 @@ import fleetService, {
   FleetDriverDirectoryDto,
   FleetDriverDto,
   FleetDriverSummaryDto,
+  FleetVehicleListDto,
 } from '@/services/fleetService';
 
 const EMPTY_SUMMARY: FleetDriverSummaryDto = {
@@ -118,6 +124,11 @@ export default function FleetDriversPage() {
   const [licenseStatus, setLicenseStatus] = React.useState('All');
   const [assignmentStatus, setAssignmentStatus] = React.useState('All');
   const [selectedDriver, setSelectedDriver] = React.useState<FleetDriverDto | null>(null);
+  const [assignmentOpen, setAssignmentOpen] = React.useState(false);
+  const [assignmentDriver, setAssignmentDriver] = React.useState<FleetDriverDto | null>(null);
+  const [assignableVehicles, setAssignableVehicles] = React.useState<FleetVehicleListDto[]>([]);
+  const [selectedVehicleAssetId, setSelectedVehicleAssetId] = React.useState('none');
+  const [assignmentBusy, setAssignmentBusy] = React.useState(false);
   const [result, setResult] = React.useState<FleetDriverDirectoryDto>({
     items: [],
     totalCount: 0,
@@ -157,6 +168,92 @@ export default function FleetDriversPage() {
     setSearchTerm(searchInput.trim());
   };
 
+  const isDriverEligibleForAssignment = (driver: FleetDriverDto) =>
+    driver.isActive &&
+    driver.isLicenseVerified &&
+    ['valid', 'expiring'].includes(driver.licenseStatus.toLowerCase()) &&
+    driver.availabilityStatus.toLowerCase() !== 'engaged';
+
+  const loadAssignableVehicles = React.useCallback(async (driver: FleetDriverDto) => {
+    setAssignmentBusy(true);
+    try {
+      const vehicles = await fleetService.getVehicles({ page: 1, pageSize: 500 });
+      const availableVehicles = (vehicles.items || [])
+        .filter((vehicle) => (vehicle.assetType || '').toLowerCase() === 'vehicle')
+        .filter((vehicle) => (vehicle.status || '').toLowerCase() === 'active')
+        .filter((vehicle) =>
+          !vehicle.currentDriverEmployeeId ||
+          vehicle.currentDriverEmployeeId === driver.employeeId ||
+          vehicle.id === driver.currentVehicleAssetId
+        )
+        .sort((a, b) => `${a.assetNumber} ${a.name}`.localeCompare(`${b.assetNumber} ${b.name}`));
+
+      setAssignableVehicles(availableVehicles);
+      setSelectedVehicleAssetId(driver.currentVehicleAssetId || 'none');
+    } catch (error: any) {
+      setAssignableVehicles([]);
+      toast({
+        title: 'Failed to load assignable vehicles',
+        description: error?.message || String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setAssignmentBusy(false);
+    }
+  }, [toast]);
+
+  const openAssignment = React.useCallback(async (driver: FleetDriverDto) => {
+    setSelectedDriver(null);
+    setAssignmentDriver(driver);
+    setAssignableVehicles([]);
+    setSelectedVehicleAssetId(driver.currentVehicleAssetId || 'none');
+    setAssignmentOpen(true);
+    await loadAssignableVehicles(driver);
+  }, [loadAssignableVehicles]);
+
+  const submitAssignment = async () => {
+    if (!assignmentDriver || selectedVehicleAssetId === 'none') return;
+
+    try {
+      setAssignmentBusy(true);
+      await fleetService.assignDriver({
+        employeeId: assignmentDriver.employeeId,
+        vehicleAssetId: selectedVehicleAssetId,
+      });
+      toast({ title: 'Driver assigned', description: `${assignmentDriver.fullName} was assigned successfully.` });
+      setAssignmentOpen(false);
+      await loadDrivers();
+    } catch (error: any) {
+      toast({
+        title: 'Failed to assign driver',
+        description: error?.message || String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setAssignmentBusy(false);
+    }
+  };
+
+  const endCurrentAssignment = async () => {
+    if (!assignmentDriver?.currentAssignmentId) return;
+
+    try {
+      setAssignmentBusy(true);
+      await fleetService.endAssignment(assignmentDriver.currentAssignmentId, {});
+      toast({ title: 'Driver unassigned', description: `${assignmentDriver.fullName} is no longer assigned to a vehicle.` });
+      setAssignmentOpen(false);
+      await loadDrivers();
+    } catch (error: any) {
+      toast({
+        title: 'Failed to end assignment',
+        description: error?.message || String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setAssignmentBusy(false);
+    }
+  };
+
   const totalPages = Math.max(1, Math.ceil(result.totalCount / PAGE_SIZE));
 
   return (
@@ -189,7 +286,7 @@ export default function FleetDriversPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Driver directory</CardTitle>
-          <CardDescription>Read-only Fleet view sourced from HR and active Fleet records.</CardDescription>
+          <CardDescription>Fleet operational view sourced from HR and active Fleet records.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_200px_180px_auto]">
@@ -243,7 +340,7 @@ export default function FleetDriversPage() {
                   <TableHead>Assigned vehicle</TableHead>
                   <TableHead>Availability</TableHead>
                   <TableHead>Trips</TableHead>
-                  <TableHead className="w-20 text-right">Action</TableHead>
+                  <TableHead className="w-36 text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -255,7 +352,17 @@ export default function FleetDriversPage() {
                   <TableRow key={driver.employeeId}>
                     <TableCell>
                       <div className="font-medium">{driver.fullName}</div>
-                      <div className="text-xs text-muted-foreground">{driver.employeeNumber} · {driver.positionTitle || 'Driver'}</div>
+                      <div className="text-xs text-muted-foreground">
+                        <button
+                          type="button"
+                          className="font-medium text-blue-600 underline-offset-2 hover:underline"
+                          onClick={() => setSelectedDriver(driver)}
+                        >
+                          {driver.employeeNumber}
+                        </button>
+                        {' · '}
+                        {driver.positionTitle || 'Driver'}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="font-mono text-xs">{driver.driverLicenseNumber || 'Not recorded'}</div>
@@ -276,7 +383,16 @@ export default function FleetDriversPage() {
                       {driver.isAssigned ? (
                         <>
                           <div className="font-medium">{driver.currentVehicleName}</div>
-                          <div className="text-xs text-muted-foreground">{driver.currentVehicleAssetNumber}</div>
+                          {driver.currentVehicleAssetId ? (
+                            <Link
+                              href={`/maintenance/assets?id=${driver.currentVehicleAssetId}`}
+                              className="text-xs font-medium text-blue-600 underline-offset-2 hover:underline"
+                            >
+                              {driver.currentVehicleAssetNumber}
+                            </Link>
+                          ) : (
+                            <div className="text-xs text-muted-foreground">{driver.currentVehicleAssetNumber}</div>
+                          )}
                         </>
                       ) : <span className="text-muted-foreground">Unassigned</span>}
                     </TableCell>
@@ -293,9 +409,21 @@ export default function FleetDriversPage() {
                       <div className="text-xs text-muted-foreground">{driver.activeTripCount} engaged</div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => setSelectedDriver(driver)} aria-label={`View ${driver.fullName}`}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void openAssignment(driver)}
+                          disabled={!isDriverEligibleForAssignment(driver) && !driver.isAssigned}
+                          title={driver.isAssigned ? 'Manage current assignment' : 'Assign vehicle'}
+                        >
+                          <UserPlus className="mr-1 h-3.5 w-3.5" />
+                          Assign
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => setSelectedDriver(driver)} aria-label={`View ${driver.fullName}`}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -350,11 +478,122 @@ export default function FleetDriversPage() {
                   <Detail label="Last trip" value={formatDateTime(selectedDriver.lastTripAtUtc)} />
                 </div>
               </div>
-              <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground md:col-span-2">
-                Fleet presents this operational view. Update the employee profile or driver licence through Human Resources so every module uses the same record.
+              <div className="flex flex-col gap-3 rounded-md bg-muted p-3 text-xs text-muted-foreground md:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+                <span>
+                  Fleet presents this operational view. Update the employee profile or driver licence through Human Resources so every module uses the same record.
+                </span>
+                <Button size="sm" onClick={() => void openAssignment(selectedDriver)}>
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Manage assignment
+                </Button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={assignmentOpen} onOpenChange={(open) => {
+        setAssignmentOpen(open);
+        if (!open) {
+          setAssignmentDriver(null);
+          setAssignableVehicles([]);
+          setSelectedVehicleAssetId('none');
+        }
+      }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Truck className="h-5 w-5" />
+              Driver vehicle assignment
+            </DialogTitle>
+            <DialogDescription>
+              {assignmentDriver ? `${assignmentDriver.fullName} · ${assignmentDriver.employeeNumber}` : 'Assign a driver to a fleet vehicle'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {assignmentDriver && (
+            <div className="space-y-4">
+              {assignmentDriver.isAssigned && (
+                <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+                  <div className="font-medium">Current assignment</div>
+                  <div>
+                    {assignmentDriver.currentVehicleName || 'Vehicle'} ({assignmentDriver.currentVehicleAssetNumber || 'no asset number'})
+                  </div>
+                  <div className="mt-1 text-xs text-blue-800">
+                    To transfer this driver to another vehicle, end the current assignment first.
+                  </div>
+                </div>
+              )}
+
+              {!isDriverEligibleForAssignment(assignmentDriver) && !assignmentDriver.isAssigned && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  This driver is not eligible for new vehicle assignment because the licence is not verified/current, the employee is inactive, or the driver is engaged on a dispatched trip.
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Vehicle</Label>
+                <Select
+                  value={selectedVehicleAssetId}
+                  onValueChange={setSelectedVehicleAssetId}
+                  disabled={assignmentBusy || assignmentDriver.isAssigned}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select vehicle" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Select vehicle</SelectItem>
+                    {assignableVehicles.map((vehicle) => (
+                      <SelectItem key={vehicle.id} value={vehicle.id}>
+                        {vehicle.assetNumber} · {vehicle.name}
+                      </SelectItem>
+                    ))}
+                    {assignableVehicles.length === 0 && (
+                      <SelectItem value="no-available-vehicles" disabled>
+                        No available active vehicles
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Only active vehicle assets without another current driver assignment are listed.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <div>
+              {assignmentDriver?.currentAssignmentId && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void endCurrentAssignment()}
+                  disabled={assignmentBusy}
+                >
+                  <UserMinus className="mr-2 h-4 w-4" />
+                  End assignment
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setAssignmentOpen(false)} disabled={assignmentBusy}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void submitAssignment()}
+                disabled={
+                  assignmentBusy ||
+                  !assignmentDriver ||
+                  assignmentDriver.isAssigned ||
+                  !isDriverEligibleForAssignment(assignmentDriver) ||
+                  selectedVehicleAssetId === 'none'
+                }
+              >
+                Assign vehicle
+              </Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
