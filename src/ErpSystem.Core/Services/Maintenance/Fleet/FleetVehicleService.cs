@@ -1,7 +1,9 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -40,6 +42,14 @@ public class FleetVehicleService : IFleetVehicleService
 
         var q = assetRepo.GetQueryable(a => a.TenantId == tenantId)
             .Where(a => a.IsFleetAsset);
+
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (scope.IsScoped)
+        {
+            q = scope.LocationId.HasValue
+                ? q.Where(a => a.CurrentSiteLocationId == scope.LocationId.Value)
+                : q.Where(a => false);
+        }
 
         // Optional filter for screens that specifically need an asset type (e.g., trip dispatch expects Vehicle assets).
         if (!string.IsNullOrWhiteSpace(assetType))
@@ -105,6 +115,48 @@ public class FleetVehicleService : IFleetVehicleService
             Page = page,
             PageSize = pageSize
         };
+    }
+
+    private async Task<(bool IsScoped, Guid? LocationId)> GetMaintenanceLocationScopeAsync()
+    {
+        if (!_currentUserProvider.IsAuthenticated)
+        {
+            return (false, null);
+        }
+
+        var unrestrictedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Constants.Roles.SuperAdmin,
+            Constants.Roles.TenantAdmin,
+            Constants.Roles.Manager,
+            "MaintenanceManager",
+            "MaintenanceSupervisor",
+            "MaintenanceDirector",
+            "FleetManager",
+            "FleetSupervisor"
+        };
+
+        if ((_currentUserProvider.Roles ?? Enumerable.Empty<string>()).Any(unrestrictedRoles.Contains))
+        {
+            return (false, null);
+        }
+
+        if (!_currentUserProvider.Claims.TryGetValue("employee_id", out var employeeClaim) ||
+            !Guid.TryParse(employeeClaim, out var employeeId))
+        {
+            return (false, null);
+        }
+
+        var employee = await _unitOfWork.Repository<Employee>()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.Department);
+
+        if (employee?.Department == null ||
+            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, null);
+        }
+
+        return (true, employee.LocationId);
     }
 
     public async Task<MaintenanceAssetDto?> GetVehicleByIdAsync(Guid vehicleAssetId)

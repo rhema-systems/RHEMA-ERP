@@ -37,7 +37,6 @@ import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAtt
 import AssetVehicleFleetTabs from '@/components/maintenance/AssetVehicleFleetTabs';
 import { QRCodeSVG } from 'qrcode.react';
 import { inspectionTemplateService, InspectionTemplate, InspectionTemplateQrPackage } from '@/services/inspectionTemplateService';
-import { projectService, ProjectLookupDto } from '@/services/projectService';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { fleetService, type FleetTripInspectionDto } from '@/services/fleetService';
 import { printQrLabel } from '@/lib/print-qr-label';
@@ -273,11 +272,10 @@ function AssetsPageContent() {
   const [assetViewTab, setAssetViewTab] = useState<string>('details');
   const [lifecycleHistory, setLifecycleHistory] = useState<AssetLifecycleHistory | null>(null);
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
-  const [projects, setProjects] = useState<ProjectLookupDto[]>([]);
   const [locations, setLocations] = useState<LocationLookup[]>([]);
   const [locationLookupError, setLocationLookupError] = useState<string | null>(null);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
-  const [moveForm, setMoveForm] = useState({ projectId: 'none', siteLocationId: 'none', location: '', reason: '', notes: '', effectiveDate: currentLocalDateTimeInput() });
+  const [moveForm, setMoveForm] = useState({ siteLocationId: 'none', location: '', reason: '', notes: '', effectiveDate: currentLocalDateTimeInput() });
   const [movingAsset, setMovingAsset] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -405,11 +403,7 @@ function AssetsPageContent() {
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
       setLocationLookupError(null);
       try {
-        const [projectItems, locationsResponse] = await Promise.all([
-          projectService.lookupProjects(),
-          fetch(`${API_URL}/Location/summary`, { headers: { Authorization: token ? `Bearer ${token}` : '' } }),
-        ]);
-        setProjects(projectItems || []);
+        const locationsResponse = await fetch(`${API_URL}/Location/summary`, { headers: { Authorization: token ? `Bearer ${token}` : '' } });
         if (!locationsResponse.ok) {
           throw new Error(`Site lookup returned HTTP ${locationsResponse.status}`);
         }
@@ -424,7 +418,7 @@ function AssetsPageContent() {
               : [];
         setLocations(locationItems.filter((item) => item.isActive !== false));
       } catch (lookupError) {
-        console.error('Failed to load project/site lookups', lookupError);
+        console.error('Failed to load HR location lookups', lookupError);
         setLocations([]);
         setLocationLookupError(lookupError instanceof Error ? lookupError.message : 'Sites could not be loaded.');
       }
@@ -1064,7 +1058,6 @@ function AssetsPageContent() {
     if (!selectedAsset) return;
     setIsViewDialogOpen(false);
     setMoveForm({
-      projectId: selectedAsset.currentProjectId || 'none',
       siteLocationId: selectedAsset.currentSiteLocationId || 'none',
       location: selectedAsset.location || '',
       reason: '',
@@ -1083,7 +1076,7 @@ function AssetsPageContent() {
         method: 'POST',
         headers: { Authorization: token ? `Bearer ${token}` : '', 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: moveForm.projectId === 'none' ? null : moveForm.projectId,
+          projectId: selectedAsset.currentProjectId || null,
           siteLocationId: moveForm.siteLocationId === 'none' ? null : moveForm.siteLocationId,
           location: moveForm.location.trim() || null,
           reason: moveForm.reason.trim(),
@@ -2074,10 +2067,6 @@ function AssetsPageContent() {
                       <p className="text-sm">{selectedAsset.location || 'Not specified'}</p>
                     </div>
                     <div>
-                      <Label className="text-sm font-medium text-muted-foreground">Current Project</Label>
-                      <p className="text-sm">{selectedAsset.currentProjectName || 'Not assigned'}</p>
-                    </div>
-                    <div>
                       <Label className="text-sm font-medium text-muted-foreground">Current Site</Label>
                       <p className="text-sm">{selectedAsset.currentSiteLocationName || 'Not assigned'}</p>
                     </div>
@@ -2213,8 +2202,8 @@ function AssetsPageContent() {
                   <div key={movement.id} className="rounded-md border p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="font-medium">{movement.toProjectName || 'Unassigned project'} / {movement.toSiteLocationName || movement.toLocation || 'Unassigned site'}</p>
-                        <p className="text-sm text-muted-foreground">From {movement.fromProjectName || 'unassigned'} / {movement.fromSiteLocationName || movement.fromLocation || 'unassigned'}</p>
+                        <p className="font-medium">{movement.toSiteLocationName || movement.toLocation || 'Unassigned site'}</p>
+                        <p className="text-sm text-muted-foreground">From {movement.fromSiteLocationName || movement.fromLocation || 'unassigned'}</p>
                         <p className="mt-2 text-sm">{movement.reason}</p>
                       </div>
                       <span className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(movement.effectiveDate)}</span>
@@ -2351,13 +2340,6 @@ function AssetsPageContent() {
             <DialogDescription>{selectedAsset?.assetNumber} · {selectedAsset?.name}</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Project</Label>
-              <Select value={moveForm.projectId} onValueChange={(value) => setMoveForm((current) => ({ ...current, projectId: value }))}>
-                <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                <SelectContent><SelectItem value="none">Unassigned</SelectItem>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.projectCode} · {project.title}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
             <div className="space-y-2">
               <Label>Site</Label>
               <Select value={moveForm.siteLocationId} onValueChange={(value) => {

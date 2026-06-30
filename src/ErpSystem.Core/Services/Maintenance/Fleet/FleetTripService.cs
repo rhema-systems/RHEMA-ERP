@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -65,6 +66,14 @@ public class FleetTripService : IFleetTripService
             .Include(t => t.DriverEmployee)
             .Include(t => t.FleetTripDestination);
 
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (scope.IsScoped)
+        {
+            q = scope.LocationId.HasValue
+                ? q.Where(t => t.VehicleAsset.CurrentSiteLocationId == scope.LocationId.Value)
+                : q.Where(t => false);
+        }
+
         if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
         {
             q = q.Where(t => t.VehicleAssetId == vehicleAssetId.Value);
@@ -112,6 +121,12 @@ public class FleetTripService : IFleetTripService
 
         var trip = await _unitOfWork.Repository<FleetTrip>()
             .FirstOrDefaultAsync(t => t.Id == tripId && t.TenantId == tenantId, t => t.VehicleAsset, t => t.DriverEmployee, t => t.FleetTripDestination);
+
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (trip != null && scope.IsScoped && (!scope.LocationId.HasValue || trip.VehicleAsset?.CurrentSiteLocationId != scope.LocationId.Value))
+        {
+            return null;
+        }
 
         return trip == null ? null : Map(trip);
     }
@@ -775,7 +790,55 @@ public class FleetTripService : IFleetTripService
         if (!string.Equals(vehicle.AssetCategory?.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Selected asset is not a vehicle.");
 
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (scope.IsScoped && (!scope.LocationId.HasValue || vehicle.CurrentSiteLocationId != scope.LocationId.Value))
+        {
+            throw new UnauthorizedAccessException("You can only use fleet vehicles assigned to your HR location/site.");
+        }
+
         return vehicle;
+    }
+
+    private async Task<(bool IsScoped, Guid? LocationId)> GetMaintenanceLocationScopeAsync()
+    {
+        if (!_currentUserProvider.IsAuthenticated)
+        {
+            return (false, null);
+        }
+
+        var unrestrictedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Constants.Roles.SuperAdmin,
+            Constants.Roles.TenantAdmin,
+            Constants.Roles.Manager,
+            "MaintenanceManager",
+            "MaintenanceSupervisor",
+            "MaintenanceDirector",
+            "FleetManager",
+            "FleetSupervisor"
+        };
+
+        if ((_currentUserProvider.Roles ?? Enumerable.Empty<string>()).Any(unrestrictedRoles.Contains))
+        {
+            return (false, null);
+        }
+
+        if (!_currentUserProvider.Claims.TryGetValue("employee_id", out var employeeClaim) ||
+            !Guid.TryParse(employeeClaim, out var employeeId))
+        {
+            return (false, null);
+        }
+
+        var employee = await _unitOfWork.Repository<Employee>()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.Department);
+
+        if (employee?.Department == null ||
+            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, null);
+        }
+
+        return (true, employee.LocationId);
     }
 
     private async Task<Employee> RequireEmployeeAsync(Guid employeeId)

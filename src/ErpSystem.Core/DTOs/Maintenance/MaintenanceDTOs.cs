@@ -67,6 +67,8 @@ public class TechnicianDto
     public string? EmploymentStatus { get; set; }
     public int ActiveWorkOrdersCount { get; set; }
     public decimal PerformanceRating { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public string? Location { get; set; }
     public string? ShiftSchedule { get; set; }
     public decimal HourlyRate { get; set; }
@@ -176,6 +178,11 @@ public class UpdateTechnicianDto
     public string? Notes { get; set; }
 
     public bool IsActive { get; set; } = true;
+}
+
+public class AssignTechnicianLocationDto
+{
+    public Guid? LocationId { get; set; }
 }
 
 /// <summary>
@@ -324,6 +331,8 @@ public class TechnicianListDto
     public int ExpiredCertificationsCount { get; set; }
     public int ExpiringCertificationsCount { get; set; }
     public decimal PerformanceRating { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public string Location { get; set; } = string.Empty;
     public DateTime? LastSyncDate { get; set; }
 }

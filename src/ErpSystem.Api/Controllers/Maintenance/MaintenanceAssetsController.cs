@@ -34,7 +34,8 @@ public class MaintenanceAssetsController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         [FromQuery] string? searchTerm = null,
-        [FromQuery] Guid? categoryId = null)
+        [FromQuery] Guid? categoryId = null,
+        [FromQuery] Guid? siteLocationId = null)
     {
         try
         {
@@ -43,7 +44,7 @@ public class MaintenanceAssetsController : ControllerBase
                 pageSize = 100;
             }
 
-            var result = await _maintenanceAssetService.GetAssetsPagedAsync(page, pageSize, searchTerm, categoryId);
+            var result = await _maintenanceAssetService.GetAssetsPagedAsync(page, pageSize, searchTerm, categoryId, siteLocationId);
             return Ok(result);
         }
         catch (Exception ex)
@@ -428,6 +429,10 @@ public class MaintenanceAssetsController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ex.Message);
         }
     }
 

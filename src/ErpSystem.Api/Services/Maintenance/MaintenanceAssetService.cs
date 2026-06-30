@@ -1,11 +1,13 @@
 using AutoMapper;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OfficeOpenXml;
@@ -203,6 +205,12 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 a => a.ParentAsset!,
                 a => a.ChildAssets!);
 
+            var scope = await GetMaintenanceLocationScopeAsync();
+            if (asset != null && scope.IsScoped && (!scope.LocationId.HasValue || asset.CurrentSiteLocationId != scope.LocationId.Value))
+            {
+                return null;
+            }
+
             return asset != null ? _mapper.Map<MaintenanceAssetDto>(asset) : null;
         }
         catch (Exception ex)
@@ -249,7 +257,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         }
     }
 
-    public async Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null)
+    public async Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null, Guid? siteLocationId = null)
     {
         try
         {
@@ -258,6 +266,19 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 .Include(a => a.CurrentProject)
                 .Include(a => a.CurrentSiteLocation)
                 .AsQueryable();
+
+            var scope = await GetMaintenanceLocationScopeAsync();
+            if (scope.IsScoped)
+            {
+                query = scope.LocationId.HasValue
+                    ? query.Where(a => a.CurrentSiteLocationId == scope.LocationId.Value)
+                    : query.Where(a => false);
+            }
+
+            if (siteLocationId.HasValue && siteLocationId.Value != Guid.Empty)
+            {
+                query = query.Where(a => a.CurrentSiteLocationId == siteLocationId.Value);
+            }
 
             if (!string.IsNullOrEmpty(searchTerm))
             {
@@ -593,12 +614,18 @@ public class MaintenanceAssetService : IMaintenanceAssetService
     public async Task<MaintenanceAssetDto> MoveAssetAsync(Guid assetId, MoveMaintenanceAssetDto moveDto)
     {
         var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var scope = await GetMaintenanceLocationScopeAsync();
         var asset = await _context.MaintenanceAssets
             .Include(a => a.AssetCategory)
             .Include(a => a.CurrentProject)
             .Include(a => a.CurrentSiteLocation)
             .FirstOrDefaultAsync(a => a.Id == assetId && a.TenantId == tenantId)
             ?? throw new ArgumentException($"Asset with ID {assetId} not found");
+
+        if (scope.IsScoped && (!scope.LocationId.HasValue || asset.CurrentSiteLocationId != scope.LocationId.Value))
+        {
+            throw new UnauthorizedAccessException("You can only move assets assigned to your HR location/site.");
+        }
 
         var targetProject = moveDto.ProjectId.HasValue
             ? await _context.Projects.FirstOrDefaultAsync(p => p.Id == moveDto.ProjectId.Value && p.TenantId == tenantId)
@@ -614,6 +641,11 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         if (moveDto.SiteLocationId.HasValue && targetSite == null)
         {
             throw new ArgumentException("The selected site/location was not found or is inactive");
+        }
+
+        if (scope.IsScoped && (!scope.LocationId.HasValue || !moveDto.SiteLocationId.HasValue || moveDto.SiteLocationId.Value != scope.LocationId.Value))
+        {
+            throw new UnauthorizedAccessException("You can only assign assets to your HR location/site.");
         }
 
         var targetLocation = string.IsNullOrWhiteSpace(moveDto.Location)
@@ -1218,6 +1250,53 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         }
 
         return false;
+    }
+
+    private async Task<(bool IsScoped, Guid? LocationId)> GetMaintenanceLocationScopeAsync()
+    {
+        if (!_currentUserService.IsAuthenticated || !_currentUserService.EmployeeId.HasValue)
+        {
+            return (false, null);
+        }
+
+        var unrestrictedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Constants.Roles.SuperAdmin,
+            Constants.Roles.TenantAdmin,
+            Constants.Roles.Manager,
+            "MaintenanceManager",
+            "MaintenanceSupervisor",
+            "MaintenanceDirector",
+            "FleetManager",
+            "FleetSupervisor"
+        };
+
+        if ((_currentUserService.Roles ?? Enumerable.Empty<string>()).Any(unrestrictedRoles.Contains))
+        {
+            return (false, null);
+        }
+
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue)
+        {
+            return (false, null);
+        }
+
+        var employee = await _context.Employees
+            .Include(e => e.Department)
+            .FirstOrDefaultAsync(e =>
+                e.Id == _currentUserService.EmployeeId.Value &&
+                e.TenantId == tenantId.Value &&
+                !e.IsDeleted &&
+                e.IsActive);
+
+        if (employee?.Department == null ||
+            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, null);
+        }
+
+        return (true, employee.LocationId);
     }
 
 }

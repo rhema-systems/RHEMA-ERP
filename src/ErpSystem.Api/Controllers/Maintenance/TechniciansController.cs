@@ -142,6 +142,29 @@ public class TechniciansController : ControllerBase
     }
 
     /// <summary>
+    /// Assigns or moves a maintenance technician to an HR location/site.
+    /// </summary>
+    [HttpPost("{id:guid}/location")]
+    [Authorize(Policy = "MaintenanceWrite")]
+    public async Task<ActionResult<TechnicianDto>> AssignTechnicianLocation(Guid id, [FromBody] AssignTechnicianLocationDto dto)
+    {
+        try
+        {
+            var result = await _technicianService.AssignTechnicianLocationAsync(id, dto ?? new AssignTechnicianLocationDto());
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error assigning technician {TechnicianId} to a location", id);
+            return StatusCode(500, $"An error occurred while assigning technician {id} to a location");
+        }
+    }
+
+    /// <summary>
     /// Gets a specific technician by ID (read-only)
     /// </summary>
     [HttpGet("{id:guid}")]

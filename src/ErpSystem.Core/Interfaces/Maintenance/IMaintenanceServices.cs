@@ -16,7 +16,7 @@ public interface IMaintenanceAssetService
     Task<MaintenanceAssetDto?> GetAssetByIdAsync(Guid id);
     Task<IEnumerable<MaintenanceAssetDto>> GetAssetsByIdsAsync(List<Guid> ids);
     Task<IEnumerable<MaintenanceAssetDto>> GetAllAssetsAsync();
-    Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null);
+    Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null, Guid? siteLocationId = null);
 
     // Business logic methods
     Task<bool> IsAssetNumberUniqueAsync(string assetNumber, Guid? excludeId = null);
@@ -627,6 +627,7 @@ public interface ITechnicianService
     Task<TechnicianWorkloadDto> GetTechnicianWorkloadAsync(Guid technicianId, DateTime startDate, DateTime endDate);
     Task<TechnicianAvailabilityDto> GetTechnicianAvailabilityAsync(Guid technicianId, DateTime date);
     Task<IEnumerable<TechnicianDto>> GetTechniciansByLocationAsync(Guid locationId);
+    Task<TechnicianDto> AssignTechnicianLocationAsync(Guid technicianId, AssignTechnicianLocationDto dto);
     Task<TechnicianAnalyticsDto> GetTechnicianAnalyticsAsync(Guid technicianId, DateTime startDate, DateTime endDate);
     Task<SkillUtilizationDto> GetSkillUtilizationAsync(Guid skillId, DateTime startDate, DateTime endDate);
     Task<IEnumerable<TechnicianDto>> FindTechniciansForWorkOrderAsync(Guid workOrderId);
