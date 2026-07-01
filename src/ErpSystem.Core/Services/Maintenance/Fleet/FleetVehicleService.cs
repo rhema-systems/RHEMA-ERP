@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Shared;
@@ -39,6 +40,10 @@ public class FleetVehicleService : IFleetVehicleService
         var assetRepo = _unitOfWork.Repository<MaintenanceAsset>();
         var assignmentRepo = _unitOfWork.Repository<FleetVehicleAssignment>();
         var activeAssignmentsQ = assignmentRepo.GetQueryable(x => x.TenantId == tenantId && x.IsActive);
+        var fleetTripRepo = _unitOfWork.Repository<FleetTrip>();
+        var fleetTripActivityQ = fleetTripRepo.GetQueryable(x => x.TenantId == tenantId && !x.IsDeleted);
+        var maintenanceScheduleRepo = _unitOfWork.Repository<MaintenanceSchedule>();
+        var activeMaintenanceSchedulesQ = maintenanceScheduleRepo.GetQueryable(x => x.TenantId == tenantId && x.IsActive && !x.IsDeleted);
 
         var q = assetRepo.GetQueryable(a => a.TenantId == tenantId)
             .Where(a => a.IsFleetAsset);
@@ -95,6 +100,32 @@ public class FleetVehicleService : IFleetVehicleService
                 Model = a.Model,
                 Mileage = a.Mileage,
                 OperatingHours = a.OperatingHours,
+                Location = a.Location,
+                CurrentProjectId = a.CurrentProjectId,
+                CurrentProjectName = a.CurrentProject != null ? a.CurrentProject.Title : null,
+                CurrentSiteLocationId = a.CurrentSiteLocationId,
+                CurrentSiteLocationName = a.CurrentSiteLocation != null ? a.CurrentSiteLocation.Name : null,
+                LastUsedAtUtc = fleetTripActivityQ
+                    .Where(x => x.VehicleAssetId == a.Id &&
+                        (x.Status == FleetTripStatuses.Dispatched || x.Status == FleetTripStatuses.Completed))
+                    .OrderByDescending(x => x.CompletedAt ?? x.ActualEndAt ?? x.DispatchedAt ?? x.ActualStartAt ?? x.PlannedStartAt ?? x.UpdatedAt ?? (DateTime?)x.CreatedAt)
+                    .Select(x => x.CompletedAt ?? x.ActualEndAt ?? x.DispatchedAt ?? x.ActualStartAt ?? x.PlannedStartAt ?? x.UpdatedAt ?? (DateTime?)x.CreatedAt)
+                    .FirstOrDefault()
+                    ?? a.LastMileageUpdate
+                    ?? a.LastOperatingHoursUpdate
+                    ?? (a.Status == AssetStatus.InUse ? (DateTime?)(a.UpdatedAt ?? a.CreatedAt) : null),
+                LastServiceDate = a.LastServiceDate,
+                NextServiceDue = a.NextServiceDue,
+                NextMaintenanceDate = activeMaintenanceSchedulesQ
+                    .Where(x => x.AssetId == a.Id)
+                    .OrderBy(x => x.NextDueDate)
+                    .Select(x => (DateTime?)x.NextDueDate)
+                    .FirstOrDefault(),
+                NextMaintenanceScheduleDueAt = activeMaintenanceSchedulesQ
+                    .Where(x => x.AssetId == a.Id)
+                    .OrderBy(x => x.NextDueDate)
+                    .Select(x => (DateTime?)x.NextDueDate)
+                    .FirstOrDefault(),
                 CurrentDriverEmployeeId = activeAssignmentsQ
                     .Where(x => x.VehicleAssetId == a.Id)
                     .OrderByDescending(x => x.AssignedFromUtc)

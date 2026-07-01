@@ -30,6 +30,16 @@ export interface FleetVehicleListDto {
   model?: string | null;
   mileage?: number | null;
   operatingHours?: number | null;
+  location?: string | null;
+  currentProjectId?: string | null;
+  currentProjectName?: string | null;
+  currentSiteLocationId?: string | null;
+  currentSiteLocationName?: string | null;
+  lastUsedAtUtc?: string | null;
+  lastServiceDate?: string | null;
+  nextServiceDue?: string | null;
+  nextMaintenanceDate?: string | null;
+  nextMaintenanceScheduleDueAt?: string | null;
   currentDriverEmployeeId?: string | null;
   currentDriverEmployeeName?: string | null;
 }

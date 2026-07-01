@@ -2,21 +2,24 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Plus, Search, Edit } from 'lucide-react';
+import { ArrowRight, Clock3, Edit, LayoutGrid, List, MapPin, Plus, Search, Truck } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { formatFleetDateTime } from '@/lib/date-format';
+import { cn } from '@/lib/utils';
 
 import fleetService, {
   FleetDriverDto,
+  FleetTripDto,
   FleetVehicleAssignmentDto,
   FleetVehicleListDto,
   PagedResult,
@@ -30,8 +33,21 @@ type AssetCategoryDto = {
   isActive?: boolean;
 };
 
+type AssetLocationSnapshot = {
+  location?: string | null;
+  currentProjectName?: string | null;
+  currentSiteLocationName?: string | null;
+  lastMileageUpdate?: string | null;
+  lastOperatingHoursUpdate?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+  status?: string | null;
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 const FUEL_TYPE_OPTIONS = ['Petrol', 'Diesel', 'Electric', 'Hybrid'] as const;
+type FleetVehiclesViewMode = 'list' | 'grid';
+const MAINTENANCE_DUE_SOON_DAYS = 14;
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('token') || localStorage.getItem('authToken');
@@ -56,6 +72,114 @@ function getVehicleStatusBadge(statusRaw: string | null | undefined) {
   return <Badge className={colors[status] ?? 'bg-gray-100 text-gray-800'}>{status === 'OutOfService' ? 'Out of Service' : status}</Badge>;
 }
 
+function getEarliestDateValue(values: Array<string | null | undefined>) {
+  const dates = values
+    .map((value) => {
+      if (!value) return null;
+      const time = new Date(value).getTime();
+      return Number.isNaN(time) ? null : time;
+    })
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+
+  return dates[0] ?? null;
+}
+
+function getVehicleMaintenanceBadge(vehicle: FleetVehicleListDto) {
+  const status = (vehicle.status || '').trim().toLowerCase();
+  const nextDueAt = getEarliestDateValue([vehicle.nextMaintenanceDate, vehicle.nextMaintenanceScheduleDueAt, vehicle.nextServiceDue]);
+  const now = Date.now();
+  const dueSoonLimit = now + MAINTENANCE_DUE_SOON_DAYS * 86_400_000;
+
+  let label = 'Ready';
+  let className = 'border-emerald-200 bg-emerald-50 text-emerald-700';
+
+  if (nextDueAt !== null && nextDueAt < now) {
+    label = 'Due';
+    className = 'border-red-200 bg-red-100 text-red-800';
+  } else if (status === 'maintenance') {
+    label = 'Scheduled';
+    className = 'border-sky-200 bg-sky-100 text-sky-800';
+  } else if (nextDueAt !== null && nextDueAt <= dueSoonLimit) {
+    label = 'Due soon';
+    className = 'border-amber-200 bg-amber-100 text-amber-800';
+  } else if (status === 'outofservice') {
+    label = 'Attention';
+    className = 'border-red-200 bg-red-50 text-red-700';
+  } else if (status === 'retired') {
+    label = 'Retired';
+    className = 'border-slate-200 bg-slate-100 text-slate-700';
+  }
+
+  return (
+    <span className={cn('inline-flex h-7 items-center rounded-full border px-2.5 text-xs font-semibold', className)}>
+      {label}
+    </span>
+  );
+}
+
+function getVehicleLocationLabel(vehicle: FleetVehicleListDto, assetLocation?: AssetLocationSnapshot) {
+  const siteLocation = (vehicle.currentSiteLocationName || assetLocation?.currentSiteLocationName)?.trim();
+  if (siteLocation) return siteLocation;
+
+  const physicalLocation = (vehicle.location || assetLocation?.location)?.trim();
+  if (physicalLocation) return physicalLocation;
+
+  const projectLocation = (vehicle.currentProjectName || assetLocation?.currentProjectName)?.trim();
+  if (projectLocation) return projectLocation;
+
+  return 'No location';
+}
+
+function getVehiclePlateLabel(vehicle: FleetVehicleListDto) {
+  const plate = vehicle.licensePlate?.trim();
+  return plate || 'No plate';
+}
+
+function getTripUsageAt(trip: FleetTripDto) {
+  const status = (trip.status || '').trim().toLowerCase();
+  const hasUsageTimestamp = Boolean(trip.completedAt || trip.actualEndAt || trip.dispatchedAt || trip.actualStartAt);
+
+  if (status !== 'completed' && status !== 'dispatched' && !hasUsageTimestamp) return null;
+
+  return trip.completedAt || trip.actualEndAt || trip.dispatchedAt || trip.actualStartAt || trip.plannedStartAt || trip.createdAt || null;
+}
+
+function getVehicleLastUsedAt(vehicle: FleetVehicleListDto, tripLastUsedAt?: string | null, assetLocation?: AssetLocationSnapshot) {
+  const directLastUsed = vehicle.lastUsedAtUtc?.trim();
+  if (directLastUsed) return directLastUsed;
+
+  const tripLastUsed = tripLastUsedAt?.trim();
+  if (tripLastUsed) return tripLastUsed;
+
+  const mileageUpdate = assetLocation?.lastMileageUpdate?.trim();
+  if (mileageUpdate) return mileageUpdate;
+
+  const hoursUpdate = assetLocation?.lastOperatingHoursUpdate?.trim();
+  if (hoursUpdate) return hoursUpdate;
+
+  const status = (vehicle.status || assetLocation?.status || '').trim().toLowerCase();
+  if (status === 'inuse') {
+    return assetLocation?.updatedAt?.trim() || assetLocation?.createdAt?.trim() || null;
+  }
+
+  return null;
+}
+
+function formatLastUsed(value: string | null | undefined) {
+  if (!value) return 'No use yet';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'No use yet';
+
+  const diffMs = Date.now() - date.getTime();
+  const diffDays = Math.max(0, Math.floor(diffMs / 86_400_000));
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return '1d ago';
+  return `${diffDays}d ago`;
+}
+
 export default function FleetVehiclesPage() {
   const { toast } = useToast();
 
@@ -66,6 +190,7 @@ export default function FleetVehiclesPage() {
   const [pageSize] = React.useState(25);
   const [searchTerm, setSearchTerm] = React.useState('');
   const [categoryId, setCategoryId] = React.useState<string>('all');
+  const [viewMode, setViewMode] = React.useState<FleetVehiclesViewMode>('list');
 
   const [result, setResult] = React.useState<PagedResult<FleetVehicleListDto>>({
     items: [],
@@ -83,6 +208,9 @@ export default function FleetVehiclesPage() {
   const [drivers, setDrivers] = React.useState<FleetDriverDto[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = React.useState<string>('none');
   const [assignmentHistory, setAssignmentHistory] = React.useState<FleetVehicleAssignmentDto[]>([]);
+  const [utilizationByVehicle, setUtilizationByVehicle] = React.useState<Record<string, number>>({});
+  const [tripLastUsedByVehicle, setTripLastUsedByVehicle] = React.useState<Record<string, string | null>>({});
+  const [assetLocationByVehicle, setAssetLocationByVehicle] = React.useState<Record<string, AssetLocationSnapshot>>({});
 
   const [editForm, setEditForm] = React.useState<UpdateFleetVehicleDto>({
     name: '',
@@ -129,6 +257,45 @@ export default function FleetVehiclesPage() {
     }
   }, [page, pageSize, searchTerm, categoryId, toast]);
 
+  const loadUtilization = React.useCallback(async () => {
+    try {
+      const toUtc = new Date();
+      const fromUtc = new Date(toUtc);
+      fromUtc.setDate(fromUtc.getDate() - 30);
+
+      const summary = await fleetService.getUtilization({
+        fromUtc: fromUtc.toISOString(),
+        toUtc: toUtc.toISOString(),
+        top: 500,
+      });
+
+      const rows = summary.rows || [];
+      const maxKm = Math.max(0, ...rows.map((row) => Number(row.totalKm) || 0));
+      const maxHours = Math.max(0, ...rows.map((row) => Number(row.totalHours) || 0));
+      const maxTrips = Math.max(0, ...rows.map((row) => Number(row.completedTrips) || 0));
+
+      const next: Record<string, number> = {};
+      rows.forEach((row) => {
+        const km = Number(row.totalKm) || 0;
+        const hours = Number(row.totalHours) || 0;
+        const trips = Number(row.completedTrips) || 0;
+        const percent = maxKm > 0
+          ? (km / maxKm) * 100
+          : maxHours > 0
+            ? (hours / maxHours) * 100
+            : maxTrips > 0
+              ? (trips / maxTrips) * 100
+              : 0;
+
+        next[row.vehicleAssetId] = Math.max(0, Math.min(100, Math.round(percent)));
+      });
+
+      setUtilizationByVehicle(next);
+    } catch {
+      setUtilizationByVehicle({});
+    }
+  }, []);
+
   React.useEffect(() => {
     (async () => {
       try {
@@ -141,8 +308,132 @@ export default function FleetVehiclesPage() {
   }, []);
 
   React.useEffect(() => {
+    const saved = window.localStorage.getItem('fleetVehiclesViewMode');
+    if (saved === 'list' || saved === 'grid') setViewMode(saved);
+  }, []);
+
+  React.useEffect(() => {
     loadVehicles();
   }, [loadVehicles]);
+
+  React.useEffect(() => {
+    loadUtilization();
+  }, [loadUtilization]);
+
+  React.useEffect(() => {
+    const vehiclesNeedingTripUsage = result.items.filter(
+      (vehicle) => !vehicle.lastUsedAtUtc && !(vehicle.id in tripLastUsedByVehicle),
+    );
+
+    if (vehiclesNeedingTripUsage.length === 0) return;
+
+    let cancelled = false;
+
+    const loadTripUsage = async () => {
+      const entries = await Promise.all(
+        vehiclesNeedingTripUsage.map(async (vehicle) => {
+          try {
+            const [dispatchedTrips, completedTrips] = await Promise.all([
+              fleetService.getTrips({ vehicleAssetId: vehicle.id, status: 'Dispatched', page: 1, pageSize: 10 }),
+              fleetService.getTrips({ vehicleAssetId: vehicle.id, status: 'Completed', page: 1, pageSize: 10 }),
+            ]);
+            const latestUsage = [...(dispatchedTrips.items || []), ...(completedTrips.items || [])]
+              .map(getTripUsageAt)
+              .filter((value): value is string => Boolean(value))
+              .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+
+            return [vehicle.id, latestUsage] as const;
+          } catch {
+            return [vehicle.id, null] as const;
+          }
+        }),
+      );
+
+      if (cancelled) return;
+
+      setTripLastUsedByVehicle((current) => {
+        const next = { ...current };
+        entries.forEach(([vehicleId, lastUsedAt]) => {
+          next[vehicleId] = lastUsedAt;
+        });
+        return next;
+      });
+    };
+
+    loadTripUsage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [result.items, tripLastUsedByVehicle]);
+
+  React.useEffect(() => {
+    const missingLocationVehicles = result.items.filter(
+      (vehicle) => {
+        const hasCheckedTrips = vehicle.lastUsedAtUtc || vehicle.id in tripLastUsedByVehicle;
+        const hasTripUsage = Boolean(vehicle.lastUsedAtUtc || tripLastUsedByVehicle[vehicle.id]);
+        const needsLocation = getVehicleLocationLabel(vehicle, assetLocationByVehicle[vehicle.id]) === 'No location';
+        const needsLastUsedFallback = hasCheckedTrips && !hasTripUsage && !getVehicleLastUsedAt(vehicle, tripLastUsedByVehicle[vehicle.id], assetLocationByVehicle[vehicle.id]);
+
+        return (needsLocation || needsLastUsedFallback) && !assetLocationByVehicle[vehicle.id];
+      },
+    );
+
+    if (missingLocationVehicles.length === 0) return;
+
+    let cancelled = false;
+
+    const loadAssetLocations = async () => {
+      const entries = await Promise.all(
+        missingLocationVehicles.map(async (vehicle) => {
+          try {
+            const response = await fetch(`${API_BASE_URL}/maintenance/assets/${vehicle.id}`, { headers: getAuthHeaders() });
+            if (!response.ok) return null;
+
+            const asset: Record<string, any> = await response.json();
+            return [
+              vehicle.id,
+              {
+                location: asset.location || asset.Location || null,
+                currentProjectName: asset.currentProjectName || asset.CurrentProjectName || null,
+                currentSiteLocationName: asset.currentSiteLocationName || asset.CurrentSiteLocationName || null,
+                lastMileageUpdate: asset.lastMileageUpdate || asset.LastMileageUpdate || null,
+                lastOperatingHoursUpdate: asset.lastOperatingHoursUpdate || asset.LastOperatingHoursUpdate || null,
+                updatedAt: asset.updatedAt || asset.UpdatedAt || null,
+                createdAt: asset.createdAt || asset.CreatedAt || null,
+                status: asset.status || asset.Status || null,
+              },
+            ] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      if (cancelled) return;
+
+      setAssetLocationByVehicle((current) => {
+        if (entries.every((entry) => !entry)) return current;
+
+        const next = { ...current };
+        entries.forEach((entry) => {
+          if (entry) next[entry[0]] = entry[1];
+        });
+        return next;
+      });
+    };
+
+    loadAssetLocations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetLocationByVehicle, result.items, tripLastUsedByVehicle]);
+
+  const changeViewMode = (mode: FleetVehiclesViewMode) => {
+    setViewMode(mode);
+    window.localStorage.setItem('fleetVehiclesViewMode', mode);
+  };
 
   const openEdit = (v: FleetVehicleListDto) => {
     if ((v.assetType || '').toLowerCase() !== 'vehicle') {
@@ -271,10 +562,51 @@ export default function FleetVehiclesPage() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader className="space-y-4">
-          <CardTitle>Fleets</CardTitle>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      <div className="space-y-4">
+        <div className="rounded-md border bg-card p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Fleets</h2>
+              <p className="text-sm text-muted-foreground">{result.totalCount.toLocaleString()} vehicles in the current filter</p>
+            </div>
+
+            <TooltipProvider delayDuration={150}>
+              <div className="inline-flex h-10 w-fit items-center rounded-md border bg-background p-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant={viewMode === 'list' ? 'default' : 'ghost'}
+                      size="icon"
+                      className={cn('h-8 w-8', viewMode !== 'list' && 'text-muted-foreground')}
+                      onClick={() => changeViewMode('list')}
+                      aria-label="Show list view"
+                    >
+                      <List className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>List view</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                      size="icon"
+                      className={cn('h-8 w-8', viewMode !== 'grid' && 'text-muted-foreground')}
+                      onClick={() => changeViewMode('grid')}
+                      aria-label="Show card view"
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Card view</TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center">
             <div className="relative flex-1">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -294,7 +626,7 @@ export default function FleetVehiclesPage() {
                 setCategoryId(v);
               }}
             >
-              <SelectTrigger className="w-full md:w-64">
+              <SelectTrigger className="w-full lg:w-64">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
               <SelectContent>
@@ -311,7 +643,7 @@ export default function FleetVehiclesPage() {
               <Button variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
                 Prev
               </Button>
-              <div className="text-sm text-muted-foreground">
+              <div className="min-w-20 text-center text-sm text-muted-foreground">
                 Page {page} of {totalPages}
               </div>
               <Button variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
@@ -319,9 +651,10 @@ export default function FleetVehiclesPage() {
               </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
+        </div>
+
+        {viewMode === 'list' ? (
+          <div className="rounded-md border bg-card">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
@@ -396,8 +729,89 @@ export default function FleetVehiclesPage() {
               </TableBody>
             </Table>
           </div>
-        </CardContent>
-      </Card>
+        ) : loading ? (
+          <div className="rounded-md border bg-card py-10 text-center text-muted-foreground">Loading...</div>
+        ) : result.items.length === 0 ? (
+          <div className="rounded-md border bg-card py-10 text-center text-muted-foreground">No vehicles found</div>
+        ) : (
+          <div className="rounded-md bg-slate-100 p-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {result.items.map((v) => {
+                const utilization = utilizationByVehicle[v.id] ?? 0;
+                const assetLocation = assetLocationByVehicle[v.id];
+                const lastUsedAt = getVehicleLastUsedAt(v, tripLastUsedByVehicle[v.id], assetLocation);
+
+                return (
+                  <Card key={v.id} className="overflow-hidden border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+                    <CardContent className="flex min-h-72 flex-col gap-4 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-600 ring-1 ring-rose-100">
+                          <Truck className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <Link href={`/maintenance/assets?id=${v.id}`} className="block truncate text-base font-semibold text-slate-950">
+                            {v.assetNumber || v.name}
+                          </Link>
+                          <p className="truncate text-sm text-slate-500">{v.currentDriverEmployeeName || 'Unassigned'}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-slate-700 hover:text-blue-700"
+                          onClick={() => window.open(`/maintenance/assets?id=${v.id}&edit=1`, '_blank')}
+                          title="Edit vehicle in Assets"
+                        >
+                          <Edit className="h-4 w-4" />
+                          <span className="sr-only">Edit vehicle</span>
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="text-slate-500">Utilization</span>
+                          <span className="font-semibold tabular-nums text-slate-900">{utilization}%</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-full rounded-full bg-rose-500" style={{ width: `${utilization}%` }} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 text-sm text-slate-500">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <MapPin className="h-4 w-4 shrink-0 text-emerald-500" />
+                          <span className="truncate">{getVehicleLocationLabel(v, assetLocation)}</span>
+                        </div>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Truck className="h-4 w-4 shrink-0 text-slate-400" />
+                          <span className="truncate font-medium text-slate-600">{getVehiclePlateLabel(v)}</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-auto flex items-center justify-between gap-3 pt-8">
+                        {getVehicleStatusBadge(v.status)}
+                        {getVehicleMaintenanceBadge(v)}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2 text-sm text-slate-500">
+                          <Clock3 className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{formatLastUsed(lastUsedAt)}</span>
+                        </div>
+                        <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700">
+                          <Link href={`/maintenance/assets?id=${v.id}`}>
+                            <ArrowRight className="h-4 w-4" />
+                            Detail
+                          </Link>
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
         <DialogContent className="max-w-xl">

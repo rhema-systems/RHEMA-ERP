@@ -18,6 +18,16 @@ public class FleetVehicleListDto
     public string? Model { get; set; }
     public double? Mileage { get; set; }
     public double? OperatingHours { get; set; }
+    public string? Location { get; set; }
+    public Guid? CurrentProjectId { get; set; }
+    public string? CurrentProjectName { get; set; }
+    public Guid? CurrentSiteLocationId { get; set; }
+    public string? CurrentSiteLocationName { get; set; }
+    public DateTime? LastUsedAtUtc { get; set; }
+    public DateTime? LastServiceDate { get; set; }
+    public DateTime? NextServiceDue { get; set; }
+    public DateTime? NextMaintenanceDate { get; set; }
+    public DateTime? NextMaintenanceScheduleDueAt { get; set; }
 
     public Guid? CurrentDriverEmployeeId { get; set; }
     public string? CurrentDriverEmployeeName { get; set; }
