@@ -10,6 +10,7 @@ This note captures the VPS deployment details that have caused repeat failures. 
 - Public API entrypoint for browsers: `https://149.102.145.190:8443/api`
 - Windows deployment root: `C:\RhemaERP`
 - Frontend runtime: `C:\RhemaERP\frontend`
+- Frontend local port: `http://127.0.0.1:3001`
 - Package drop folder: `C:\RhemaERP\packages`
 - Deployment/log folder: `C:\RhemaERP\logs`
 - Windows services:
@@ -27,6 +28,8 @@ The browser must never be sent to `http://localhost:5000`, `https://localhost:53
 
    ```powershell
    cd frontend
+   Remove-Item -LiteralPath .next -Recurse -Force -ErrorAction SilentlyContinue
+   $env:NODE_ENV = 'production'
    $env:NEXT_PUBLIC_API_URL = 'https://149.102.145.190:8443/api'
    $env:API_URL = 'https://149.102.145.190:8443/api'
    $env:NEXTAUTH_URL = 'https://149.102.145.190:8443'
@@ -97,6 +100,17 @@ In this repo, `server.js` is generated under `.next\standalone\server.js`. Put t
 
 Avoid packaging `.next\cache` and `.next\standalone\node_modules`; the VPS already has runtime dependencies and including them can turn a small deployment into a very large zip.
 
+Before packaging, verify the build and middleware IDs match and neither is `development`:
+
+```powershell
+$buildId = (Get-Content -LiteralPath .next\BUILD_ID -Raw).Trim()
+$manifest = Get-Content -LiteralPath .next\server\middleware-manifest.json -Raw | ConvertFrom-Json
+$middlewareBuildId = $manifest.middleware.'/'.env.__NEXT_BUILD_ID
+if ($buildId -eq 'development' -or $buildId -ne $middlewareBuildId) {
+  throw 'Frontend is not a clean production build.'
+}
+```
+
 Do not live-mirror `.next` over SMB while the frontend service is running. Use the package-and-apply flow instead:
 
 1. Build locally with the production API variables.
@@ -105,7 +119,7 @@ Do not live-mirror `.next` over SMB while the frontend service is running. Use t
 4. Stop `RhemaERPFrontend`.
 5. Apply the package on the VPS or copy the staged tree as one consistent set.
 6. Start `RhemaERPFrontend`.
-7. Verify the live HTML and every CSS file referenced by that HTML.
+7. Verify `http://127.0.0.1:3001/login` on the VPS, then verify the live HTML and every CSS file referenced by that HTML.
 
 If a browser reports a missing old CSS chunk after deployment, first verify the live `/login` HTML. If live HTML no longer references that old chunk, add a temporary compatibility copy only as a bridge for already-cached browser pages, then restart `RhemaERPFrontend` so the standalone server sees the copied file.
 
