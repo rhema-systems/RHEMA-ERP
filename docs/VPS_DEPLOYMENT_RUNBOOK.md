@@ -63,6 +63,25 @@ The browser must never be sent to `http://localhost:5000`, `https://localhost:53
 
    Compact rows and alternating row color belong in `frontend/src/components/ui/table.tsx`, `frontend/src/components/ui/DataTable/DataTable.tsx`, `frontend/src/components/admin/data-table.tsx`, `frontend/src/components/mobile/MobileDataTable.tsx`, and the global raw-table fallback in `frontend/src/app/globals.css`. Avoid page-only grid styling unless the page has a special layout need.
 
+8. Publish the API as self-contained for the VPS.
+
+   The `RhemaERPAPI` service runs `C:\RhemaERP\api\ErpSystem.Api.exe`. Publish with the same app-local runtime shape the VPS expects:
+
+   ```powershell
+   dotnet publish src\ErpSystem.Api\ErpSystem.Api.csproj `
+     -c Release `
+     -r win-x64 `
+     --self-contained true `
+     -o artifacts\api-publish-<stamp> `
+     /p:PublishSingleFile=false
+   ```
+
+   A framework-dependent API publish can fail at service start with fragmented log lines such as `.NET location`, `Framework: 'Microsoft.NETCore.App', version '8.0.0'`, and `App: C:\RhemaERP\api\ErpSystem.Api.exe`.
+
+9. Do not publish or mirror runtime uploads.
+
+   `src/ErpSystem.Api/wwwroot/uploads` contains runtime data and can include stale/missing upload references from local development. The project excludes that folder from publish. On the VPS, preserve `C:\RhemaERP\api\wwwroot\uploads` and do not wipe it during API deployments.
+
 ## Packaging Notes
 
 The deployed frontend package should contain:
@@ -75,6 +94,18 @@ The deployed frontend package should contain:
 In this repo, `server.js` is generated under `.next\standalone\server.js`. Put that file at the package root if the deployment script expects `server.js` beside `.next`.
 
 Avoid packaging `.next\cache` and `.next\standalone\node_modules`; the VPS already has runtime dependencies and including them can turn a small deployment into a very large zip.
+
+The deployed API package should be copied over `C:\RhemaERP\api` while preserving:
+
+- `appsettings.json`
+- `appsettings.Production.json`
+- `.env`
+- `.env.production`
+- `RhemaERPAPI.exe`
+- `RhemaERPAPI.xml`
+- `wwwroot\uploads`
+
+Do not mirror-delete the API folder unless those preserved files and folders have first been backed up and restored. A normal `robocopy` copy with `/E` and explicit excludes is safer than `/MIR` for API deployments.
 
 ## Required Smoke Tests
 
