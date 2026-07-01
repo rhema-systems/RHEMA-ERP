@@ -1,20 +1,14 @@
  
 // Service Worker for ERP System PWA
-const CACHE_NAME = 'erp-system-v2026-07-01-asset-grid-fix'
-const STATIC_CACHE_NAME = 'erp-static-v2026-07-01-asset-grid-fix'
-const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-07-01-asset-grid-fix'
+const CACHE_NAME = 'erp-system-v2026-07-01-static-cache-fix'
+const STATIC_CACHE_NAME = 'erp-static-v2026-07-01-static-cache-fix'
+const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-07-01-static-cache-fix'
 const OFFLINE_PAGE = '/offline'
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const IS_LOCAL_DEV = LOCAL_DEV_HOSTS.has(self.location.hostname)
 
 // Define what to cache during install
 const STATIC_ASSETS = [
-  '/',
-  '/login',
-  '/mobile',
-  '/mobile/fleet/inspection',
-  '/dashboard',
-  '/offline',
   '/manifest.json',
   '/favicon.ico',
   '/icon-192.png',
@@ -208,25 +202,8 @@ async function handleRuntimeCache(request) {
 // Handle navigation requests
 async function handleNavigationRequest(request) {
   try {
-    // Try network first
-    const networkResponse = await fetch(request)
-    return networkResponse
+    return await fetch(request)
   } catch (error) {
-    // Network failed, try cache
-    const cache = await caches.open(STATIC_CACHE_NAME)
-    const cachedResponse = await cache.match(request.url)
-    
-    if (cachedResponse) {
-      return cachedResponse
-    }
-    
-    // Return offline page if available
-    const offlinePage = await cache.match('/offline')
-    if (offlinePage) {
-      return offlinePage
-    }
-    
-    // Fallback offline response
     return new Response(`
       <!DOCTYPE html>
       <html>

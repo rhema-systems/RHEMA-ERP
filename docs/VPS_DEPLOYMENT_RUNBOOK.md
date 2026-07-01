@@ -47,6 +47,8 @@ The browser must never be sent to `http://localhost:5000`, `https://localhost:53
 
    If `frontend/public/sw.js` keeps the old cache names, users may keep stale chunks after deployment. The 2026-07-01 asset/grid fix used cache names ending in `2026-07-01-asset-grid-fix`.
 
+   Do not precache app pages such as `/`, `/login`, `/dashboard`, `/mobile`, or authenticated module routes. Cache hashed static assets only. Precaching pages can leave browsers with HTML that points to CSS/JS chunks from an older build, which makes the app render as unstyled HTML after a deployment.
+
 4. Route through the HTTPS proxy only.
 
    The API service should bind locally on `http://127.0.0.1:5000`. Public direct access to `http://149.102.145.190:5000` should be refused. Browsers should use the HTTPS proxy on port `8443`.
@@ -95,6 +97,18 @@ In this repo, `server.js` is generated under `.next\standalone\server.js`. Put t
 
 Avoid packaging `.next\cache` and `.next\standalone\node_modules`; the VPS already has runtime dependencies and including them can turn a small deployment into a very large zip.
 
+Do not live-mirror `.next` over SMB while the frontend service is running. Use the package-and-apply flow instead:
+
+1. Build locally with the production API variables.
+2. Stage `.next`, `public`, root `server.js` from `.next\standalone\server.js`, and `package.json`.
+3. Copy the package to `C:\RhemaERP\packages`.
+4. Stop `RhemaERPFrontend`.
+5. Apply the package on the VPS or copy the staged tree as one consistent set.
+6. Start `RhemaERPFrontend`.
+7. Verify the live HTML and every CSS file referenced by that HTML.
+
+If a browser reports a missing old CSS chunk after deployment, first verify the live `/login` HTML. If live HTML no longer references that old chunk, add a temporary compatibility copy only as a bridge for already-cached browser pages, then restart `RhemaERPFrontend` so the standalone server sees the copied file.
+
 The deployed API package should be copied over `C:\RhemaERP\api` while preserving:
 
 - `appsettings.json`
@@ -129,6 +143,7 @@ Expected results:
 - `/login` returns HTTP 200.
 - `/sw.js` contains the latest cache version.
 - Direct `:5000/health` is refused or unreachable from outside.
+- Live `/login` and `/dashboard` HTML reference CSS files that all return HTTP 200.
 
 Also scan the source and deployed login chunks for bad client URLs:
 
@@ -141,6 +156,21 @@ For deployed login assets, fetch `/login`, request the referenced `/_next/static
 - `http://localhost:5000`
 - `https://localhost:53484`
 - `https://localhost:7095`
+
+For CSS, parse the live HTML and check each referenced stylesheet:
+
+```powershell
+$base = 'https://149.102.145.190:8443'
+foreach ($route in @('/login', '/dashboard')) {
+  $html = (Invoke-WebRequest -Uri "$base$route" -SkipCertificateCheck -UseBasicParsing).Content
+  [regex]::Matches($html, 'href="([^"]+\.css[^"]*)"') |
+    ForEach-Object { $_.Groups[1].Value } |
+    Sort-Object -Unique |
+    ForEach-Object {
+      Invoke-WebRequest -Uri "$base$_" -SkipCertificateCheck -UseBasicParsing
+    }
+}
+```
 
 ## 2026-07-01 Incident Summary
 
