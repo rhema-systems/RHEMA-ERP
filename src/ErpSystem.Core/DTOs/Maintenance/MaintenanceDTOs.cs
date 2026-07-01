@@ -2069,6 +2069,8 @@ public class MaintenanceAssetDto
     public Guid AssetCategoryId { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public int? Year { get; set; }
+    public string? OwnershipType { get; set; }
     public string? SerialNumber { get; set; }
     public string? LicensePlate { get; set; }
     public string? VIN { get; set; }
@@ -2163,6 +2165,11 @@ public class CreateMaintenanceAssetDto
     [StringLength(100)]
     public string? Model { get; set; }
 
+    public int? Year { get; set; }
+
+    [StringLength(20)]
+    public string? OwnershipType { get; set; }
+
     [StringLength(50)]
     public string? SerialNumber { get; set; }
 
@@ -2225,6 +2232,11 @@ public class UpdateMaintenanceAssetDto
 
     [StringLength(100)]
     public string? Model { get; set; }
+
+    public int? Year { get; set; }
+
+    [StringLength(20)]
+    public string? OwnershipType { get; set; }
 
     [StringLength(50)]
     public string? SerialNumber { get; set; }

@@ -188,6 +188,57 @@
   }
 }
 
+@media screen {
+  body:not(.printing-payroll-payslip) table {
+    font-size: 13px;
+    line-height: 1.25rem;
+  }
+
+  body:not(.printing-payroll-payslip) table thead {
+    background: rgb(241 245 249 / 0.8);
+    color: rgb(51 65 85);
+  }
+
+  body:not(.printing-payroll-payslip) table th {
+    height: 2rem;
+    padding: 0.375rem 0.625rem;
+    text-align: left;
+    vertical-align: middle;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  body:not(.printing-payroll-payslip) table td {
+    padding: 0.375rem 0.625rem;
+    vertical-align: middle;
+  }
+
+  body:not(.printing-payroll-payslip) table tbody > tr:nth-child(even):not([data-state="selected"]) {
+    background: rgb(248 250 252 / 0.8);
+  }
+
+  body:not(.printing-payroll-payslip) table tbody > tr:hover {
+    background: rgb(239 246 255 / 0.7);
+  }
+
+  .dark body:not(.printing-payroll-payslip) table thead,
+  body.dark:not(.printing-payroll-payslip) table thead {
+    background: rgb(15 23 42 / 0.8);
+    color: rgb(203 213 225);
+  }
+
+  .dark body:not(.printing-payroll-payslip) table tbody > tr:nth-child(even):not([data-state="selected"]),
+  body.dark:not(.printing-payroll-payslip) table tbody > tr:nth-child(even):not([data-state="selected"]) {
+    background: rgb(15 23 42 / 0.35);
+  }
+
+  .dark body:not(.printing-payroll-payslip) table tbody > tr:hover,
+  body.dark:not(.printing-payroll-payslip) table tbody > tr:hover {
+    background: rgb(30 41 59 / 0.7);
+  }
+}
+
 .payroll-payslip-print-root,
 .payroll-payslip-print-root * {
   box-sizing: border-box;

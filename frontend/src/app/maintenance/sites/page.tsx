@@ -40,7 +40,7 @@ interface AssetLookup {
   currentSiteLocationName?: string | null;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 const authHeaders = () => {
   const token = localStorage.getItem('authToken') || localStorage.getItem('token');

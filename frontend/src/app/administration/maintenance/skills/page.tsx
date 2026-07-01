@@ -90,7 +90,7 @@ export default function TechnicalSkillsPage() {
       setIsLoading(true);
       setError(null);
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/maintenance/technical-skills?pageSize=1000', {
+      const response = await fetch('/api/maintenance/technical-skills?pageSize=1000', {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
@@ -167,7 +167,7 @@ export default function TechnicalSkillsPage() {
   const handleCreate = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/maintenance/technical-skills', {
+      const response = await fetch('/api/maintenance/technical-skills', {
         method: 'POST',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -217,7 +217,7 @@ export default function TechnicalSkillsPage() {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/maintenance/technical-skills/${selectedSkill.id}`, {
+      const response = await fetch(`/api/maintenance/technical-skills/${selectedSkill.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -250,7 +250,7 @@ export default function TechnicalSkillsPage() {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/maintenance/technical-skills/${id}`, {
+      const response = await fetch(`/api/maintenance/technical-skills/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',

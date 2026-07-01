@@ -56,7 +56,7 @@ class TokenRefreshService {
       throw new Error('No refresh token available');
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     
     const response = await fetch(`${baseUrl}/auth/refresh`, {

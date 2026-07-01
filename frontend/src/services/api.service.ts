@@ -176,7 +176,7 @@ export interface RefreshTokenRequest {
 }
 
 class ApiService {
-  private baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api';
+  private baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
   private token: string | null = null;
   private readonly enableApiDebugLogging = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
 

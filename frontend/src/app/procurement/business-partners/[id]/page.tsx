@@ -43,7 +43,7 @@ import { PerformanceReviewDialog } from '@/components/procurement/PerformanceRev
 import { PerformanceReviewDetailDialog } from '@/components/procurement/PerformanceReviewDetailDialog';
 import { PerformanceTrendsChart } from '@/components/procurement/PerformanceTrendsChart';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export default function BusinessPartnerDetailPage() {
   const router = useRouter();
@@ -1454,4 +1454,3 @@ export default function BusinessPartnerDetailPage() {
     </div>
   );
 }
-

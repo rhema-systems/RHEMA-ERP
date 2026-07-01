@@ -15,6 +15,7 @@ A modern, multi-tenant, database-agnostic Enterprise Resource Planning (ERP) sys
 - **🟢 Deployment**: Automated (CI/CD Pipeline)
 
 > 📋 **[Health Check Documentation](./docs/HEALTH_CHECK.md)** - Monitor system health and deployment status
+> 🛠️ **[VPS Deployment Runbook](./docs/VPS_DEPLOYMENT_RUNBOOK.md)** - Live VPS deployment checklist and known failure fixes
 
 ## 🌟 **Key Features**
 

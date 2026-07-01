@@ -249,7 +249,7 @@ const createEmptyAssetForm = (category = ''): AssetFormState => ({
 });
 
 function AssetsPageContent() {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
   const { toast } = useToast();
   const { assetValueLabel, formatMoney } = useMaintenanceCurrency();
   const searchParams = useSearchParams();
@@ -715,8 +715,8 @@ function AssetsPageContent() {
         assetCategoryId: typeId,
         manufacturer: newAsset.manufacturer?.trim() || null,
         model: newAsset.model?.trim() || null,
-        year: isVehicleCategory ? yearNumber : null,
-        ownershipType: isVehicleCategory ? newAsset.ownershipType : 'Owned',
+        year: yearNumber,
+        ownershipType: newAsset.ownershipType || 'Owned',
         serialNumber: newAsset.serialNumber?.trim() || null,
         licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
         vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
@@ -883,8 +883,8 @@ function AssetsPageContent() {
           assetCategoryId,
           manufacturer: newAsset.manufacturer,
           model: newAsset.model,
-          year: isVehicleCategory ? yearNumber : null,
-          ownershipType: isVehicleCategory ? newAsset.ownershipType : 'Owned',
+          year: yearNumber,
+          ownershipType: newAsset.ownershipType || 'Owned',
           serialNumber: newAsset.serialNumber,
           licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
           vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,

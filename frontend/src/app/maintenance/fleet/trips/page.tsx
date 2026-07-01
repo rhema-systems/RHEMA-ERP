@@ -40,7 +40,7 @@ import { formatFleetDateTime } from '@/lib/date-format';
 import maintenanceSettingsService from '@/services/maintenanceSettingsService';
 import { MaintenanceAttachmentEntityType } from '@/services/maintenanceAttachmentsService';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('token') || localStorage.getItem('authToken');

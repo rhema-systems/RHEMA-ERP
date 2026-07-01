@@ -226,7 +226,7 @@ const mapScheduleToAssignment = (schedule: any): Assignment => {
 
 
 export default function TechniciansPage() {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
   const { toast } = useToast();
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [filteredTechnicians, setFilteredTechnicians] = useState<Technician[]>([]);

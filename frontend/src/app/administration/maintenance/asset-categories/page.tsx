@@ -129,7 +129,7 @@ export default function AssetCategoriesPage() {
       console.log('🔄 Fetching asset categories...');
       console.log('Token available:', !!token);
       console.log('Token preview:', token ? `${token.substring(0, 20)}...` : 'None');
-      console.log('API URL:', 'http://localhost:5000/api/maintenance/asset-categories');
+      console.log('API URL:', '/api/maintenance/asset-categories');
       
       // For now, we'll proceed without authentication since the API endpoint allows anonymous access
       // TODO: Restore authentication requirement when proper auth is implemented
@@ -141,7 +141,7 @@ export default function AssetCategoriesPage() {
       
       const headers = buildHeaders(token);
 
-      const response = await fetch('http://localhost:5000/api/maintenance/asset-categories?pageSize=1000', {
+      const response = await fetch('/api/maintenance/asset-categories?pageSize=1000', {
         headers
       });
       
@@ -180,7 +180,7 @@ export default function AssetCategoriesPage() {
       
       // Check if it's a network error
       if (error instanceof TypeError && error.message.includes('fetch')) {
-        setError('Unable to connect to the server. Please check if the API is running on http://localhost:5000');
+        setError('Unable to connect to the server. Please check if the API is running on ');
       } else {
         setError(`Failed to load asset categories: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
@@ -252,7 +252,7 @@ export default function AssetCategoriesPage() {
 
       const headers = buildHeaders(token);
 
-      const response = await fetch('http://localhost:5000/api/maintenance/asset-categories', {
+      const response = await fetch('/api/maintenance/asset-categories', {
         method: 'POST',
         headers,
         body: JSON.stringify(createDto)
@@ -329,7 +329,7 @@ export default function AssetCategoriesPage() {
 
       const headers = buildHeaders(token);
 
-      const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${selectedCategory.id}`, {
+      const response = await fetch(`/api/maintenance/asset-categories/${selectedCategory.id}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify(updateDto)
@@ -361,7 +361,7 @@ export default function AssetCategoriesPage() {
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
       const headers = buildHeaders(token);
 
-      const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${id}`, {
+      const response = await fetch(`/api/maintenance/asset-categories/${id}`, {
         method: 'DELETE',
         headers
       });

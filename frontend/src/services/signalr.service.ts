@@ -98,7 +98,7 @@ class SignalRService {
   private readonly enableSignalRDebugLogging = process.env.NEXT_PUBLIC_DEBUG_SIGNALR === 'true';
 
   constructor() {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    const baseUrl = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(/\/api\/?$/, '');
     this.hubUrl = `${baseUrl}/api/hubs/dashboard`;
     if (this.enableSignalRDebugLogging) {
       console.log('SignalR Service initialized:', {

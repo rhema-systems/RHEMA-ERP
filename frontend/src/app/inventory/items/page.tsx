@@ -71,7 +71,7 @@ const ABCCodes = [
 const getFullImageUrl = (url: string | null | undefined): string | null => {
   if (!url) return null;
   if (url.startsWith('/uploads')) {
-    const backendBaseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace('/api', '');
+    const backendBaseUrl = (process.env.NEXT_PUBLIC_API_URL || '/api').replace('/api', '');
     return `${backendBaseUrl}${url}`;
   }
   return url;

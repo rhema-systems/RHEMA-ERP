@@ -3,7 +3,7 @@
  * Handles Purchase Requisitions, Purchase Orders, and Purchase Receipts (GRN)
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
 function getAuthHeaders(): HeadersInit {

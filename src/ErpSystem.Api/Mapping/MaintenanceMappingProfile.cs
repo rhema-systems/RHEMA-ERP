@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Api.Mapping;
 
@@ -19,6 +20,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.PurchaseDate, opt => opt.MapFrom(src => src.PurchaseDate))
             .ForMember(dest => dest.WarrantyEndDate, opt => opt.MapFrom(src => src.WarrantyEndDate))
             .ForMember(dest => dest.WarrantyStartDate, opt => opt.MapFrom(src => src.WarrantyStartDate))
+            .ForMember(dest => dest.OwnershipType, opt => opt.MapFrom(src => src.OwnershipType.ToString()))
             .ForMember(dest => dest.CurrentProjectName, opt => opt.MapFrom(src => src.CurrentProject != null ? src.CurrentProject.Title : null))
             .ForMember(dest => dest.CurrentSiteLocationName, opt => opt.MapFrom(src => src.CurrentSiteLocation != null ? src.CurrentSiteLocation.Name : null));
 
@@ -34,6 +36,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.Employee, opt => opt.Ignore())
             .ForMember(dest => dest.CurrentProject, opt => opt.Ignore())
             .ForMember(dest => dest.CurrentSiteLocation, opt => opt.Ignore())
+            .ForMember(dest => dest.OwnershipType, opt => opt.MapFrom(src => ParseOwnershipType(src.OwnershipType)))
             .ForMember(dest => dest.ParentAsset, opt => opt.Ignore())
             .ForMember(dest => dest.ChildAssets, opt => opt.Ignore())
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore())
@@ -57,6 +60,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.AssetCategory, opt => opt.Ignore())
             .ForMember(dest => dest.CurrentProject, opt => opt.Ignore())
             .ForMember(dest => dest.CurrentSiteLocation, opt => opt.Ignore())
+            .ForMember(dest => dest.OwnershipType, opt => opt.MapFrom(src => ParseOwnershipType(src.OwnershipType)))
             .ForMember(dest => dest.ParentAsset, opt => opt.Ignore())
             .ForMember(dest => dest.ChildAssets, opt => opt.Ignore())
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore())
@@ -602,5 +606,12 @@ public class MaintenanceMappingProfile : Profile
 
         // ApplicationUser mapping for DTOs
         CreateMap<ApplicationUser, ApplicationUserDto>();
+    }
+
+    private static AssetOwnershipType ParseOwnershipType(string? value)
+    {
+        return Enum.TryParse<AssetOwnershipType>(value, true, out var ownershipType)
+            ? ownershipType
+            : AssetOwnershipType.Owned;
     }
 }

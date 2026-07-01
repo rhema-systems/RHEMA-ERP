@@ -303,7 +303,7 @@ function WorkOrdersPageContent() {
   // Helper function to get file URL from storage path
   const getFileUrl = (filePath: string | undefined | null): string => {
     if (!filePath) return '';
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || '';
     // Ensure path has leading slash
     const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
     // Add /uploads prefix if not already present
@@ -1562,7 +1562,7 @@ function WorkOrdersPageContent() {
   const handleTaskStatusUpdate = async (taskId: string, newStatus: string, actualHours: number | null = null, completionNotes: string | null = null, technicianId: string | null = null) => {
     try {
       // Update task status via API
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/work-orders/tasks/${taskId}/status`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api'}/maintenance/work-orders/tasks/${taskId}/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

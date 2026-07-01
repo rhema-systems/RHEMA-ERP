@@ -20,6 +20,7 @@ This documentation provides comprehensive details about your **Production-Ready 
 - **[Storage Abstraction Guide](STORAGE_ABSTRACTION.md)** - File storage configuration
 - **[Database Guide](database-switching-guide.md)** - Database provider switching
 - **[Deployment Guide](modular-monolith-deployment-guide.md)** - Production deployment
+- **[VPS Deployment Runbook](VPS_DEPLOYMENT_RUNBOOK.md)** - Live VPS deployment gotchas and smoke tests
 - **[CI/CD Guide](ci-cd-guide.md)** - Automated deployment pipeline
 
 ## 🛠️ **Development Guides**

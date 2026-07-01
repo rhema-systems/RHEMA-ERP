@@ -754,7 +754,7 @@ export default function QualityControlPage() {
                               try {
                                 const token = localStorage.getItem('authToken');
                                 const response = await fetch(
-                                  `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/quality-control/certificate/${inspection.id}`,
+                                  `${process.env.NEXT_PUBLIC_API_URL || '/api'}/maintenance/quality-control/certificate/${inspection.id}`,
                                   {
                                     headers: {
                                       'Authorization': token ? `Bearer ${token}` : ''
@@ -1164,7 +1164,7 @@ export default function QualityControlPage() {
                   try {
                     const token = localStorage.getItem('authToken');
                     const response = await fetch(
-                      `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/quality-control/certificate/${selectedCompletedInspection.id}`,
+                      `${process.env.NEXT_PUBLIC_API_URL || '/api'}/maintenance/quality-control/certificate/${selectedCompletedInspection.id}`,
                       {
                         headers: {
                           'Authorization': token ? `Bearer ${token}` : ''

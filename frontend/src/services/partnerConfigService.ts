@@ -3,7 +3,7 @@
  * API service for managing Business Partner configuration (Categories, Specializations, License Types)
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
 const getAuthHeaders = () => {
@@ -329,4 +329,3 @@ export const licenseTypeService = {
     if (!response.ok) throw new Error('Failed to delete license type');
   }
 };
-

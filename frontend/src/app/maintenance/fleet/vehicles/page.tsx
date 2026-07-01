@@ -30,7 +30,7 @@ type AssetCategoryDto = {
   isActive?: boolean;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 const FUEL_TYPE_OPTIONS = ['Petrol', 'Diesel', 'Electric', 'Hybrid'] as const;
 
 function getAuthHeaders(): HeadersInit {

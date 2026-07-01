@@ -295,7 +295,7 @@ export default function SafetyProtocolsPage() {
         return;
       }
 
-      const response = await fetch('http://localhost:5000/api/maintenance/safety-protocols?pageSize=1000', {
+      const response = await fetch('/api/maintenance/safety-protocols?pageSize=1000', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -392,7 +392,7 @@ export default function SafetyProtocolsPage() {
 
       console.log('Sending create request:', createDto);
 
-      const response = await fetch('http://localhost:5000/api/maintenance/safety-protocols', {
+      const response = await fetch('/api/maintenance/safety-protocols', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -478,7 +478,7 @@ export default function SafetyProtocolsPage() {
 
       console.log('Sending update request:', updateDto);
 
-      const response = await fetch(`http://localhost:5000/api/maintenance/safety-protocols/${selectedProtocol.id}`, {
+      const response = await fetch(`/api/maintenance/safety-protocols/${selectedProtocol.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -514,7 +514,7 @@ export default function SafetyProtocolsPage() {
         return;
       }
 
-      const response = await fetch(`http://localhost:5000/api/maintenance/safety-protocols/${id}`, {
+      const response = await fetch(`/api/maintenance/safety-protocols/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,

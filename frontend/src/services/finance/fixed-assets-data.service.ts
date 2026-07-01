@@ -209,7 +209,7 @@ class FixedAssetsDataService {
   async downloadExcel(reportType: string, query: FixedAssetReportQuery): Promise<{ fileName: string; blob: Blob }> {
     const qs = this.buildQueryString(query);
     const connector = qs ? '&' : '?';
-    const url = `${process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api'}/finance/fixed-assets/reports/export/excel${qs}${connector}reportType=${reportType}`;
+    const url = `${process.env.NEXT_PUBLIC_API_URL || '/api'}/finance/fixed-assets/reports/export/excel${qs}${connector}reportType=${reportType}`;
 
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     const response = await fetch(url, {
@@ -237,7 +237,7 @@ class FixedAssetsDataService {
   }
 
   async downloadImportTemplate(): Promise<void> {
-    const url = `${process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api'}/finance/fixed-assets/import-template`;
+    const url = `${process.env.NEXT_PUBLIC_API_URL || '/api'}/finance/fixed-assets/import-template`;
 
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     const response = await fetch(url, {

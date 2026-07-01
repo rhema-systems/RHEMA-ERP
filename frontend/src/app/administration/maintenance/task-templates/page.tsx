@@ -124,7 +124,7 @@ export default function TaskTemplatesPage() {
   const fetchMaintenanceTypes = async () => {
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      const response = await fetch('http://localhost:5000/api/maintenance/maintenance-types?pageSize=1000', {
+      const response = await fetch('/api/maintenance/maintenance-types?pageSize=1000', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -142,7 +142,7 @@ export default function TaskTemplatesPage() {
   const fetchAssets = async () => {
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      const response = await fetch('http://localhost:5000/api/maintenance/assets?pageSize=1000', {
+      const response = await fetch('/api/maintenance/assets?pageSize=1000', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -174,7 +174,7 @@ export default function TaskTemplatesPage() {
       
       // Fetch all asset templates
       try {
-        const assetResponse = await fetch('http://localhost:5000/api/maintenance/task-templates/asset', {
+        const assetResponse = await fetch('/api/maintenance/task-templates/asset', {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -195,7 +195,7 @@ export default function TaskTemplatesPage() {
       
       // Fetch all asset type templates
       try {
-        const assetTypeResponse = await fetch('http://localhost:5000/api/maintenance/task-templates/asset-type', {
+        const assetTypeResponse = await fetch('/api/maintenance/task-templates/asset-type', {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -215,7 +215,7 @@ export default function TaskTemplatesPage() {
       }
       
       // Fetch all maintenance type templates
-      const maintenanceResponse = await fetch('http://localhost:5000/api/maintenance/task-templates/maintenance-type', {
+      const maintenanceResponse = await fetch('/api/maintenance/task-templates/maintenance-type', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -321,17 +321,17 @@ export default function TaskTemplatesPage() {
       };
 
       if (activeTab === 'asset') {
-        endpoint = 'http://localhost:5000/api/maintenance/task-templates/asset';
+        endpoint = '/api/maintenance/task-templates/asset';
         createDto.assetId = formData.assetId;
         createDto.requiredTools = formData.requiredTools;
         createDto.requiredParts = formData.requiredParts;
       } else if (activeTab === 'assetType') {
-        endpoint = 'http://localhost:5000/api/maintenance/task-templates/asset-type';
+        endpoint = '/api/maintenance/task-templates/asset-type';
         createDto.assetTypeId = formData.assetTypeId;
         createDto.requiredTools = formData.requiredTools;
         createDto.requiredParts = formData.requiredParts;
       } else {
-        endpoint = 'http://localhost:5000/api/maintenance/task-templates/maintenance-type';
+        endpoint = '/api/maintenance/task-templates/maintenance-type';
       }
 
       const response = await fetch(endpoint, {
@@ -403,15 +403,15 @@ export default function TaskTemplatesPage() {
       };
 
       if (activeTab === 'asset') {
-        endpoint = `http://localhost:5000/api/maintenance/task-templates/asset/${selectedTemplate.id}`;
+        endpoint = `/api/maintenance/task-templates/asset/${selectedTemplate.id}`;
         updateDto.requiredTools = formData.requiredTools;
         updateDto.requiredParts = formData.requiredParts;
       } else if (activeTab === 'assetType') {
-        endpoint = `http://localhost:5000/api/maintenance/task-templates/asset-type/${selectedTemplate.id}`;
+        endpoint = `/api/maintenance/task-templates/asset-type/${selectedTemplate.id}`;
         updateDto.requiredTools = formData.requiredTools;
         updateDto.requiredParts = formData.requiredParts;
       } else {
-        endpoint = `http://localhost:5000/api/maintenance/task-templates/maintenance-type/${selectedTemplate.id}`;
+        endpoint = `/api/maintenance/task-templates/maintenance-type/${selectedTemplate.id}`;
       }
 
       const response = await fetch(endpoint, {
@@ -452,11 +452,11 @@ export default function TaskTemplatesPage() {
 
       let endpoint = '';
       if (activeTab === 'asset') {
-        endpoint = `http://localhost:5000/api/maintenance/task-templates/asset/${id}`;
+        endpoint = `/api/maintenance/task-templates/asset/${id}`;
       } else if (activeTab === 'assetType') {
-        endpoint = `http://localhost:5000/api/maintenance/task-templates/asset-type/${id}`;
+        endpoint = `/api/maintenance/task-templates/asset-type/${id}`;
       } else {
-        endpoint = `http://localhost:5000/api/maintenance/task-templates/maintenance-type/${id}`;
+        endpoint = `/api/maintenance/task-templates/maintenance-type/${id}`;
       }
 
       const response = await fetch(endpoint, {
