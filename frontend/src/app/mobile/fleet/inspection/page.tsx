@@ -991,13 +991,16 @@ function FleetInspectionMobilePage() {
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950">
+            <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-950">
               <video
                 ref={scannerVideoRef}
                 muted
                 playsInline
                 className={`aspect-[4/3] w-full object-cover ${(scannerActive || scannerStarting) && scannerHasVideo ? 'block' : 'hidden'}`}
               />
+              {scannerActive && scannerHasVideo ? (
+                <div className="mobile-scanner-line" aria-hidden="true" />
+              ) : null}
               <canvas ref={scannerCanvasRef} className="hidden" />
               {(scannerActive || scannerStarting) && !scannerHasVideo ? (
                 <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 bg-slate-900 px-6 text-center text-white">

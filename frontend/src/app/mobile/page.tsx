@@ -152,11 +152,13 @@ function MobileHomeContent() {
         return;
       }
 
-      const accepted = await PWAManager.getInstance().showInstallPrompt();
-      if (accepted) {
+      const outcome = await PWAManager.getInstance().requestInstall();
+      if (outcome === 'accepted') {
         setMessage('Mobile app installed. You can open it from your phone home screen.');
+      } else if (outcome === 'dismissed') {
+        setMessage('Installation was cancelled. Tap Install App when you are ready to try again.');
       } else {
-        setMessage('If no prompt appears, use your browser menu and choose Add to Home Screen.');
+        setMessage('This browser did not offer an install prompt. In Chrome or Edge, open the browser menu and choose Install app or Add to Home screen.');
       }
     } catch {
       setMessage('Use your browser menu and choose Add to Home Screen.');

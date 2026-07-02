@@ -1,5 +1,12 @@
 "use client"
 
+type InstallPromptOutcome = 'accepted' | 'dismissed' | 'unavailable'
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
+
 // PWA utilities for service worker registration and management
 export class PWAManager {
   private static instance: PWAManager
@@ -9,6 +16,8 @@ export class PWAManager {
   private onlineHandlers: (() => void)[] = []
   private offlineHandlers: (() => void)[] = []
   private updateHandlers: (() => void)[] = []
+  private deferredInstallPrompt: BeforeInstallPromptEvent | null = null
+  private installPromptListenerReady = false
 
   static getInstance(): PWAManager {
     if (!PWAManager.instance) {
@@ -19,10 +28,12 @@ export class PWAManager {
 
   async init() {
     if (typeof window !== 'undefined') {
+      // Capture this one-time browser event before service-worker registration awaits.
+      this.setupInstallPrompt()
+
       if (this.shouldDisableServiceWorker()) {
         await this.unregisterServiceWorkers()
         this.setupNetworkListeners()
-        this.setupInstallPrompt()
         return
       }
 
@@ -38,8 +49,6 @@ export class PWAManager {
       // Set up online/offline listeners
       this.setupNetworkListeners()
       
-      // Set up beforeinstallprompt listener for PWA installation
-      this.setupInstallPrompt()
     }
   }
 
@@ -123,26 +132,17 @@ export class PWAManager {
   }
 
   private setupInstallPrompt() {
-    let deferredPrompt: any = null
+    if (this.installPromptListenerReady) return
+    this.installPromptListenerReady = true
 
-    window.addEventListener('beforeinstallprompt', (e) => {
-      // Prevent Chrome 67 and earlier from automatically showing the prompt
-      e.preventDefault()
-      // Stash the event so it can be triggered later
-      deferredPrompt = e
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault()
+      this.deferredInstallPrompt = event as BeforeInstallPromptEvent
     })
 
-    // Store the prompt for later use
-    ;(window as any).showInstallPrompt = async () => {
-      if (deferredPrompt) {
-        deferredPrompt.prompt()
-        const { outcome } = await deferredPrompt.userChoice
-        console.log(`User response to install prompt: ${outcome}`)
-        deferredPrompt = null
-        return outcome === 'accepted'
-      }
-      return false
-    }
+    window.addEventListener('appinstalled', () => {
+      this.deferredInstallPrompt = null
+    })
   }
 
   // Public API methods
@@ -176,11 +176,18 @@ export class PWAManager {
     return null
   }
 
+  async requestInstall(): Promise<InstallPromptOutcome> {
+    const prompt = this.deferredInstallPrompt
+    if (!prompt) return 'unavailable'
+
+    this.deferredInstallPrompt = null
+    await prompt.prompt()
+    const { outcome } = await prompt.userChoice
+    return outcome
+  }
+
   async showInstallPrompt(): Promise<boolean> {
-    if ((window as any).showInstallPrompt) {
-      return await (window as any).showInstallPrompt()
-    }
-    return false
+    return await this.requestInstall() === 'accepted'
   }
 
   async requestNotificationPermission(): Promise<NotificationPermission> {

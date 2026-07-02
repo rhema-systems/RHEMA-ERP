@@ -276,3 +276,26 @@
     display: none !important;
   }
 }
+@keyframes mobile-scanner-sweep {
+  0%, 100% {
+    top: 14%;
+    opacity: 0.75;
+  }
+  50% {
+    top: 84%;
+    opacity: 1;
+  }
+}
+
+.mobile-scanner-line {
+  position: absolute;
+  z-index: 10;
+  top: 14%;
+  right: 10%;
+  left: 10%;
+  height: 2px;
+  pointer-events: none;
+  background: #ef4444;
+  box-shadow: 0 0 5px #ef4444, 0 0 12px rgb(239 68 68 / 75%);
+  animation: mobile-scanner-sweep 2.2s ease-in-out infinite;
+}

@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin, Upload, Download, ArrowRightLeft, QrCode, Printer, Loader2 } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin, Upload, Download, ArrowRightLeft, QrCode, Printer, Loader2, LayoutGrid, List, ArrowRight } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 import { useRouter } from 'next/navigation';
@@ -40,6 +41,7 @@ import { inspectionTemplateService, InspectionTemplate, InspectionTemplateQrPack
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { fleetService, type FleetTripInspectionDto } from '@/services/fleetService';
 import { printQrLabel } from '@/lib/print-qr-label';
+import { cn } from '@/lib/utils';
 
 import { format } from 'date-fns';
 
@@ -74,6 +76,8 @@ interface Asset {
   currentSiteLocationId?: string | null;
   currentSiteLocationName?: string | null;
 }
+
+type AssetsViewMode = 'list' | 'grid';
 
 interface AssetMovementHistory {
   id: string;
@@ -259,6 +263,7 @@ function AssetsPageContent() {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [viewMode, setViewMode] = useState<AssetsViewMode>('list');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -456,7 +461,12 @@ function AssetsPageContent() {
     setAssetInspectionsLoading(true);
     setAssetInspectionsError(null);
     try {
-      setAssetInspections(await fleetService.getAssetInspections(assetId, 100));
+      const inspections = await fleetService.getAssetInspections(assetId, 100);
+      setAssetInspections(inspections.slice().sort((left, right) => {
+        const leftTime = new Date(left.completedAtUtc || left.startedAtUtc).getTime();
+        const rightTime = new Date(right.completedAtUtc || right.startedAtUtc).getTime();
+        return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+      }));
     } catch (inspectionError) {
       console.error('Failed to load asset inspections', inspectionError);
       setAssetInspections([]);
@@ -632,6 +642,16 @@ function AssetsPageContent() {
 
     setFilteredAssets(filtered);
   }, [assets, searchTerm, categoryFilter, statusFilter]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('maintenanceAssetsViewMode');
+    if (saved === 'list' || saved === 'grid') setViewMode(saved);
+  }, []);
+
+  const changeViewMode = (mode: AssetsViewMode) => {
+    setViewMode(mode);
+    window.localStorage.setItem('maintenanceAssetsViewMode', mode);
+  };
 
   const handleCreateAsset = async () => {
     try {
@@ -1166,15 +1186,42 @@ function AssetsPageContent() {
   };
 
   const getInspectionStatusBadge = (status?: string | null) => {
-    const normalized = status || 'Unknown';
-    const variant = normalized === 'Rejected' || normalized === 'Failed' ? 'destructive' : 'outline';
-    return <Badge variant={variant}>{normalized}</Badge>;
+    const label = status || 'Unknown';
+    const normalized = label.trim().toLowerCase();
+    if (['rejected', 'failed', 'cancelled', 'canceled'].includes(normalized)) return <Badge variant="destructive">{label}</Badge>;
+    if (['completed', 'approved', 'submitted', 'synced'].includes(normalized)) {
+      return <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800 hover:bg-green-100">{label}</Badge>;
+    }
+    if (['inprogress', 'in progress', 'started', 'draft'].includes(normalized)) {
+      return <Badge variant="outline" className="border-blue-200 bg-blue-100 text-blue-800 hover:bg-blue-100">{label}</Badge>;
+    }
+    return <Badge variant="outline" className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">{label}</Badge>;
+  };
+
+  const getWorkOrderStatusBadge = (status?: string | null) => {
+    const label = status || 'Unknown';
+    const normalized = label.trim().toLowerCase();
+    if (['failed', 'rejected', 'cancelled', 'canceled', 'overdue'].includes(normalized)) return <Badge variant="destructive">{label}</Badge>;
+    if (['completed', 'complete', 'closed', 'approved'].includes(normalized)) {
+      return <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800 hover:bg-green-100">{label}</Badge>;
+    }
+    if (['inprogress', 'in progress', 'started', 'assigned'].includes(normalized)) {
+      return <Badge variant="outline" className="border-blue-200 bg-blue-100 text-blue-800 hover:bg-blue-100">{label}</Badge>;
+    }
+    if (['pending', 'scheduled', 'onhold', 'on hold'].includes(normalized)) {
+      return <Badge variant="outline" className="border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-100">{label}</Badge>;
+    }
+    return <Badge variant="outline" className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">{label}</Badge>;
   };
 
   const getInspectionResultBadge = (result?: string | null) => {
     if (!result) return <Badge variant="outline">Pending</Badge>;
-    const variant = result === 'Fail' ? 'destructive' : 'outline';
-    return <Badge variant={variant}>{result}</Badge>;
+    const normalized = result.trim().toLowerCase();
+    if (normalized === 'fail' || normalized === 'failed') return <Badge variant="destructive">{result}</Badge>;
+    if (normalized === 'pass' || normalized === 'passed') {
+      return <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800 hover:bg-green-100">{result}</Badge>;
+    }
+    return <Badge variant="outline">{result}</Badge>;
   };
 
   const getSheetTypeLabel = (sheetType?: string | null) => {
@@ -1238,6 +1285,31 @@ function AssetsPageContent() {
       photo: null,
     })) || [];
   const assetInspectionReviewRows = selectedAssetInspectionRows.length ? selectedAssetInspectionRows : selectedAssetTemplateRows;
+  const sortedMovementHistory = (lifecycleHistory?.movements || []).slice().sort((left, right) => {
+    const leftTime = new Date(left.effectiveDate).getTime();
+    const rightTime = new Date(right.effectiveDate).getTime();
+    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+  });
+  const sortedWorkOrderHistory = (lifecycleHistory?.workOrderHistory || []).slice().sort((left, right) => {
+    const leftTime = new Date(left.actualCompletionDate || left.createdAt).getTime();
+    const rightTime = new Date(right.actualCompletionDate || right.createdAt).getTime();
+    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+  });
+  const sortedServiceHistory = (lifecycleHistory?.serviceHistory || []).slice().sort((left, right) => {
+    const leftTime = new Date(left.actualCompletionDate || left.createdAt).getTime();
+    const rightTime = new Date(right.actualCompletionDate || right.createdAt).getTime();
+    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+  });
+
+  const getMovementPlace = (
+    projectName?: string | null,
+    siteName?: string | null,
+    location?: string | null,
+  ) => {
+    const primary = siteName?.trim() || location?.trim() || projectName?.trim() || 'Unassigned';
+    const context = projectName?.trim() && projectName.trim() !== primary ? projectName.trim() : null;
+    return { primary, context };
+  };
 
   return (
     <div className="space-y-6">
@@ -1922,15 +1994,54 @@ function AssetsPageContent() {
         </CardContent>
       </Card>
 
-      {/* Assets Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Assets ({filteredAssets.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
+      {/* Asset list and card views */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">Assets</h2>
+            <p className="text-sm text-muted-foreground">{filteredAssets.length.toLocaleString()} assets in the current filter</p>
+          </div>
+          <TooltipProvider delayDuration={150}>
+            <div className="inline-flex h-10 w-fit items-center rounded-md border bg-background p-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant={viewMode === 'list' ? 'default' : 'ghost'}
+                    size="icon"
+                    className={cn('h-8 w-8', viewMode !== 'list' && 'text-muted-foreground')}
+                    onClick={() => changeViewMode('list')}
+                    aria-label="Show list view"
+                  >
+                    <List className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>List view</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                    size="icon"
+                    className={cn('h-8 w-8', viewMode !== 'grid' && 'text-muted-foreground')}
+                    onClick={() => changeViewMode('grid')}
+                    aria-label="Show card view"
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Card view</TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
+        </div>
+
+        {viewMode === 'list' ? (
+          <div className="overflow-x-auto rounded-md border bg-card">
+            <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="bg-muted/40">
                 <TableHead>Asset Number</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Asset Type</TableHead>
@@ -1943,8 +2054,12 @@ function AssetsPageContent() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredAssets.map((asset) => (
-                <TableRow key={asset.id}>
+              {loading ? (
+                <TableRow><TableCell colSpan={9} className="h-28 text-center text-muted-foreground">Loading assets...</TableCell></TableRow>
+              ) : filteredAssets.length === 0 ? (
+                <TableRow><TableCell colSpan={9} className="h-28 text-center text-muted-foreground">No assets match the current filters.</TableCell></TableRow>
+              ) : filteredAssets.map((asset, index) => (
+                <TableRow key={asset.id} className={index % 2 === 1 ? 'bg-muted/10 hover:bg-muted/30' : 'hover:bg-muted/30'}>
                   <TableCell>
                     <div className="font-mono text-sm font-medium">
                       {asset.assetNumber}
@@ -2018,9 +2133,95 @@ function AssetsPageContent() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </Table>
+          </div>
+        ) : loading ? (
+          <div className="rounded-md border bg-card py-10 text-center text-muted-foreground">Loading assets...</div>
+        ) : filteredAssets.length === 0 ? (
+          <div className="rounded-md border bg-card py-10 text-center text-muted-foreground">No assets match the current filters.</div>
+        ) : (
+          <div className="rounded-md bg-slate-100 p-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {filteredAssets.map((asset) => {
+                const maintenanceOverdue = isMaintenanceOverdue(asset.nextMaintenanceDate);
+                const makeAndModel = [asset.manufacturer, asset.model].filter(Boolean).join(' ');
+
+                return (
+                  <Card key={asset.id} className="overflow-hidden border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+                    <CardContent className="flex min-h-72 flex-col gap-4 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 ring-1 ring-blue-100">
+                          <Settings className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-mono text-base font-semibold text-slate-950">{asset.assetNumber}</p>
+                          <p className="truncate text-sm text-slate-500">{asset.name}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-slate-700 hover:text-blue-700"
+                          onClick={() => handleEditAsset(asset)}
+                          title="Edit asset"
+                        >
+                          <Edit className="h-4 w-4" />
+                          <span className="sr-only">Edit asset</span>
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2 text-sm text-slate-500">
+                        <p className="truncate font-medium text-slate-700">{makeAndModel || asset.category}</p>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <MapPin className="h-4 w-4 shrink-0 text-emerald-500" />
+                          <span className="truncate">{asset.location || 'No location'}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {getStatusBadge(asset.status)}
+                        {getConditionBadge(asset.condition)}
+                        {getCriticalityBadge(asset.criticality)}
+                      </div>
+
+                      <div className="mt-auto flex items-start gap-2 border-t border-slate-100 pt-4 text-sm">
+                        <Calendar className={cn('mt-0.5 h-4 w-4 shrink-0', maintenanceOverdue ? 'text-red-600' : 'text-slate-400')} />
+                        <div className={cn('min-w-0', maintenanceOverdue ? 'font-medium text-red-700' : 'text-slate-500')}>
+                          <p>{asset.nextMaintenanceDate ? formatDate(asset.nextMaintenanceDate) : 'Not scheduled'}</p>
+                          {maintenanceOverdue && <p className="text-xs">Overdue</p>}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => router.push(`/maintenance/asset-admission?assetId=${asset.id}`)}
+                        >
+                          Admit
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700"
+                          onClick={() => {
+                            setSelectedAsset(asset);
+                            setIsViewDialogOpen(true);
+                          }}
+                        >
+                          <ArrowRight className="h-4 w-4" />
+                          Detail
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* View Asset Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
@@ -2168,57 +2369,164 @@ function AssetsPageContent() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="schedule">
-                <div className="space-y-4">
-                  <h4 className="text-sm font-medium">Maintenance Schedule</h4>
-                  <div className="border rounded-lg p-4">
-                    <div className="flex items-center justify-between">
+              <TabsContent value="schedule" className="space-y-3">
+                <div className="overflow-hidden rounded-md border border-blue-100 bg-blue-50/40 shadow-sm">
+                  <div className="flex flex-col gap-4 border-b border-blue-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-600 text-white shadow-sm">
+                        <Calendar className="h-5 w-5" />
+                      </span>
                       <div>
-                        <p className="font-medium text-sm">Next Scheduled Maintenance</p>
-                        <p className="text-sm text-muted-foreground">
-                          {selectedAsset.nextMaintenanceDate
-                            ? formatDate(selectedAsset.nextMaintenanceDate)
-                            : 'Not scheduled'
-                          }
-                        </p>
+                        <h4 className="text-sm font-semibold text-slate-900">Maintenance Schedule</h4>
+                        <p className="text-xs text-slate-500">Planned and previous maintenance dates for this asset.</p>
                       </div>
-                      <div className="flex space-x-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => router.push(`/maintenance/scheduled?create=1&assetId=${selectedAsset.id}`)}
-                        >
-                          <Calendar className="h-4 w-4 mr-2" />
-                          Schedule Maintenance
-                        </Button>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="bg-blue-600 text-white hover:bg-blue-700"
+                      onClick={() => router.push(`/maintenance/scheduled?create=1&assetId=${selectedAsset.id}`)}
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      Schedule Maintenance
+                    </Button>
+                  </div>
+                  <div className="grid gap-3 p-4 sm:grid-cols-2">
+                    <div className="rounded-md border border-slate-200 bg-white p-3">
+                      <p className="text-xs font-medium text-slate-500">Last Maintenance</p>
+                      <p className="mt-1 text-base font-semibold text-slate-900">
+                        {selectedAsset.lastMaintenanceDate ? formatDate(selectedAsset.lastMaintenanceDate) : 'No maintenance recorded'}
+                      </p>
+                    </div>
+                    <div className={cn(
+                      'rounded-md border p-3',
+                      isMaintenanceOverdue(selectedAsset.nextMaintenanceDate)
+                        ? 'border-red-200 bg-red-50'
+                        : selectedAsset.nextMaintenanceDate
+                          ? 'border-emerald-200 bg-emerald-50'
+                          : 'border-slate-200 bg-white',
+                    )}>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-medium text-slate-500">Next Maintenance</p>
+                        {isMaintenanceOverdue(selectedAsset.nextMaintenanceDate) ? (
+                          <Badge variant="destructive">Overdue</Badge>
+                        ) : selectedAsset.nextMaintenanceDate ? (
+                          <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800 hover:bg-green-100">Scheduled</Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">Not scheduled</Badge>
+                        )}
                       </div>
+                      <p className={cn(
+                        'mt-1 text-base font-semibold',
+                        isMaintenanceOverdue(selectedAsset.nextMaintenanceDate) ? 'text-red-800' : 'text-slate-900',
+                      )}>
+                        {selectedAsset.nextMaintenanceDate ? formatDate(selectedAsset.nextMaintenanceDate) : 'No date set'}
+                      </p>
                     </div>
                   </div>
                 </div>
               </TabsContent>
 
-              <TabsContent value="movement" className="space-y-3">
-                {lifecycleLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : lifecycleHistory?.movements.length ? lifecycleHistory.movements.map((movement) => (
-                  <div key={movement.id} className="rounded-md border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{movement.toSiteLocationName || movement.toLocation || 'Unassigned site'}</p>
-                        <p className="text-sm text-muted-foreground">From {movement.fromSiteLocationName || movement.fromLocation || 'unassigned'}</p>
-                        <p className="mt-2 text-sm">{movement.reason}</p>
-                      </div>
-                      <span className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(movement.effectiveDate)}</span>
+              <TabsContent value="movement">
+                {lifecycleLoading ? (
+                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading movement history...
+                  </div>
+                ) : sortedMovementHistory.length ? (
+                  <div className="overflow-hidden rounded-md border bg-background">
+                    <div className="hidden grid-cols-[150px_minmax(0,1fr)_28px_minmax(0,1fr)_minmax(140px,0.75fr)] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground md:grid">
+                      <span>Date / Time</span>
+                      <span>From</span>
+                      <span />
+                      <span>To</span>
+                      <span>Reason</span>
+                    </div>
+                    <div className="divide-y">
+                      {sortedMovementHistory.map((movement, index) => {
+                        const from = getMovementPlace(movement.fromProjectName, movement.fromSiteLocationName, movement.fromLocation);
+                        const to = getMovementPlace(movement.toProjectName, movement.toSiteLocationName, movement.toLocation);
+
+                        return (
+                          <div
+                            key={movement.id}
+                            className={cn(
+                              'grid grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)] items-center gap-2 px-3 py-2 md:grid-cols-[150px_minmax(0,1fr)_28px_minmax(0,1fr)_minmax(140px,0.75fr)]',
+                              index % 2 === 1 && 'bg-muted/10',
+                            )}
+                          >
+                            <div className="col-span-3 flex items-center justify-between gap-3 text-xs text-muted-foreground md:col-span-1 md:block">
+                              <span className="md:hidden">Moved</span>
+                              <span className="whitespace-nowrap">{formatDateTime(movement.effectiveDate)}</span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium" title={from.primary}>{from.primary}</p>
+                              {from.context ? <p className="truncate text-xs text-muted-foreground" title={from.context}>{from.context}</p> : null}
+                            </div>
+                            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                              <ArrowRight className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-blue-700" title={to.primary}>{to.primary}</p>
+                              {to.context ? <p className="truncate text-xs text-muted-foreground" title={to.context}>{to.context}</p> : null}
+                            </div>
+                            <div className="col-span-3 min-w-0 text-sm md:col-span-1">
+                              <p className="truncate" title={movement.reason}>{movement.reason || 'Asset movement'}</p>
+                              {movement.notes ? <p className="truncate text-xs text-muted-foreground" title={movement.notes}>{movement.notes}</p> : null}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                )) : <p className="py-8 text-center text-sm text-muted-foreground">No movement history.</p>}
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No movement history.</p>
+                )}
               </TabsContent>
 
               <TabsContent value="service" className="space-y-3">
-                {lifecycleLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : lifecycleHistory?.serviceHistory.length ? lifecycleHistory.serviceHistory.map((record) => (
-                  <div key={record.id} className="flex items-start justify-between rounded-md border p-3">
-                    <div><p className="font-medium">{record.title}</p><p className="text-sm text-muted-foreground">{record.workOrderNumber} · {record.maintenanceType || record.workOrderType}</p></div>
-                    <div className="text-right"><Badge variant="outline">{record.status}</Badge><p className="mt-1 text-xs text-muted-foreground">{formatDate(record.actualCompletionDate || record.createdAt)}</p></div>
+                {lifecycleLoading ? (
+                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading service history...
                   </div>
-                )) : <p className="py-8 text-center text-sm text-muted-foreground">No completed service history.</p>}
+                ) : sortedServiceHistory.length ? (
+                  <div className="overflow-x-auto rounded-md border bg-background">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-100 hover:bg-slate-100">
+                          <TableHead>Work Order</TableHead>
+                          <TableHead>Service</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Completed / Created</TableHead>
+                          <TableHead>Cost</TableHead>
+                          <TableHead className="text-right">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedServiceHistory.map((record, index) => (
+                          <TableRow key={record.id} className={cn('hover:bg-blue-50/70', index % 2 === 1 && 'bg-slate-50')}>
+                            <TableCell className="whitespace-nowrap font-mono text-sm font-medium">{record.workOrderNumber}</TableCell>
+                            <TableCell className="min-w-56 font-medium">{record.title}</TableCell>
+                            <TableCell>{record.maintenanceType || record.workOrderType || 'Service'}</TableCell>
+                            <TableCell>{getWorkOrderStatusBadge(record.status)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-sm">{formatDateTime(record.actualCompletionDate || record.createdAt)}</TableCell>
+                            <TableCell className="whitespace-nowrap font-medium">{formatMoney(record.actualCost || 0)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                size="sm"
+                                className="bg-blue-600 text-white hover:bg-blue-700"
+                                onClick={() => router.push(`/maintenance/work-orders?id=${record.id}`)}
+                              >
+                                Review
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No completed service history.</p>
+                )}
               </TabsContent>
 
               <TabsContent value="inspections" className="space-y-3">
@@ -2235,10 +2543,10 @@ function AssetsPageContent() {
                     </Button>
                   </div>
                 ) : assetInspections.length ? (
-                  <div className="overflow-x-auto rounded-md border">
+                  <div className="overflow-x-auto rounded-md border bg-background">
                     <Table>
                       <TableHeader>
-                        <TableRow>
+                        <TableRow className="bg-slate-100 hover:bg-slate-100">
                           <TableHead>Date / Time</TableHead>
                           <TableHead>Sheet</TableHead>
                           <TableHead>Kind</TableHead>
@@ -2249,10 +2557,10 @@ function AssetsPageContent() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {assetInspections.map((inspection) => (
+                        {assetInspections.map((inspection, index) => (
                           <TableRow
                             key={inspection.id}
-                            className="cursor-pointer"
+                            className={cn('cursor-pointer hover:bg-blue-50/70', index % 2 === 1 && 'bg-slate-50')}
                             onClick={() => void openAssetInspectionReview(inspection)}
                           >
                             <TableCell className="whitespace-nowrap">
@@ -2279,8 +2587,8 @@ function AssetsPageContent() {
                             </TableCell>
                             <TableCell className="text-right">
                               <Button
-                                variant="outline"
                                 size="sm"
+                                className="bg-blue-600 text-white hover:bg-blue-700"
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   void openAssetInspectionReview(inspection);
@@ -2300,12 +2608,50 @@ function AssetsPageContent() {
               </TabsContent>
 
               <TabsContent value="work-orders" className="space-y-3">
-                {lifecycleLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : lifecycleHistory?.workOrderHistory.length ? lifecycleHistory.workOrderHistory.map((record) => (
-                  <div key={record.id} className="flex items-start justify-between rounded-md border p-3">
-                    <div><p className="font-medium">{record.title}</p><p className="text-sm text-muted-foreground">{record.workOrderNumber} · {record.workOrderType || 'Work order'}</p></div>
-                    <div className="text-right"><Badge variant="outline">{record.status}</Badge><p className="mt-1 text-xs text-muted-foreground">{formatMoney(record.actualCost || 0)}</p></div>
+                {lifecycleLoading ? (
+                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading work orders...
                   </div>
-                )) : <p className="py-8 text-center text-sm text-muted-foreground">No work-order history.</p>}
+                ) : sortedWorkOrderHistory.length ? (
+                  <div className="overflow-x-auto rounded-md border bg-background">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-100 hover:bg-slate-100">
+                          <TableHead>Work Order</TableHead>
+                          <TableHead>Title</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Completed / Created</TableHead>
+                          <TableHead>Cost</TableHead>
+                          <TableHead className="text-right">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedWorkOrderHistory.map((record, index) => (
+                          <TableRow key={record.id} className={cn('hover:bg-blue-50/70', index % 2 === 1 && 'bg-slate-50')}>
+                            <TableCell className="whitespace-nowrap font-mono text-sm font-medium">{record.workOrderNumber}</TableCell>
+                            <TableCell className="min-w-56 font-medium">{record.title}</TableCell>
+                            <TableCell>{record.workOrderType || record.maintenanceType || 'Work order'}</TableCell>
+                            <TableCell>{getWorkOrderStatusBadge(record.status)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-sm">{formatDateTime(record.actualCompletionDate || record.createdAt)}</TableCell>
+                            <TableCell className="whitespace-nowrap font-medium">{formatMoney(record.actualCost || 0)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                size="sm"
+                                className="bg-blue-600 text-white hover:bg-blue-700"
+                                onClick={() => router.push(`/maintenance/work-orders?id=${record.id}`)}
+                              >
+                                Review
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No work-order history.</p>
+                )}
               </TabsContent>
 
               {selectedAssetIsVehicle && (

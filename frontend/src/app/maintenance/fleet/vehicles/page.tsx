@@ -92,7 +92,7 @@ function getVehicleMaintenanceBadge(vehicle: FleetVehicleListDto) {
   const dueSoonLimit = now + MAINTENANCE_DUE_SOON_DAYS * 86_400_000;
 
   let label = 'Ready';
-  let className = 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  let className = '';
 
   if (nextDueAt !== null && nextDueAt < now) {
     label = 'Due';
@@ -109,6 +109,10 @@ function getVehicleMaintenanceBadge(vehicle: FleetVehicleListDto) {
   } else if (status === 'retired') {
     label = 'Retired';
     className = 'border-slate-200 bg-slate-100 text-slate-700';
+  }
+
+  if (label === 'Ready') {
+    return <span className="text-sm text-slate-500">Ready</span>;
   }
 
   return (

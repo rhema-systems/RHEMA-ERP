@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
+import { AlertTriangle, ArrowUpRight, CircleDollarSign, Clock3, Fuel, Route, ShieldAlert, Wrench } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ import fleetService, {
 import { formatFleetDate, formatFleetDateTime } from '@/lib/date-format';
 
 type Loadable<T> = { loading: boolean; error: string | null; data: T | null };
+const fleetActionButtonClass = 'bg-blue-600 text-white hover:bg-blue-700';
 
 function ErrorBox({ message }: { message: string }) {
   return <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{message}</div>;
@@ -39,6 +41,43 @@ function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
       </TableCell>
     </TableRow>
   );
+}
+
+function FleetTable({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white shadow-sm">
+      <Table>{children}</Table>
+    </div>
+  );
+}
+
+function FleetStatusBadge({ status }: { status?: string | null }) {
+  const label = status?.trim() || 'Unknown';
+  const normalized = label.toLowerCase().replace(/[\s_-]/g, '');
+
+  if (['completed', 'complete', 'closed', 'resolved', 'approved', 'active', 'installed', 'ok'].includes(normalized)) {
+    return <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800 hover:bg-green-100">{label}</Badge>;
+  }
+  if (['inprogress', 'started', 'dispatched', 'inuse', 'assigned', 'instock'].includes(normalized)) {
+    return <Badge variant="outline" className="border-blue-200 bg-blue-100 text-blue-800 hover:bg-blue-100">{label}</Badge>;
+  }
+  if (['pending', 'planned', 'scheduled', 'open', 'reported', 'requested', 'duesoon', 'onhold'].includes(normalized)) {
+    return <Badge variant="outline" className="border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-100">{label}</Badge>;
+  }
+  if (['failed', 'rejected', 'cancelled', 'canceled', 'overdue', 'outofservice', 'disposed'].includes(normalized)) {
+    return <Badge variant="destructive">{label}</Badge>;
+  }
+  return <Badge variant="outline" className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">{label}</Badge>;
+}
+
+function FleetSeverityBadge({ severity }: { severity?: string | null }) {
+  const label = severity?.trim() || 'Unknown';
+  const normalized = label.toLowerCase();
+  if (normalized === 'critical') return <Badge variant="destructive">{label}</Badge>;
+  if (normalized === 'high') return <Badge variant="outline" className="border-orange-200 bg-orange-100 text-orange-800 hover:bg-orange-100">{label}</Badge>;
+  if (normalized === 'medium') return <Badge variant="outline" className="border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-100">{label}</Badge>;
+  if (normalized === 'low') return <Badge variant="outline" className="border-blue-200 bg-blue-100 text-blue-800 hover:bg-blue-100">{label}</Badge>;
+  return <Badge variant="outline" className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">{label}</Badge>;
 }
 
 function getComplianceStatus(expiryDateIso?: string | null): 'Not set' | 'Overdue' | 'Due soon' | 'OK' {
@@ -59,7 +98,7 @@ function ComplianceStatusBadge({ expiryDate }: { expiryDate?: string | null }) {
   if (status === 'OK') return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">OK</Badge>;
   if (status === 'Due soon') return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">Due soon</Badge>;
   if (status === 'Overdue') return <Badge variant="destructive">Overdue</Badge>;
-  return <Badge variant="outline">Not set</Badge>;
+  return <Badge variant="outline" className="border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-100">Not set</Badge>;
 }
 
 export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAssetId: string }) {
@@ -195,8 +234,12 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
   }, [tab, vehicleAssetId]);
 
   return (
-    <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full space-y-3">
-      <TabsList className="flex flex-wrap justify-start gap-1 h-auto">
+    <Tabs
+      value={tab}
+      onValueChange={(v) => setTab(v as any)}
+      className="w-full space-y-3 [&_thead_tr]:bg-slate-100 [&_thead_tr]:hover:bg-slate-100 [&_tbody_tr:nth-child(even)]:bg-slate-50 [&_tbody_tr]:hover:bg-blue-50/60"
+    >
+      <TabsList className="flex h-auto flex-wrap justify-start gap-1 bg-slate-100 p-1">
         <TabsTrigger value="summary">Summary</TabsTrigger>
         <TabsTrigger value="trips">Trips</TabsTrigger>
         <TabsTrigger value="assignments">Assignments</TabsTrigger>
@@ -216,96 +259,115 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
             <div className="text-sm font-medium">Fleet Summary</div>
             <div className="text-xs text-muted-foreground">Recent activity and KPIs for this vehicle.</div>
           </div>
-          <Button size="sm" variant="outline" onClick={() => router.push('/maintenance/fleet/dashboard')}>
+          <Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => router.push('/maintenance/fleet/dashboard')}>
             Open Fleet Dashboard
+            <ArrowUpRight className="ml-1 h-4 w-4" />
           </Button>
         </div>
 
         {summary.loading && <p className="text-sm text-muted-foreground">Loading summary...</p>}
         {summary.error && <ErrorBox message={summary.error} />}
         {summary.data && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Completed Trips (This Month)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{summary.data.tripsThisMonth}</div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <Card className="border-emerald-200 bg-emerald-50/70 shadow-sm">
+              <CardContent className="flex items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="text-xs font-medium text-emerald-800">Completed Trips</p>
+                  <div className="mt-1 text-2xl font-bold text-emerald-950">{summary.data.tripsThisMonth}</div>
+                  <p className="text-xs text-emerald-700">This month</p>
+                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm">
+                  <Route className="h-5 w-5" />
+                </span>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Open Defects</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{summary.data.openDefects}</div>
+            <Card className="border-rose-200 bg-rose-50/70 shadow-sm">
+              <CardContent className="flex items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="text-xs font-medium text-rose-800">Open Defects</p>
+                  <div className="mt-1 text-2xl font-bold text-rose-950">{summary.data.openDefects}</div>
+                  <p className="text-xs text-rose-700">Awaiting attention</p>
+                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-rose-600 text-white shadow-sm">
+                  <AlertTriangle className="h-5 w-5" />
+                </span>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Compliance Due Soon</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{summary.data.complianceDueSoon}</div>
+            <Card className="border-amber-200 bg-amber-50/70 shadow-sm">
+              <CardContent className="flex items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="text-xs font-medium text-amber-800">Due Soon</p>
+                  <div className="mt-1 text-2xl font-bold text-amber-950">{summary.data.complianceDueSoon}</div>
+                  <p className="text-xs text-amber-700">Compliance items</p>
+                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-amber-500 text-white shadow-sm">
+                  <Clock3 className="h-5 w-5" />
+                </span>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Compliance Overdue</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{summary.data.complianceOverdue}</div>
+            <Card className="border-red-200 bg-red-50/70 shadow-sm">
+              <CardContent className="flex items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="text-xs font-medium text-red-800">Overdue</p>
+                  <div className="mt-1 text-2xl font-bold text-red-950">{summary.data.complianceOverdue}</div>
+                  <p className="text-xs text-red-700">Compliance items</p>
+                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-red-600 text-white shadow-sm">
+                  <ShieldAlert className="h-5 w-5" />
+                </span>
               </CardContent>
             </Card>
 
-            <Card className="md:col-span-2">
+            <Card className="border-slate-200 bg-slate-50/70 shadow-sm md:col-span-2">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Costs (This Month)</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <CircleDollarSign className="h-4 w-4 text-blue-600" /> Costs This Month
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="flex items-center justify-between rounded-md bg-muted/30 p-2">
-                    <span className="text-muted-foreground">Fuel</span>
-                    <span className="font-medium">{summary.data.fuelCostThisMonth.toLocaleString()}</span>
+                  <div className="flex items-center justify-between rounded-md border border-cyan-100 bg-white p-2.5">
+                    <span className="flex items-center gap-2 text-slate-600"><Fuel className="h-4 w-4 text-cyan-600" />Fuel</span>
+                    <span className="font-semibold text-slate-900">{summary.data.fuelCostThisMonth.toLocaleString()}</span>
                   </div>
-                  <div className="flex items-center justify-between rounded-md bg-muted/30 p-2">
-                    <span className="text-muted-foreground">External Repairs</span>
-                    <span className="font-medium">{summary.data.externalRepairCostThisMonth.toLocaleString()}</span>
+                  <div className="flex items-center justify-between rounded-md border border-violet-100 bg-white p-2.5">
+                    <span className="flex items-center gap-2 text-slate-600"><Wrench className="h-4 w-4 text-violet-600" />External</span>
+                    <span className="font-semibold text-slate-900">{summary.data.externalRepairCostThisMonth.toLocaleString()}</span>
                   </div>
-                  <div className="flex items-center justify-between rounded-md bg-muted/30 p-2">
-                    <span className="text-muted-foreground">Internal Maintenance</span>
-                    <span className="font-medium">{summary.data.internalMaintenanceCostThisMonth.toLocaleString()}</span>
+                  <div className="flex items-center justify-between rounded-md border border-amber-100 bg-white p-2.5">
+                    <span className="flex items-center gap-2 text-slate-600"><Wrench className="h-4 w-4 text-amber-600" />Internal</span>
+                    <span className="font-semibold text-slate-900">{summary.data.internalMaintenanceCostThisMonth.toLocaleString()}</span>
                   </div>
-                  <div className="flex items-center justify-between rounded-md bg-muted/30 p-2">
-                    <span className="text-muted-foreground">Total</span>
-                    <span className="font-medium">{summary.data.totalCostThisMonth.toLocaleString()}</span>
+                  <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 p-2.5">
+                    <span className="font-medium text-blue-800">Total</span>
+                    <span className="font-bold text-blue-950">{summary.data.totalCostThisMonth.toLocaleString()}</span>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="md:col-span-2">
+            <Card className="border-blue-100 bg-blue-50/50 shadow-sm md:col-span-2">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Quick Links</CardTitle>
+                <CardTitle className="text-sm font-semibold text-slate-800">Quick Links</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/trips?vehicleAssetId=${vehicleAssetId}`)}>
+                  <Button size="sm" variant="outline" className="bg-white hover:border-blue-300 hover:bg-blue-100" onClick={() => router.push(`/maintenance/fleet/trips?vehicleAssetId=${vehicleAssetId}`)}>
                     Trips
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/compliance?vehicleAssetId=${vehicleAssetId}`)}>
+                  <Button size="sm" variant="outline" className="bg-white hover:border-blue-300 hover:bg-blue-100" onClick={() => router.push(`/maintenance/fleet/compliance?vehicleAssetId=${vehicleAssetId}`)}>
                     Compliance
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/fuel?vehicleAssetId=${vehicleAssetId}`)}>
+                  <Button size="sm" variant="outline" className="bg-white hover:border-blue-300 hover:bg-blue-100" onClick={() => router.push(`/maintenance/fleet/fuel?vehicleAssetId=${vehicleAssetId}`)}>
                     Fuel
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/defects?vehicleAssetId=${vehicleAssetId}`)}>
+                  <Button size="sm" variant="outline" className="bg-white hover:border-blue-300 hover:bg-blue-100" onClick={() => router.push(`/maintenance/fleet/defects?vehicleAssetId=${vehicleAssetId}`)}>
                     Defects
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/incidents?vehicleAssetId=${vehicleAssetId}`)}>
+                  <Button size="sm" variant="outline" className="bg-white hover:border-blue-300 hover:bg-blue-100" onClick={() => router.push(`/maintenance/fleet/incidents?vehicleAssetId=${vehicleAssetId}`)}>
                     Incidents
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/costs?vehicleAssetId=${vehicleAssetId}`)}>
+                  <Button size="sm" variant="outline" className="bg-white hover:border-blue-300 hover:bg-blue-100" onClick={() => router.push(`/maintenance/fleet/costs?vehicleAssetId=${vehicleAssetId}`)}>
                     Costs
                   </Button>
                 </div>
@@ -318,14 +380,14 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
       <TabsContent value="trips" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Recent Trips</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/trips?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/trips?vehicleAssetId=${vehicleAssetId}`)}>
             Open Trips
           </Button>
         </div>
         {trips.loading && <p className="text-sm text-muted-foreground">Loading trips...</p>}
         {trips.error && <ErrorBox message={trips.error} />}
         {trips.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Status</TableHead>
@@ -338,12 +400,12 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
             <TableBody>
               {(trips.data.items || []).map((t) => (
                 <TableRow key={t.id}>
-                  <TableCell><Badge variant="outline">{t.status}</Badge></TableCell>
+                  <TableCell><FleetStatusBadge status={t.status} /></TableCell>
                   <TableCell className="text-sm">{t.plannedStartAt ? formatFleetDateTime(t.plannedStartAt) : '-'}</TableCell>
                   <TableCell className="text-sm">{t.purpose || '-'}</TableCell>
                   <TableCell className="text-sm">{t.driverEmployeeName || '-'}</TableCell>
                   <TableCell className="text-right">
-                    <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/trips?id=${t.id}`)}>
+                    <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/trips?id=${t.id}`)}>
                       View
                     </Button>
                   </TableCell>
@@ -351,21 +413,21 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
               ))}
               {(trips.data.items || []).length === 0 && <EmptyRow colSpan={5} message="No trips found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
 
       <TabsContent value="assignments" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Driver Assignment History</div>
-          <Button size="sm" variant="outline" onClick={() => router.push('/maintenance/fleet/vehicles')}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push('/maintenance/fleet/vehicles')}>
             Open Vehicles
           </Button>
         </div>
         {assignments.loading && <p className="text-sm text-muted-foreground">Loading assignments...</p>}
         {assignments.error && <ErrorBox message={assignments.error} />}
         {assignments.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Employee</TableHead>
@@ -382,26 +444,26 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                   <TableCell className="text-sm">{a.assignmentType}</TableCell>
                   <TableCell className="text-sm">{formatFleetDateTime(a.assignedFromUtc)}</TableCell>
                   <TableCell className="text-sm">{a.assignedToUtc ? formatFleetDateTime(a.assignedToUtc) : '-'}</TableCell>
-                  <TableCell>{a.isActive ? <Badge className="bg-green-100 text-green-800">Active</Badge> : <Badge variant="outline">Ended</Badge>}</TableCell>
+                  <TableCell><FleetStatusBadge status={a.isActive ? 'Active' : 'Ended'} /></TableCell>
                 </TableRow>
               ))}
               {(assignments.data || []).length === 0 && <EmptyRow colSpan={5} message="No assignments found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
 
       <TabsContent value="compliance" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Compliance Records</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/compliance?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/compliance?vehicleAssetId=${vehicleAssetId}`)}>
             Open Compliance
           </Button>
         </div>
         {compliance.loading && <p className="text-sm text-muted-foreground">Loading compliance...</p>}
         {compliance.error && <ErrorBox message={compliance.error} />}
         {compliance.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Type</TableHead>
@@ -418,25 +480,25 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                   <TableCell className="text-sm">{c.issueDate ? formatFleetDate(c.issueDate) : '-'}</TableCell>
                   <TableCell className="text-sm">{formatFleetDate(c.expiryDate)}</TableCell>
                   <TableCell><ComplianceStatusBadge expiryDate={c.expiryDate} /></TableCell>
-                  <TableCell>{c.isCritical ? <Badge className="bg-red-100 text-red-800">Yes</Badge> : <Badge variant="outline">No</Badge>}</TableCell>
+                  <TableCell>{c.isCritical ? <Badge variant="destructive">Yes</Badge> : <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800 hover:bg-green-100">No</Badge>}</TableCell>
                 </TableRow>
               ))}
               {(compliance.data.items || []).length === 0 && <EmptyRow colSpan={5} message="No compliance records found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
       <TabsContent value="fuel" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Fuel Transactions</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/fuel?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/fuel?vehicleAssetId=${vehicleAssetId}`)}>
             Open Fuel
           </Button>
         </div>
         {fuel.loading && <p className="text-sm text-muted-foreground">Loading fuel transactions...</p>}
         {fuel.error && <ErrorBox message={fuel.error} />}
         {fuel.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -456,21 +518,21 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
               ))}
               {(fuel.data.items || []).length === 0 && <EmptyRow colSpan={4} message="No fuel transactions found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
 
       <TabsContent value="defects" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Defects</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/defects?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/defects?vehicleAssetId=${vehicleAssetId}`)}>
             Open Defects
           </Button>
         </div>
         {defects.loading && <p className="text-sm text-muted-foreground">Loading defects...</p>}
         {defects.error && <ErrorBox message={defects.error} />}
         {defects.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Title</TableHead>
@@ -483,28 +545,28 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
               {(defects.data.items || []).map((d) => (
                 <TableRow key={d.id}>
                   <TableCell className="text-sm">{d.title}</TableCell>
-                  <TableCell><Badge variant="outline">{d.severity}</Badge></TableCell>
-                  <TableCell><Badge variant="outline">{d.status}</Badge></TableCell>
+                  <TableCell><FleetSeverityBadge severity={d.severity} /></TableCell>
+                  <TableCell><FleetStatusBadge status={d.status} /></TableCell>
                   <TableCell className="text-sm">{formatFleetDateTime(d.reportedAtUtc)}</TableCell>
                 </TableRow>
               ))}
               {(defects.data.items || []).length === 0 && <EmptyRow colSpan={4} message="No defects found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
 
       <TabsContent value="incidents" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Incidents</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/incidents?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/incidents?vehicleAssetId=${vehicleAssetId}`)}>
             Open Incidents
           </Button>
         </div>
         {incidents.loading && <p className="text-sm text-muted-foreground">Loading incidents...</p>}
         {incidents.error && <ErrorBox message={incidents.error} />}
         {incidents.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Title</TableHead>
@@ -518,26 +580,26 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                 <TableRow key={i.id}>
                   <TableCell className="text-sm">{i.title}</TableCell>
                   <TableCell className="text-sm">{i.incidentType}</TableCell>
-                  <TableCell><Badge variant="outline">{i.status}</Badge></TableCell>
+                  <TableCell><FleetStatusBadge status={i.status} /></TableCell>
                   <TableCell className="text-sm">{formatFleetDateTime(i.occurredAtUtc)}</TableCell>
                 </TableRow>
               ))}
               {(incidents.data.items || []).length === 0 && <EmptyRow colSpan={4} message="No incidents found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
       <TabsContent value="external-repairs" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">External Repairs</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/external-repairs?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/external-repairs?vehicleAssetId=${vehicleAssetId}`)}>
             Open External Repairs
           </Button>
         </div>
         {externalRepairs.loading && <p className="text-sm text-muted-foreground">Loading external repairs...</p>}
         {externalRepairs.error && <ErrorBox message={externalRepairs.error} />}
         {externalRepairs.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Title</TableHead>
@@ -552,28 +614,28 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                 <TableRow key={r.id}>
                   <TableCell className="text-sm">{r.title}</TableCell>
                   <TableCell className="text-sm">{r.vendorBusinessPartnerName || '-'}</TableCell>
-                  <TableCell><Badge variant="outline">{r.status}</Badge></TableCell>
+                  <TableCell><FleetStatusBadge status={r.status} /></TableCell>
                   <TableCell className="text-sm">{formatFleetDateTime(r.requestedAtUtc)}</TableCell>
                   <TableCell className="text-right text-sm">{r.actualCost != null ? r.actualCost.toLocaleString() : '-'}</TableCell>
                 </TableRow>
               ))}
               {(externalRepairs.data.items || []).length === 0 && <EmptyRow colSpan={5} message="No external repairs found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
 
       <TabsContent value="costs" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Cost Entries</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/costs?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/costs?vehicleAssetId=${vehicleAssetId}`)}>
             Open Costs
           </Button>
         </div>
         {costs.loading && <p className="text-sm text-muted-foreground">Loading costs...</p>}
         {costs.error && <ErrorBox message={costs.error} />}
         {costs.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -595,21 +657,21 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
               ))}
               {(costs.data.items || []).length === 0 && <EmptyRow colSpan={4} message="No cost entries found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
 
       <TabsContent value="tyres" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Tyres</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/tyres?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/tyres?vehicleAssetId=${vehicleAssetId}`)}>
             Open Tyres
           </Button>
         </div>
         {tyres.loading && <p className="text-sm text-muted-foreground">Loading tyres...</p>}
         {tyres.error && <ErrorBox message={tyres.error} />}
         {tyres.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Serial</TableHead>
@@ -625,27 +687,27 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                   <TableCell className="text-sm font-mono">{t.serialNumber}</TableCell>
                   <TableCell className="text-sm">{t.brand || '-'}</TableCell>
                   <TableCell className="text-sm">{t.position || '-'}</TableCell>
-                  <TableCell><Badge variant="outline">{t.status}</Badge></TableCell>
+                  <TableCell><FleetStatusBadge status={t.status} /></TableCell>
                   <TableCell className="text-sm">{formatFleetDateTime(t.installedAtUtc)}</TableCell>
                 </TableRow>
               ))}
               {(tyres.data.items || []).length === 0 && <EmptyRow colSpan={5} message="No tyres found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
 
       <TabsContent value="batteries" className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Batteries</div>
-          <Button size="sm" variant="outline" onClick={() => router.push(`/maintenance/fleet/batteries?vehicleAssetId=${vehicleAssetId}`)}>
+          <Button size="sm" className={fleetActionButtonClass} onClick={() => router.push(`/maintenance/fleet/batteries?vehicleAssetId=${vehicleAssetId}`)}>
             Open Batteries
           </Button>
         </div>
         {batteries.loading && <p className="text-sm text-muted-foreground">Loading batteries...</p>}
         {batteries.error && <ErrorBox message={batteries.error} />}
         {batteries.data && (
-          <Table>
+          <FleetTable>
             <TableHeader>
               <TableRow>
                 <TableHead>Serial</TableHead>
@@ -661,13 +723,13 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
                   <TableCell className="text-sm font-mono">{b.serialNumber}</TableCell>
                   <TableCell className="text-sm">{b.brand || '-'}</TableCell>
                   <TableCell className="text-sm">{b.position || '-'}</TableCell>
-                  <TableCell><Badge variant="outline">{b.status}</Badge></TableCell>
+                  <TableCell><FleetStatusBadge status={b.status} /></TableCell>
                   <TableCell className="text-sm">{formatFleetDateTime(b.installedAtUtc)}</TableCell>
                 </TableRow>
               ))}
               {(batteries.data.items || []).length === 0 && <EmptyRow colSpan={5} message="No batteries found for this vehicle." />}
             </TableBody>
-          </Table>
+          </FleetTable>
         )}
       </TabsContent>
     </Tabs>
