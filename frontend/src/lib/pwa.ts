@@ -41,8 +41,10 @@ export class PWAManager {
       if ('serviceWorker' in navigator) {
         try {
           await this.registerServiceWorker()
-          await this.warmMobileShell()
-          void this.requestPersistentStorage()
+          if (this.isMobileSurface()) {
+            await this.warmMobileShell()
+            void this.requestPersistentStorage()
+          }
         } catch (error) {
           console.error('Failed to register service worker:', error)
         }
@@ -61,6 +63,10 @@ export class PWAManager {
 
     const localHosts = new Set(['localhost', '127.0.0.1', '::1'])
     return localHosts.has(window.location.hostname)
+  }
+
+  private isMobileSurface() {
+    return window.location.pathname === '/mobile' || window.location.pathname.startsWith('/mobile/')
   }
 
   private async unregisterServiceWorkers() {
@@ -125,7 +131,9 @@ export class PWAManager {
       this.isOnline = true
       this.notifyOnlineHandlers()
       this.syncOfflineData()
-      void this.warmMobileShell()
+      if (this.isMobileSurface()) {
+        void this.warmMobileShell()
+      }
     })
 
     window.addEventListener('offline', () => {
@@ -243,7 +251,7 @@ export class PWAManager {
   }
 
   private async warmMobileShell() {
-    if (!this.serviceWorkerRegistration || !navigator.onLine) return
+    if (!this.isMobileSurface() || !this.serviceWorkerRegistration || !navigator.onLine) return
 
     const registration = await navigator.serviceWorker.ready
     const worker = registration.active || navigator.serviceWorker.controller
