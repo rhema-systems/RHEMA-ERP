@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { taxDataService } from '@/services/finance/tax-data.service';
-import { Tax, TaxCategory, TaxApplicability, CreateTaxDto } from '@/types/tax';
+import { Tax, TaxCategory, TaxApplicability, TaxCalculationMethod, CreateTaxDto } from '@/types/tax';
 import { Plus, Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
@@ -24,6 +24,7 @@ export default function TaxesPage() {
         code: '',
         name: '',
         rate: 0,
+        calculationMethod: TaxCalculationMethod.Simple,
         category: TaxCategory.Standard,
         applicability: TaxApplicability.Both,
         isInputTaxDeductible: false,
@@ -59,6 +60,7 @@ export default function TaxesPage() {
                 code: tax.code,
                 name: tax.name,
                 rate: tax.rate,
+                calculationMethod: tax.calculationMethod,
                 category: tax.category,
                 applicability: tax.applicability,
                 isInputTaxDeductible: tax.isInputTaxDeductible,
@@ -71,6 +73,7 @@ export default function TaxesPage() {
                 code: '',
                 name: '',
                 rate: 0,
+                calculationMethod: TaxCalculationMethod.Simple,
                 category: TaxCategory.Standard,
                 applicability: TaxApplicability.Both,
                 isInputTaxDeductible: false,

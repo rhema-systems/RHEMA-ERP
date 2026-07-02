@@ -459,7 +459,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                         DisplayOrder = v.DisplayOrder
                     })
                     .ToList() ?? new List<SegmentLookupValueSummaryDto>(),
-                CreatedBy = segment.CreatedBy,
+                CreatedBy = segment.CreatedBy ?? "system",
                 CreatedAt = segment.CreatedAt,
                 UpdatedBy = segment.UpdatedBy,
                 UpdatedAt = segment.UpdatedAt

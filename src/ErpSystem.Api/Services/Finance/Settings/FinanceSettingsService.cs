@@ -149,6 +149,11 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.ControlAccountInventoryId.HasValue) settings.ControlAccountInventoryId = dto.ControlAccountInventoryId;
             if (dto.ControlAccountPayrollId.HasValue) settings.ControlAccountPayrollId = dto.ControlAccountPayrollId;
             if (dto.ControlAccountTaxId.HasValue) settings.ControlAccountTaxId = dto.ControlAccountTaxId;
+            if (dto.ControlAccountGRVAccrualId.HasValue) settings.ControlAccountGRVAccrualId = dto.ControlAccountGRVAccrualId;
+            if (dto.DiscountAllowedAccountId.HasValue) settings.DiscountAllowedAccountId = dto.DiscountAllowedAccountId;
+            if (dto.DiscountReceivedAccountId.HasValue) settings.DiscountReceivedAccountId = dto.DiscountReceivedAccountId;
+            if (dto.MigrationClearingAccountId.HasValue) settings.MigrationClearingAccountId = dto.MigrationClearingAccountId;
+            if (dto.OpeningBalanceAutoRoutingEnabled.HasValue) settings.OpeningBalanceAutoRoutingEnabled = dto.OpeningBalanceAutoRoutingEnabled.Value;
 
             await _context.SaveChangesAsync();
 
@@ -208,7 +213,12 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 ControlAccountApId = settings.ControlAccountApId,
                 ControlAccountInventoryId = settings.ControlAccountInventoryId,
                 ControlAccountPayrollId = settings.ControlAccountPayrollId,
-                ControlAccountTaxId = settings.ControlAccountTaxId
+                ControlAccountTaxId = settings.ControlAccountTaxId,
+                ControlAccountGRVAccrualId = settings.ControlAccountGRVAccrualId,
+                DiscountAllowedAccountId = settings.DiscountAllowedAccountId,
+                DiscountReceivedAccountId = settings.DiscountReceivedAccountId,
+                MigrationClearingAccountId = settings.MigrationClearingAccountId,
+                OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled
             };
         }
     }

@@ -18,15 +18,18 @@ namespace ErpSystem.Api.Services.Finance.GL
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
+        private readonly IAccountingBookService _accountingBookService;
         private readonly ILogger<AccountService> _logger;
 
         public AccountService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            IAccountingBookService accountingBookService,
             ILogger<AccountService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _accountingBookService = accountingBookService;
             _logger = logger;
         }
 
@@ -42,6 +45,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .GetQueryable(a => a.TenantId == TenantId && a.Id == id)
                 .Include(a => a.SegmentValues)
                     .ThenInclude(v => v.SegmentStructure)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountingBook)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (account == null)
@@ -70,6 +75,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .GetQueryable(a => a.TenantId == TenantId && a.AccountNumber == accountNumber)
                 .Include(a => a.SegmentValues)
                     .ThenInclude(v => v.SegmentStructure)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountingBook)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return account == null ? null : MapToDto(account);
@@ -84,9 +91,13 @@ namespace ErpSystem.Api.Services.Finance.GL
             int? take = null,
             CancellationToken cancellationToken = default)
         {
+            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
+
             IQueryable<Account> query = _unitOfWork.Accounts
                 .GetQueryable(a => a.TenantId == TenantId)
-                .Include(a => a.SegmentValues);
+                .Include(a => a.SegmentValues)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountingBook);
 
             if (!string.IsNullOrWhiteSpace(accountType) &&
                 Enum.TryParse<AccountType>(accountType.Trim(), ignoreCase: true, out var parsedAccountType))
@@ -168,6 +179,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var now = DateTime.UtcNow;
+            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
 
             var account = new Account
             {
@@ -242,6 +254,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             // Persist via repository/UnitOfWork
             await _unitOfWork.Accounts.AddAsync(account);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _accountingBookService.SyncAccountMappingsAsync(account, cancellationToken);
 
             return MapToDto(account);
         }
@@ -356,6 +369,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             await _unitOfWork.Accounts.UpdateAsync(account);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _accountingBookService.SyncAccountMappingsAsync(account, cancellationToken);
 
             return MapToDto(account);
         }
@@ -439,8 +453,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 IsIFRSClassified = account.IsIFRSClassified,
                 IsBaseFrameworkClassified = account.IsBaseClassified,
                 IsLocalFrameworkClassified = account.IsLocalClassified,
+                IsBaseClassified = account.IsBaseClassified,
+                IsLocalClassified = account.IsLocalClassified,
+                IsManagementClassified = account.IsLocalClassified,
                 IsControlAccount = account.IsControlAccount,
                 IsPostingAllowed = account.AllowDirectPosting,
+                AllowDirectPosting = account.AllowDirectPosting,
                 ReferenceNumber = account.ReferenceNumber,
                 Status = account.Status.ToString(),
                 EffectiveDate = account.EffectiveDate,
@@ -480,6 +498,21 @@ namespace ErpSystem.Api.Services.Finance.GL
                     UpdatedAt = v.UpdatedAt,
                     CreatedBy = v.CreatedBy,
                     UpdatedBy = v.UpdatedBy
+                })
+                .ToList();
+
+            dto.AccountingBooks = account.AccountingBooks
+                .Where(mapping => mapping.AccountingBook != null && !mapping.IsDeleted)
+                .OrderBy(mapping => mapping.AccountingBook.SortOrder)
+                .Select(mapping => new AccountAccountingBookDto
+                {
+                    Id = mapping.Id,
+                    AccountId = mapping.AccountId,
+                    AccountingBookId = mapping.AccountingBookId,
+                    AccountingBookCode = mapping.AccountingBook.Code,
+                    AccountingBookName = mapping.AccountingBook.Name,
+                    IsEnabled = mapping.IsEnabled,
+                    FinancialStatementLineItem = mapping.FinancialStatementLineItem
                 })
                 .ToList();
 

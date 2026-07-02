@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -14,15 +15,21 @@ public class AssetDisposalService : IAssetDisposalService
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly IJournalEntryService _journalEntryService;
+    private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly IWorkflowService _workflowService;
 
     public AssetDisposalService(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
-        IJournalEntryService journalEntryService)
+        IJournalEntryService journalEntryService,
+        IDocumentNumberingService documentNumberingService,
+        IWorkflowService workflowService)
     {
         _context = context;
         _currentUser = currentUser;
         _journalEntryService = journalEntryService;
+        _documentNumberingService = documentNumberingService;
+        _workflowService = workflowService;
     }
 
     private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
@@ -81,11 +88,28 @@ public class AssetDisposalService : IAssetDisposalService
             RequestedById = requestedById,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = UserName,
-            ReferenceNumber = $"DSP-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..4].ToUpper()}"
+            ReferenceNumber = await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.AssetDisposal,
+                TenantId,
+                dto.DisposalDate,
+                nameof(AssetDisposal))
         };
 
         _context.AssetDisposals.Add(disposal);
         await _context.SaveChangesAsync();
+
+        var workflowResult = await _workflowService.StartApprovalWorkflowAsync("AssetDisposal", disposal.Id);
+        if (!workflowResult.Success)
+        {
+            disposal.Status = AssetDisposalStatus.Rejected;
+            disposal.Comments = workflowResult.Message ?? "Unable to start asset disposal approval workflow.";
+            disposal.UpdatedAt = DateTime.UtcNow;
+            disposal.UpdatedBy = UserName;
+            await _context.SaveChangesAsync();
+
+            throw new InvalidOperationException(disposal.Comments);
+        }
 
         return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to request disposal.");
     }
@@ -101,6 +125,19 @@ public class AssetDisposalService : IAssetDisposalService
         {
             throw new InvalidOperationException("Only pending disposals can be approved.");
         }
+
+        if (CurrentUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("AssetDisposal", disposalId, CurrentUserId))
+            throw new InvalidOperationException("This asset disposal is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("AssetDisposal", disposalId, CurrentUserId, "Approve", dto.Comments);
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process asset disposal approval.");
+
+        if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+            return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to retrieve disposal.");
 
         disposal.Status = AssetDisposalStatus.Approved;
         disposal.ApprovedById = approvedById;
@@ -263,6 +300,24 @@ public class AssetDisposalService : IAssetDisposalService
         var disposal = await _context.AssetDisposals
             .FirstOrDefaultAsync(d => d.TenantId == TenantId && d.Id == disposalId)
             ?? throw new KeyNotFoundException("Disposal request not found.");
+
+        if (disposal.Status != AssetDisposalStatus.PendingApproval)
+        {
+            throw new InvalidOperationException("Only pending disposals can be rejected.");
+        }
+
+        if (CurrentUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("AssetDisposal", disposalId, CurrentUserId))
+            throw new InvalidOperationException("This asset disposal is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("AssetDisposal", disposalId, CurrentUserId, "Reject", comments);
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process asset disposal rejection.");
+
+        if (workflowResult.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed))
+            return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to retrieve disposal.");
 
         disposal.Status = AssetDisposalStatus.Rejected;
         disposal.Comments = comments;

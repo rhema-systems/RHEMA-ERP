@@ -473,7 +473,14 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 throw new InvalidOperationException("Component not found.");
 
             if (dto.CalculationOrder.HasValue) component.CalculationOrder = dto.CalculationOrder.Value;
-            if (dto.CompoundBasis.HasValue) component.CompoundBasis = dto.CompoundBasis.Value;
+            if (dto.CompoundBasis.HasValue)
+            {
+                component.CompoundBasis = dto.CompoundBasis.Value;
+                if (dto.CompoundBasis.Value != CompoundBasis.Specific)
+                {
+                    component.AppliesOnTaxCodes = null;
+                }
+            }
             if (dto.AppliesOnTaxCodes != null) component.AppliesOnTaxCodes = string.Join(",", dto.AppliesOnTaxCodes);
 
             component.UpdatedAt = DateTime.UtcNow;
@@ -548,13 +555,14 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             // Check if already seeded
             var existing = await _context.Set<Tax>()
-                .AnyAsync(t => t.TenantId == TenantId && t.Code == "VAT" && !t.IsDeleted, cancellationToken);
+                .AnyAsync(t => t.TenantId == TenantId
+                    && (t.Code == "VAT" || t.Code == "VAT-STD")
+                    && !t.IsDeleted, cancellationToken);
 
             if (existing)
             {
-                _logger.LogInformation("Ghana taxes already seeded for tenant {TenantId}", TenantId);
-                // Even if taxes exist, we should check if rules exist and seed them if missing? 
-                // Separate method for rules.
+                await RepairGhanaVatStandardComponentsAsync(cancellationToken);
+                _logger.LogInformation("Ghana taxes already seeded for tenant {TenantId}; repaired standard VAT component settings", TenantId);
                 return;
             }
 
@@ -619,7 +627,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "VAT",
                 Name = "Value Added Tax",
-                Description = "Ghana VAT at 15% (compound on NHIL, GETFL, COVID)",
+                Description = "Ghana VAT at 15% on the base taxable amount",
                 Rate = 15.00m,
                 EffectiveFrom = effectiveFrom,
                 Applicability = TaxApplicability.Both,
@@ -675,7 +683,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "GH-SALES-STD",
                 Name = "Ghana Standard Sales Tax",
-                Description = "NHIL + GETFL + COVID + VAT (compound)",
+                Description = "NHIL + GETFL + COVID + VAT on the base taxable amount",
                 Applicability = TaxApplicability.Sales,
                 IsDefault = true,
                 IsActive = true,
@@ -689,7 +697,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "GH-PURCH-STD",
                 Name = "Ghana Standard Purchase Tax",
-                Description = "NHIL + GETFL + COVID + VAT (compound)",
+                Description = "NHIL + GETFL + COVID + VAT on the base taxable amount",
                 Applicability = TaxApplicability.Purchases,
                 IsDefault = true,
                 IsActive = true,
@@ -748,7 +756,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 new TaxGroupComponent
                 {
                     Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = salesGroup.Id, TaxId = vat.Id,
-                    CalculationOrder = 4, CompoundBasis = CompoundBasis.Specific, AppliesOnTaxCodes = "NHIL,GETFL,COVID",
+                    CalculationOrder = 4, CompoundBasis = CompoundBasis.BaseOnly,
                     CreatedAt = now, CreatedBy = "system"
                 }
             }, cancellationToken);
@@ -774,7 +782,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 new TaxGroupComponent
                 {
                     Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = purchaseGroup.Id, TaxId = vat.Id,
-                    CalculationOrder = 4, CompoundBasis = CompoundBasis.Specific, AppliesOnTaxCodes = "NHIL,GETFL,COVID",
+                    CalculationOrder = 4, CompoundBasis = CompoundBasis.BaseOnly,
                     CreatedAt = now, CreatedBy = "system"
                 }
             }, cancellationToken);
@@ -795,6 +803,87 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             await _context.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Successfully seeded Ghana taxes: 6 taxes, 4 groups");
+        }
+
+        private async Task RepairGhanaVatStandardComponentsAsync(CancellationToken cancellationToken)
+        {
+            var candidateGroups = await _context.Set<TaxGroup>()
+                .Include(g => g.Components)
+                    .ThenInclude(c => c.Tax)
+                .Where(g => g.TenantId == TenantId
+                    && !g.IsDeleted
+                    && (g.Code == "VAT-STD-SCHEME"
+                        || g.Code == "GH-SALES-STD"
+                        || g.Code == "GH-PURCH-STD"
+                        || g.Name.Contains("VAT Standard")
+                        || g.Name.Contains("Ghana Standard")))
+                .ToListAsync(cancellationToken);
+
+            var now = DateTime.UtcNow;
+            var changed = false;
+
+            foreach (var group in candidateGroups)
+            {
+                if (string.Equals(group.Code, "VAT-STD-SCHEME", StringComparison.OrdinalIgnoreCase))
+                {
+                    var description = "Standard VAT Scheme including NHIL, GETFund, and VAT on the base taxable amount. COVID-19 Health Recovery Levy is inactive.";
+                    if (!string.Equals(group.Description, description, StringComparison.Ordinal))
+                    {
+                        group.Description = description;
+                        group.UpdatedAt = now;
+                        group.UpdatedBy = "system";
+                        changed = true;
+                    }
+                }
+                else if (string.Equals(group.Code, "GH-SALES-STD", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(group.Code, "GH-PURCH-STD", StringComparison.OrdinalIgnoreCase))
+                {
+                    var description = "NHIL + GETFL + COVID + VAT on the base taxable amount";
+                    if (!string.Equals(group.Description, description, StringComparison.Ordinal))
+                    {
+                        group.Description = description;
+                        group.UpdatedAt = now;
+                        group.UpdatedBy = "system";
+                        changed = true;
+                    }
+                }
+
+                foreach (var component in group.Components.Where(c => !c.IsDeleted))
+                {
+                    var taxCode = component.Tax?.Code ?? string.Empty;
+                    var taxName = component.Tax?.Name ?? string.Empty;
+                    var isVatComponent =
+                        string.Equals(taxCode, "VAT", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(taxCode, "VAT-STD", StringComparison.OrdinalIgnoreCase)
+                        || taxName.Contains("Value Added Tax", StringComparison.OrdinalIgnoreCase);
+
+                    if (!isVatComponent)
+                    {
+                        continue;
+                    }
+
+                    if (component.CompoundBasis != CompoundBasis.BaseOnly)
+                    {
+                        component.CompoundBasis = CompoundBasis.BaseOnly;
+                        changed = true;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(component.AppliesOnTaxCodes))
+                    {
+                        component.AppliesOnTaxCodes = null;
+                        changed = true;
+                    }
+
+                    component.UpdatedAt = now;
+                    component.UpdatedBy = "system";
+                }
+            }
+
+            if (changed)
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+                _logger.LogInformation("Repaired Ghana standard VAT components for tenant {TenantId}", TenantId);
+            }
         }
 
         public async Task SeedTaxRulesAsync(CancellationToken cancellationToken = default)

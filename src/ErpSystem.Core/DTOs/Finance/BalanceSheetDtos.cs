@@ -10,7 +10,7 @@ namespace ErpSystem.Core.DTOs.Finance
     {
         public string CompanyName { get; set; } = string.Empty;
         public DateTime AsAtDate { get; set; }
-        public string BookClassification { get; set; } = "IFRS"; // IFRS, Base, Local
+        public string BookClassification { get; set; } = "IFRS"; // IFRS, LOCAL_STATUTORY, MANAGEMENT
         public string CurrencyCode { get; set; } = "GHS";
         
         public List<BalanceSheetSectionDto> Sections { get; set; } = new();

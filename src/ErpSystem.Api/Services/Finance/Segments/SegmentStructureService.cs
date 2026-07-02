@@ -128,21 +128,14 @@ namespace ErpSystem.Api.Services.Finance.Segments
             };
         }
 
-        public async Task<SegmentStructureDto> CreateSegmentStructureAsync(SegmentStructureCreateDto dto, CancellationToken cancellationToken = default)
-        {
-            // Simplified implementation - delegates to AccountSegmentStructureService
-            throw new NotImplementedException("Use AccountSegmentStructureService.CreateAsync instead");
-        }
+        public Task<SegmentStructureDto> CreateSegmentStructureAsync(SegmentStructureCreateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentStructureDto>(new NotImplementedException("Use AccountSegmentStructureService.CreateAsync instead"));
 
-        public async Task<SegmentStructureDto> UpdateSegmentStructureAsync(Guid id, SegmentStructureUpdateDto dto, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use AccountSegmentStructureService.UpdateAsync instead");
-        }
+        public Task<SegmentStructureDto> UpdateSegmentStructureAsync(Guid id, SegmentStructureUpdateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentStructureDto>(new NotImplementedException("Use AccountSegmentStructureService.UpdateAsync instead"));
 
-        public async Task DeleteSegmentStructureAsync(Guid id, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use AccountSegmentStructureService.DeleteAsync instead");
-        }
+        public Task DeleteSegmentStructureAsync(Guid id, CancellationToken cancellationToken = default)
+            => Task.FromException(new NotImplementedException("Use AccountSegmentStructureService.DeleteAsync instead"));
 
         // Segment Lookup Value Operations
         public async Task<IReadOnlyList<SegmentLookupValueDto>> GetSegmentLookupValuesAsync(Guid segmentStructureId, CancellationToken cancellationToken = default)
@@ -165,20 +158,14 @@ namespace ErpSystem.Api.Services.Finance.Segments
             }).ToList();
         }
 
-        public async Task<SegmentLookupValueDto> AddSegmentLookupValueAsync(Guid segmentStructureId, SegmentLookupValueCreateDto dto, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use SegmentLookupValueService.CreateAsync instead");
-        }
+        public Task<SegmentLookupValueDto> AddSegmentLookupValueAsync(Guid segmentStructureId, SegmentLookupValueCreateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentLookupValueDto>(new NotImplementedException("Use SegmentLookupValueService.CreateAsync instead"));
 
-        public async Task<SegmentLookupValueDto> UpdateSegmentLookupValueAsync(Guid valueId, SegmentLookupValueUpdateDto dto, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use SegmentLookupValueService.UpdateAsync instead");
-        }
+        public Task<SegmentLookupValueDto> UpdateSegmentLookupValueAsync(Guid valueId, SegmentLookupValueUpdateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentLookupValueDto>(new NotImplementedException("Use SegmentLookupValueService.UpdateAsync instead"));
 
-        public async Task DeleteSegmentLookupValueAsync(Guid valueId, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use SegmentLookupValueService.DeleteAsync instead");
-        }
+        public Task DeleteSegmentLookupValueAsync(Guid valueId, CancellationToken cancellationToken = default)
+            => Task.FromException(new NotImplementedException("Use SegmentLookupValueService.DeleteAsync instead"));
 
         // Account Number Utility Operations
         public async Task<bool> ValidateAccountNumberAsync(string accountNumber, CancellationToken cancellationToken = default)

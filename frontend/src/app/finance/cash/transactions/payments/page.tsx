@@ -45,13 +45,15 @@ import { cn } from '@/lib/utils';
 
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import { financeService } from '@/services/finance.service';
 import { CreateCashPaymentDto } from '@/types/cash-management';
 
 const paymentSchema = z.object({
-    transactionDate: z.date({ required_error: "Date is required" }),
+    transactionDate: z.date({ message: "Date is required" }),
     bankAccountId: z.string().min(1, "Bank account is required"),
-    amount: z.coerce.number().min(0.01, "Amount must be greater than 0"),
+    amount: z.number().min(0.01, "Amount must be greater than 0"),
     currency: z.string().min(1, "Currency is required"),
+    exchangeRate: z.number().min(0.0001, "Exchange rate must be greater than 0"),
     paymentMethodId: z.string().optional(),
     referenceNumber: z.string().optional(),
     description: z.string().optional(),
@@ -92,6 +94,7 @@ export default function RecordPaymentPage() {
             transactionDate: new Date(),
             amount: 0,
             currency: 'GHS',
+            exchangeRate: 1,
         },
     });
 
@@ -102,6 +105,13 @@ export default function RecordPaymentPage() {
             const account = bankAccounts.find(a => a.id === selectedBankAccountId);
             if (account) {
                 form.setValue('currency', account.currency);
+                if (account.currency === 'GHS') {
+                    form.setValue('exchangeRate', 1);
+                } else {
+                    void financeService.getCurrentExchangeRate(account.currency)
+                        .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
+                        .catch(() => form.setValue('exchangeRate', 1));
+                }
             }
         }
     }, [selectedBankAccountId, bankAccounts, form]);
@@ -114,6 +124,7 @@ export default function RecordPaymentPage() {
                 bankAccountId: data.bankAccountId,
                 amount: data.amount,
                 currency: data.currency,
+                exchangeRate: data.exchangeRate,
                 paymentMethodId: data.paymentMethodId,
                 referenceNumber: data.referenceNumber,
                 description: data.description,
@@ -257,11 +268,27 @@ export default function RecordPaymentPage() {
                                                 type="number"
                                                 step="0.01"
                                                 className="pl-12"
-                                                {...form.register('amount')}
+                                                {...form.register('amount', { valueAsNumber: true })}
                                             />
                                         </div>
                                         {form.formState.errors.amount && <p className="text-sm text-red-500">{form.formState.errors.amount.message}</p>}
                                     </div>
+                                    <div className="space-y-2">
+                                        <Label>Exchange Rate</Label>
+                                        <Input
+                                            type="number"
+                                            step="0.000001"
+                                            disabled={form.watch('currency') === 'GHS'}
+                                            {...form.register('exchangeRate', { valueAsNumber: true })}
+                                        />
+                                        <p className="text-xs text-muted-foreground">
+                                            1 {form.watch('currency')} = {form.watch('exchangeRate') || 1} GHS
+                                        </p>
+                                        {form.formState.errors.exchangeRate && <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label>Payment Method</Label>
                                         <Select

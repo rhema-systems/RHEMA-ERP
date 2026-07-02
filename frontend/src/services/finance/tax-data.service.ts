@@ -136,20 +136,59 @@ class TaxDataService {
         return apiService.post<void>('/finance/tax/seed/ghana', {});
     }
 
-    // ===== REPORTS (Mock/Placeholder until Backend Implemented) =====
-    async getPurchaseTransactions(): Promise<any[]> { // Should be TransactionWithTax[]
-        // TODO: Implement backend endpoint /finance/reports/input-vat
-        return [];
+    // ===== REPORTS =====
+    async getPurchaseTransactions(startDate?: string, endDate?: string): Promise<TransactionWithTax[]> {
+        const queryParams = new URLSearchParams();
+        if (startDate) queryParams.append('startDate', startDate);
+        if (endDate) queryParams.append('endDate', endDate);
+
+        return apiService.get<TransactionWithTax[]>(`/finance/tax/reports/input-vat${queryParams.toString() ? `?${queryParams}` : ''}`);
     }
 
-    async getSalesTransactions(): Promise<any[]> { // Should be TransactionWithTax[]
-        // TODO: Implement backend endpoint /finance/reports/output-vat
-        return [];
+    async getSalesTransactions(startDate?: string, endDate?: string): Promise<TransactionWithTax[]> {
+        const queryParams = new URLSearchParams();
+        if (startDate) queryParams.append('startDate', startDate);
+        if (endDate) queryParams.append('endDate', endDate);
+
+        return apiService.get<TransactionWithTax[]>(`/finance/tax/reports/output-vat${queryParams.toString() ? `?${queryParams}` : ''}`);
     }
 
-    async getWHTSummary(startDate?: string, endDate?: string): Promise<any[]> { // Should be WHTSummaryEntry[]
-        // TODO: Implement backend endpoint /finance/reports/wht-summary
-        return [];
+    async getVATReconciliation(startDate?: string, endDate?: string): Promise<any> {
+        const queryParams = new URLSearchParams();
+        if (startDate) queryParams.append('startDate', startDate);
+        if (endDate) queryParams.append('endDate', endDate);
+
+        return apiService.get(`/finance/tax/reports/vat-reconciliation${queryParams.toString() ? `?${queryParams}` : ''}`);
+    }
+
+    async getWHTSummary(startDate?: string, endDate?: string): Promise<WHTSummaryEntry[]> {
+        const queryParams = new URLSearchParams();
+        if (startDate) queryParams.append('fromDate', startDate);
+        if (endDate) queryParams.append('toDate', endDate);
+
+        const report = await apiService.get<{
+            bySupplier?: Array<{
+                supplierName: string;
+                taxId?: string | null;
+                totalInvoiceAmount: number;
+                totalWithholdingTax: number;
+                totalNetPayment: number;
+                transactionCount: number;
+            }>;
+        }>(`/ap/reports/withholding-tax${queryParams.toString() ? `?${queryParams}` : ''}`);
+
+        return (report.bySupplier || []).map(supplier => ({
+            supplierName: supplier.supplierName,
+            supplierTIN: supplier.taxId || undefined,
+            taxType: 'WHT',
+            transactionCount: supplier.transactionCount,
+            grossAmount: supplier.totalInvoiceAmount,
+            whtRate: supplier.totalInvoiceAmount > 0
+                ? (supplier.totalWithholdingTax / supplier.totalInvoiceAmount) * 100
+                : 0,
+            whtAmount: supplier.totalWithholdingTax,
+            netAmount: supplier.totalNetPayment,
+        }));
     }
 
     // ===== TAX RULES =====

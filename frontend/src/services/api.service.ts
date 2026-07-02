@@ -760,7 +760,7 @@ export default apiService;
 // Helper function to get stored token for SignalR
 export function getStoredToken(): string | null {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('authToken');
+    return localStorage.getItem('authToken') || localStorage.getItem('token');
   }
   return null;
 }

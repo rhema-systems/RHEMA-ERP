@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Numbering;
 using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
@@ -85,8 +86,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<AccountSegmentStructure> AccountSegmentStructures { get; set; }
     public DbSet<SegmentLookupValue> SegmentLookupValues { get; set; }
     public DbSet<Account> Accounts { get; set; }
+    public DbSet<AccountingBook> AccountingBooks { get; set; }
+    public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
     public DbSet<AccountSegmentValue> AccountSegmentValues { get; set; }
     public DbSet<FinanceSettings> FinanceSettings { get; set; }
+    public DbSet<DocumentSequenceDefinition> DocumentSequenceDefinitions { get; set; }
+    public DbSet<DocumentNumberReservation> DocumentNumberReservations { get; set; }
     public DbSet<Tax> Taxes { get; set; }
     public DbSet<TaxGroup> TaxGroups { get; set; }
     public DbSet<TaxGroupComponent> TaxGroupComponents { get; set; }
@@ -120,7 +125,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<TaxRule> TaxRules { get; set; }
     public DbSet<Invoice> Invoices { get; set; }
     public DbSet<VendorInvoice> VendorInvoices { get; set; }
-    public DbSet<Customer> Customers { get; set; }
+    public DbSet<SupplierReturn> SupplierReturns { get; set; }
+    public DbSet<SupplierReturnLineItem> SupplierReturnLineItems { get; set; }
+    public DbSet<SupplierDebitNote> SupplierDebitNotes { get; set; }
+    public DbSet<SupplierDebitNoteLineItem> SupplierDebitNoteLineItems { get; set; }
+    public DbSet<FinancePurchaseOrder> FinancePurchaseOrders { get; set; }
+    public DbSet<FinancePurchaseOrderItem> FinancePurchaseOrderItems { get; set; }
+    public DbSet<FinancePurchaseOrderReceipt> FinancePurchaseOrderReceipts { get; set; }
+    public DbSet<FinancePurchaseOrderReceiptItem> FinancePurchaseOrderReceiptItems { get; set; }
 
     // Sales Order Management entities
     public DbSet<SalesOrder> SalesOrders { get; set; }
@@ -855,6 +867,34 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
 
+        builder.Entity<DocumentSequenceDefinition>(entity =>
+        {
+            entity.ToTable("DocumentSequenceDefinitions");
+            entity.HasIndex(e => new { e.TenantId, e.Module, e.DocumentType, e.Name }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.Module, e.DocumentType, e.IsActive, e.IsDefault });
+            entity.Property(e => e.Module).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.DocumentType).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(150).IsRequired();
+            entity.Property(e => e.Format).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.ResetPolicy).HasMaxLength(20).IsRequired();
+            entity.HasMany(e => e.Reservations)
+                .WithOne(e => e.DocumentSequenceDefinition)
+                .HasForeignKey(e => e.DocumentSequenceDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<DocumentNumberReservation>(entity =>
+        {
+            entity.ToTable("DocumentNumberReservations");
+            entity.HasIndex(e => new { e.TenantId, e.Module, e.DocumentType, e.DocumentNumber }).IsUnique();
+            entity.HasIndex(e => e.DocumentSequenceDefinitionId);
+            entity.Property(e => e.Module).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.DocumentType).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.DocumentNumber).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.PeriodKey).HasMaxLength(20);
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+        });
+
         // ─── CRM Entity FK Configurations (prevent cascade cycles) ───
 
         builder.Entity<Lead>(entity =>
@@ -929,6 +969,91 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
             // Ignore computed property
             entity.Ignore(e => e.LineTotal);
+        });
+
+        builder.Entity<Invoice>(entity =>
+        {
+            entity.ToTable("Invoices");
+            entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CustomerName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.CustomerAddress).HasMaxLength(500);
+            entity.Property(e => e.Notes).HasMaxLength(500);
+            entity.Property(e => e.Reference).HasMaxLength(100);
+            entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.SubTotal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.CreditedAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
+            entity.Ignore(e => e.CustomerId);
+            entity.Ignore(e => e.BalanceAmount);
+            entity.HasOne(e => e.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.TaxGroup)
+                .WithMany()
+                .HasForeignKey(e => e.TaxGroupId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<InvoiceLineItem>(entity =>
+        {
+            entity.ToTable("InvoiceLineItem");
+            entity.Property(e => e.Description).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnitCost).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.CostTotal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Ignore(e => e.LineTotal);
+            entity.HasOne(e => e.Invoice)
+                .WithMany(i => i.LineItems)
+                .HasForeignKey(e => e.InvoiceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.GLAccount)
+                .WithMany()
+                .HasForeignKey(e => e.GLAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse)
+                .WithMany()
+                .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Location)
+                .WithMany()
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.TaxGroup)
+                .WithMany()
+                .HasForeignKey(e => e.TaxGroupId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Customer>(entity =>
+        {
+            entity.Ignore(e => e.Invoices);
         });
 
         builder.Entity<Activity>(entity =>
@@ -1365,6 +1490,228 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<FinancePurchaseOrder>(entity =>
+        {
+            entity.ToTable("FinancePurchaseOrders");
+            entity.Property(e => e.OrderNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Remarks).HasMaxLength(500);
+
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => e.VendorId);
+            entity.HasIndex(e => e.TaxGroupId);
+            entity.HasIndex(e => e.PaymentTermId);
+
+            entity.HasOne(e => e.Vendor)
+                .WithMany()
+                .HasForeignKey(e => e.VendorId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.PaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.TaxGroup)
+                .WithMany()
+                .HasForeignKey(e => e.TaxGroupId);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinancePurchaseOrderItem>(entity =>
+        {
+            entity.ToTable("FinancePurchaseOrderItems");
+            entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.OrderedQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.ReceivedQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.InvoicedQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CancelledQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.CurrencyCode).HasMaxLength(3);
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TaxCode).HasMaxLength(50);
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.LineTotal).HasColumnType("decimal(18,2)");
+
+            entity.HasIndex(e => e.FinancePurchaseOrderId);
+            entity.HasIndex(e => e.GlAccountId);
+            entity.HasIndex(e => e.InventoryItemId);
+            entity.HasIndex(e => e.TaxGroupId);
+            entity.HasIndex(e => e.TenantId);
+
+            entity.HasOne(e => e.FinancePurchaseOrder)
+                .WithMany(e => e.Items)
+                .HasForeignKey(e => e.FinancePurchaseOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.GlAccount)
+                .WithMany()
+                .HasForeignKey(e => e.GlAccountId);
+            entity.HasOne(e => e.InventoryItem)
+                .WithMany()
+                .HasForeignKey(e => e.InventoryItemId);
+            entity.HasOne(e => e.TaxGroup)
+                .WithMany()
+                .HasForeignKey(e => e.TaxGroupId);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinancePurchaseOrderReceipt>(entity =>
+        {
+            entity.ToTable("FinancePurchaseOrderReceipts");
+            entity.Property(e => e.ReceiptNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Remarks).HasMaxLength(500);
+
+            entity.HasIndex(e => e.FinancePurchaseOrderId);
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => e.VendorInvoiceId);
+
+            entity.HasOne(e => e.FinancePurchaseOrder)
+                .WithMany(e => e.Receipts)
+                .HasForeignKey(e => e.FinancePurchaseOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.VendorInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.VendorInvoiceId);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinancePurchaseOrderReceiptItem>(entity =>
+        {
+            entity.ToTable("FinancePurchaseOrderReceiptItems");
+            entity.Property(e => e.QuantityReceived).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.InvoicedQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+
+            entity.HasIndex(e => e.FinancePurchaseOrderItemId);
+            entity.HasIndex(e => e.FinancePurchaseOrderReceiptId);
+            entity.HasIndex(e => e.TenantId);
+
+            entity.HasOne(e => e.FinancePurchaseOrderItem)
+                .WithMany()
+                .HasForeignKey(e => e.FinancePurchaseOrderItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.FinancePurchaseOrderReceipt)
+                .WithMany(e => e.Items)
+                .HasForeignKey(e => e.FinancePurchaseOrderReceiptId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SupplierReturn>(entity =>
+        {
+            entity.ToTable("SupplierReturns");
+            entity.Property(e => e.ReturnNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.VendorName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(500);
+            entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.SubTotal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
+            entity.HasOne(e => e.Vendor)
+                .WithMany()
+                .HasForeignKey(e => e.VendorId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.OriginalVendorInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalVendorInvoiceId);
+            entity.HasOne(e => e.OriginalFinancePurchaseOrderReceipt)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalFinancePurchaseOrderReceiptId);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SupplierReturnLineItem>(entity =>
+        {
+            entity.ToTable("SupplierReturnLineItems");
+            entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.QuantityReturned).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.LineTotal).HasColumnType("decimal(18,2)");
+            entity.HasOne(e => e.SupplierReturn)
+                .WithMany(r => r.LineItems)
+                .HasForeignKey(e => e.SupplierReturnId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SupplierDebitNote>(entity =>
+        {
+            entity.ToTable("SupplierDebitNotes");
+            entity.Property(e => e.DebitNoteNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.SubTotal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
+            entity.HasOne(e => e.Vendor)
+                .WithMany()
+                .HasForeignKey(e => e.VendorId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.SupplierReturn)
+                .WithMany()
+                .HasForeignKey(e => e.SupplierReturnId);
+            entity.HasOne(e => e.OriginalVendorInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalVendorInvoiceId);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SupplierDebitNoteLineItem>(entity =>
+        {
+            entity.ToTable("SupplierDebitNoteLineItems");
+            entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.LineTotal).HasColumnType("decimal(18,2)");
+            entity.HasOne(e => e.SupplierDebitNote)
+                .WithMany(d => d.LineItems)
+                .HasForeignKey(e => e.SupplierDebitNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<VendorPayment>(entity =>
         {
             entity.ToTable("VendorPayment");
@@ -1465,6 +1812,39 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<AccountingBook>(entity =>
+        {
+            entity.ToTable("AccountingBooks");
+            entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
+            entity.Property(e => e.Code).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.Purpose).HasMaxLength(50);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountAccountingBook>(entity =>
+        {
+            entity.ToTable("AccountAccountingBooks");
+            entity.HasIndex(e => new { e.TenantId, e.AccountId, e.AccountingBookId }).IsUnique();
+            entity.Property(e => e.FinancialStatementLineItem).HasMaxLength(100);
+            entity.HasOne(e => e.Account)
+                .WithMany(a => a.AccountingBooks)
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany(book => book.AccountMappings)
+                .HasForeignKey(e => e.AccountingBookId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<JournalEntry>(entity =>
         {
             entity.ToTable("JournalEntries");
@@ -1537,6 +1917,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.StockMovementId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FixedAsset>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.AssetCode }).IsUnique();
+            entity.Property(e => e.Location).HasMaxLength(500);
         });
 
         // Configure FixedAssetCategory → Account relationships (prevent cascade cycles with multiple FKs)
@@ -1705,9 +2091,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new SupplierGroupConfiguration());
         builder.ApplyConfiguration(new PriceListChangeHistoryConfiguration());
 
-        builder.Ignore<Customer>();
-        builder.Ignore<Invoice>();
-        builder.Ignore<InvoiceLineItem>();
         builder.Ignore<Payment>();
 
         // CRM uses BusinessPartner as the account backbone, so we keep the sales entities
@@ -3370,7 +3753,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(wot => wot.Checkout)
                 .WithMany()
                 .HasForeignKey(wot => wot.CheckoutId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // Configure AssetDowntime entity

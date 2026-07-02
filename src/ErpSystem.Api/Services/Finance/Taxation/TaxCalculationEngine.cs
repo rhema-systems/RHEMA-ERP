@@ -193,7 +193,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             // Fetch all active rules
             var rules = await _context.TaxRules
                 .Include(r => r.TaxGroup)
-                    .ThenInclude(g => g.Components.Where(c => !c.IsDeleted))
+                    .ThenInclude(g => g!.Components.Where(c => !c.IsDeleted))
                         .ThenInclude(c => c.Tax)
                 .Where(r => r.TenantId == TenantId && r.IsActive)
                 .OrderBy(r => r.Priority)
@@ -205,8 +205,13 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             string? customerType = null;
             if (request.CustomerId.HasValue)
             {
-                var customer = await _context.Customers
-                    .FirstOrDefaultAsync(c => c.Id == request.CustomerId.Value, cancellationToken);
+                var customer = await _context.BusinessPartners
+                    .FirstOrDefaultAsync(c =>
+                        c.Id == request.CustomerId.Value &&
+                        c.TenantId == TenantId &&
+                        !c.IsDeleted &&
+                        (c.PartnerType == "Customer" || c.PartnerType == "Both"),
+                        cancellationToken);
                 customerType = customer?.CustomerType;
             }
 

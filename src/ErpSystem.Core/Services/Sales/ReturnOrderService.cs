@@ -3,6 +3,8 @@ using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -19,6 +21,9 @@ public class ReturnOrderService : IReturnOrderService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<ReturnOrderService> _logger;
+    private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly ISubledgerPostingService _subledgerPostingService;
 
     public ReturnOrderService(
         IGenericRepository<ReturnOrder> returnRepo,
@@ -28,7 +33,10 @@ public class ReturnOrderService : IReturnOrderService
         IGenericRepository<Refund> refundRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
-        ILogger<ReturnOrderService> logger)
+        ILogger<ReturnOrderService> logger,
+        IDocumentNumberingService documentNumberingService,
+        IWorkflowIntegrationService workflowIntegrationService,
+        ISubledgerPostingService subledgerPostingService)
     {
         _returnRepo = returnRepo;
         _returnLineRepo = returnLineRepo;
@@ -38,6 +46,9 @@ public class ReturnOrderService : IReturnOrderService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _documentNumberingService = documentNumberingService;
+        _workflowIntegrationService = workflowIntegrationService;
+        _subledgerPostingService = subledgerPostingService;
     }
 
     // ═════════════════════════════════════
@@ -46,8 +57,13 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<ReturnOrderDetailDto> CreateReturnOrderAsync(CreateReturnOrderDto dto)
     {
-        var docNumber = $"RO-{await _returnRepo.CountAsync() + 1:D6}";
         var tenantId = _currentUserProvider.TenantId;
+        var docNumber = await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.ReturnOrder,
+            tenantId,
+            DateTime.UtcNow,
+            nameof(ReturnOrder));
 
         var ro = new ReturnOrder
         {
@@ -87,6 +103,16 @@ public class ReturnOrderService : IReturnOrderService
         ro.TotalAmount = total;
         await _returnRepo.UpdateAsync(ro);
         await _unitOfWork.SaveChangesAsync();
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync("ReturnOrder", ro.Id);
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            ro.ReturnStatus = ReturnOrderStatus.Cancelled;
+            ro.InspectionNotes = workflowResult.ExecutionResult.Message ?? "Unable to start customer return approval workflow.";
+            await _returnRepo.UpdateAsync(ro);
+            await _unitOfWork.SaveChangesAsync();
+            throw new InvalidOperationException(ro.InspectionNotes);
+        }
 
         _logger.LogInformation("Created Return Order {DocNumber} for {Amount}", docNumber, total);
         return await GetReturnOrderByIdAsync(ro.Id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -143,6 +169,22 @@ public class ReturnOrderService : IReturnOrderService
         var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
         if (ro.ReturnStatus != ReturnOrderStatus.Requested)
             throw new InvalidOperationException("Only requested return orders can be approved");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync("ReturnOrder", id, _currentUserProvider.UserId, "Approve");
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to process customer return approval workflow.");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Pending)
+            return await GetReturnOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Rejected)
+        {
+            ro.ReturnStatus = ReturnOrderStatus.Rejected;
+            await _returnRepo.UpdateAsync(ro);
+            await _unitOfWork.SaveChangesAsync();
+            return await GetReturnOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+        }
+
         ro.ReturnStatus = ReturnOrderStatus.Approved;
         await _returnRepo.UpdateAsync(ro);
         await _unitOfWork.SaveChangesAsync();
@@ -179,6 +221,13 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<ReturnOrderDetailDto> RejectReturnOrderAsync(Guid id, string? reason = null)
     {
         var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync("ReturnOrder", id, _currentUserProvider.UserId, "Reject", reason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to process customer return rejection workflow.");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Pending)
+            return await GetReturnOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+
         ro.ReturnStatus = ReturnOrderStatus.Rejected;
         ro.InspectionNotes = reason;
         await _returnRepo.UpdateAsync(ro);
@@ -201,8 +250,13 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<CreditNoteDetailDto> CreateCreditNoteAsync(CreateCreditNoteDto dto)
     {
-        var docNumber = $"CN-{await _creditNoteRepo.CountAsync() + 1:D6}";
         var tenantId = _currentUserProvider.TenantId;
+        var docNumber = await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.CreditNote,
+            tenantId,
+            DateTime.UtcNow,
+            nameof(CreditNote));
 
         var cn = new CreditNote
         {
@@ -211,7 +265,7 @@ public class ReturnOrderService : IReturnOrderService
             CustomerId = dto.CustomerId,
             ReturnOrderId = dto.ReturnOrderId,
             OriginalInvoiceId = dto.OriginalInvoiceId,
-            CreditNoteStatus = CreditNoteStatus.Draft,
+            CreditNoteStatus = CreditNoteStatus.PendingApproval,
             Reason = dto.Reason,
             TenantId = tenantId
         };
@@ -240,6 +294,15 @@ public class ReturnOrderService : IReturnOrderService
         cn.TaxAmount = tax;
         await _creditNoteRepo.UpdateAsync(cn);
         await _unitOfWork.SaveChangesAsync();
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync("CreditNote", cn.Id);
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            cn.CreditNoteStatus = CreditNoteStatus.Draft;
+            await _creditNoteRepo.UpdateAsync(cn);
+            await _unitOfWork.SaveChangesAsync();
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to start credit note approval workflow.");
+        }
 
         _logger.LogInformation("Created Credit Note {DocNumber} for {Amount}", docNumber, cn.TotalAmount);
         return await GetCreditNoteByIdAsync(cn.Id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -323,9 +386,40 @@ public class ReturnOrderService : IReturnOrderService
         var cn = await _creditNoteRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Credit Note {id} not found");
         if (cn.CreditNoteStatus != CreditNoteStatus.Draft && cn.CreditNoteStatus != CreditNoteStatus.PendingApproval)
             throw new InvalidOperationException("Only draft/pending credit notes can be approved");
-        cn.CreditNoteStatus = CreditNoteStatus.Approved;
-        await _creditNoteRepo.UpdateAsync(cn);
-        await _unitOfWork.SaveChangesAsync();
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync("CreditNote", id, _currentUserProvider.UserId, "Approve");
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to process credit note approval workflow.");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Pending)
+            return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Rejected)
+        {
+            cn.CreditNoteStatus = CreditNoteStatus.Voided;
+            cn.Reason = $"{cn.Reason}\n[Rejected] Workflow rejected".Trim();
+            await _creditNoteRepo.UpdateAsync(cn);
+            await _unitOfWork.SaveChangesAsync();
+            return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+        }
+
+        await _unitOfWork.BeginTransactionAsync();
+        try
+        {
+            cn.CreditNoteStatus = CreditNoteStatus.Approved;
+            await _creditNoteRepo.UpdateAsync(cn);
+            await _unitOfWork.SaveChangesAsync();
+
+            await _subledgerPostingService.PostSalesCreditNoteAsync(cn.Id);
+
+            await _unitOfWork.CommitAsync();
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync();
+            throw;
+        }
+
         return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
@@ -358,7 +452,12 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<RefundDetailDto> CreateRefundAsync(CreateRefundDto dto)
     {
-        var docNumber = $"RF-{await _refundRepo.CountAsync() + 1:D6}";
+        var docNumber = await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.Refund,
+            _currentUserProvider.TenantId,
+            DateTime.UtcNow,
+            nameof(Refund));
         var refund = new Refund
         {
             DocumentNumber = docNumber,
@@ -366,7 +465,7 @@ public class ReturnOrderService : IReturnOrderService
             CustomerId = dto.CustomerId,
             CreditNoteId = dto.CreditNoteId,
             ReturnOrderId = dto.ReturnOrderId,
-            RefundStatus = RefundStatus.Draft,
+            RefundStatus = RefundStatus.PendingApproval,
             RefundAmount = dto.RefundAmount,
             TotalAmount = dto.RefundAmount,
             RefundMethod = dto.RefundMethod,
@@ -376,6 +475,15 @@ public class ReturnOrderService : IReturnOrderService
 
         await _refundRepo.AddAsync(refund);
         await _unitOfWork.SaveChangesAsync();
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync("Refund", refund.Id);
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            refund.RefundStatus = RefundStatus.Draft;
+            await _refundRepo.UpdateAsync(refund);
+            await _unitOfWork.SaveChangesAsync();
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to start refund approval workflow.");
+        }
 
         _logger.LogInformation("Created Refund {DocNumber} for {Amount}", docNumber, dto.RefundAmount);
         return await GetRefundByIdAsync(refund.Id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -427,6 +535,22 @@ public class ReturnOrderService : IReturnOrderService
         var refund = await _refundRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Refund {id} not found");
         if (refund.RefundStatus != RefundStatus.Draft && refund.RefundStatus != RefundStatus.PendingApproval)
             throw new InvalidOperationException("Only draft/pending refunds can be approved");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync("Refund", id, _currentUserProvider.UserId, "Approve");
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to process refund approval workflow.");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Pending)
+            return await GetRefundByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Rejected)
+        {
+            refund.RefundStatus = RefundStatus.Rejected;
+            await _refundRepo.UpdateAsync(refund);
+            await _unitOfWork.SaveChangesAsync();
+            return await GetRefundByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+        }
+
         refund.RefundStatus = RefundStatus.Approved;
         await _refundRepo.UpdateAsync(refund);
         await _unitOfWork.SaveChangesAsync();
@@ -451,6 +575,13 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<RefundDetailDto> RejectRefundAsync(Guid id, string? reason = null)
     {
         var refund = await _refundRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Refund {id} not found");
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync("Refund", id, _currentUserProvider.UserId, "Reject", reason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to process refund rejection workflow.");
+
+        if (workflowResult.Outcome == WorkflowOutcome.Pending)
+            return await GetRefundByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+
         refund.RefundStatus = RefundStatus.Rejected;
         refund.Reason = $"{refund.Reason}\n[Rejected] {reason}".Trim();
         await _refundRepo.UpdateAsync(refund);

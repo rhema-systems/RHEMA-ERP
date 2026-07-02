@@ -7,8 +7,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -21,15 +23,21 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<UnitJournalEntryService> _logger;
+        private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IWorkflowService _workflowService;
 
         public UnitJournalEntryService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
-            ILogger<UnitJournalEntryService> logger)
+            ILogger<UnitJournalEntryService> logger,
+            IDocumentNumberingService documentNumberingService,
+            IWorkflowService workflowService)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _logger = logger;
+            _documentNumberingService = documentNumberingService;
+            _workflowService = workflowService;
         }
 
         private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
@@ -255,6 +263,18 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("UnitJournalEntry", id);
+            if (!workflowResult.Success)
+            {
+                entry.Status = UnitJournalEntryStatus.Draft;
+                entry.UpdatedAt = DateTime.UtcNow;
+                entry.UpdatedBy = UserName;
+                await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to start unit journal entry approval workflow.");
+            }
+
             _logger.LogInformation("Unit journal entry {EntryNumber} submitted for approval by {User}", entry.EntryNumber, UserName);
 
             return MapToDto(entry);
@@ -272,6 +292,25 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             if (entry.Status != UnitJournalEntryStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending entries can be approved.");
+
+            if (UserId == Guid.Empty)
+                throw new InvalidOperationException("Unable to resolve the current approver.");
+
+            if (!await _workflowService.CanUserApproveAsync("UnitJournalEntry", id, UserId))
+                throw new InvalidOperationException("This unit journal entry is assigned to another workflow approver.");
+
+            var workflowResult = await _workflowService.ProcessApprovalStepAsync("UnitJournalEntry", id, UserId, "Approve");
+            if (!workflowResult.Success)
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to process unit journal entry approval.");
+
+            if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+            {
+                _logger.LogInformation(
+                    "Recorded intermediate approval for unit journal entry {EntryNumber}; workflow status is {WorkflowStatus}",
+                    entry.EntryNumber,
+                    workflowResult.Status);
+                return MapToDto(entry);
+            }
 
             entry.Status = UnitJournalEntryStatus.Approved;
             entry.ApprovedAt = DateTime.UtcNow;
@@ -300,6 +339,25 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             if (entry.Status != UnitJournalEntryStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending entries can be rejected.");
+
+            if (UserId == Guid.Empty)
+                throw new InvalidOperationException("Unable to resolve the current approver.");
+
+            if (!await _workflowService.CanUserApproveAsync("UnitJournalEntry", id, UserId))
+                throw new InvalidOperationException("This unit journal entry is assigned to another workflow approver.");
+
+            var workflowResult = await _workflowService.ProcessApprovalStepAsync("UnitJournalEntry", id, UserId, "Reject", reason);
+            if (!workflowResult.Success)
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to process unit journal entry rejection.");
+
+            if (workflowResult.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed))
+            {
+                _logger.LogInformation(
+                    "Recorded unit journal entry rejection workflow action for {EntryNumber}; workflow status is {WorkflowStatus}",
+                    entry.EntryNumber,
+                    workflowResult.Status);
+                return MapToDto(entry);
+            }
 
             entry.Status = UnitJournalEntryStatus.Rejected;
             entry.RejectionReason = reason;
@@ -457,23 +515,13 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<string> GenerateEntryNumberAsync(CancellationToken cancellationToken = default)
         {
-            var year = DateTime.UtcNow.Year;
-            var prefix = $"UJE-{year}-";
-
-            var lastEntry = await _unitOfWork.Repository<UnitJournalEntry>()
-                .GetQueryable(e => e.TenantId == TenantId && e.EntryNumber.StartsWith(prefix))
-                .OrderByDescending(e => e.EntryNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            int nextNumber = 1;
-            if (lastEntry != null)
-            {
-                var lastNumberStr = lastEntry.EntryNumber.Replace(prefix, "");
-                if (int.TryParse(lastNumberStr, out int lastNumber))
-                    nextNumber = lastNumber + 1;
-            }
-
-            return $"{prefix}{nextNumber:D4}";
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.UnitJournalEntry,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(UnitJournalEntry),
+                cancellationToken: cancellationToken);
         }
 
         private UnitJournalEntryDto MapToDto(UnitJournalEntry entry)

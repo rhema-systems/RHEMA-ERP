@@ -17,8 +17,15 @@ namespace ErpSystem.Core.Entities.Finance
         public string InvoiceNumber { get; set; } = string.Empty;
 
         [Required]
-        public Guid CustomerId { get; set; }
-        public virtual Customer? Customer { get; set; }
+        public Guid BusinessPartnerId { get; set; }
+        public virtual BusinessPartner? BusinessPartner { get; set; }
+
+        [NotMapped]
+        public Guid CustomerId
+        {
+            get => BusinessPartnerId;
+            set => BusinessPartnerId = value;
+        }
 
         [Required]
         [MaxLength(200)]
@@ -46,9 +53,12 @@ namespace ErpSystem.Core.Entities.Finance
         
         [Column(TypeName = "decimal(18,2)")]
         public decimal PaidAmount { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal CreditedAmount { get; set; }
         
         [Column(TypeName = "decimal(18,2)")]
-        public decimal BalanceAmount => TotalAmount - PaidAmount;
+        public decimal BalanceAmount => TotalAmount - PaidAmount - CreditedAmount;
 
         public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
 
@@ -57,6 +67,8 @@ namespace ErpSystem.Core.Entities.Finance
 
         [MaxLength(100)]
         public string? Reference { get; set; }
+
+        public bool IsOpeningBalance { get; set; }
 
         [Required]
         [MaxLength(3)]
@@ -75,12 +87,16 @@ namespace ErpSystem.Core.Entities.Finance
 
         // Payment terms
         public int PaymentTermsDays { get; set; } = 30;
+        public Guid? PaymentTermId { get; set; }
+        public virtual PaymentTerm? PaymentTerm { get; set; }
 
         // Taxation
         public Guid? TaxGroupId { get; set; }
         
         [ForeignKey(nameof(TaxGroupId))]
         public virtual TaxGroup? TaxGroup { get; set; }
+
+        public Guid? JournalEntryId { get; set; }
 
         // Multi-tenant
         public Guid TenantId { get; set; }

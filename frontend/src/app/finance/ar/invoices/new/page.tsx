@@ -34,6 +34,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Popover,
     PopoverContent,
@@ -51,6 +52,7 @@ import { arService } from '@/services/ar-service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { financeService } from '@/services/finance.service';
+import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
@@ -75,6 +77,9 @@ const invoiceSchema = z.object({
     exchangeRate: z.coerce.number().min(0.0001).optional().default(1.0),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
+    paymentTermId: z.string().optional(),
+    discountAmount: z.coerce.number().min(0).optional().default(0),
+    isOpeningBalance: z.boolean().default(false),
     notes: z.string().optional(),
     taxGroupId: z.string().optional(),
     lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
@@ -117,6 +122,11 @@ export default function NewInvoicePage() {
         queryFn: () => taxDataService.getTaxGroups({ isActive: true, applicability: 'Sales' }),
     });
 
+    const { data: paymentTerms = [], isLoading: paymentTermsLoading } = useQuery({
+        queryKey: ['payment-terms', 'Customer'],
+        queryFn: () => paymentTermService.getByApplicableTo('Customer'),
+    });
+
     // Filter customers based on search
     const filteredCustomers = customersData?.items?.filter((customer: any) => {
         if (!customerSearch) return true;
@@ -148,7 +158,7 @@ export default function NewInvoicePage() {
 
 
     const form = useForm<InvoiceFormValues>({
-        resolver: zodResolver(invoiceSchema),
+        resolver: zodResolver(invoiceSchema) as any,
         defaultValues: {
             customerId: preselectedCustomerId || '',
             invoiceDate: new Date(),
@@ -157,19 +167,27 @@ export default function NewInvoicePage() {
             exchangeRate: 1.0,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
+            paymentTermId: 'none',
+            discountAmount: 0,
+            isOpeningBalance: false,
             notes: '',
             lineItems: [
-                { lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0, taxCode: '' }
+                { lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0 }
             ],
         },
     });
 
     const watchInvoiceDate = form.watch('invoiceDate');
+    const watchPaymentTermId = form.watch('paymentTermId');
     useEffect(() => {
         if (watchInvoiceDate) {
             form.setValue('exchangeRateDate', watchInvoiceDate);
+            const selectedTerm = paymentTerms.find(term => term.id === watchPaymentTermId);
+            if (selectedTerm) {
+                form.setValue('dueDate', addDays(watchInvoiceDate, selectedTerm.dueDays));
+            }
         }
-    }, [watchInvoiceDate]);
+    }, [watchInvoiceDate, watchPaymentTermId, paymentTerms]);
 
     const { fields, append, remove } = useFieldArray({
         control: form.control,
@@ -188,6 +206,7 @@ export default function NewInvoicePage() {
 
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const documentDiscount = Math.min(Number(form.watch('discountAmount')) || 0, subtotal);
 
     const getTaxBreakdown = () => {
         let totalTaxAmount = 0;
@@ -235,7 +254,7 @@ export default function NewInvoicePage() {
             }
         });
 
-        const grandTotal = subtotal + totalTaxAmount;
+        const grandTotal = Math.max(0, subtotal + totalTaxAmount - documentDiscount);
 
         return {
             totalTaxAmount,
@@ -246,13 +265,30 @@ export default function NewInvoicePage() {
 
     const taxEstimate = getTaxBreakdown();
     const totalTax = taxEstimate.totalTaxAmount;
-    const totalAmount = taxEstimate.grandTotal;
+    const totalAmount = Math.max(0, taxEstimate.grandTotal);
 
     const formatAmountWithCurrency = (amount: number) => {
         if (watchCurrencyCode === 'GHS') {
             return formatCurrency(amount);
         }
         return `${watchCurrencyCode} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    const formatPaymentTerm = (term: PaymentTermListDto) => {
+        const discountText = term.discountPercent && term.discountDays
+            ? `, ${term.discountPercent}% if paid in ${term.discountDays} days`
+            : '';
+        return `${term.code} - ${term.name} (${term.dueDays} days${discountText})`;
+    };
+
+    const applyPaymentTerm = (paymentTermId: string, invoiceDate = form.getValues('invoiceDate'), fallbackDays?: number) => {
+        form.setValue('paymentTermId', paymentTermId);
+        const selectedTerm = paymentTerms.find(term => term.id === paymentTermId);
+        if (selectedTerm && invoiceDate) {
+            form.setValue('dueDate', addDays(invoiceDate, selectedTerm.dueDays));
+        } else if (fallbackDays !== undefined && invoiceDate) {
+            form.setValue('dueDate', addDays(invoiceDate, fallbackDays));
+        }
     };
 
     // Update due date when customer is selected (based on payment terms)
@@ -263,19 +299,24 @@ export default function NewInvoicePage() {
         const customer = customersData.items.find(c => c.id === customerId);
         if (customer) {
             setSelectedCustomer(customer);
-            const terms = customer.paymentTermsDays || 30;
             const invoiceDate = form.getValues('invoiceDate');
-            form.setValue('dueDate', addDays(invoiceDate, terms));
+            if (customer.paymentTermId) {
+                applyPaymentTerm(customer.paymentTermId, invoiceDate, customer.paymentTermsDays || 30);
+            } else {
+                const terms = customer.paymentTermsDays || 30;
+                form.setValue('paymentTermId', 'none');
+                form.setValue('dueDate', addDays(invoiceDate, terms));
+            }
 
-            if (customer.currency) {
-                form.setValue('currencyCode', customer.currency);
-                if (customer.currency === 'GHS') {
+            if (customer.currencyCode) {
+                form.setValue('currencyCode', customer.currencyCode);
+                if (customer.currencyCode === 'GHS') {
                     form.setValue('exchangeRate', 1.0);
                     form.setValue('exchangeRateSource', 'Daily');
                 } else {
                     try {
-                        const rateObj = await financeService.getCurrentExchangeRate(customer.currency);
-                        const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
+                        const rateObj = await financeService.getCurrentExchangeRate(customer.currencyCode);
+                        const rawRate = rateObj?.rate || (rateObj as any)?.currentExchangeRate || 1.0;
                         const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
                         form.setValue('exchangeRate', finalRate);
                         form.setValue('exchangeRateSource', 'Daily');
@@ -310,6 +351,9 @@ export default function NewInvoicePage() {
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
+                paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
+                discountAmount: Number(data.discountAmount) || 0,
+                isOpeningBalance: data.isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
                     lineItemType: item.lineItemType,
                     productId: item.productId,
@@ -497,6 +541,32 @@ export default function NewInvoicePage() {
                         {/* Default Tax Group removed from main top section to match premium line-driven model */}
 
                         <div className="space-y-2">
+                            <Label>Payment Term</Label>
+                            <Controller
+                                control={form.control}
+                                name="paymentTermId"
+                                render={({ field }) => (
+                                    <Select value={field.value || 'none'} onValueChange={(value) => applyPaymentTerm(value)}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={paymentTermsLoading ? 'Loading terms...' : 'Select payment term'} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">Manual due date / no configured term</SelectItem>
+                                            {paymentTerms.map(term => (
+                                                <SelectItem key={term.id} value={term.id}>
+                                                    {formatPaymentTerm(term)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            />
+                            <span className="text-[11px] text-muted-foreground block mt-1">
+                                Defaults from the customer and updates due date; manual due date remains editable.
+                            </span>
+                        </div>
+
+                        <div className="space-y-2">
                             <Label>Currency</Label>
                             <Controller
                                 control={form.control}
@@ -512,7 +582,7 @@ export default function NewInvoicePage() {
                                             } else {
                                                 try {
                                                     const rateObj = await financeService.getCurrentExchangeRate(val);
-                                                    const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
+                                                    const rawRate = rateObj?.rate || (rateObj as any)?.currentExchangeRate || 1.0;
                                                     const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
                                                     form.setValue('exchangeRate', finalRate);
                                                     form.setValue('exchangeRateSource', 'Daily');
@@ -553,6 +623,23 @@ export default function NewInvoicePage() {
                             </div>
                         )}
 
+                        <div className="flex items-center gap-3 rounded-md border p-3">
+                            <Controller
+                                control={form.control}
+                                name="isOpeningBalance"
+                                render={({ field }) => (
+                                    <Checkbox
+                                        id="isOpeningBalance"
+                                        checked={field.value}
+                                        onCheckedChange={(checked) => field.onChange(checked === true)}
+                                    />
+                                )}
+                            />
+                            <Label htmlFor="isOpeningBalance" className="font-medium">
+                                Opening Balance
+                            </Label>
+                        </div>
+
                         <div className="space-y-2">
                             <Label>Default Tax Group (For new lines)</Label>
                             <Controller
@@ -573,6 +660,20 @@ export default function NewInvoicePage() {
                                 )}
                             />
                             <span className="text-[11px] text-muted-foreground block mt-1">Optional. Pre-populates new lines; can be overridden on each line.</span>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="discountAmount">Document Discount Allowed</Label>
+                            <Input
+                                id="discountAmount"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                {...form.register('discountAmount')}
+                            />
+                            <span className="text-[11px] text-muted-foreground block mt-1">
+                                Posts to the configured Discount Allowed control account when the invoice is posted.
+                            </span>
                         </div>
 
                         {watchCurrencyCode !== 'GHS' && (
@@ -639,7 +740,7 @@ export default function NewInvoicePage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxCode: '' })}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0 })}>
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </CardHeader>
@@ -841,6 +942,12 @@ export default function NewInvoicePage() {
                                     <span>Est. Sales Taxes:</span>
                                     <span className="font-medium text-amber-600">+{formatAmountWithCurrency(totalTax)}</span>
                                 </div>
+                                {documentDiscount > 0 && (
+                                    <div className="flex justify-between w-72 text-sm text-muted-foreground">
+                                        <span>Discount Allowed:</span>
+                                        <span className="font-medium text-red-600">-{formatAmountWithCurrency(documentDiscount)}</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between w-72 text-xl font-bold border-t pt-2 mt-2">
                                     <span>Grand Total:</span>
                                     <span className="text-primary">{formatAmountWithCurrency(totalAmount)}</span>

@@ -48,6 +48,7 @@ function WorkflowAdministrationPageInner() {
   });
 
   const [definitions, setDefinitions] = useState<WorkflowDefinitionAdminDto[]>([]);
+  const [definitionsTotalCount, setDefinitionsTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
   // Edit / Delete actions
@@ -206,7 +207,7 @@ function WorkflowAdministrationPageInner() {
       setLoading(true);
       const result = await workflowApiService.getWorkflowDefinitions({
         page: 1,
-        pageSize: 10,
+        pageSize: 100,
         searchTerm: searchQuery || undefined,
         entityType: entityTypeFilter && entityTypeFilter !== 'all' ? entityTypeFilter : undefined,
         isActive:
@@ -219,6 +220,7 @@ function WorkflowAdministrationPageInner() {
         sortDescending: false,
       } as unknown as WorkflowDefinitionFilterDto);
       setDefinitions(result.data);
+      setDefinitionsTotalCount(result.totalCount);
     } catch (error) {
       console.error('Failed to fetch workflow definitions:', error);
       toast({ title: 'Failed to load definitions', variant: 'destructive' });
@@ -515,6 +517,9 @@ function WorkflowAdministrationPageInner() {
               </Select>
             </div>
             <div className="flex space-x-2">
+              <Badge variant="outline">
+                Showing {definitions.length} of {definitionsTotalCount}
+              </Badge>
               <Badge variant="secondary">All Modules Connected</Badge>
               <Badge variant="outline">Real-time Sync</Badge>
             </div>

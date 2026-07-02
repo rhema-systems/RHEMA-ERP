@@ -10,12 +10,15 @@ import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { financeService } from '@/services/finance.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Plus, Trash2, Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from "@/lib/utils";
+import { useDocumentSequence } from '@/hooks/use-document-sequence';
+import { FinanceDocumentTypes } from '@/types/document-numbering';
 
 // Reusable Searchable Combobox Component
 function SearchableSelect({ items, value, onValueChange, placeholder, displayKey, renderItem }: any) {
@@ -92,15 +95,18 @@ export default function CreatePurchaseOrderPage() {
     const [warehouses, setWarehouses] = useState<any[]>([]);
     const [glAccounts, setGlAccounts] = useState<any[]>([]);
     const [taxGroups, setTaxGroups] = useState<any[]>([]);
+    const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
 
     const [vendorId, setVendorId] = useState('');
-    const [orderNumber, setOrderNumber] = useState(`FPO-${Math.floor(Math.random() * 10000)}`);
+    const [orderNumber, setOrderNumber] = useState('');
+    const orderSequence = useDocumentSequence('Finance', FinanceDocumentTypes.APFinancePurchaseOrder);
     const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
     const [currencyCode, setCurrencyCode] = useState('GHS');
     const [exchangeRate, setExchangeRate] = useState<number>(1.0);
     const [exchangeRateDate, setExchangeRateDate] = useState(new Date().toISOString().split('T')[0]);
     const [exchangeRateSource, setExchangeRateSource] = useState('Daily');
     const [taxGroupId, setTaxGroupId] = useState('');
+    const [paymentTermId, setPaymentTermId] = useState('');
 
     const [lines, setLines] = useState<any[]>([]);
 
@@ -111,12 +117,26 @@ export default function CreatePurchaseOrderPage() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                const [v, i, w, a, tg] = await Promise.all([
+                const loadSupplierPaymentTerms = async () => {
+                    const supplierTerms = await paymentTermService.getByApplicableTo('Supplier');
+                    if (supplierTerms.length > 0) {
+                        return supplierTerms;
+                    }
+
+                    const activeTerms = await paymentTermService.getActive();
+                    return activeTerms.filter(term => {
+                        const applicableTo = (term.applicableTo || 'All').toLowerCase();
+                        return applicableTo === 'all' || applicableTo === 'supplier' || applicableTo === 'vendor';
+                    });
+                };
+
+                const [v, i, w, a, tg, pt] = await Promise.all([
                     businessPartnerService.getActivePartners(),
                     inventoryManagementService.getInventoryItems(),
                     inventoryManagementService.getWarehouses(true),
                     financeService.getAllAccounts(),
-                    taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' })
+                    taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' }),
+                    loadSupplierPaymentTerms()
                 ]);
 
                 // Map, filter out Customers, and deduplicate vendors
@@ -124,7 +144,7 @@ export default function CreatePurchaseOrderPage() {
                     .filter(ven => ven.partnerType !== 'Customer')
                     .map(ven => ({
                         ...ven, 
-                        displayName: ven.name || ven.companyName || ven.partnerName || 'Unknown'
+                        displayName: (ven as any).name || ven.companyName || ven.partnerName || 'Unknown'
                     }));
                 // Sort to prefer vendors that have a currency populated so they are kept during deduplication
                 mappedVendors.sort((a, b) => {
@@ -139,18 +159,23 @@ export default function CreatePurchaseOrderPage() {
                 
                 setVendors(uniqueVendors);
                 setTaxGroups(tg || []);
+                setPaymentTerms(pt || []);
+                const defaultPaymentTerm = (pt || []).find(term => term.isDefault);
+                if (defaultPaymentTerm) {
+                    setPaymentTermId(defaultPaymentTerm.id);
+                }
                 
                 setInventoryItems((i || []).map(item => ({
                     ...item,
-                    displayName: item.name || item.itemName || item.itemCode || 'Unknown'
+                    displayName: item.name || (item as any).itemName || item.itemCode || 'Unknown'
                 })));
                 
                 setWarehouses((w || []).map(wh => ({
                     ...wh,
-                    displayName: wh.name || wh.warehouseName || 'Unknown'
+                    displayName: wh.name || (wh as any).warehouseName || 'Unknown'
                 })));
                 
-                const rawAccounts = a?.data || a || [];
+                const rawAccounts = (a as any)?.data || a || [];
                 // Sort accounts by accountCode (Chart of Accounts standard)
                 const sortedAccounts = [...rawAccounts].sort((x: any, y: any) => {
                     const codeX = (x.accountCode || '').toString();
@@ -173,6 +198,9 @@ export default function CreatePurchaseOrderPage() {
     const handleVendorChange = async (val: string) => {
         setVendorId(val);
         const selectedVendor = vendors.find(v => v.id === val);
+        if (selectedVendor?.paymentTermId) {
+            setPaymentTermId(selectedVendor.paymentTermId);
+        }
         if (selectedVendor && selectedVendor.currency) {
             const currency = selectedVendor.currency;
             setCurrencyCode(currency);
@@ -182,7 +210,7 @@ export default function CreatePurchaseOrderPage() {
             } else {
                 try {
                     const rateObj = await financeService.getCurrentExchangeRate(currency);
-                    const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
+                    const rawRate = rateObj?.rate || (rateObj as any)?.currentExchangeRate || 1.0;
                     const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
                     setExchangeRate(finalRate);
                     setExchangeRateSource('Daily');
@@ -203,7 +231,7 @@ export default function CreatePurchaseOrderPage() {
         } else {
             try {
                 const rateObj = await financeService.getCurrentExchangeRate(val);
-                const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
+                const rawRate = rateObj?.rate || (rateObj as any)?.currentExchangeRate || 1.0;
                 const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
                 setExchangeRate(finalRate);
                 setExchangeRateSource('Daily');
@@ -323,8 +351,9 @@ export default function CreatePurchaseOrderPage() {
         try {
             const newPo = {
                 vendorId: vendorId,
-                orderNumber: orderNumber,
+                orderNumber: orderSequence.allowManualEntry && orderNumber.trim() ? orderNumber.trim() : undefined,
                 orderDate: new Date(orderDate).toISOString(),
+                paymentTermId: paymentTermId || null,
                 currencyCode: currencyCode,
                 exchangeRate: Number(exchangeRate) || 1.0,
                 taxGroupId: taxGroupId === 'none' ? null : (taxGroupId || null),
@@ -365,7 +394,14 @@ export default function CreatePurchaseOrderPage() {
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                         <label className="text-sm font-medium">Order Number</label>
-                        <Input value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+                        <Input
+                            value={orderSequence.allowManualEntry ? orderNumber : orderSequence.sampleNumber}
+                            onChange={(e) => setOrderNumber(e.target.value)}
+                            disabled={!orderSequence.allowManualEntry || orderSequence.loading}
+                            placeholder={orderSequence.allowManualEntry ? `Auto: ${orderSequence.sampleNumber}` : undefined}
+                            className="font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">Assigned by the configured Finance Purchase Order sequence when saved.</p>
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm font-medium">Order Date</label>
@@ -380,6 +416,23 @@ export default function CreatePurchaseOrderPage() {
                             placeholder="Select Vendor"
                             displayKey="displayName"
                         />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium">Payment Terms</label>
+                        <Select value={paymentTermId || 'none'} onValueChange={(value) => setPaymentTermId(value === 'none' ? '' : value)}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select Payment Terms" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">Vendor Default / None</SelectItem>
+                                {paymentTerms.map(term => (
+                                    <SelectItem key={term.id} value={term.id}>
+                                        {term.name} ({term.code})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Controls invoice due date and early-payment discount terms.</p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:col-span-2">
                         <div className="space-y-2">

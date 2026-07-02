@@ -322,9 +322,34 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
         public async Task<decimal> ConvertAsync(decimal amount, string fromCode, string toCode, CancellationToken cancellationToken = default)
         {
-            if (fromCode == toCode) return amount;
-            // Simplified stub. Real logic should query ExchangeRates.
-            return amount; 
+            var fromCurrency = fromCode.Trim().ToUpperInvariant();
+            var toCurrency = toCode.Trim().ToUpperInvariant();
+            if (fromCurrency == toCurrency) return amount;
+
+            var date = DateTime.UtcNow.Date;
+            var rate = await _unitOfWork.Repository<ExchangeRate>()
+                .GetQueryable(r => r.TenantId == TenantId &&
+                                   r.IsActive &&
+                                   r.EffectiveDate <= date &&
+                                   (r.EndDate == null || r.EndDate >= date) &&
+                                   ((r.BaseCurrencyCode == toCurrency && r.TargetCurrencyCode == fromCurrency) ||
+                                    (r.BaseCurrencyCode == fromCurrency && r.TargetCurrencyCode == toCurrency)))
+                .OrderByDescending(r => r.EffectiveDate)
+                .ThenByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (rate == null || rate.Rate <= 0)
+            {
+                return amount;
+            }
+
+            if (rate.BaseCurrencyCode == toCurrency && rate.TargetCurrencyCode == fromCurrency)
+            {
+                return amount * rate.Rate;
+            }
+
+            var inverseRate = rate.InverseRate > 0 ? rate.InverseRate : 1 / rate.Rate;
+            return amount * inverseRate;
         }
 
         public async Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default)

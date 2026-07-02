@@ -39,7 +39,6 @@ public class FixedAssetReportsService : IFixedAssetReportsService
     {
         var dbQuery = _context.FixedAssets
             .Include(a => a.Category)
-            .Include(a => a.MaintenanceAsset)
             .Where(a => a.TenantId == TenantId);
 
         if (query.CategoryId.HasValue)
@@ -49,7 +48,10 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             dbQuery = dbQuery.Where(a => a.Status == query.Status.Value);
 
         if (!string.IsNullOrEmpty(query.SearchTerm))
-            dbQuery = dbQuery.Where(a => a.Name.Contains(query.SearchTerm) || a.AssetCode.Contains(query.SearchTerm));
+            dbQuery = dbQuery.Where(a =>
+                a.Name.Contains(query.SearchTerm) ||
+                a.AssetCode.Contains(query.SearchTerm) ||
+                (a.Location != null && a.Location.Contains(query.SearchTerm)));
 
         var assets = await dbQuery.ToListAsync();
 
@@ -64,7 +66,7 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             NetBookValue = a.NetBookValue,
             Status = a.Status,
             SerialNumber = a.SerialNumber,
-            Location = a.MaintenanceAsset?.Location
+            Location = a.Location
         }).ToList();
 
         return new FixedAssetRegisterDto
@@ -168,7 +170,7 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                 IsVerified = i.IsVerified,
                 Condition = i.Condition,
                 VerificationDate = i.VerificationDate,
-                CurrentLocation = i.CurrentLocation,
+                CurrentLocation = i.CurrentLocation ?? i.FixedAsset?.Location,
                 Notes = i.Notes
             }).ToList()
         };
@@ -185,13 +187,14 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             worksheet.Cells[1, 1].Value = "Asset Code";
             worksheet.Cells[1, 2].Value = "Name";
             worksheet.Cells[1, 3].Value = "Category";
-            worksheet.Cells[1, 4].Value = "Acquisition Date";
-            worksheet.Cells[1, 5].Value = "Cost";
-            worksheet.Cells[1, 6].Value = "Acc. Depreciation";
-            worksheet.Cells[1, 7].Value = "NBV";
-            worksheet.Cells[1, 8].Value = "Status";
+            worksheet.Cells[1, 4].Value = "Location";
+            worksheet.Cells[1, 5].Value = "Acquisition Date";
+            worksheet.Cells[1, 6].Value = "Cost";
+            worksheet.Cells[1, 7].Value = "Acc. Depreciation";
+            worksheet.Cells[1, 8].Value = "NBV";
+            worksheet.Cells[1, 9].Value = "Status";
 
-            using (var range = worksheet.Cells[1, 1, 1, 8])
+            using (var range = worksheet.Cells[1, 1, 1, 9])
             {
                 range.Style.Font.Bold = true;
                 range.Style.Fill.PatternType = ExcelFillStyle.Solid;
@@ -204,11 +207,12 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                 worksheet.Cells[i + 2, 1].Value = item.AssetCode;
                 worksheet.Cells[i + 2, 2].Value = item.Name;
                 worksheet.Cells[i + 2, 3].Value = item.CategoryName;
-                worksheet.Cells[i + 2, 4].Value = item.AcquisitionDate.ToString("yyyy-MM-dd");
-                worksheet.Cells[i + 2, 5].Value = item.Cost;
-                worksheet.Cells[i + 2, 6].Value = item.AccumulatedDepreciation;
-                worksheet.Cells[i + 2, 7].Value = item.NetBookValue;
-                worksheet.Cells[i + 2, 8].Value = item.Status.ToString();
+                worksheet.Cells[i + 2, 4].Value = item.Location;
+                worksheet.Cells[i + 2, 5].Value = item.AcquisitionDate.ToString("yyyy-MM-dd");
+                worksheet.Cells[i + 2, 6].Value = item.Cost;
+                worksheet.Cells[i + 2, 7].Value = item.AccumulatedDepreciation;
+                worksheet.Cells[i + 2, 8].Value = item.NetBookValue;
+                worksheet.Cells[i + 2, 9].Value = item.Status.ToString();
             }
             worksheet.Cells.AutoFitColumns();
         }
@@ -237,6 +241,7 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                             columns.ConstantColumn(80);
                             columns.RelativeColumn();
                             columns.RelativeColumn();
+                            columns.RelativeColumn();
                             columns.ConstantColumn(80);
                             columns.ConstantColumn(80);
                             columns.ConstantColumn(80);
@@ -248,6 +253,7 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                             header.Cell().Element(CellStyle).Text("Code");
                             header.Cell().Element(CellStyle).Text("Name");
                             header.Cell().Element(CellStyle).Text("Category");
+                            header.Cell().Element(CellStyle).Text("Location");
                             header.Cell().Element(CellStyle).Text("Cost");
                             header.Cell().Element(CellStyle).Text("Depr.");
                             header.Cell().Element(CellStyle).Text("NBV");
@@ -261,6 +267,7 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                             table.Cell().Element(ValueStyle).Text(item.AssetCode);
                             table.Cell().Element(ValueStyle).Text(item.Name);
                             table.Cell().Element(ValueStyle).Text(item.CategoryName);
+                            table.Cell().Element(ValueStyle).Text(item.Location ?? string.Empty);
                             table.Cell().Element(ValueStyle).Text(item.Cost.ToString("N2"));
                             table.Cell().Element(ValueStyle).Text(item.AccumulatedDepreciation.ToString("N2"));
                             table.Cell().Element(ValueStyle).Text(item.NetBookValue.ToString("N2"));

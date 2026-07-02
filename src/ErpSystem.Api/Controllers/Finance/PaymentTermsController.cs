@@ -52,6 +52,7 @@ public class PaymentTermsController : ControllerBase
     /// Get payment terms by applicable type (Supplier, Customer, Contractor, All)
     /// </summary>
     [HttpGet("by-type/{applicableTo}")]
+    [HttpGet("applicable/{applicableTo}")]
     public async Task<ActionResult<IEnumerable<PaymentTermDto>>> GetByApplicableTo(string applicableTo)
     {
         var paymentTerms = await _paymentTermService.GetByApplicableToAsync(applicableTo);

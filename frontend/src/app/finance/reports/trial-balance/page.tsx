@@ -1,144 +1,148 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Download, Loader2, Printer, Search } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { Account, FinanceSettings } from '@/types/finance';
-
-// Derived type for trial balance display
-interface TrialBalanceItem {
-    id: string;
-    accountCode: string;
-    accountName: string;
-    accountType: string;
-    openingBalance: number;
-    periodDebit: number;
-    periodCredit: number;
-    currency: string;
-    isSegmented: boolean;
-}
+import type { FinanceSettings, TrialBalanceLineDto, TrialBalanceReportDto } from '@/types/finance';
+import { Download, Loader2, Printer, Search } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { DEFAULT_ACCOUNTING_BOOKS } from '@/lib/finance/accounting-books';
 
 export default function TrialBalancePage() {
     const router = useRouter();
-    const [asOfDate, setAsOfDate] = useState(new Date().toISOString().split('T')[0]);
-    const [currency, setCurrency] = useState('GHS');
+    const [asAtDate, setAsAtDate] = useState(new Date().toISOString().split('T')[0]);
+    const [bookClassification, setBookClassification] = useState('IFRS');
+    const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
     const [hideZeroBalances, setHideZeroBalances] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-
-    // Data loading state
     const [loading, setLoading] = useState(true);
+    const [running, setRunning] = useState(false);
+    const [actionLoading, setActionLoading] = useState<'print' | 'export' | null>(null);
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
-    const [trialBalanceData, setTrialBalanceData] = useState<TrialBalanceItem[]>([]);
+    const [report, setReport] = useState<TrialBalanceReportDto | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
-    // Load settings and accounts on mount
     useEffect(() => {
-        loadData();
+        loadInitialReport();
     }, []);
 
-    const loadData = async () => {
+    const loadInitialReport = async () => {
         try {
             setLoading(true);
-
-            // Load settings first to get COA type
             const settingsData = await financeDataService.getFinanceSettings();
+            const books = await financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS);
             setSettings(settingsData);
-
-            // Load accounts based on COA type
-            const accounts = await financeDataService.getAccounts({ coaType: settingsData.coaType });
-
-            // Transform accounts to trial balance items with mock period activity
-            const items: TrialBalanceItem[] = accounts.map(account => ({
-                id: account.id,
-                accountCode: account.accountCode,
-                accountName: account.accountName,
-                accountType: account.accountType,
-                openingBalance: account.currentBalance || 0,
-                // Mock period activity - in real implementation this would come from journal entries
-                periodDebit: generateMockDebit(account),
-                periodCredit: generateMockCredit(account),
-                currency: account.currencyCode,
-                isSegmented: account.isSegmented || false,
-            }));
-
-            setTrialBalanceData(items);
-        } catch (error) {
-            console.error('Error loading trial balance data:', error);
+            if (books.length > 0) setAccountingBooks(books);
+            const data = await financeDataService.getTrialBalance({
+                asAtDate,
+                bookClassification,
+                includeZeroBalances: !hideZeroBalances,
+            });
+            setReport(data);
+        } catch (err) {
+            console.error('Error loading trial balance report:', err);
+            setError('Could not generate the trial balance report.');
         } finally {
             setLoading(false);
         }
     };
 
-    // Generate mock period debits based on account type
-    const generateMockDebit = (account: Account): number => {
-        const balance = Math.abs(account.currentBalance || 0);
-        switch (account.accountType) {
-            case 'Asset': return Math.round(balance * 0.15);
-            case 'Expense': return Math.round(balance * 0.12);
-            case 'Liability': return Math.round(balance * 0.08);
-            case 'Revenue': return Math.round(balance * 0.02);
-            default: return 0;
+    const runReport = async () => {
+        try {
+            setRunning(true);
+            setError(null);
+            const data = await financeDataService.getTrialBalance({
+                asAtDate,
+                bookClassification,
+                includeZeroBalances: !hideZeroBalances,
+            });
+            setReport(data);
+        } catch (err) {
+            console.error('Error loading trial balance report:', err);
+            setError('Could not generate the trial balance report.');
+        } finally {
+            setRunning(false);
         }
     };
 
-    // Generate mock period credits based on account type
-    const generateMockCredit = (account: Account): number => {
-        const balance = Math.abs(account.currentBalance || 0);
-        switch (account.accountType) {
-            case 'Asset': return Math.round(balance * 0.05);
-            case 'Expense': return Math.round(balance * 0.01);
-            case 'Liability': return Math.round(balance * 0.12);
-            case 'Revenue': return Math.round(balance * 0.18);
-            default: return 0;
-        }
-    };
+    const filteredLines = useMemo(() => {
+        const search = searchTerm.trim().toLowerCase();
+        const lines = report?.lines ?? [];
+        if (!search) return lines;
 
-    // Filter Logic
-    const filteredData = trialBalanceData.filter(item => {
-        const closingBalance = item.openingBalance + item.periodDebit - item.periodCredit;
-        const matchesSearch = item.accountName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            item.accountCode.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesZero = hideZeroBalances ? Math.abs(closingBalance) > 0.01 : true;
+        return lines.filter(line =>
+            line.accountCode.toLowerCase().includes(search) ||
+            line.accountNumber.toLowerCase().includes(search) ||
+            line.accountName.toLowerCase().includes(search)
+        );
+    }, [report, searchTerm]);
 
-        return matchesSearch && matchesZero;
-    }).sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+    const formatMoney = (amount: number) => new Intl.NumberFormat('en-GH', {
+        style: 'decimal',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(amount || 0);
 
-    // Totals Calculation
-    const totals = filteredData.reduce((acc, item) => {
-        const closing = item.openingBalance + item.periodDebit - item.periodCredit;
-        return {
-            openingDebit: acc.openingDebit + (item.openingBalance > 0 ? item.openingBalance : 0),
-            openingCredit: acc.openingCredit + (item.openingBalance < 0 ? Math.abs(item.openingBalance) : 0),
-            periodDebit: acc.periodDebit + item.periodDebit,
-            periodCredit: acc.periodCredit + item.periodCredit,
-            closingDebit: acc.closingDebit + (closing > 0 ? closing : 0),
-            closingCredit: acc.closingCredit + (closing < 0 ? Math.abs(closing) : 0),
-        };
-    }, {
-        openingDebit: 0, openingCredit: 0,
-        periodDebit: 0, periodCredit: 0,
-        closingDebit: 0, closingCredit: 0
+    const reportParameters = () => ({
+        asAtDate,
+        bookClassification,
+        includeZeroBalances: !hideZeroBalances,
     });
 
-    const formatMoney = (amount: number) => {
-        return new Intl.NumberFormat('en-GH', {
-            style: 'decimal',
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        }).format(amount);
+    const openDetailedLedger = (line: TrialBalanceLineDto) => {
+        if (!line.accountId) return;
+
+        const asAt = new Date(asAtDate);
+        const startDate = new Date(asAt.getFullYear(), 0, 1).toISOString().split('T')[0];
+        const params = new URLSearchParams({
+            startDate,
+            endDate: asAtDate,
+            bookClassification,
+            includeReversed: 'true',
+            includeOpeningBalances: 'true',
+        });
+        params.append('accountIds', line.accountId);
+
+        router.push(`/finance/reports/detailed-ledger?${params.toString()}`);
+    };
+
+    const printReport = async () => {
+        try {
+            setActionLoading('print');
+            setError(null);
+            await documentOutputService.printReportDocument(DOCUMENT_TYPES.financeTrialBalance, reportParameters());
+        } catch (err) {
+            console.error('Error printing trial balance report:', err);
+            setError('Could not print the trial balance report.');
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const exportReport = async () => {
+        try {
+            setActionLoading('export');
+            setError(null);
+            await documentOutputService.downloadReportDocument(DOCUMENT_TYPES.financeTrialBalance, reportParameters());
+        } catch (err) {
+            console.error('Error exporting trial balance report:', err);
+            setError('Could not export the trial balance report.');
+        } finally {
+            setActionLoading(null);
+        }
     };
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-96">
+            <div className="flex h-96 items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
         );
@@ -146,32 +150,30 @@ export default function TrialBalancePage() {
 
     return (
         <div className="space-y-6">
-            {/* Page Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Trial Balance</h1>
                     <p className="text-muted-foreground">
                         Statement of all ledger account balances
                         {settings?.coaType === 'Segmented' && (
-                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                            <span className="ml-2 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">
                                 Segmented COA
                             </span>
                         )}
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => window.print()}>
-                        <Printer className="mr-2 h-4 w-4" />
+                    <Button variant="outline" onClick={printReport} disabled={!report || actionLoading !== null}>
+                        {actionLoading === 'print' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
                         Print
                     </Button>
-                    <Button variant="outline">
-                        <Download className="mr-2 h-4 w-4" />
+                    <Button variant="outline" onClick={exportReport} disabled={!report || actionLoading !== null}>
+                        {actionLoading === 'export' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                         Export
                     </Button>
                 </div>
             </div>
 
-            {/* Breadcrumbs */}
             <Breadcrumb>
                 <BreadcrumbList>
                     <BreadcrumbItem>
@@ -192,27 +194,23 @@ export default function TrialBalancePage() {
                 </BreadcrumbList>
             </Breadcrumb>
 
-            {/* Filters */}
             <Card>
                 <CardContent className="p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-5">
                         <div className="space-y-2">
-                            <Label>As Of Date</Label>
-                            <Input
-                                type="date"
-                                value={asOfDate}
-                                onChange={(e) => setAsOfDate(e.target.value)}
-                            />
+                            <Label>As At Date</Label>
+                            <Input type="date" value={asAtDate} onChange={(event) => setAsAtDate(event.target.value)} />
                         </div>
                         <div className="space-y-2">
-                            <Label>Currency</Label>
-                            <Select value={currency} onValueChange={setCurrency}>
+                            <Label>Book</Label>
+                            <Select value={bookClassification} onValueChange={setBookClassification}>
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="GHS">GHS - Ghana Cedi</SelectItem>
-                                    <SelectItem value="USD">USD - US Dollar</SelectItem>
+                                    {accountingBooks.map((book) => (
+                                        <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -221,89 +219,87 @@ export default function TrialBalancePage() {
                             <div className="relative">
                                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                                 <Input
-                                    placeholder="Code or Name..."
                                     className="pl-8"
+                                    placeholder="Code or name..."
                                     value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    onChange={(event) => setSearchTerm(event.target.value)}
                                 />
                             </div>
                         </div>
-                        <div className="flex items-center space-x-2 pb-2">
-                            <Switch
-                                id="hide-zero"
-                                checked={hideZeroBalances}
-                                onCheckedChange={setHideZeroBalances}
-                            />
+                        <div className="flex items-center gap-2 pb-2">
+                            <Switch id="hide-zero" checked={hideZeroBalances} onCheckedChange={setHideZeroBalances} />
                             <Label htmlFor="hide-zero">Hide Zero Balances</Label>
                         </div>
+                        <Button onClick={runReport} disabled={running}>
+                            {running && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Run Report
+                        </Button>
                     </div>
+                    {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
                 </CardContent>
             </Card>
 
-            {/* Report Table */}
             <Card>
-                <CardHeader className="pb-2">
-                    <div className="flex justify-between items-center">
+                <CardHeader className="border-b pb-2">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                         <CardTitle className="text-lg">
-                            Trial Balance as of {new Date(asOfDate).toLocaleDateString()}
+                            Trial Balance as at {report ? new Date(report.asAtDate).toLocaleDateString() : new Date(asAtDate).toLocaleDateString()}
                         </CardTitle>
                         <span className="text-sm text-muted-foreground">
-                            Currency: {currency} | {filteredData.length} accounts
+                            Currency: {report?.currencyCode || settings?.baseCurrency || 'GHS'} | {filteredLines.length} accounts
                         </span>
                     </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                     <div className="rounded-md border">
                         <Table>
                             <TableHeader>
                                 <TableRow className="bg-muted/50">
-                                    <TableHead className={settings?.coaType === 'Segmented' ? 'w-[150px]' : 'w-[100px]'}>Code</TableHead>
+                                    <TableHead className={settings?.coaType === 'Segmented' ? 'w-[180px]' : 'w-[120px]'}>Account</TableHead>
                                     <TableHead>Account Name</TableHead>
-                                    <TableHead className="text-right">Opening Debit</TableHead>
-                                    <TableHead className="text-right">Opening Credit</TableHead>
-                                    <TableHead className="text-right">Period Debit</TableHead>
-                                    <TableHead className="text-right">Period Credit</TableHead>
-                                    <TableHead className="text-right font-bold">Closing Debit</TableHead>
-                                    <TableHead className="text-right font-bold">Closing Credit</TableHead>
+                                    <TableHead>Type</TableHead>
+                                    <TableHead className="text-right">Debit Balance</TableHead>
+                                    <TableHead className="text-right">Credit Balance</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredData.map((item) => {
-                                    const closing = item.openingBalance + item.periodDebit - item.periodCredit;
-                                    const openDebit = item.openingBalance > 0 ? item.openingBalance : 0;
-                                    const openCredit = item.openingBalance < 0 ? Math.abs(item.openingBalance) : 0;
-                                    const closeDebit = closing > 0 ? closing : 0;
-                                    const closeCredit = closing < 0 ? Math.abs(closing) : 0;
-
-                                    return (
-                                        <TableRow key={item.id}>
-                                            <TableCell className="font-medium font-mono text-sm">
-                                                {item.accountCode}
-                                            </TableCell>
-                                            <TableCell>{item.accountName}</TableCell>
-                                            <TableCell className="text-right text-muted-foreground">{openDebit > 0 ? formatMoney(openDebit) : '-'}</TableCell>
-                                            <TableCell className="text-right text-muted-foreground">{openCredit > 0 ? formatMoney(openCredit) : '-'}</TableCell>
-                                            <TableCell className="text-right">{item.periodDebit > 0 ? formatMoney(item.periodDebit) : '-'}</TableCell>
-                                            <TableCell className="text-right">{item.periodCredit > 0 ? formatMoney(item.periodCredit) : '-'}</TableCell>
-                                            <TableCell className="text-right font-bold">{closeDebit > 0 ? formatMoney(closeDebit) : '-'}</TableCell>
-                                            <TableCell className="text-right font-bold">{closeCredit > 0 ? formatMoney(closeCredit) : '-'}</TableCell>
+                                {filteredLines.length > 0 ? (
+                                    filteredLines.map(line => (
+                                        <TableRow
+                                            key={line.accountId}
+                                            className="cursor-pointer hover:bg-muted/50"
+                                            title="Open detailed ledger for this account"
+                                            onClick={() => openDetailedLedger(line)}
+                                        >
+                                            <TableCell className="font-mono text-sm">{line.accountNumber || line.accountCode}</TableCell>
+                                            <TableCell>{line.accountName}</TableCell>
+                                            <TableCell>{line.accountType}</TableCell>
+                                            <TableCell className="text-right">{line.debitBalance ? formatMoney(line.debitBalance) : '-'}</TableCell>
+                                            <TableCell className="text-right">{line.creditBalance ? formatMoney(line.creditBalance) : '-'}</TableCell>
                                         </TableRow>
-                                    );
-                                })}
+                                    ))
+                                ) : (
+                                    <TableRow>
+                                        <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                                            No trial balance lines found
+                                        </TableCell>
+                                    </TableRow>
+                                )}
                             </TableBody>
                             <tfoot className="bg-muted/50 font-bold">
                                 <TableRow>
-                                    <TableCell colSpan={2} className="text-right">TOTALS:</TableCell>
-                                    <TableCell className="text-right">{formatMoney(totals.openingDebit)}</TableCell>
-                                    <TableCell className="text-right">{formatMoney(totals.openingCredit)}</TableCell>
-                                    <TableCell className="text-right">{formatMoney(totals.periodDebit)}</TableCell>
-                                    <TableCell className="text-right">{formatMoney(totals.periodCredit)}</TableCell>
-                                    <TableCell className="text-right text-blue-600">{formatMoney(totals.closingDebit)}</TableCell>
-                                    <TableCell className="text-right text-blue-600">{formatMoney(totals.closingCredit)}</TableCell>
+                                    <TableCell colSpan={3} className="text-right">TOTALS:</TableCell>
+                                    <TableCell className="text-right">{formatMoney(report?.totalDebits ?? 0)}</TableCell>
+                                    <TableCell className="text-right">{formatMoney(report?.totalCredits ?? 0)}</TableCell>
                                 </TableRow>
                             </tfoot>
                         </Table>
                     </div>
+                    {report && !report.isBalanced && (
+                        <div className="mt-3 text-sm text-red-600">
+                            Difference: {formatMoney(report.difference)}
+                        </div>
+                    )}
                 </CardContent>
             </Card>
         </div>

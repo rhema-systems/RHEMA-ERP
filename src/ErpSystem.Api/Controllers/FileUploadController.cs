@@ -25,13 +25,14 @@ public class FileUploadController : ControllerBase
     private static readonly Dictionary<string, string[]> AllowedFileTypes = new()
     {
         { "image", new[] { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico" } },
-        { "document", new[] { ".pdf", ".doc", ".docx", ".txt", ".rtf" } }
+        { "document", new[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".rtf" } }
     };
 
     private static readonly string[] AllowedMimeTypes = new[]
     {
         "image/jpeg", "image/png", "image/gif", "image/bmp", "image/svg+xml", "image/webp", "image/x-icon", "image/vnd.microsoft.icon",
         "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv",
         "text/plain", "application/rtf"
     };
     private static readonly char[] second = new[] { ' ', '.', ',', ';' };

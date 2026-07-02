@@ -48,8 +48,16 @@ export default function FiscalPeriodsPage() {
         loadData();
     }, [loadData]);
 
+    const getPeriodStatus = (period: FiscalPeriod): string => {
+        const legacyPeriod = period as FiscalPeriod & { status?: string; isOpen?: boolean };
+
+        return period.periodStatus
+            || legacyPeriod.status
+            || (period.isLocked ? 'Locked' : period.isClosed ? 'Closed' : legacyPeriod.isOpen ? 'Open' : 'Future');
+    };
+
     const filteredPeriods = periods.filter((period) => {
-        if (filterStatus !== 'all' && period.status !== filterStatus) return false;
+        if (filterStatus !== 'all' && getPeriodStatus(period) !== filterStatus) return false;
         // Simple year filter logic - in real app might need more robust date parsing
         if (filterYear !== 'all' && !period.periodName.includes(filterYear) && !period.startDate.startsWith(filterYear)) return false;
         return true;
@@ -239,7 +247,10 @@ export default function FiscalPeriodsPage() {
                                             <td colSpan={6} className="p-4 text-center text-muted-foreground">No periods found matching filters</td>
                                         </tr>
                                     ) : (
-                                        filteredPeriods.map((period) => (
+                                        filteredPeriods.map((period) => {
+                                            const status = getPeriodStatus(period);
+
+                                            return (
                                             <tr key={period.id} className="border-b hover:bg-muted/50">
                                                 <td className="p-4 font-mono font-semibold">{period.periodNumber}</td>
                                                 <td className="p-4 font-medium">{period.periodName}</td>
@@ -247,7 +258,7 @@ export default function FiscalPeriodsPage() {
                                                 <td className="p-4">{formatDate(period.endDate)}</td>
                                                 <td className="p-4">
                                                     <div className="flex flex-col gap-1">
-                                                        {getStatusBadge(period.status)}
+                                                        {getStatusBadge(status)}
                                                         {period.moduleLocks && period.moduleLocks.some(l => l.isLocked) && (
                                                             <Badge variant="outline" className="text-xs w-fit border-orange-200 text-orange-700 bg-orange-50">
                                                                 <Lock className="h-3 w-3 mr-1" />
@@ -266,7 +277,7 @@ export default function FiscalPeriodsPage() {
                                                         />
 
                                                         {/* Period Actions */}
-                                                        {period.status === 'Open' && (
+                                                        {status === 'Open' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
                                                                     <Button
@@ -324,7 +335,7 @@ export default function FiscalPeriodsPage() {
                                                                 </DialogContent>
                                                             </Dialog>
                                                         )}
-                                                        {period.status === 'Closed' && (
+                                                        {status === 'Closed' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
                                                                     <Button variant="outline" size="sm">
@@ -360,7 +371,8 @@ export default function FiscalPeriodsPage() {
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>

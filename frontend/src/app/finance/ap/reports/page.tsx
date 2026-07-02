@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
     Calendar as CalendarIcon,
@@ -35,8 +36,20 @@ import {
     TableRow,
 } from '@/components/ui/table';
 
+const REPORT_TABS = ['aging', 'cash', 'statements'] as const;
+
+function getReportTab(tab: string | null) {
+    return REPORT_TABS.find((reportTab) => reportTab === tab) ?? 'aging';
+}
+
 export default function ApReportsPage() {
-    const [activeTab, setActiveTab] = useState('aging');
+    const searchParams = useSearchParams();
+    const tabParam = searchParams.get('tab');
+    const [activeTab, setActiveTab] = useState(() => getReportTab(tabParam));
+
+    useEffect(() => {
+        setActiveTab(getReportTab(tabParam));
+    }, [tabParam]);
 
     return (
         <div className="space-y-8 p-8 max-w-[1600px] mx-auto">

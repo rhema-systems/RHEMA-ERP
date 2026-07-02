@@ -31,6 +31,7 @@ namespace ErpSystem.Core.Interfaces
         Task<BalanceSheetDto> GenerateBalanceSheetAsync(BalanceSheetRequestDto request);
         Task<IncomeStatementDto> GenerateIncomeStatementAsync(IncomeStatementRequestDto request);
         Task<TrialBalanceDto> GenerateTrialBalanceAsync(TrialBalanceRequestDto request);
+        Task<DetailedLedgerReportDto> GenerateDetailedLedgerAsync(DetailedLedgerRequestDto request);
         Task<CashFlowStatementDto> GenerateCashFlowStatementAsync(CashFlowStatementRequestDto request);
         Task<MultiCurrencyDetailReportDto> GenerateMultiCurrencyDetailReportAsync(MultiCurrencyDetailRequestDto request);
         #endregion

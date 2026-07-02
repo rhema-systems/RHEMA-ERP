@@ -2,17 +2,30 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Eye } from 'lucide-react';
+import { Plus, Eye, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { financePurchaseOrderService, FinancePurchaseOrder } from '@/services/financePurchaseOrderService';
 import { formatCurrency } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/hooks/use-auth';
+
+const FINANCE_PO_APPROVER_ROLES = [
+    'SuperAdmin',
+    'TenantAdmin',
+    'Manager',
+    'Accounts Officer',
+    'Senior Accountant',
+    'Finance Manager',
+    'Financial Controller',
+];
 
 export default function PurchaseOrdersPage() {
     const router = useRouter();
+    const { hasAnyRole } = useAuth();
     const [pos, setPos] = useState<FinancePurchaseOrder[]>([]);
     const [loading, setLoading] = useState(true);
+    const canOpenApprovalQueue = hasAnyRole(FINANCE_PO_APPROVER_ROLES);
 
     useEffect(() => {
         loadPOs();
@@ -31,16 +44,19 @@ export default function PurchaseOrdersPage() {
 
     const getStatusBadge = (status: any) => {
         const statusStr = typeof status === 'number' ? 
-            (status === 1 ? 'Draft' : status === 2 ? 'Approved' : status === 3 ? 'PartiallyReceived' : status === 4 ? 'Received' : status === 5 ? 'PartiallyInvoiced' : status === 6 ? 'Invoiced' : 'Unknown') : 
+            (status === 1 ? 'Draft' : status === 2 ? 'Approved' : status === 3 ? 'PartiallyReceived' : status === 4 ? 'Received' : status === 5 ? 'PartiallyInvoiced' : status === 6 ? 'Invoiced' : status === 9 ? 'PendingApproval' : status === 10 ? 'Rejected' : 'Unknown') : 
             String(status);
 
         switch (statusStr) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
+            case 'PendingApproval':
+            case 'Pending Approval': return <Badge className="bg-amber-600">Pending Approval</Badge>;
             case 'Approved': return <Badge className="bg-blue-600">Approved</Badge>;
             case 'PartiallyReceived': return <Badge className="bg-indigo-600">Partially Received</Badge>;
             case 'Received': return <Badge className="bg-green-600">Received</Badge>;
             case 'PartiallyInvoiced': return <Badge className="bg-orange-500">Partially Invoiced</Badge>;
             case 'Invoiced': return <Badge className="bg-green-800">Invoiced</Badge>;
+            case 'Rejected': return <Badge variant="destructive">Rejected</Badge>;
             default: return <Badge variant="secondary">Unknown ({status})</Badge>;
         }
     };
@@ -52,9 +68,16 @@ export default function PurchaseOrdersPage() {
                     <h1 className="text-3xl font-bold tracking-tight">Finance Purchase Orders</h1>
                     <p className="text-muted-foreground mt-2">Manage AP Finance POs</p>
                 </div>
-                <Button onClick={() => router.push('/finance/ap/purchase-orders/create')}>
-                    <Plus className="mr-2 h-4 w-4" /> Create PO
-                </Button>
+                <div className="flex gap-2">
+                    {canOpenApprovalQueue && (
+                        <Button variant="outline" onClick={() => router.push('/finance/ap/purchase-orders/approvals')}>
+                            <ShieldCheck className="mr-2 h-4 w-4" /> Approval Queue
+                        </Button>
+                    )}
+                    <Button onClick={() => router.push('/finance/ap/purchase-orders/create')}>
+                        <Plus className="mr-2 h-4 w-4" /> Create PO
+                    </Button>
+                </div>
             </div>
 
             <Card>
@@ -83,7 +106,7 @@ export default function PurchaseOrdersPage() {
                                         <tr key={po.id} className="border-b hover:bg-muted/50">
                                             <td className="p-3 font-medium">{po.orderNumber}</td>
                                             <td className="p-3">{new Date(po.orderDate).toLocaleDateString()}</td>
-                                            <td className="p-3">{formatCurrency(po.totalAmount)}</td>
+                                            <td className="p-3">{formatCurrency(po.totalAmount, po.currencyCode || 'GHS')}</td>
                                             <td className="p-3">{getStatusBadge(po.status)}</td>
                                             <td className="p-3 space-x-2">
                                                 <Button variant="ghost" size="sm" onClick={() => router.push(`/finance/ap/purchase-orders/${po.id}`)}>

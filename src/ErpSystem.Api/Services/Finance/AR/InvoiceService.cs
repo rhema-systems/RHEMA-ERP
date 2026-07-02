@@ -1,12 +1,14 @@
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Numbering;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -25,6 +27,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly IInventoryValuationService _inventoryValuationService;
         private readonly ILogger<InvoiceService> _logger;
+        private readonly IDocumentNumberingService _documentNumberingService;
 
         public InvoiceService(
             IUnitOfWork unitOfWork,
@@ -32,7 +35,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             ITaxCalculationEngine taxEngine,
             ISubledgerPostingService subledgerPostingService,
             IInventoryValuationService inventoryValuationService,
-            ILogger<InvoiceService> logger)
+            ILogger<InvoiceService> logger,
+            IDocumentNumberingService documentNumberingService)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -40,6 +44,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             _subledgerPostingService = subledgerPostingService;
             _inventoryValuationService = inventoryValuationService;
             _logger = logger;
+            _documentNumberingService = documentNumberingService;
         }
 
         private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
@@ -51,7 +56,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
                 .Include(i => i.LineItems)
                     .ThenInclude(li => li.GLAccount)
-                .Include(i => i.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return invoice == null ? null : MapToDto(invoice);
@@ -63,7 +67,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(i => i.TenantId == TenantId && i.InvoiceNumber == invoiceNumber)
                 .Include(i => i.LineItems)
                     .ThenInclude(li => li.GLAccount)
-                .Include(i => i.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return invoice == null ? null : MapToDto(invoice);
@@ -84,7 +87,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             if (query.CustomerId.HasValue)
-                queryable = queryable.Where(i => i.CustomerId == query.CustomerId.Value);
+                queryable = queryable.Where(i => i.BusinessPartnerId == query.CustomerId.Value);
 
             if (!string.IsNullOrWhiteSpace(query.Status))
             {
@@ -106,6 +109,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.DueDate.Value < now &&
                     (i.TotalAmount - i.PaidAmount) > 0);
             }
+
+            if (query.IsOpeningBalance.HasValue)
+                queryable = queryable.Where(i => i.IsOpeningBalance == query.IsOpeningBalance.Value);
 
             // Get total count
             var totalCount = await queryable.CountAsync(cancellationToken);
@@ -147,12 +153,19 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<InvoiceDto> CreateAsync(InvoiceCreateDto dto, CancellationToken cancellationToken = default)
         {
-            // Validate customer exists
-            var customer = await _unitOfWork.Repository<Customer>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == dto.CustomerId);
+            // Validate customer business partner exists
+            var customer = await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(c =>
+                    c.TenantId == TenantId &&
+                    c.Id == dto.CustomerId &&
+                    !c.IsDeleted &&
+                    (c.PartnerType == "Customer" || c.PartnerType == "Both"));
 
             if (customer == null)
                 throw new KeyNotFoundException($"Customer with Id '{dto.CustomerId}' not found.");
+
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? customer.PaymentTermId, cancellationToken);
+            var paymentTermsDays = paymentTerm?.DueDays ?? TryParsePaymentTermsDays(customer.PaymentTerms) ?? 30;
 
             // Check for duplicate invoice
             if (!string.IsNullOrWhiteSpace(dto.Reference))
@@ -171,16 +184,18 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 InvoiceNumber = invoiceNumber,
-                CustomerId = dto.CustomerId,
-                CustomerName = customer.CustomerName,
-                CustomerAddress = customer.Address,
+                BusinessPartnerId = dto.CustomerId,
+                CustomerName = customer.PartnerName,
+                CustomerAddress = customer.PhysicalAddress ?? customer.MailingAddress,
                 InvoiceDate = dto.InvoiceDate,
-                DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(customer.PaymentTermsDays),
+                DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
                 Reference = dto.Reference,
                 Notes = dto.Notes,
+                IsOpeningBalance = dto.IsOpeningBalance,
                 CurrencyCode = dto.CurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
-                PaymentTermsDays = customer.PaymentTermsDays,
+                PaymentTermsDays = paymentTermsDays,
+                PaymentTermId = paymentTerm?.Id ?? customer.PaymentTermId,
                 Status = InvoiceStatus.Draft,
                 CreatedAt = now,
                 CreatedBy = UserName
@@ -288,7 +303,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             await _unitOfWork.Repository<Invoice>().AddAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Created invoice {InvoiceNumber} for customer {CustomerId}", invoiceNumber, customer.Id);
+            _logger.LogInformation("Created invoice {InvoiceNumber} for customer business partner {CustomerId}", invoiceNumber, customer.Id);
 
             return MapToDto(invoice);
         }
@@ -319,6 +334,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.DueDate = dto.DueDate;
             invoice.Reference = dto.Reference;
             invoice.Notes = dto.Notes;
+            invoice.IsOpeningBalance = dto.IsOpeningBalance;
             invoice.DiscountAmount = dto.DiscountAmount;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
@@ -431,7 +447,6 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
-                .Include(i => i.Customer)
                 .Include(i => i.LineItems)
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -447,7 +462,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.UpdatedBy = UserName;
 
             // Process Inventory Issues for Inventory-type line items
-            foreach (var line in invoice.LineItems.Where(l => l.LineItemType == LineItemType.Inventory))
+            foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == LineItemType.Inventory))
             {
                 if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
                 {
@@ -472,14 +487,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             // Update customer's outstanding balance
-            if (invoice.Customer != null)
+            var customerPartner = await GetCustomerPartnerAsync(invoice.CustomerId, cancellationToken);
+            if (customerPartner != null)
             {
                 // Use BaseCurrencyAmount for standardized balance
-                invoice.Customer.OutstandingBalance += invoice.BaseCurrencyAmount;
-                invoice.Customer.LastOrderDate = invoice.InvoiceDate;
-                invoice.Customer.UpdatedAt = now;
-                invoice.Customer.UpdatedBy = UserName;
-                await _unitOfWork.Repository<Customer>().UpdateAsync(invoice.Customer);
+                customerPartner.OutstandingBalance = (customerPartner.OutstandingBalance ?? 0m) + invoice.BaseCurrencyAmount;
+                customerPartner.UpdatedAt = now;
+                customerPartner.UpdatedBy = UserName;
+                await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customerPartner);
             }
 
             await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
@@ -497,7 +512,6 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
-                .Include(i => i.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (invoice == null)
@@ -515,15 +529,16 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Reverse the unpaid portion of the invoice from customer's outstanding balance.
             // If partially paid, only the remaining outstanding (BaseCurrencyAmount - PaidAmount) 
             // should be reversed. The paid allocations will be reversed separately via payment reversal.
-            if (invoice.Customer != null)
+            var customerPartner = await GetCustomerPartnerAsync(invoice.CustomerId, cancellationToken);
+            if (customerPartner != null)
             {
                 var unpaidPortion = invoice.BaseCurrencyAmount - invoice.PaidAmount;
                 if (unpaidPortion > 0)
                 {
-                    invoice.Customer.OutstandingBalance -= unpaidPortion;
-                    invoice.Customer.UpdatedAt = now;
-                    invoice.Customer.UpdatedBy = UserName;
-                    await _unitOfWork.Repository<Customer>().UpdateAsync(invoice.Customer);
+                    customerPartner.OutstandingBalance = (customerPartner.OutstandingBalance ?? 0m) - unpaidPortion;
+                    customerPartner.UpdatedAt = now;
+                    customerPartner.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customerPartner);
                 }
             }
 
@@ -571,7 +586,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var duplicate = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.CustomerId == customerId &&
+                    i.BusinessPartnerId == customerId &&
                     i.Reference == reference &&
                     i.InvoiceDate >= dateTolerance &&
                     i.Status != InvoiceStatus.Cancelled)
@@ -582,29 +597,54 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task<string> GenerateInvoiceNumberAsync(CancellationToken cancellationToken)
         {
-            var prefix = "INV";
-            var currentYear = DateTime.UtcNow.Year;
-            var currentMonth = DateTime.UtcNow.Month;
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.ARInvoice,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(Invoice),
+                cancellationToken: cancellationToken);
+        }
 
-            // Get the last invoice for this month
-            var lastInvoice = await _unitOfWork.Repository<Invoice>()
-                .GetQueryable(i =>
-                    i.TenantId == TenantId &&
-                    i.InvoiceNumber.StartsWith($"{prefix}-{currentYear}{currentMonth:00}"))
-                .OrderByDescending(i => i.InvoiceNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (lastInvoice == null)
-                return $"{prefix}-{currentYear}{currentMonth:00}-0001";
-
-            // Extract sequence number and increment
-            var parts = lastInvoice.InvoiceNumber.Split('-');
-            if (parts.Length >= 3 && int.TryParse(parts[2], out var lastSeq))
+        private async Task<PaymentTerm?> ResolvePaymentTermAsync(Guid? paymentTermId, CancellationToken cancellationToken)
+        {
+            if (!paymentTermId.HasValue || paymentTermId.Value == Guid.Empty)
             {
-                return $"{prefix}-{currentYear}{currentMonth:00}-{(lastSeq + 1):0000}";
+                return null;
             }
 
-            return $"{prefix}-{currentYear}{currentMonth:00}-0001";
+            return await _unitOfWork.Repository<PaymentTerm>()
+                .FirstOrDefaultAsync(pt =>
+                    pt.TenantId == TenantId &&
+                    pt.Id == paymentTermId.Value &&
+                    pt.IsActive &&
+                    !pt.IsDeleted);
+        }
+
+        private async Task<BusinessPartner?> GetCustomerPartnerAsync(Guid customerId, CancellationToken cancellationToken)
+        {
+            return await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(p =>
+                    p.TenantId == TenantId &&
+                    p.Id == customerId &&
+                    !p.IsDeleted &&
+                    (p.PartnerType == "Customer" || p.PartnerType == "Both"));
+        }
+
+        private static int? TryParsePaymentTermsDays(string? paymentTerms)
+        {
+            if (string.IsNullOrWhiteSpace(paymentTerms))
+            {
+                return null;
+            }
+
+            if (paymentTerms.Equals("COD", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            var digits = new string(paymentTerms.Where(char.IsDigit).ToArray());
+            return int.TryParse(digits, out var days) ? days : null;
         }
 
         private InvoiceDto MapToDto(Invoice invoice)
@@ -627,6 +667,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Status = invoice.Status.ToString(),
                 Notes = invoice.Notes,
                 Reference = invoice.Reference,
+                IsOpeningBalance = invoice.IsOpeningBalance,
                 CurrencyCode = invoice.CurrencyCode,
                 ExchangeRate = invoice.ExchangeRate,
                 PaymentTermsDays = invoice.PaymentTermsDays,

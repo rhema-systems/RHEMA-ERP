@@ -205,20 +205,20 @@ export default function ReturnDetailsPage() {
             <CardContent className="space-y-3 font-semibold text-sm">
               <div className="flex justify-between py-1 border-b border-dashed">
                 <span className="text-muted-foreground font-normal">Reclaimed Subtotal:</span>
-                <span>{formatCurrency(ret.subTotal)} {ret.currencyCode}</span>
+                <span>{formatCurrency(ret.subTotal, ret.currencyCode || 'GHS')}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-dashed text-emerald-600">
                 <span className="font-normal text-emerald-600">Reclaimed Tax Total:</span>
-                <span>{formatCurrency(ret.taxAmount)} {ret.currencyCode}</span>
+                <span>{formatCurrency(ret.taxAmount, ret.currencyCode || 'GHS')}</span>
               </div>
               <div className="flex justify-between py-2 border-b text-xl font-extrabold text-slate-800 dark:text-slate-200">
                 <span>Reclaimed Grand Total:</span>
-                <span>{formatCurrency(ret.totalAmount)} {ret.currencyCode}</span>
+                <span>{formatCurrency(ret.totalAmount, ret.currencyCode || 'GHS')}</span>
               </div>
               {ret.currencyCode !== 'GHS' && (
                 <div className="flex justify-between py-1 text-xs text-muted-foreground">
                   <span className="font-normal">Base Currency (GHS):</span>
-                  <span>{formatCurrency(ret.baseCurrencyAmount)} GHS</span>
+                  <span>{formatCurrency(ret.baseCurrencyAmount, 'GHS')}</span>
                 </div>
               )}
             </CardContent>
@@ -294,14 +294,14 @@ export default function ReturnDetailsPage() {
                           {line.description}
                         </td>
                         <td className="p-3 text-right font-bold">{line.quantityReturned}</td>
-                        <td className="p-3 text-right">{formatCurrency(line.unitPrice)}</td>
+                        <td className="p-3 text-right">{formatCurrency(line.unitPrice, ret.currencyCode || 'GHS')}</td>
                         {ret.originalVendorInvoiceId && (
                           <td className="p-3 text-right text-emerald-600">
-                            {formatCurrency(line.taxAmount)}
+                            {formatCurrency(line.taxAmount, ret.currencyCode || 'GHS')}
                           </td>
                         )}
                         <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200">
-                          {formatCurrency(line.lineTotal)}
+                          {formatCurrency(line.lineTotal, ret.currencyCode || 'GHS')}
                         </td>
                       </tr>
                     ))}

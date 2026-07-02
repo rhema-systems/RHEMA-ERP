@@ -215,6 +215,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<IReadOnlyList<FiscalPeriodDto>> GetFiscalPeriodsAsync(
             Guid? fiscalYearId = null,
+            string? status = null,
             CancellationToken cancellationToken = default)
         {
             var query = _unitOfWork.Repository<FiscalPeriod>()
@@ -222,6 +223,12 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             if (fiscalYearId.HasValue)
                 query = query.Where(fp => fp.FiscalYearId == fiscalYearId.Value);
+
+            if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                var normalizedStatus = status.Trim();
+                query = query.Where(fp => fp.PeriodStatus == normalizedStatus);
+            }
 
             var periods = await query
                 .OrderBy(fp => fp.StartDate)

@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -12,13 +13,19 @@ public class AssetTransferService : IAssetTransferService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly IWorkflowService _workflowService;
 
     public AssetTransferService(
         ApplicationDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IDocumentNumberingService documentNumberingService,
+        IWorkflowService workflowService)
     {
         _context = context;
         _currentUser = currentUser;
+        _documentNumberingService = documentNumberingService;
+        _workflowService = workflowService;
     }
 
     private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
@@ -68,7 +75,6 @@ public class AssetTransferService : IAssetTransferService
     public async Task<AssetTransferDto> RequestTransferAsync(RequestAssetTransferDto dto, Guid requestedById)
     {
         var asset = await _context.FixedAssets
-            .Include(a => a.MaintenanceAsset)
             .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == dto.FixedAssetId)
             ?? throw new KeyNotFoundException("Fixed asset not found.");
 
@@ -79,8 +85,7 @@ public class AssetTransferService : IAssetTransferService
             TransferDate = dto.TransferDate,
             TransferType = dto.TransferType,
             Status = AssetTransferStatus.PendingApproval,
-            FromLocation = asset.MaintenanceAsset?.Location,
-            FromCustodianId = asset.MaintenanceAsset?.EmployeeId,
+            FromLocation = asset.Location,
             ToLocation = dto.ToLocation,
             ToCustodianId = dto.ToCustodianId,
             Reason = dto.Reason,
@@ -88,11 +93,28 @@ public class AssetTransferService : IAssetTransferService
             RequestedById = requestedById,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = UserName,
-            ReferenceNumber = $"TRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..4].ToUpper()}"
+            ReferenceNumber = await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.AssetTransfer,
+                TenantId,
+                dto.TransferDate,
+                nameof(AssetTransfer))
         };
 
         _context.AssetTransfers.Add(transfer);
         await _context.SaveChangesAsync();
+
+        var workflowResult = await _workflowService.StartApprovalWorkflowAsync("AssetTransfer", transfer.Id);
+        if (!workflowResult.Success)
+        {
+            transfer.Status = AssetTransferStatus.Rejected;
+            transfer.Comments = workflowResult.Message ?? "Unable to start asset transfer approval workflow.";
+            transfer.UpdatedAt = DateTime.UtcNow;
+            transfer.UpdatedBy = UserName;
+            await _context.SaveChangesAsync();
+
+            throw new InvalidOperationException(transfer.Comments);
+        }
 
         return await GetByIdAsync(transfer.Id) ?? throw new InvalidOperationException("Failed to request transfer.");
     }
@@ -101,7 +123,6 @@ public class AssetTransferService : IAssetTransferService
     {
         var transfer = await _context.AssetTransfers
             .Include(t => t.FixedAsset)
-            .ThenInclude(a => a.MaintenanceAsset)
             .FirstOrDefaultAsync(t => t.TenantId == TenantId && t.Id == transferId)
             ?? throw new KeyNotFoundException("Transfer request not found.");
 
@@ -109,6 +130,19 @@ public class AssetTransferService : IAssetTransferService
         {
             throw new InvalidOperationException("Only pending transfers can be approved.");
         }
+
+        if (CurrentUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("AssetTransfer", transferId, CurrentUserId))
+            throw new InvalidOperationException("This asset transfer is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("AssetTransfer", transferId, CurrentUserId, "Approve", dto.Comments);
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process asset transfer approval.");
+
+        if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+            return await GetByIdAsync(transfer.Id) ?? throw new InvalidOperationException("Failed to retrieve transfer.");
 
         transfer.Status = AssetTransferStatus.Approved;
         transfer.ApprovedById = approvedById;
@@ -126,7 +160,6 @@ public class AssetTransferService : IAssetTransferService
     {
         var transfer = await _context.AssetTransfers
             .Include(t => t.FixedAsset)
-            .ThenInclude(a => a.MaintenanceAsset)
             .FirstOrDefaultAsync(t => t.TenantId == TenantId && t.Id == transferId)
             ?? throw new KeyNotFoundException("Transfer request not found.");
 
@@ -135,14 +168,9 @@ public class AssetTransferService : IAssetTransferService
             throw new InvalidOperationException("Only approved transfers can be completed.");
         }
 
-        if (transfer.FixedAsset.MaintenanceAsset != null)
-        {
-            transfer.FixedAsset.MaintenanceAsset.Location = transfer.ToLocation;
-            transfer.FixedAsset.MaintenanceAsset.EmployeeId = transfer.ToCustodianId;
-            transfer.FixedAsset.MaintenanceAsset.UpdatedAt = DateTime.UtcNow;
-            transfer.FixedAsset.MaintenanceAsset.UpdatedBy = UserName;
-        }
-
+        transfer.FixedAsset.Location = transfer.ToLocation;
+        transfer.FixedAsset.UpdatedAt = DateTime.UtcNow;
+        transfer.FixedAsset.UpdatedBy = UserName;
         transfer.Status = AssetTransferStatus.Completed;
         transfer.UpdatedAt = DateTime.UtcNow;
         transfer.UpdatedBy = UserName;
@@ -173,6 +201,24 @@ public class AssetTransferService : IAssetTransferService
         var transfer = await _context.AssetTransfers
             .FirstOrDefaultAsync(t => t.TenantId == TenantId && t.Id == transferId)
             ?? throw new KeyNotFoundException("Transfer request not found.");
+
+        if (transfer.Status != AssetTransferStatus.PendingApproval)
+        {
+            throw new InvalidOperationException("Only pending transfers can be rejected.");
+        }
+
+        if (CurrentUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("AssetTransfer", transferId, CurrentUserId))
+            throw new InvalidOperationException("This asset transfer is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("AssetTransfer", transferId, CurrentUserId, "Reject", comments);
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process asset transfer rejection.");
+
+        if (workflowResult.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed))
+            return await GetByIdAsync(transfer.Id) ?? throw new InvalidOperationException("Failed to retrieve transfer.");
 
         transfer.Status = AssetTransferStatus.Rejected;
         transfer.Comments = comments;

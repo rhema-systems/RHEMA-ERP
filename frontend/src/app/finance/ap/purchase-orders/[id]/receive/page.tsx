@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { financePurchaseOrderService, FinancePurchaseOrder } from '@/services/financePurchaseOrderService';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
+import { useDocumentSequence } from '@/hooks/use-document-sequence';
+import { FinanceDocumentTypes } from '@/types/document-numbering';
 
 export default function ReceivePOPage({ params }: { params: { id: string } }) {
     const router = useRouter();
@@ -15,7 +17,9 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
     const [po, setPo] = useState<FinancePurchaseOrder | null>(null);
     const [loading, setLoading] = useState(true);
     const [receiveQtys, setReceiveQtys] = useState<Record<string, number>>({});
+    const [receiptNumber, setReceiptNumber] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const receiptSequence = useDocumentSequence('Finance', FinanceDocumentTypes.APGoodsReceipt);
 
     useEffect(() => {
         loadPO();
@@ -29,8 +33,9 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
             // Initialize quantities to remaining
             const initialQtys: Record<string, number> = {};
             data.items.forEach(item => {
+                if (!item.id) return;
                 const remaining = item.orderedQuantity - (item.receivedQuantity || 0);
-                initialQtys[item.id!] = remaining > 0 ? remaining : 0;
+                initialQtys[item.id] = remaining > 0 ? remaining : 0;
             });
             setReceiveQtys(initialQtys);
         } catch (error) {
@@ -44,10 +49,13 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
         if (!po) return;
         setSubmitting(true);
         try {
-            const receiptItems = po.items.map(item => ({
-                financePurchaseOrderItemId: item.id!,
-                quantityReceived: receiveQtys[item.id!] || 0
-            })).filter(r => r.quantityReceived > 0);
+            const receiptItems = po.items
+                .filter((item) => Boolean(item.id))
+                .map(item => ({
+                    financePurchaseOrderItemId: item.id as string,
+                    quantityReceived: receiveQtys[item.id as string] || 0
+                }))
+                .filter(r => r.quantityReceived > 0);
 
             if (receiptItems.length === 0) {
                 toast({ title: 'Warning', description: 'No quantities to receive', variant: 'destructive' });
@@ -56,7 +64,7 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
 
             const receipt = {
                 financePurchaseOrderId: po.id,
-                receiptNumber: `GRV-${Math.floor(Math.random() * 10000)}`,
+                receiptNumber: receiptSequence.allowManualEntry && receiptNumber.trim() ? receiptNumber.trim() : undefined,
                 receiptDate: new Date().toISOString(),
                 remarks: 'E2E Testing Receipt',
                 lines: receiptItems
@@ -94,6 +102,17 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
                     <CardTitle>Enter Quantities to Receive</CardTitle>
                 </CardHeader>
                 <CardContent>
+                    <div className="mb-4 grid max-w-sm gap-2">
+                        <label className="text-sm font-medium text-muted-foreground">GRV Receipt Number</label>
+                        <Input
+                            value={receiptSequence.allowManualEntry ? receiptNumber : receiptSequence.sampleNumber}
+                            onChange={(event) => setReceiptNumber(event.target.value)}
+                            disabled={!receiptSequence.allowManualEntry || receiptSequence.loading}
+                            placeholder={receiptSequence.allowManualEntry ? `Auto: ${receiptSequence.sampleNumber}` : undefined}
+                            className="bg-muted font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">Assigned by the configured Goods Receipt sequence when saved.</p>
+                    </div>
                     <table className="w-full text-sm text-left">
                         <thead className="border-b bg-muted/50">
                             <tr>
@@ -116,9 +135,9 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
                                             type="number" 
                                             min={0} 
                                             max={remaining}
-                                            value={receiveQtys[item.id!] ?? 0}
-                                            onChange={(e) => setReceiveQtys({...receiveQtys, [item.id!]: Number(e.target.value)})}
-                                            disabled={remaining <= 0}
+                                            value={item.id ? receiveQtys[item.id] ?? 0 : 0}
+                                            onChange={(e) => item.id && setReceiveQtys({ ...receiveQtys, [item.id]: Number(e.target.value) })}
+                                            disabled={!item.id || remaining <= 0}
                                         />
                                     </td>
                                 </tr>

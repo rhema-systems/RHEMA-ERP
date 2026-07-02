@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { TrendingUp, Plus, Edit, Upload, Filter, LineChart } from 'lucide-react';
-import type { ExchangeRate } from '@/types/finance';
+import type { ExchangeRate, ExchangeRateType } from '@/types/finance';
 import Link from 'next/link';
 
 

@@ -31,6 +31,9 @@ function SegmentConfigurationContent() {
     const [isValueDialogOpen, setIsValueDialogOpen] = useState(false);
     const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
     const [editingSegment, setEditingSegment] = useState<SegmentStructure | null>(null);
+    const [lookupValueToDelete, setLookupValueToDelete] = useState<SegmentLookupValue | null>(null);
+    const [isDeletingLookupValue, setIsDeletingLookupValue] = useState(false);
+    const [valueFormError, setValueFormError] = useState<string | null>(null);
 
     // Reorder confirmation dialog state
     const [reorderConfirmOpen, setReorderConfirmOpen] = useState(false);
@@ -253,6 +256,7 @@ function SegmentConfigurationContent() {
     const [editingValue, setEditingValue] = useState<SegmentLookupValue | null>(null);
 
     const handleEditValue = (value: SegmentLookupValue) => {
+        setValueFormError(null);
         setEditingValue(value);
         setValueForm({
             segmentValue: value.segmentValue,
@@ -263,51 +267,56 @@ function SegmentConfigurationContent() {
     };
 
     const handleSaveValue = async () => {
-        // Since we don't have a backend endpoint for updating lookup values in the service yet (based on previous context),
-        // we will mock it for now or check if it exists. 
-        // Assuming optimistic update or generic update if available.
-        // Actually, looking at financeDataService, I don't see updateLookupValue.
-        // Let's assume we maintain local state or use a generic update if I missed it.
-        // Wait, I should check finance-data.service.ts first. 
-        // If not there, I will just implement the functionality for the UI but might fail on API call if missing.
+        if (!selectedSegmentId) return;
 
-        // For now, let's implement the UI logic assuming create/update separation or just UI state update if it's a demo.
-        // But user said "remove demo mode", so this must be real.
-        // Checking previous file content of finance-data.service.ts... I don't recall updateLookupValue.
-        // However, I can implement it safely.
+        try {
+            setValueFormError(null);
+            const payload = {
+                segmentStructureId: selectedSegmentId,
+                segmentValue: valueForm.segmentValue,
+                description: valueForm.description,
+                isActive: valueForm.isActive,
+                displayOrder: editingValue ? editingValue.displayOrder : (lookupValues[selectedSegmentId]?.length || 0) + 1,
+                effectiveDate: editingValue?.effectiveDate ?? new Date().toISOString(),
+            };
 
-        const newValue: SegmentLookupValue = {
-            id: editingValue ? editingValue.id : `val-${Date.now()}`,
-            segmentStructureId: selectedSegmentId,
-            segmentValue: valueForm.segmentValue,
-            description: valueForm.description,
-            effectiveDate: editingValue ? editingValue.effectiveDate : new Date().toISOString(),
-            isActive: valueForm.isActive,
-            displayOrder: editingValue ? editingValue.displayOrder : (lookupValues[selectedSegmentId]?.length || 0) + 1,
-            createdAt: editingValue ? editingValue.createdAt : new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-        };
+            if (editingValue) {
+                await financeDataService.updateSegmentLookupValue(selectedSegmentId, editingValue.id, {
+                    ...payload,
+                    id: editingValue.id,
+                });
+                toast.success('Value updated');
+            } else {
+                await financeDataService.createSegmentLookupValue(selectedSegmentId, payload);
+                toast.success('Value created');
+            }
 
-        // TODO: Call API here once endpoint is confirmed. 
-        // For now, updating local state so UI works.
-
-        const currentValues = lookupValues[selectedSegmentId] || [];
-        let newValues;
-
-        if (editingValue) {
-            newValues = currentValues.map(v => v.id === editingValue.id ? newValue : v);
-            toast.success('Value updated (Local)');
-        } else {
-            newValues = [...currentValues, newValue];
-            toast.success('Value created (Local)');
+            await fetchLookupValues(selectedSegmentId);
+            setIsValueDialogOpen(false);
+            resetValueForm();
+        } catch (error) {
+            console.error('Failed to save lookup value:', error);
+            const message = error instanceof Error ? error.message : editingValue ? 'Failed to update value' : 'Failed to create value';
+            setValueFormError(message);
+            toast.error(message);
         }
+    };
 
-        setLookupValues({
-            ...lookupValues,
-            [selectedSegmentId]: newValues,
-        });
-        setIsValueDialogOpen(false);
-        resetValueForm();
+    const handleDeleteValue = async () => {
+        if (!selectedSegmentId || !lookupValueToDelete) return;
+
+        try {
+            setIsDeletingLookupValue(true);
+            await financeDataService.deleteSegmentLookupValue(selectedSegmentId, lookupValueToDelete.id);
+            toast.success('Value deleted');
+            await fetchLookupValues(selectedSegmentId);
+            setLookupValueToDelete(null);
+        } catch (error) {
+            console.error('Failed to delete lookup value:', error);
+            toast.error(error instanceof Error ? error.message : 'Failed to delete value');
+        } finally {
+            setIsDeletingLookupValue(false);
+        }
     };
 
     const resetValueForm = () => {
@@ -316,6 +325,7 @@ function SegmentConfigurationContent() {
             description: '',
             isActive: true,
         });
+        setValueFormError(null);
         setEditingValue(null);
     };
 
@@ -497,7 +507,6 @@ function SegmentConfigurationContent() {
                                                 onCheckedChange={(checked) =>
                                                     setSegmentForm({ ...segmentForm, isMandatory: checked as boolean })
                                                 }
-                                                disabled={!!editingSegment}
                                             />
                                             <Label htmlFor="isMandatory">Mandatory Segment</Label>
                                         </div>
@@ -737,6 +746,11 @@ function SegmentConfigurationContent() {
                                                     />
                                                     <Label htmlFor="valueActive">Active</Label>
                                                 </div>
+                                                {valueFormError && (
+                                                    <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                                        {valueFormError}
+                                                    </div>
+                                                )}
                                             </div>
                                             <DialogFooter>
                                                 <Button variant="outline" onClick={() => setIsValueDialogOpen(false)}>Cancel</Button>
@@ -768,10 +782,18 @@ function SegmentConfigurationContent() {
                                                         </Badge>
                                                     </td>
                                                     <td className="p-3 text-right">
-                                                        <Button variant="ghost" size="sm" onClick={() => handleEditValue(value)}>
+                                                        <Button variant="ghost" size="sm" onClick={() => handleEditValue(value)} title="Edit value">
                                                             <Edit className="h-4 w-4" />
                                                         </Button>
-
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="text-destructive hover:text-destructive"
+                                                            onClick={() => setLookupValueToDelete(value)}
+                                                            title="Delete value"
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
                                                     </td>
                                                 </tr>
                                             )) || (
@@ -807,6 +829,32 @@ function SegmentConfigurationContent() {
                         <AlertDialogCancel onClick={() => setPendingReorder(null)}>Cancel</AlertDialogCancel>
                         <AlertDialogAction onClick={handleReorderConfirm}>
                             Yes, Reorder Segments
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Lookup Value Delete Confirmation Dialog */}
+            <AlertDialog open={!!lookupValueToDelete} onOpenChange={(open) => !open && setLookupValueToDelete(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Lookup Value?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will delete lookup value <strong>{lookupValueToDelete?.segmentValue}</strong>
+                            {lookupValueToDelete?.description ? ` (${lookupValueToDelete.description})` : ''}.
+                            If the value is already used by accounts, the system will deactivate it instead.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDeletingLookupValue}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={isDeletingLookupValue}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                handleDeleteValue();
+                            }}
+                        >
+                            {isDeletingLookupValue ? 'Deleting...' : 'Delete Value'}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

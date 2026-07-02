@@ -20,6 +20,7 @@ export type RevaluationFrequency = 'None' | 'Monthly' | 'Quarterly' | 'Annually'
 
 export interface Currency {
     id: string;
+    tenantId?: string;
     currencyCode: string;
     numericCode: string;
     currencyName: string;
@@ -41,9 +42,11 @@ export interface Currency {
 
 export interface ExchangeRate {
     id: string;
+    tenantId?: string;
     baseCurrencyCode: string;
     targetCurrencyCode: string;
     rate: number;
+    currentExchangeRate?: number;
     effectiveDate: string;
     rateType: ExchangeRateType;
     rateSource: string;
@@ -55,6 +58,7 @@ export interface ExchangeRate {
 
 export interface FiscalYear {
     id: string;
+    tenantId?: string;
     fiscalYearName: string;
     fiscalYearCode: string;
     year: number;
@@ -73,6 +77,7 @@ export interface FiscalYear {
 
 export interface FiscalPeriod {
     id: string;
+    tenantId?: string;
     fiscalYearId: string;
     periodNumber: number;
     periodCode: string;
@@ -80,6 +85,8 @@ export interface FiscalPeriod {
     startDate: string;
     endDate: string;
     periodStatus: PeriodStatus;
+    status?: PeriodStatus;
+    isOpen?: boolean;
     isClosed: boolean;
     isLocked: boolean;
     closedDate?: string;
@@ -114,6 +121,30 @@ export interface ModuleDefinition {
     checkboxLabel?: string;
 }
 
+export interface AccountingBook {
+    id: string;
+    tenantId: string;
+    code: string;
+    name: string;
+    description?: string;
+    purpose: string;
+    isActive: boolean;
+    isDefault: boolean;
+    allowsPosting: boolean;
+    isSystemDefined: boolean;
+    sortOrder: number;
+}
+
+export interface AccountAccountingBook {
+    id: string;
+    accountId: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    isEnabled: boolean;
+    financialStatementLineItem?: string;
+}
+
 export interface Account {
     id: string;
     tenantId: string;
@@ -130,12 +161,17 @@ export interface Account {
     currencyCode: string;
     isMultiCurrency: boolean;
     isIFRSClassified: boolean;
-    isManagementClassified: boolean;
-    isLocalClassified: boolean;
+    isManagementClassified?: boolean;
+    isBaseClassified?: boolean;
+    isLocalClassified?: boolean;
+    isBaseFrameworkClassified?: boolean;
+    isLocalFrameworkClassified?: boolean;
+    accountingBooks?: AccountAccountingBook[];
     ifrsLineItem?: string;
     baseLineItem?: string;
     localLineItem?: string;
     allowDirectPosting: boolean;
+    isPostingAllowed?: boolean;
     isControlAccount: boolean;
     budgetTrackingEnabled: boolean;
     status: AccountStatus;
@@ -198,6 +234,7 @@ export interface SegmentStructure {
 export interface SegmentLookupValue {
     id: string;
     segmentStructureId: string;
+    parentLookupValueId?: string;
     segmentValue: string;
     description: string;
     effectiveDate: string;
@@ -214,6 +251,7 @@ export interface SegmentLookupValue {
  */
 export interface JournalEntry {
     id: string;
+    tenantId?: string;
     /** Backend: JournalNumber */
     journalNumber: string;
     /** Alias kept for backward compat with UI components */
@@ -239,8 +277,11 @@ export interface JournalEntry {
     postingStatus: PostingStatus;
     isReversed: boolean;
     reversalJournalId?: string;
+    originalJournalId?: string;
     /** Alias kept for backward compat */
     reversalJournalEntryId?: string;
+    /** Alias kept for backward compat */
+    originalJournalEntryId?: string;
     postedDate?: string;
     /** Alias kept for backward compat */
     postingDate?: string;
@@ -272,6 +313,7 @@ export interface JournalEntry {
     revaluationType?: string;
     reversalDate?: string;
     reversalReason?: string;
+    reversalType?: string;
     notes?: string;
 }
 
@@ -315,6 +357,20 @@ export interface JournalEntryAttachment {
     uploadedBy: string;
 }
 
+export interface FinanceJournalAuditLog {
+    id: string;
+    action: string;
+    resource: string;
+    resourceId?: string;
+    username: string;
+    userId: string;
+    timestamp: string;
+    ipAddress?: string;
+    userAgent?: string;
+    oldValues?: unknown;
+    newValues?: unknown;
+}
+
 export interface AccountBalance {
     accountId: string;
     balance: number;
@@ -355,6 +411,9 @@ export interface FinanceSettings {
     controlAccountInventoryId?: string;
     controlAccountPayrollId?: string;
     controlAccountTaxId?: string;
+    controlAccountGRVAccrualId?: string;
+    discountAllowedAccountId?: string;
+    discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
     /** True when posted transactions exist — base currency and control accounts become locked */
@@ -374,6 +433,9 @@ export interface UpdateFinanceSettingsDto {
     controlAccountInventoryId?: string;
     controlAccountPayrollId?: string;
     controlAccountTaxId?: string;
+    controlAccountGRVAccrualId?: string;
+    discountAllowedAccountId?: string;
+    discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
 }
@@ -486,10 +548,13 @@ export interface PeriodCloseValidationDto {
 export interface AccountFilters {
     accountType?: AccountType;
     status?: AccountStatus;
-    classification?: 'IFRS' | 'Base' | 'Local';
+    classification?: 'IFRS' | 'LOCAL_STATUTORY' | 'MANAGEMENT';
     isMultiCurrency?: boolean;
     parentAccountId?: string;
     search?: string;
+    page?: number;
+    pageSize?: number;
+    take?: number;
 }
 
 export interface CreateAccountDto {
@@ -604,10 +669,12 @@ export interface JournalEntryFilters {
 }
 
 export interface CreateJournalEntryDto {
-    journalNumber: string;
+    journalNumber?: string;
     transactionDate: string;
+    journalType?: JournalType;
     description?: string;
     reference?: string;
+    notes?: string;
     bookClassification?: string;
     fiscalPeriodId?: string;
     sourceModule?: string;
@@ -630,22 +697,21 @@ export interface CreateAccountTransactionDto {
 
 // Reports
 export interface TrialBalanceRequestDto {
-    periodId?: string;
-    asOfDate?: string;
-    classification?: string;
+    asAtDate?: string;
+    bookClassification?: string;
     includeZeroBalances?: boolean;
-    accountTypes?: AccountType[];
-    segmentFilters?: Record<string, string>;
 }
 
 export interface TrialBalanceReportDto {
-    reportDate: string;
-    periodName: string;
-    classification: string;
-    accounts: TrialBalanceLineDto[];
+    companyName: string;
+    asAtDate: string;
+    bookClassification: string;
+    currencyCode: string;
+    lines: TrialBalanceLineDto[];
     totalDebits: number;
     totalCredits: number;
     isBalanced: boolean;
+    difference: number;
 }
 
 export interface TrialBalanceLineDto {
@@ -657,35 +723,213 @@ export interface TrialBalanceLineDto {
     debitBalance: number;
     creditBalance: number;
     netBalance: number;
-    segmentValues?: Record<string, string>;
+}
+
+export interface DetailedLedgerRequestDto {
+    startDate: string;
+    endDate: string;
+    accountIds?: string[];
+    bookClassification?: string;
+    includeReversed?: boolean;
+    includeOpeningBalances?: boolean;
+}
+
+export interface DetailedLedgerReportDto {
+    companyName: string;
+    reportDate: string;
+    startDate: string;
+    endDate: string;
+    bookClassification: string;
+    currencyCode: string;
+    accounts: DetailedLedgerAccountDto[];
+    totalDebits: number;
+    totalCredits: number;
+}
+
+export interface DetailedLedgerAccountDto {
+    accountId: string;
+    accountCode: string;
+    accountNumber: string;
+    accountName: string;
+    accountType: string;
+    openingBalance: number;
+    openingBalanceType: 'Debit' | 'Credit' | '';
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
+    closingBalanceType: 'Debit' | 'Credit' | '';
+    lines: DetailedLedgerLineDto[];
+}
+
+export interface DetailedLedgerLineDto {
+    transactionId: string;
+    journalEntryId: string;
+    journalEntryNumber: string;
+    transactionDate: string;
+    lineNumber: number;
+    description: string;
+    reference: string;
+    sourceModule: string;
+    postingStatus: string;
+    debitAmount: number;
+    creditAmount: number;
+    runningBalance: number;
+    runningBalanceType: 'Debit' | 'Credit' | '';
+    currencyCode?: string;
+    foreignAmount?: number;
+    exchangeRate?: number;
+    isReversed: boolean;
 }
 
 export interface IncomeStatementRequestDto {
-    periodId?: string;
-    startDate?: string;
-    endDate?: string;
-    classification?: string;
-    comparePeriodId?: string;
-    includeBudget?: boolean;
+    periodStart: string;
+    periodEnd: string;
+    bookClassification?: string;
+    includeAccountDetails?: boolean;
 }
 
 export interface BalanceSheetRequestDto {
-    asOfDate: string;
-    classification?: string;
-    compareAsOfDate?: string;
+    asAtDate: string;
+    bookClassification?: string;
+    includeAccountDetails?: boolean;
 }
 
 export interface CashFlowStatementRequestDto {
-    periodId?: string;
-    startDate?: string;
-    endDate?: string;
-    classification?: string;
+    periodStart: string;
+    periodEnd: string;
+    bookClassification?: string;
+    includeAccountDetails?: boolean;
+    method?: 'Direct' | 'Indirect';
 }
 
 export interface MultiCurrencyDetailRequestDto {
     accountId?: string;
     currencyCode?: string;
-    asOfDate?: string;
+    startDate: string;
+    endDate: string;
+    includeRevaluation?: boolean;
+}
+
+export interface IncomeStatementReportDto {
+    companyName: string;
+    periodStart: string;
+    periodEnd: string;
+    bookClassification: string;
+    currencyCode: string;
+    sections: IncomeStatementSectionDto[];
+    totalRevenue: number;
+    totalCostOfSales: number;
+    grossProfit: number;
+    totalOperatingExpenses: number;
+    operatingProfit: number;
+    totalOtherIncome: number;
+    totalOtherExpenses: number;
+    profitBeforeTax: number;
+    taxExpense: number;
+    netProfit: number;
+}
+
+export interface IncomeStatementSectionDto {
+    sectionName: string;
+    sectionOrder: number;
+    lineItems: FinancialStatementLineItemDto[];
+    sectionTotal: number;
+}
+
+export interface FinancialStatementLineItemDto {
+    lineItemName: string;
+    amount: number;
+    lineOrder: number;
+    accountNumbers?: string[];
+}
+
+export interface BalanceSheetReportDto {
+    companyName: string;
+    asAtDate: string;
+    bookClassification: string;
+    currencyCode: string;
+    sections: BalanceSheetSectionDto[];
+    totalAssets: number;
+    totalLiabilities: number;
+    totalEquity: number;
+    isBalanced: boolean;
+}
+
+export interface BalanceSheetSectionDto {
+    sectionName: string;
+    sectionOrder: number;
+    categories: BalanceSheetCategoryDto[];
+    sectionTotal: number;
+}
+
+export interface BalanceSheetCategoryDto {
+    categoryName: string;
+    categoryOrder: number;
+    lineItems: FinancialStatementLineItemDto[];
+    categoryTotal: number;
+}
+
+export interface CashFlowStatementReportDto {
+    companyName: string;
+    periodStart: string;
+    periodEnd: string;
+    bookClassification: string;
+    currencyCode: string;
+    operatingActivities: CashFlowSectionDto;
+    investingActivities: CashFlowSectionDto;
+    financingActivities: CashFlowSectionDto;
+    netCashFromOperating: number;
+    netCashFromInvesting: number;
+    netCashFromFinancing: number;
+    netIncreaseInCash: number;
+    cashAtBeginning: number;
+    cashAtEnd: number;
+    isReconciled: boolean;
+}
+
+export interface CashFlowSectionDto {
+    sectionName: string;
+    sectionOrder: number;
+    lineItems: FinancialStatementLineItemDto[];
+    sectionTotal: number;
+}
+
+export interface MultiCurrencyDetailReportDto {
+    companyName: string;
+    reportDate: string;
+    periodStart: string;
+    periodEnd: string;
+    accounts: MultiCurrencyAccountDetailDto[];
+}
+
+export interface MultiCurrencyAccountDetailDto {
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    currencyCode: string;
+    openingBalanceForeign: number;
+    openingBalanceBase: number;
+    totalDebitsForeign: number;
+    totalCreditsForeign: number;
+    totalDebitsBase: number;
+    totalCreditsBase: number;
+    closingBalanceForeign: number;
+    closingBalanceBase: number;
+    unrealizedGainLoss: number;
+    transactions: MultiCurrencyTransactionDetailDto[];
+}
+
+export interface MultiCurrencyTransactionDetailDto {
+    transactionDate: string;
+    description: string;
+    reference: string;
+    transactionType: 'Debit' | 'Credit' | string;
+    foreignAmount: number;
+    exchangeRate: number;
+    baseAmount: number;
+    runningBalanceForeign: number;
+    runningBalanceBase: number;
+    isRevaluation: boolean;
 }
 
 // Revaluation

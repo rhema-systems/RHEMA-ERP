@@ -52,6 +52,8 @@ export interface FinanceSettings {
   unrealizedGainLossAccountId?: string;
   realizedGainLossAccountId?: string;
   suspenseAccountId?: string;
+  discountAllowedAccountId?: string;
+  discountReceivedAccountId?: string;
 }
 
 // --- Currency ---
@@ -553,7 +555,7 @@ class FinanceService {
    * Get fiscal periods (optionally filtered by year)
    */
   async getFiscalPeriods(fiscalYearId?: string): Promise<FiscalPeriod[]> {
-    const query = fiscalYearId ? `?fiscalYearId=${fiscalYearId}` : '';
+    const query = fiscalYearId ? `?yearId=${fiscalYearId}` : '';
     return apiService.get<FiscalPeriod[]>(`${this.baseUrl}/fiscal-periods${query}`);
   }
 
@@ -638,7 +640,11 @@ class FinanceService {
    */
   async getAllAccounts(filters?: AccountFilters): Promise<Account[]> {
     const result = await this.getAccounts({ pageSize: 10000, filters });
-    return result.items;
+    if (Array.isArray(result)) {
+      return result;
+    }
+
+    return result.items || (result as any).data || [];
   }
 
   /**
@@ -879,8 +885,8 @@ class FinanceService {
   /**
    * Reverse posted journal entry
    */
-  async reverseJournalEntry(id: string, reason: string): Promise<JournalEntry> {
-    return apiService.post<JournalEntry>(`${this.baseUrl}/journal-entries/${id}/reverse`, { reason });
+  async reverseJournalEntry(id: string, reason: string, reversalDate?: string): Promise<JournalEntry> {
+    return apiService.post<JournalEntry>(`${this.baseUrl}/journal-entries/${id}/reverse`, { reason, reversalDate });
   }
 
   // ==========================================

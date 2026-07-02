@@ -3,8 +3,10 @@ using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -25,23 +27,30 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<VendorPaymentService> _logger;
         private readonly ISubledgerPostingService _subledgerPostingService;
+        private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IWorkflowService _workflowService;
 
         public VendorPaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ITenantSettingsService tenantSettingsService,
             ISubledgerPostingService subledgerPostingService,
-            ILogger<VendorPaymentService> logger)
+            ILogger<VendorPaymentService> logger,
+            IDocumentNumberingService documentNumberingService,
+            IWorkflowService workflowService)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
             _subledgerPostingService = subledgerPostingService;
             _logger = logger;
+            _documentNumberingService = documentNumberingService;
+            _workflowService = workflowService;
         }
 
         private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
         private string UserName => _currentUser.UserName ?? "system";
+        private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
         // ═════════════════════════════════════════════════════════════════
         //  GET
@@ -245,9 +254,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     continue;
                 }
 
-                // Cannot allocate more than remaining balance or unallocated amount
+                // Cannot allocate more cash than remaining balance or unallocated payment amount.
                 var maxAllocatable = Math.Min(balance, payment.TotalAmount - payment.AllocatedAmount);
                 var allocAmount = Math.Min(alloc.AllocatedAmount, maxAllocatable);
+                var discountAmount = Math.Min(alloc.DiscountAmount, Math.Max(balance - allocAmount, 0m));
 
                 if (allocAmount <= 0)
                 {
@@ -262,7 +272,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorPaymentId = paymentId,
                     VendorInvoiceId = alloc.VendorInvoiceId,
                     AllocatedAmount = allocAmount,
-                    DiscountAmount = alloc.DiscountAmount,
+                    DiscountAmount = discountAmount,
                     WithholdingTaxAmount = alloc.WithholdingTaxAmount,
                     AllocationDate = now,
                     Notes = alloc.Notes,
@@ -272,8 +282,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(allocation);
 
-                // Update invoice paid amount
-                invoice.PaidAmount += allocAmount;
+                // Update invoice paid amount. Supplier discounts reduce the payable balance but are not cash.
+                invoice.PaidAmount += allocAmount + discountAmount;
                 if (invoice.PaidAmount >= invoice.TotalAmount)
                     invoice.Status = VendorInvoiceStatus.Paid;
                 else if (invoice.PaidAmount > 0)
@@ -293,7 +303,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorInvoiceId = alloc.VendorInvoiceId,
                     InvoiceNumber = invoice.InvoiceNumber,
                     AllocatedAmount = allocAmount,
-                    DiscountAmount = alloc.DiscountAmount,
+                    DiscountAmount = discountAmount,
                     WithholdingTaxAmount = alloc.WithholdingTaxAmount,
                     AllocationDate = now,
                     Notes = alloc.Notes
@@ -356,7 +366,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(reversal);
 
             // Restore invoice balance
-            allocation.VendorInvoice.PaidAmount -= allocation.AllocatedAmount;
+            allocation.VendorInvoice.PaidAmount -= allocation.AllocatedAmount + allocation.DiscountAmount;
             if (allocation.VendorInvoice.PaidAmount <= 0)
             {
                 allocation.VendorInvoice.PaidAmount = 0;
@@ -494,7 +504,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             // Reverse all non-reversal allocations
             foreach (var alloc in payment.Allocations.Where(a => !a.IsReversal).ToList())
             {
-                alloc.VendorInvoice.PaidAmount -= alloc.AllocatedAmount;
+                alloc.VendorInvoice.PaidAmount -= alloc.AllocatedAmount + alloc.DiscountAmount;
                 if (alloc.VendorInvoice.PaidAmount <= 0)
                 {
                     alloc.VendorInvoice.PaidAmount = 0;
@@ -593,8 +603,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DueDateTo = dto.DueDateTo,
                 PaymentMethod = dto.PaymentMethod,
                 BankAccountId = dto.BankAccountId,
-                Status = PaymentBatchStatus.Draft,
-                CreatedById = _currentUser.UserId != null ? Guid.Parse(_currentUser.UserId) : null,
+                Status = PaymentBatchStatus.PendingApproval,
+                CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId,
                 Notes = dto.Notes,
                 CreatedAt = now,
                 CreatedBy = UserName
@@ -658,6 +668,18 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             await _unitOfWork.Repository<PaymentBatch>().AddAsync(batch);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("PaymentBatch", batch.Id);
+            if (!workflowResult.Success)
+            {
+                batch.Status = PaymentBatchStatus.Draft;
+                batch.UpdatedAt = DateTime.UtcNow;
+                batch.UpdatedBy = UserName;
+                await _unitOfWork.Repository<PaymentBatch>().UpdateAsync(batch);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to start payment batch approval workflow.");
+            }
 
             _logger.LogInformation("Created payment batch {BatchNumber} with {Count} payments, total {Total}",
                 batchNumber, paymentCount, totalAmount);
@@ -733,8 +755,21 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (batch.Status != PaymentBatchStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending batches can be approved.");
 
+            if (CurrentUserId == Guid.Empty)
+                throw new InvalidOperationException("Unable to resolve the current approver.");
+
+            if (!await _workflowService.CanUserApproveAsync("PaymentBatch", batchId, CurrentUserId))
+                throw new InvalidOperationException("This payment batch is assigned to another workflow approver.");
+
+            var workflowResult = await _workflowService.ProcessApprovalStepAsync("PaymentBatch", batchId, CurrentUserId, "Approve");
+            if (!workflowResult.Success)
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to process payment batch approval.");
+
+            if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+                return await GetPaymentBatchAsync(batchId, cancellationToken) ?? throw new InvalidOperationException("Batch not found after approval.");
+
             batch.Status = PaymentBatchStatus.Approved;
-            batch.ApprovedById = _currentUser.UserId != null ? Guid.Parse(_currentUser.UserId) : null;
+            batch.ApprovedById = CurrentUserId;
             batch.ApprovedDate = DateTime.UtcNow;
             batch.UpdatedAt = DateTime.UtcNow;
             batch.UpdatedBy = UserName;
@@ -849,46 +884,24 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private async Task<string> GeneratePaymentNumberAsync(CancellationToken cancellationToken)
         {
-            var prefix = "VP";
-            var currentYear = DateTime.UtcNow.Year;
-
-            var lastPayment = await _unitOfWork.Repository<VendorPayment>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    p.PaymentNumber.StartsWith($"{prefix}-{currentYear}"))
-                .OrderByDescending(p => p.PaymentNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (lastPayment == null)
-                return $"{prefix}-{currentYear}-00001";
-
-            var parts = lastPayment.PaymentNumber.Split('-');
-            if (parts.Length >= 3 && int.TryParse(parts[2], out var lastSeq))
-                return $"{prefix}-{currentYear}-{(lastSeq + 1):00000}";
-
-            return $"{prefix}-{currentYear}-00001";
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.APPayment,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(VendorPayment),
+                cancellationToken: cancellationToken);
         }
 
         private async Task<string> GenerateBatchNumberAsync(CancellationToken cancellationToken)
         {
-            var prefix = "PB";
-            var currentYear = DateTime.UtcNow.Year;
-
-            var lastBatch = await _unitOfWork.Repository<PaymentBatch>()
-                .GetQueryable(b =>
-                    b.TenantId == TenantId &&
-                    b.BatchNumber.StartsWith($"{prefix}-{currentYear}"))
-                .OrderByDescending(b => b.BatchNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (lastBatch == null)
-                return $"{prefix}-{currentYear}-00001";
-
-            var parts = lastBatch.BatchNumber.Split('-');
-            if (parts.Length >= 3 && int.TryParse(parts[2], out var lastSeq))
-                return $"{prefix}-{currentYear}-{(lastSeq + 1):00000}";
-
-            return $"{prefix}-{currentYear}-00001";
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.APPaymentBatch,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(PaymentBatch),
+                cancellationToken: cancellationToken);
         }
 
         private VendorPaymentDto MapToDto(VendorPayment payment)

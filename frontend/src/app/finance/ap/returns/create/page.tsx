@@ -12,6 +12,8 @@ import { accountsPayableService } from '@/services/accountsPayableService';
 import { apiService } from '@/services/api.service';
 import { formatCurrency } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { useDocumentSequence } from '@/hooks/use-document-sequence';
+import { FinanceDocumentTypes } from '@/types/document-numbering';
 
 interface SelectedReturnLine {
   id: string; // original line ID
@@ -44,6 +46,7 @@ export default function CreateReturnPage() {
 
   // Return Header fields
   const [returnNumber, setReturnNumber] = useState<string>('');
+  const returnSequence = useDocumentSequence('Finance', FinanceDocumentTypes.APSupplierReturn);
   const [returnDate, setReturnDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [reason, setReason] = useState<string>('');
 
@@ -102,7 +105,7 @@ export default function CreateReturnPage() {
         setSelectedDoc(doc);
         setCurrencyCode(doc.currencyCode);
         setExchangeRate(doc.exchangeRate);
-        setReturnNumber(`SR-VI-${doc.invoiceNumber.replace(/VI-/gi, '')}-${Math.floor(100 + Math.random() * 900)}`);
+        setReturnNumber('');
 
         // Load existing returns to calculate remaining quantities
         const allReturns = await accountsPayableService.getSupplierReturns();
@@ -139,7 +142,7 @@ export default function CreateReturnPage() {
         setSelectedDoc(doc);
         setCurrencyCode(doc.financePurchaseOrder?.currencyCode || 'GHS');
         setExchangeRate(doc.financePurchaseOrder?.exchangeRate || 1.0);
-        setReturnNumber(`SR-GRV-${doc.receiptNumber.replace(/GRV-/gi, '')}-${Math.floor(100 + Math.random() * 900)}`);
+        setReturnNumber('');
 
         // Load existing returns to calculate remaining quantities
         const allReturns = await accountsPayableService.getSupplierReturns();
@@ -237,7 +240,7 @@ export default function CreateReturnPage() {
     setSubmitting(true);
     try {
       const payload = {
-        returnNumber: returnNumber.trim(),
+        returnNumber: returnSequence.allowManualEntry && returnNumber.trim() ? returnNumber.trim() : undefined,
         vendorId: selectedDoc.businessPartnerId || selectedDoc.vendorId || selectedDoc.financePurchaseOrder?.vendorId,
         vendorName: selectedDoc.supplierName || selectedDoc.vendorName || selectedDoc.financePurchaseOrder?.vendorName || '',
         originalVendorInvoiceId: sourceType === 'invoice' ? selectedDocId : null,
@@ -343,7 +346,7 @@ export default function CreateReturnPage() {
                   {sourceType === 'invoice' ? (
                     invoices.map(inv => (
                       <option key={inv.id} value={inv.id}>
-                        {inv.invoiceNumber} - {inv.supplierName} ({inv.currencyCode} {formatCurrency(inv.totalAmount)})
+                        {inv.invoiceNumber} - {inv.supplierName} ({formatCurrency(inv.totalAmount, inv.currencyCode || 'GHS')})
                       </option>
                     ))
                   ) : (
@@ -375,11 +378,13 @@ export default function CreateReturnPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium text-muted-foreground">Return Slip Number (Auto)</label>
                 <Input 
-                  value={returnNumber} 
+                  value={returnSequence.allowManualEntry ? returnNumber : returnSequence.sampleNumber} 
                   onChange={(e) => setReturnNumber(e.target.value)}
-                  placeholder="SR-2026-00001"
-                  disabled={!selectedDocId}
+                  placeholder={returnSequence.allowManualEntry ? `Auto: ${returnSequence.sampleNumber}` : undefined}
+                  disabled={!selectedDocId || !returnSequence.allowManualEntry || returnSequence.loading}
+                  className="font-mono"
                 />
+                <p className="text-xs text-muted-foreground">Assigned by the configured Supplier Return sequence when saved.</p>
               </div>
 
               <div className="space-y-2">
@@ -415,22 +420,22 @@ export default function CreateReturnPage() {
               <CardContent className="space-y-3 font-semibold text-sm">
                 <div className="flex justify-between py-1 border-b border-dashed">
                   <span className="text-muted-foreground">Subtotal Reclaimed:</span>
-                  <span>{formatCurrency(returnSubTotal)} {currencyCode}</span>
+                  <span>{formatCurrency(returnSubTotal, currencyCode || 'GHS')}</span>
                 </div>
                 {sourceType === 'invoice' && (
                   <div className="flex justify-between py-1 border-b border-dashed text-emerald-600">
                     <span>Tax Reclaimed (Proportional):</span>
-                    <span>{formatCurrency(returnTaxAmount)} {currencyCode}</span>
+                    <span>{formatCurrency(returnTaxAmount, currencyCode || 'GHS')}</span>
                   </div>
                 )}
                 <div className="flex justify-between py-2 border-b text-lg font-bold text-slate-800 dark:text-slate-200">
                   <span>Reclaimed Total:</span>
-                  <span>{formatCurrency(returnTotal)} {currencyCode}</span>
+                  <span>{formatCurrency(returnTotal, currencyCode || 'GHS')}</span>
                 </div>
                 {currencyCode !== 'GHS' && (
                   <div className="flex justify-between py-1 text-xs text-muted-foreground">
                     <span>Base Currency Reclaimed:</span>
-                    <span>{formatCurrency(returnBaseTotal)} GHS</span>
+                    <span>{formatCurrency(returnBaseTotal, 'GHS')}</span>
                   </div>
                 )}
               </CardContent>
@@ -520,14 +525,14 @@ export default function CreateReturnPage() {
                               min={0}
                             />
                           </td>
-                          <td className="p-3 text-right">{formatCurrency(line.unitPrice)}</td>
+                          <td className="p-3 text-right">{formatCurrency(line.unitPrice, currencyCode || 'GHS')}</td>
                           {sourceType === 'invoice' && (
                             <td className="p-3 text-right text-emerald-600">
-                              {formatCurrency(line.taxAmount)}
+                              {formatCurrency(line.taxAmount, currencyCode || 'GHS')}
                             </td>
                           )}
                           <td className="p-3 text-right font-bold">
-                            {formatCurrency(line.lineTotal)}
+                            {formatCurrency(line.lineTotal, currencyCode || 'GHS')}
                           </td>
                         </tr>
                       ))}

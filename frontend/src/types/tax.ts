@@ -158,6 +158,20 @@ export interface WHTSummaryEntry {
     netAmount: number;
 }
 
+export interface VATReconciliation {
+    period: string;
+    outputVAT: number;
+    inputVAT: number;
+    netVATPayable: number;
+    outputNHIL: number;
+    inputNHIL: number;
+    netNHILPayable: number;
+    outputGETFL: number;
+    inputGETFL: number;
+    netGETFLPayable: number;
+    totalPayable: number;
+}
+
 
 // DTOs for creating/updating
 export interface CreateTaxTypeDto {

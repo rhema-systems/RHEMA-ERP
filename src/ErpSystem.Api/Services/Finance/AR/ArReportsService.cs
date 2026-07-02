@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -43,14 +44,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                     (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue));
 
             if (customerId.HasValue)
-                query = query.Where(i => i.CustomerId == customerId.Value);
+                query = query.Where(i => i.BusinessPartnerId == customerId.Value);
 
-            var invoices = await query
-                .Include(i => i.Customer)
-                .ToListAsync(cancellationToken);
+            var invoices = await query.ToListAsync(cancellationToken);
 
             // Group by customer
-            var customerGroups = invoices.GroupBy(i => new { i.CustomerId, i.CustomerName, i.Customer });
+            var customerGroups = invoices.GroupBy(i => new { i.CustomerId, i.CustomerName });
 
             var customerAging = new List<CustomerAgingDto>();
 
@@ -59,10 +58,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var aging = new CustomerAgingDto
                 {
                     CustomerId = group.Key.CustomerId,
-                    CustomerCode = group.Key.Customer?.CustomerCode ?? string.Empty,
+                    CustomerCode = string.Empty,
                     CustomerName = group.Key.CustomerName,
-                    Phone = group.Key.Customer?.Phone,
-                    Email = group.Key.Customer?.Email
+                    Phone = null,
+                    Email = null
                 };
 
                 foreach (var invoice in group)
@@ -162,13 +161,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                     (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue));
 
             if (customerId.HasValue)
-                query = query.Where(i => i.CustomerId == customerId.Value);
+                query = query.Where(i => i.BusinessPartnerId == customerId.Value);
 
-            var invoices = await query
-                .Include(i => i.Customer)
-                .ToListAsync(cancellationToken);
+            var invoices = await query.ToListAsync(cancellationToken);
 
-            var customerGroups = invoices.GroupBy(i => new { i.CustomerId, i.CustomerName, i.Customer });
+            var customerGroups = invoices.GroupBy(i => new { i.CustomerId, i.CustomerName });
 
             var customerDetailedAging = new List<CustomerDetailedAgingDto>();
 
@@ -177,7 +174,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var detailedAging = new CustomerDetailedAgingDto
                 {
                     CustomerId = group.Key.CustomerId,
-                    CustomerCode = group.Key.Customer?.CustomerCode ?? string.Empty,
+                    CustomerCode = string.Empty,
                     CustomerName = group.Key.CustomerName
                 };
 
@@ -233,8 +230,12 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<CustomerStatementDto> GetCustomerStatementAsync(Guid customerId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default)
         {
-            var customer = await _unitOfWork.Repository<Customer>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == customerId);
+            var customer = await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(c =>
+                    c.TenantId == TenantId &&
+                    c.Id == customerId &&
+                    !c.IsDeleted &&
+                    (c.PartnerType == "Customer" || c.PartnerType == "Both"));
 
             if (customer == null)
                 throw new KeyNotFoundException($"Customer with Id '{customerId}' not found.");
@@ -243,7 +244,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var openingInvoices = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.CustomerId == customerId &&
+                    i.BusinessPartnerId == customerId &&
                     i.InvoiceDate < fromDate)
                 .ToListAsync(cancellationToken);
 
@@ -260,7 +261,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var periodInvoices = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.CustomerId == customerId &&
+                    i.BusinessPartnerId == customerId &&
                     i.InvoiceDate >= fromDate &&
                     i.InvoiceDate <= toDate)
                 .OrderBy(i => i.InvoiceDate)
@@ -312,9 +313,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             var statement = new CustomerStatementDto
             {
                 CustomerId = customerId,
-                CustomerCode = customer.CustomerCode,
-                CustomerName = customer.CustomerName,
-                CustomerAddress = customer.Address,
+                CustomerCode = customer.CustomerAccountNumber ?? customer.PartnerCode,
+                CustomerName = customer.PartnerName,
+                CustomerAddress = customer.PhysicalAddress ?? customer.MailingAddress,
                 FromDate = fromDate,
                 ToDate = toDate,
                 OpeningBalance = openingBalance,
@@ -337,11 +338,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.DueDate.HasValue &&
                     i.DueDate.Value < now &&
                     (i.TotalAmount - i.PaidAmount) > 0)
-                .Include(i => i.Customer)
                 .ToListAsync(cancellationToken);
 
             var customerGroups = overdueInvoices
-                .GroupBy(i => new { i.CustomerId, i.CustomerName, i.Customer })
+                .GroupBy(i => new { i.CustomerId, i.CustomerName })
                 .Select(g => new OverdueCustomerDto
                 {
                     CustomerId = g.Key.CustomerId,
@@ -349,8 +349,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     TotalOverdue = g.Sum(i => i.BalanceAmount),
                     OverdueInvoiceCount = g.Count(),
                     DaysOldest = g.Max(i => i.DueDate.HasValue ? (now - i.DueDate.Value).Days : 0),
-                    Phone = g.Key.Customer?.Phone,
-                    Email = g.Key.Customer?.Email,
+                    Phone = null,
+                    Email = null,
                     Priority = g.Sum(i => i.BalanceAmount) > 10000 ? "High" :
                               g.Sum(i => i.BalanceAmount) > 5000 ? "Medium" : "Low"
                 })
@@ -413,7 +413,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.TenantId == TenantId &&
                     i.InvoiceDate >= query.FromDate &&
                     i.InvoiceDate <= query.ToDate &&
-                    (!query.CustomerId.HasValue || i.CustomerId == query.CustomerId.Value))
+                    (!query.CustomerId.HasValue || i.BusinessPartnerId == query.CustomerId.Value))
                 .ToListAsync(cancellationToken);
 
             // Group by the specified dimension

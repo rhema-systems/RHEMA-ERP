@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,7 @@ using ErpSystem.Data;
 
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 
 namespace ErpSystem.Api.Services.Finance.GL
 {
@@ -20,19 +22,25 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly ICurrentUserService _currentUserService;
         private readonly ITenantSettingsService _tenantSettings;
         private readonly IFiscalPeriodService _fiscalPeriodService;
+        private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IAccountingBookService _accountingBookService;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
             ReportingDbContext reportingContext,
             ICurrentUserService currentUserService,
             ITenantSettingsService tenantSettings,
-            IFiscalPeriodService fiscalPeriodService)
+            IFiscalPeriodService fiscalPeriodService,
+            IDocumentNumberingService documentNumberingService,
+            IAccountingBookService accountingBookService)
         {
             _context = context;
             _reportingContext = reportingContext;
             _currentUserService = currentUserService;
             _tenantSettings = tenantSettings;
             _fiscalPeriodService = fiscalPeriodService;
+            _documentNumberingService = documentNumberingService;
+            _accountingBookService = accountingBookService;
         }
 
         #region Account Management
@@ -65,6 +73,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 // 1. Validate Account Structure
                 await ValidateAccountStructureAsync(accountDto.AccountNumber);
+                await _accountingBookService.EnsureTenantDefaultsAsync();
 
                 // 2. Parse AccountType safely
                 if (!Enum.TryParse<AccountType>(accountDto.AccountType, true, out var accountType))
@@ -87,9 +96,11 @@ namespace ErpSystem.Api.Services.Finance.GL
                     CurrencyCode = string.IsNullOrWhiteSpace(accountDto.CurrencyCode) ? baseCurrencyCode : accountDto.CurrencyCode.Trim().ToUpperInvariant(),
                     IsMultiCurrency = accountDto.IsMultiCurrency,
                     IsSegmented = true,
-                    IsIFRSClassified = true,
-                    IsBaseClassified = true,
-                    IsLocalClassified = false,
+                    IsIFRSClassified = accountDto.IsIFRSClassified,
+                    IsBaseClassified = accountDto.IsBaseFrameworkClassified,
+                    IsLocalClassified = accountDto.IsLocalFrameworkClassified,
+                    IsControlAccount = accountDto.IsControlAccount,
+                    AllowDirectPosting = accountDto.IsPostingAllowed,
                     Status = AccountStatus.Active,
                     TenantId = tenantId.Value,
                     CreatedAt = now,
@@ -128,6 +139,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 // 5. Save to Database
                 _context.Accounts.Add(account);
                 await _context.SaveChangesAsync();
+                await _accountingBookService.SyncAccountMappingsAsync(account);
 
                 return account;
             }
@@ -275,12 +287,16 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<JournalEntry> PostJournalEntryAsync(CreateJournalEntryDto entryDto)
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            var strategy = _context.Database.CreateExecutionStrategy();
+
+            return await strategy.ExecuteAsync(async () =>
             {
-                // 1. Validate Debits = Credits
-                var totalDebit = entryDto.Transactions.Where(t => t.TransactionType == "Debit").Sum(t => t.Amount);
-                var totalCredit = entryDto.Transactions.Where(t => t.TransactionType == "Credit").Sum(t => t.Amount);
+                await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                try
+                {
+                    // 1. Validate Debits = Credits
+                    var totalDebit = entryDto.Transactions.Where(t => t.TransactionType == "Debit").Sum(t => t.Amount);
+                    var totalCredit = entryDto.Transactions.Where(t => t.TransactionType == "Credit").Sum(t => t.Amount);
 
                 if (totalDebit != totalCredit)
                 {
@@ -320,7 +336,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var journalEntry = new JournalEntry
                 {
                     Id = Guid.NewGuid(),
-                    JournalEntryNumber = entryDto.JournalNumber,
+                    JournalEntryNumber = string.IsNullOrWhiteSpace(entryDto.JournalNumber)
+                        ? await GenerateJournalEntryNumberAsync()
+                        : entryDto.JournalNumber.Trim(),
                     EntryDate = entryDto.TransactionDate,
                     Description = entryDto.Description ?? string.Empty,
                     ReferenceNumber = entryDto.Reference,
@@ -390,6 +408,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         FiscalPeriodId = fiscalPeriod.Id,
                         LineNumber = lineNum++,
                         BookClassification = "IFRS",
+                        PostingStatus = "Posted",
+                        PostedDate = DateTime.UtcNow,
                         // Multi-Currency Mapping
                         TransactionCurrency = lineDto.CurrencyCode,
                         ForeignCurrencyAmount = lineDto.ForeignAmount,
@@ -405,27 +425,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                         
                         if (currencyLink != null)
                         {
-                            // Determine sign based on account type and transaction type
-                            decimal foreignChange = lineDto.ForeignAmount ?? 0;
-                            
-                            // Adjust sign for Credit transactions
-                            if (lineDto.TransactionType == "Credit")
+                            var foreignChange = lineDto.ForeignAmount ?? 0;
+                            var isDebitNormalAccount = account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense;
+                            var isCredit = string.Equals(lineDto.TransactionType, "Credit", StringComparison.OrdinalIgnoreCase);
+                            if ((isCredit && isDebitNormalAccount) || (!isCredit && !isDebitNormalAccount))
                             {
-                                // For Assets/Expenses, Credit decreases balance
-                                if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                                    foreignChange = -foreignChange;
-                                // For Liabilities/Equity/Revenue, Credit increases balance
-                                else
-                                    foreignChange = foreignChange; 
-                            }
-                            else // Debit
-                            {
-                                // For Assets/Expenses, Debit increases balance
-                                if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                                    foreignChange = foreignChange;
-                                // For Liabilities/Equity/Revenue, Debit decreases balance
-                                else
-                                    foreignChange = -foreignChange;
+                                foreignChange = -foreignChange;
                             }
 
                             currencyLink.ForeignCurrencyBalance += foreignChange;
@@ -440,13 +445,14 @@ namespace ErpSystem.Api.Services.Finance.GL
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                return journalEntry;
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
+                    return journalEntry;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
+            });
         }
 
         public async Task<decimal> GetAccountBalanceAsync(Guid accountId, string? currencyCode = null)
@@ -464,29 +470,13 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<string> GenerateJournalEntryNumberAsync(CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId;
-            var year = DateTime.UtcNow.Year;
-            var prefix = $"JE-{year}-";
-
-            // Find the last number with this prefix
-            var lastEntry = await _context.JournalEntries
-                .Where(j => j.TenantId == tenantId && j.JournalEntryNumber.StartsWith(prefix))
-                .OrderByDescending(j => j.JournalEntryNumber)
-                .Select(j => j.JournalEntryNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            int nextNumber = 1;
-            if (!string.IsNullOrEmpty(lastEntry))
-            {
-                var numberPart = lastEntry.Replace(prefix, "");
-                if (int.TryParse(numberPart, out int lastNum))
-                {
-                    nextNumber = lastNum + 1;
-                }
-            }
-
-            // Return formatted number: JE-2026-000001
-            return $"{prefix}{nextNumber:D6}";
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.JournalEntry,
+                _currentUserService.TenantId,
+                DateTime.UtcNow,
+                nameof(JournalEntry),
+                cancellationToken: cancellationToken);
         }
 
         #endregion
@@ -564,7 +554,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             var journalEntry = new JournalEntry
             {
                 Id = Guid.NewGuid(),
-                JournalEntryNumber = $"REV-{revaluationDate:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 8)}",
+                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
+                    DocumentNumberingModules.Finance,
+                    FinanceDocumentTypes.CurrencyRevaluation,
+                    tenantIdValue,
+                    revaluationDate,
+                    nameof(JournalEntry)),
                 EntryDate = revaluationDate,
                 Description = $"Currency Revaluation - {request.RevaluationType} - {revaluationDate:d}",
                 ReferenceNumber = request.RevaluationType,
@@ -771,11 +766,11 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .ToListAsync();
 
             // Filter by book classification
-            var lineItemProperty = request.BookClassification switch
+            var lineItemProperty = NormalizeBookClassification(request.BookClassification) switch
             {
                 "IFRS" => "IFRSLineItem",
-                "Base" => "BaseLineItem",
-                "Local" => "LocalLineItem",
+                "LOCAL_STATUTORY" => "BaseLineItem",
+                "MANAGEMENT" => "LocalLineItem",
                 _ => "IFRSLineItem"
             };
 
@@ -907,19 +902,50 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private string? GetLineItem(Account account, string bookClassification)
         {
-            return bookClassification switch
+            return NormalizeBookClassification(bookClassification) switch
             {
                 "IFRS" => account.IFRSLineItem,
-                "Base" => account.BaseLineItem,
-                "Local" => account.LocalLineItem,
+                "LOCAL_STATUTORY" => account.BaseLineItem,
+                "MANAGEMENT" => account.LocalLineItem,
                 _ => account.IFRSLineItem
+            };
+        }
+
+        private static string NormalizeBookClassification(string? bookClassification)
+        {
+            var normalized = (bookClassification ?? "IFRS").Trim().ToUpperInvariant();
+            return normalized switch
+            {
+                "BASE" or "LOCAL" => "LOCAL_STATUTORY",
+                "MANAGEMENT" => "MANAGEMENT",
+                _ => normalized
             };
         }
 
         private async Task<decimal> CalculateAccountBalanceAsOf(Guid accountId, DateTime asAtDate)
         {
+            var endExclusive = asAtDate.Date.AddDays(1);
             var transactions = await _context.AccountTransactions
-                .Where(t => t.AccountId == accountId && t.TransactionDate <= asAtDate && !t.IsDeleted)
+                .Where(t => t.AccountId == accountId && t.TransactionDate < endExclusive && !t.IsDeleted)
+                .ToListAsync();
+
+            return transactions.Sum(t => t.DebitAmount - t.CreditAmount);
+        }
+
+        private async Task<decimal> CalculatePostedAccountNetBalanceAsOf(Guid accountId, DateTime asAtDate, string bookClassification)
+        {
+            var endExclusive = asAtDate.Date.AddDays(1);
+
+            var transactions = await _context.AccountTransactions
+                .Include(t => t.JournalEntry)
+                .Where(t => t.AccountId == accountId
+                    && t.TransactionDate < endExclusive
+                    && !t.IsDeleted
+                    && t.BookClassification == bookClassification
+                    && (t.PostingStatus == "Posted"
+                        || t.PostingStatus == "Reversed"
+                        || t.JournalEntry.PostingStatus == "Posted"
+                        || t.JournalEntry.PostingStatus == "Reversed"))
                 .ToListAsync();
 
             return transactions.Sum(t => t.DebitAmount - t.CreditAmount);
@@ -1261,10 +1287,159 @@ namespace ErpSystem.Api.Services.Finance.GL
             return transactions.Sum(t => t.CreditAmount - t.DebitAmount);
         }
 
+        public async Task<DetailedLedgerReportDto> GenerateDetailedLedgerAsync(DetailedLedgerRequestDto request)
+        {
+            var tenantId = _currentUserService.TenantId;
+            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+
+            if (request.EndDate.Date < request.StartDate.Date)
+            {
+                throw new ArgumentException("End date must be on or after start date.");
+            }
+
+            var startDate = request.StartDate.Date;
+            var endExclusive = request.EndDate.Date.AddDays(1);
+            var selectedAccountIds = request.AccountIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? new List<Guid>();
+
+            var accountQuery = _context.Accounts
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted);
+
+            if (selectedAccountIds.Count > 0)
+            {
+                accountQuery = accountQuery.Where(a => selectedAccountIds.Contains(a.Id));
+            }
+
+            var accounts = await accountQuery
+                .OrderBy(a => a.AccountNumber)
+                .ToListAsync();
+
+            var report = new DetailedLedgerReportDto
+            {
+                CompanyName = await _tenantSettings.GetCompanyNameAsync(),
+                ReportDate = DateTime.UtcNow,
+                StartDate = startDate,
+                EndDate = request.EndDate.Date,
+                BookClassification = string.IsNullOrWhiteSpace(request.BookClassification) ? "IFRS" : request.BookClassification,
+                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
+            };
+
+            foreach (var account in accounts)
+            {
+                var transactionBaseQuery = _context.AccountTransactions
+                    .Include(t => t.JournalEntry)
+                    .Where(t => t.TenantId == tenantId
+                        && t.AccountId == account.Id
+                        && !t.IsDeleted
+                        && (request.IncludeReversed
+                            ? (t.PostingStatus == "Posted"
+                                || t.PostingStatus == "Reversed"
+                                || t.JournalEntry.PostingStatus == "Posted"
+                                || t.JournalEntry.PostingStatus == "Reversed")
+                            : (t.PostingStatus == "Posted" || t.JournalEntry.PostingStatus == "Posted"))
+                        && t.BookClassification == report.BookClassification);
+
+                if (!request.IncludeReversed)
+                {
+                    transactionBaseQuery = transactionBaseQuery.Where(t => !t.IsReversed);
+                }
+
+                var openingBalance = 0m;
+                if (request.IncludeOpeningBalances)
+                {
+                    var openingMovements = await transactionBaseQuery
+                        .Where(t => t.TransactionDate < startDate)
+                        .Select(t => new { t.DebitAmount, t.CreditAmount })
+                        .ToListAsync();
+
+                    openingBalance = openingMovements.Sum(t => GetNormalBalanceMovement(account.AccountType, t.DebitAmount, t.CreditAmount));
+                }
+
+                var ledgerAccount = new DetailedLedgerAccountDto
+                {
+                    AccountId = account.Id,
+                    AccountCode = account.AccountCode,
+                    AccountNumber = account.AccountNumber,
+                    AccountName = account.AccountName,
+                    AccountType = account.AccountType.ToString(),
+                    OpeningBalance = Math.Abs(openingBalance),
+                    OpeningBalanceType = GetBalanceType(account.AccountType, openingBalance)
+                };
+
+                var runningBalance = openingBalance;
+                var periodTransactions = await transactionBaseQuery
+                    .Where(t => t.TransactionDate >= startDate && t.TransactionDate < endExclusive)
+                    .OrderBy(t => t.TransactionDate)
+                    .ThenBy(t => t.JournalEntry.JournalEntryNumber)
+                    .ThenBy(t => t.LineNumber)
+                    .ToListAsync();
+
+                foreach (var transaction in periodTransactions)
+                {
+                    runningBalance += GetNormalBalanceMovement(account.AccountType, transaction.DebitAmount, transaction.CreditAmount);
+
+                    ledgerAccount.Lines.Add(new DetailedLedgerLineDto
+                    {
+                        TransactionId = transaction.Id,
+                        JournalEntryId = transaction.JournalEntryId,
+                        JournalEntryNumber = transaction.JournalEntry?.JournalEntryNumber ?? string.Empty,
+                        TransactionDate = transaction.TransactionDate,
+                        LineNumber = transaction.LineNumber,
+                        Description = transaction.Description ?? transaction.JournalEntry?.Description ?? string.Empty,
+                        Reference = transaction.SourceReferenceNumber
+                            ?? transaction.JournalEntry?.ReferenceNumber
+                            ?? transaction.ReferenceNumber
+                            ?? string.Empty,
+                        SourceModule = transaction.SourceModule ?? transaction.JournalEntry?.SourceModule ?? "GL",
+                        PostingStatus = transaction.JournalEntry?.PostingStatus ?? transaction.PostingStatus,
+                        DebitAmount = transaction.DebitAmount,
+                        CreditAmount = transaction.CreditAmount,
+                        RunningBalance = Math.Abs(runningBalance),
+                        RunningBalanceType = GetBalanceType(account.AccountType, runningBalance),
+                        CurrencyCode = transaction.TransactionCurrency,
+                        ForeignAmount = transaction.ForeignCurrencyAmount,
+                        ExchangeRate = transaction.ExchangeRate,
+                        IsReversed = transaction.IsReversed
+                    });
+                }
+
+                ledgerAccount.TotalDebits = ledgerAccount.Lines.Sum(l => l.DebitAmount);
+                ledgerAccount.TotalCredits = ledgerAccount.Lines.Sum(l => l.CreditAmount);
+                ledgerAccount.ClosingBalance = Math.Abs(runningBalance);
+                ledgerAccount.ClosingBalanceType = GetBalanceType(account.AccountType, runningBalance);
+
+                report.TotalDebits += ledgerAccount.TotalDebits;
+                report.TotalCredits += ledgerAccount.TotalCredits;
+                report.Accounts.Add(ledgerAccount);
+            }
+
+            return report;
+        }
+
+        private static decimal GetNormalBalanceMovement(AccountType accountType, decimal debitAmount, decimal creditAmount)
+        {
+            var isDebitNormal = accountType == AccountType.Asset || accountType == AccountType.Expense;
+            return isDebitNormal ? debitAmount - creditAmount : creditAmount - debitAmount;
+        }
+
+        private static string GetBalanceType(AccountType accountType, decimal normalBalance)
+        {
+            if (normalBalance == 0)
+            {
+                return string.Empty;
+            }
+
+            var isDebitNormal = accountType == AccountType.Asset || accountType == AccountType.Expense;
+            var isNormalBalance = normalBalance > 0;
+            return isDebitNormal == isNormalBalance ? "Debit" : "Credit";
+        }
+
         public async Task<TrialBalanceDto> GenerateTrialBalanceAsync(TrialBalanceRequestDto request)
         {
             var tenantId = _currentUserService.TenantId;
             if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var bookClassification = string.IsNullOrWhiteSpace(request.BookClassification)
+                ? "IFRS"
+                : request.BookClassification.Trim();
 
             // 1. Get all accounts for the tenant
             var accounts = await _context.Accounts
@@ -1277,6 +1452,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 CompanyName = await _tenantSettings.GetCompanyNameAsync(),
                 AsAtDate = request.AsAtDate,
+                BookClassification = bookClassification,
                 CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
             };
 
@@ -1285,7 +1461,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             // 3. Calculate balance for each account
             foreach (var account in accounts)
             {
-                var balance = await CalculateAccountBalanceAsOf(account.Id, request.AsAtDate);
+                var balance = await CalculatePostedAccountNetBalanceAsOf(account.Id, request.AsAtDate, bookClassification);
 
                 // Skip zero balances if requested
                 if (!request.IncludeZeroBalances && balance == 0)
@@ -1293,43 +1469,24 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 var line = new TrialBalanceLineDto
                 {
+                    AccountId = account.Id,
                     AccountCode = account.AccountCode,
                     AccountNumber = account.AccountNumber,
                     AccountName = account.AccountName,
                     AccountType = account.AccountType.ToString()
                 };
 
-                // Determine debit or credit balance based on account type and balance
-                // Assets, Expenses: Debit-normal (positive balance = debit)
-                // Liabilities, Equity, Revenue: Credit-normal (positive balance = credit)
-                bool isDebitNormal = account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense;
-
+                // Trial balance columns follow the net line direction:
+                // positive (debits exceed credits) is a debit balance; negative is a credit balance.
                 if (balance > 0)
                 {
-                    if (isDebitNormal)
-                    {
-                        line.DebitBalance = balance;
-                        line.CreditBalance = 0;
-                    }
-                    else
-                    {
-                        line.DebitBalance = 0;
-                        line.CreditBalance = balance;
-                    }
+                    line.DebitBalance = balance;
+                    line.CreditBalance = 0;
                 }
                 else if (balance < 0)
                 {
-                    // Negative balance - reverse the normal side
-                    if (isDebitNormal)
-                    {
-                        line.DebitBalance = 0;
-                        line.CreditBalance = Math.Abs(balance);
-                    }
-                    else
-                    {
-                        line.DebitBalance = Math.Abs(balance);
-                        line.CreditBalance = 0;
-                    }
+                    line.DebitBalance = 0;
+                    line.CreditBalance = Math.Abs(balance);
                 }
                 else
                 {
@@ -1825,7 +1982,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId.Value,
-                JournalEntryNumber = $"YE-CLOSE-{fiscalYear.FiscalYearCode}",
+                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
+                    DocumentNumberingModules.Finance,
+                    FinanceDocumentTypes.YearEndClose,
+                    tenantId.Value,
+                    fiscalYear.EndDate,
+                    nameof(JournalEntry)),
                 Description = $"Year-end close - Transfer to Retained Earnings for {fiscalYear.FiscalYearName}",
                 EntryDate = fiscalYear.EndDate,
                 PostingDate = DateTime.UtcNow,

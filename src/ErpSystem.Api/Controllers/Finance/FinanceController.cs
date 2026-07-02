@@ -113,7 +113,7 @@ namespace ErpSystem.Api.Controllers
         /// <response code="400">Validation failure - unbalanced entry, invalid account, closed period, or other business rule violation</response>
         /// <response code="401">Not authenticated</response>
         /// <response code="500">Internal server error</response>
-        [HttpPost("journal-entries")]
+        [HttpPost("journal-entries/post-to-ledger")]
         public async Task<IActionResult> PostJournalEntry([FromBody] CreateJournalEntryDto entryDto)
         {
             try
@@ -288,6 +288,25 @@ namespace ErpSystem.Api.Controllers
             {
                 var trialBalance = await _glService.GenerateTrialBalanceAsync(request);
                 return Ok(trialBalance);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Generates a detailed ledger report listing posted GL transaction lines for selected accounts and a date range.
+        /// </summary>
+        /// <param name="request">Query parameters including start/end dates, selected GL account IDs, book classification, and reversal inclusion.</param>
+        /// <returns>The detailed ledger grouped by account, with opening balance, period debits/credits, running balance, and closing balance.</returns>
+        [HttpGet("statements/detailed-ledger")]
+        public async Task<IActionResult> GetDetailedLedger([FromQuery] DetailedLedgerRequestDto request)
+        {
+            try
+            {
+                var detailedLedger = await _glService.GenerateDetailedLedgerAsync(request);
+                return Ok(detailedLedger);
             }
             catch (Exception ex)
             {

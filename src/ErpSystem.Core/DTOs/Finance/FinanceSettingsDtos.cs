@@ -24,6 +24,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
+        public Guid? ControlAccountGRVAccrualId { get; set; }
+        public Guid? DiscountAllowedAccountId { get; set; }
+        public Guid? DiscountReceivedAccountId { get; set; }
         
         // Subledger Settings
         public Guid? WriteOffExpenseAccountId { get; set; }
@@ -55,6 +58,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
+        public Guid? ControlAccountGRVAccrualId { get; set; }
+        public Guid? DiscountAllowedAccountId { get; set; }
+        public Guid? DiscountReceivedAccountId { get; set; }
         public Guid? MigrationClearingAccountId { get; set; }
         public bool? OpeningBalanceAutoRoutingEnabled { get; set; }
         

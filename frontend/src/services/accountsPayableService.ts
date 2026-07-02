@@ -38,6 +38,7 @@ export interface VendorInvoiceQuery {
     dueFromDate?: string;
     dueToDate?: string;
     overdueOnly?: boolean;
+    isOpeningBalance?: boolean;
     sortBy?: string;
     sortDescending?: boolean;
 }
@@ -85,26 +86,27 @@ class AccountsPayableService {
         if (query.dueFromDate) params.append('DueFromDate', query.dueFromDate);
         if (query.dueToDate) params.append('DueToDate', query.dueToDate);
         if (query.overdueOnly !== undefined) params.append('OverdueOnly', query.overdueOnly.toString());
+        if (query.isOpeningBalance !== undefined) params.append('IsOpeningBalance', query.isOpeningBalance.toString());
         if (query.sortBy) params.append('SortBy', query.sortBy);
         if (query.sortDescending !== undefined) params.append('SortDescending', query.sortDescending.toString());
 
-        return apiService.get<PagedResult<VendorInvoice>>(`${this.baseUrl}/vendor-invoices?${params.toString()}`);
+        return apiService.get<PagedResult<VendorInvoice>>(`${this.baseUrl}/invoices?${params.toString()}`);
     }
 
     public async getInvoice(id: string): Promise<VendorInvoice> {
-        return apiService.get<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}`);
+        return apiService.get<VendorInvoice>(`${this.baseUrl}/invoices/${id}`);
     }
 
     public async createInvoice(data: VendorInvoiceCreateRequest): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices`, data);
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices`, data);
     }
 
     public async updateInvoice(id: string, data: VendorInvoiceUpdateRequest): Promise<VendorInvoice> {
-        return apiService.put<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}`, data);
+        return apiService.put<VendorInvoice>(`${this.baseUrl}/invoices/${id}`, data);
     }
 
     public async approveInvoice(id: string, comments?: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}/approve`, { comments });
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/approve`, comments || 'Approved');
     }
 
     public async submitInvoiceForApproval(id: string): Promise<VendorInvoice> {
@@ -116,7 +118,7 @@ class AccountsPayableService {
     }
 
     public async voidInvoice(id: string, comments?: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}/void`, { comments });
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/void`, comments || 'Voided by user');
     }
 
     // --- Vendor Payments ---

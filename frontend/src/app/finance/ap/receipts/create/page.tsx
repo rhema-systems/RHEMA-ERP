@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { financePurchaseOrderService, FinancePurchaseOrder } from '@/services/financePurchaseOrderService';
+import { useDocumentSequence } from '@/hooks/use-document-sequence';
+import { FinanceDocumentTypes } from '@/types/document-numbering';
 
 interface SelectedLine {
     id: string;
@@ -32,6 +34,7 @@ export default function CreateReceiptPage() {
     
     // Receipt Header
     const [receiptNumber, setReceiptNumber] = useState<string>('');
+    const receiptSequence = useDocumentSequence('Finance', FinanceDocumentTypes.APGoodsReceipt);
     const [receiptDate, setReceiptDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [remarks, setRemarks] = useState<string>('');
     
@@ -82,14 +85,13 @@ export default function CreateReceiptPage() {
             const poData = await financePurchaseOrderService.getPurchaseOrderById(poId);
             setSelectedPo(poData);
             
-            // Set a default receipt number
-            setReceiptNumber(`GRV-${poData.orderNumber.replace(/PO-/gi, '')}-${Math.floor(1000 + Math.random() * 9000)}`);
+            setReceiptNumber('');
             
             // Scaffolding selected lines with initial values
-            const initialLines: SelectedLine[] = poData.items.map(item => {
+            const initialLines: SelectedLine[] = poData.items.filter((item) => Boolean(item.id)).map(item => {
                 const remaining = item.orderedQuantity - (item.receivedQuantity || 0);
                 return {
-                    id: item.id!,
+                    id: item.id as string,
                     description: item.description,
                     lineType: item.lineType,
                     orderedQuantity: item.orderedQuantity,
@@ -137,11 +139,6 @@ export default function CreateReceiptPage() {
             toast({ title: 'Validation Error', description: 'Please select a Purchase Order', variant: 'destructive' });
             return;
         }
-        if (!receiptNumber.trim()) {
-            toast({ title: 'Validation Error', description: 'GRV Receipt Number is required', variant: 'destructive' });
-            return;
-        }
-
         const selectedLines = lines.filter(l => l.selected && l.quantityReceived > 0);
         if (selectedLines.length === 0) {
             toast({ title: 'Validation Error', description: 'At least one line item must be selected and have a receive quantity greater than 0', variant: 'destructive' });
@@ -160,7 +157,7 @@ export default function CreateReceiptPage() {
             // Map strictly to backend CreateFinancePurchaseReceiptDto
             const payload = {
                 financePurchaseOrderId: selectedPo.id,
-                receiptNumber: receiptNumber,
+                receiptNumber: receiptSequence.allowManualEntry && receiptNumber.trim() ? receiptNumber.trim() : undefined,
                 receiptDate: new Date(receiptDate).toISOString(),
                 remarks: remarks,
                 lines: selectedLines.map(l => ({
@@ -234,11 +231,13 @@ export default function CreateReceiptPage() {
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-muted-foreground">GRV Receipt Number</label>
                                 <Input 
-                                    value={receiptNumber} 
+                                    value={receiptSequence.allowManualEntry ? receiptNumber : receiptSequence.sampleNumber} 
                                     onChange={(e) => setReceiptNumber(e.target.value)} 
-                                    placeholder="e.g. GRV-10255"
-                                    disabled={!selectedPoId}
+                                    placeholder={receiptSequence.allowManualEntry ? `Auto: ${receiptSequence.sampleNumber}` : undefined}
+                                    disabled={!selectedPoId || !receiptSequence.allowManualEntry || receiptSequence.loading}
+                                    className="font-mono"
                                 />
+                                <p className="text-xs text-muted-foreground">Assigned by the configured Goods Receipt sequence when saved.</p>
                             </div>
 
                             <div className="space-y-2">

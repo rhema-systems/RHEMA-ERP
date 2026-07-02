@@ -1,10 +1,12 @@
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -22,19 +24,22 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly ILogger<PaymentService> _logger;
+        private readonly IDocumentNumberingService _documentNumberingService;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ITenantSettingsService tenantSettingsService,
             ISubledgerPostingService subledgerPostingService,
-            ILogger<PaymentService> logger)
+            ILogger<PaymentService> logger,
+            IDocumentNumberingService documentNumberingService)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
             _subledgerPostingService = subledgerPostingService;
             _logger = logger;
+            _documentNumberingService = documentNumberingService;
         }
 
         private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
@@ -44,7 +49,6 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var payment = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == id)
-                .Include(p => p.Customer)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.Invoice)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -56,7 +60,6 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var payment = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.PaymentNumber == paymentNumber)
-                .Include(p => p.Customer)
                 .Include(p => p.Allocations)
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -113,7 +116,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             var payments = await queryable
                 .Skip((query.PageNumber - 1) * query.PageSize)
                 .Take(query.PageSize)
-                .Include(p => p.Customer)
                 .ToListAsync(cancellationToken);
 
             return new PagedResult<CustomerPaymentDto>
@@ -127,15 +129,14 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<CustomerPaymentDto> CreateAsync(PaymentCreateDto dto, CancellationToken cancellationToken = default)
         {
-            // Validate customer exists
-            var customer = await _unitOfWork.Repository<Customer>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == dto.CustomerId);
+            // Validate customer business partner exists
+            var customer = await GetCustomerPartnerAsync(dto.CustomerId, cancellationToken);
 
             if (customer == null)
                 throw new KeyNotFoundException($"Customer with Id '{dto.CustomerId}' not found.");
 
             // Generate payment number
-            var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
+            var paymentNumber = await GeneratePaymentNumberAsync(dto.IsCreditNote, cancellationToken);
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
             var paymentCurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode)
                 ? baseCurrencyCode
@@ -164,11 +165,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                 CreatedBy = UserName
             };
 
-            // Update customer's last payment date
-            customer.LastPaymentDate = dto.PaymentDate;
+            // Keep the customer partner audit trail in sync with payment activity.
             customer.UpdatedAt = now;
             customer.UpdatedBy = UserName;
-            await _unitOfWork.Repository<Customer>().UpdateAsync(customer);
+            await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customer);
 
             await _unitOfWork.Repository<CustomerPayment>().AddAsync(payment);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -218,7 +218,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             var payment = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == dto.CustomerPaymentId)
                 .Include(p => p.Allocations)
-                .Include(p => p.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
@@ -229,7 +228,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Success = false
             };
 
-            // Calculate available amount
+            // Calculate available cash. Discounts close invoice balance but do not consume cash availability.
             var availableAmount = payment.TotalAmount - payment.AllocatedAmount;
 
             if (availableAmount <= 0)
@@ -238,8 +237,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 return result;
             }
 
-            // Calculate total allocation requested
-            var totalAllocationRequested = dto.Allocations.Sum(a => a.AllocatedAmount + a.DiscountAmount);
+            // Calculate total cash allocation requested.
+            var totalAllocationRequested = dto.Allocations.Sum(a => a.AllocatedAmount);
 
             if (totalAllocationRequested > availableAmount)
             {
@@ -343,18 +342,19 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             // Update payment allocated amount
-            payment.AllocatedAmount = payment.Allocations.Where(a => !a.IsReversal).Sum(a => a.AllocatedAmount + a.DiscountAmount);
+            payment.AllocatedAmount = payment.Allocations.Where(a => !a.IsReversal).Sum(a => a.AllocatedAmount);
 
             // Update customer outstanding balance (deduct only the newly allocated amount, not cumulative PaidAmount)
-            if (payment.Customer != null)
+            var customerPartner = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken);
+            if (customerPartner != null)
             {
                 var totalNewlyAllocated = payment.Allocations
                     .Where(a => a.CreatedAt == now) // Only allocations created in this request
                     .Sum(a => a.AllocatedAmount + a.DiscountAmount);
-                payment.Customer.OutstandingBalance -= totalNewlyAllocated;
-                payment.Customer.UpdatedAt = now;
-                payment.Customer.UpdatedBy = UserName;
-                await _unitOfWork.Repository<Customer>().UpdateAsync(payment.Customer);
+                customerPartner.OutstandingBalance = (customerPartner.OutstandingBalance ?? 0m) - totalNewlyAllocated;
+                customerPartner.UpdatedAt = now;
+                customerPartner.UpdatedBy = UserName;
+                await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customerPartner);
             }
 
             await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
@@ -376,7 +376,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             var allocation = await _unitOfWork.Repository<PaymentAllocation>()
                 .GetQueryable(a => a.TenantId == TenantId && a.Id == allocationId)
                 .Include(a => a.CustomerPayment)
-                    .ThenInclude(p => p.Customer)
                 .Include(a => a.Invoice)
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -407,17 +406,18 @@ namespace ErpSystem.Api.Services.Finance.AR
             await _unitOfWork.Repository<Invoice>().UpdateAsync(allocation.Invoice);
 
             // Reverse payment allocated amount
-            allocation.CustomerPayment.AllocatedAmount -= totalApplied;
+            allocation.CustomerPayment.AllocatedAmount -= allocation.AllocatedAmount;
             allocation.CustomerPayment.UpdatedAt = now;
             allocation.CustomerPayment.UpdatedBy = UserName;
 
             // Reverse customer outstanding balance
-            if (allocation.CustomerPayment.Customer != null)
+            var allocationCustomer = await GetCustomerPartnerAsync(allocation.CustomerPayment.CustomerId, cancellationToken);
+            if (allocationCustomer != null)
             {
-                allocation.CustomerPayment.Customer.OutstandingBalance += totalApplied;
-                allocation.CustomerPayment.Customer.UpdatedAt = now;
-                allocation.CustomerPayment.Customer.UpdatedBy = UserName;
-                await _unitOfWork.Repository<Customer>().UpdateAsync(allocation.CustomerPayment.Customer);
+                allocationCustomer.OutstandingBalance = (allocationCustomer.OutstandingBalance ?? 0m) + totalApplied;
+                allocationCustomer.UpdatedAt = now;
+                allocationCustomer.UpdatedBy = UserName;
+                await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(allocationCustomer);
             }
 
             // Mark allocation as reversed
@@ -460,7 +460,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == id)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.Invoice)
-                .Include(p => p.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
@@ -499,12 +498,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             payment.UpdatedBy = UserName;
 
             // Update customer outstanding balance using pre-computed amount
-            if (payment.Customer != null)
+            var bouncedCustomer = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken);
+            if (bouncedCustomer != null)
             {
-                payment.Customer.OutstandingBalance += reversedAmount;
-                payment.Customer.UpdatedAt = now;
-                payment.Customer.UpdatedBy = UserName;
-                await _unitOfWork.Repository<Customer>().UpdateAsync(payment.Customer);
+                bouncedCustomer.OutstandingBalance = (bouncedCustomer.OutstandingBalance ?? 0m) + reversedAmount;
+                bouncedCustomer.UpdatedAt = now;
+                bouncedCustomer.UpdatedBy = UserName;
+                await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(bouncedCustomer);
             }
 
             await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
@@ -542,7 +542,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var invoices = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.CustomerId == customerId &&
+                    i.BusinessPartnerId == customerId &&
                     (i.TotalAmount - i.PaidAmount) > 0 &&
                     (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue))
                 .OrderBy(i => i.InvoiceDate)
@@ -594,29 +594,25 @@ namespace ErpSystem.Api.Services.Finance.AR
             return await CreateAsync(paymentDto, cancellationToken);
         }
 
-        private async Task<string> GeneratePaymentNumberAsync(CancellationToken cancellationToken)
+        private async Task<string> GeneratePaymentNumberAsync(bool isCreditNote, CancellationToken cancellationToken)
         {
-            var prefix = "PMT";
-            var currentYear = DateTime.UtcNow.Year;
-            var currentMonth = DateTime.UtcNow.Month;
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                isCreditNote ? FinanceDocumentTypes.ARCreditNote : FinanceDocumentTypes.ARPayment,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(CustomerPayment),
+                cancellationToken: cancellationToken);
+        }
 
-            var lastPayment = await _unitOfWork.Repository<CustomerPayment>()
-                .GetQueryable(p =>
+        private async Task<BusinessPartner?> GetCustomerPartnerAsync(Guid customerId, CancellationToken cancellationToken)
+        {
+            return await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(p =>
                     p.TenantId == TenantId &&
-                    p.PaymentNumber.StartsWith($"{prefix}-{currentYear}{currentMonth:00}"))
-                .OrderByDescending(p => p.PaymentNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (lastPayment == null)
-                return $"{prefix}-{currentYear}{currentMonth:00}-0001";
-
-            var parts = lastPayment.PaymentNumber.Split('-');
-            if (parts.Length >= 3 && int.TryParse(parts[2], out var lastSeq))
-            {
-                return $"{prefix}-{currentYear}{currentMonth:00}-{(lastSeq + 1):0000}";
-            }
-
-            return $"{prefix}-{currentYear}{currentMonth:00}-0001";
+                    p.Id == customerId &&
+                    !p.IsDeleted &&
+                    (p.PartnerType == "Customer" || p.PartnerType == "Both"));
         }
 
         private CustomerPaymentDto MapToDto(CustomerPayment payment)
@@ -626,7 +622,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Id = payment.Id,
                 PaymentNumber = payment.PaymentNumber,
                 CustomerId = payment.CustomerId,
-                CustomerName = payment.Customer?.CustomerName ?? string.Empty,
+                CustomerName = string.Empty,
                 PaymentDate = payment.PaymentDate,
                 TotalAmount = payment.TotalAmount,
                 AllocatedAmount = payment.AllocatedAmount,

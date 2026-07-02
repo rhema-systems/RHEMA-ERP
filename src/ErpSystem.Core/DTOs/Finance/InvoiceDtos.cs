@@ -22,9 +22,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public string Status { get; set; } = "Draft";
         public string? Notes { get; set; }
         public string? Reference { get; set; }
+        public bool IsOpeningBalance { get; set; }
         public string CurrencyCode { get; set; } = "USD";
         public decimal ExchangeRate { get; set; } = 1.0m;
         public int PaymentTermsDays { get; set; } = 30; // AR-specific
+        public Guid? PaymentTermId { get; set; }
         public Guid? TaxGroupId { get; set; }
         public List<InvoiceLineItemDto> LineItems { get; set; } = new();
         public List<PaymentDto> Payments { get; set; } = new();
@@ -52,12 +54,15 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime InvoiceDate { get; set; }
 
         public DateTime? DueDate { get; set; }
+        public Guid? PaymentTermId { get; set; }
 
         [MaxLength(500)]
         public string? Notes { get; set; }
 
         [MaxLength(100)]
         public string? Reference { get; set; }
+
+        public bool IsOpeningBalance { get; set; }
 
         [MaxLength(3)]
         public string CurrencyCode { get; set; } = "USD";
@@ -74,9 +79,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? CustomerAddress { get; set; }
         public DateTime InvoiceDate { get; set; }
         public DateTime? DueDate { get; set; }
+        public Guid? PaymentTermId { get; set; }
         public string Status { get; set; } = "Draft";
         public string? Notes { get; set; }
         public string? Reference { get; set; }
+        public bool IsOpeningBalance { get; set; }
         public List<UpdateInvoiceLineItemDto> LineItems { get; set; } = new();
     }
 

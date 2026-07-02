@@ -19,7 +19,8 @@ export type FixedAssetStatus =
   | 'Disposed'
   | 'HeldForSale'
   | 'WrittenOff'
-  | 'UnderConstruction';
+  | 'UnderConstruction'
+  | 'OnHold';
 
 export interface FixedAssetCategory {
   id: string;
@@ -63,6 +64,7 @@ export interface FixedAsset {
   assetCode: string;
   name: string;
   description?: string;
+  location?: string;
   fixedAssetCategoryId: string;
   fixedAssetCategoryName?: string;
   purchaseDate: string;
@@ -90,6 +92,7 @@ export interface CreateFixedAssetDto {
   assetCode: string;
   name: string;
   description?: string;
+  location?: string;
   fixedAssetCategoryId: string;
   purchaseDate: string;
   placedInServiceDate?: string;
@@ -315,6 +318,7 @@ export interface BulkImportResult {
   totalRows: number;
   successCount: number;
   errorCount: number;
+  isDryRun: boolean;
   errors: BulkImportError[];
   successfulAssetCodes: string[];
 }

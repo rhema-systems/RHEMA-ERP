@@ -126,7 +126,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     Description = r.Description,
                     Priority = r.Priority,
                     TaxGroupId = r.TaxGroupId,
-                    TaxGroupName = r.TaxGroup.Name,
+                    TaxGroupName = r.TaxGroup != null ? r.TaxGroup.Name : string.Empty,
                     TransactionType = r.TransactionType,
                     ProductCategoryId = r.ProductCategoryId,
                     ProductCategoryName = "Category", // Placeholder until joined
@@ -180,7 +180,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 Description = r.Description,
                 Priority = r.Priority,
                 TaxGroupId = r.TaxGroupId,
-                TaxGroupName = r.TaxGroup.Name,
+                TaxGroupName = r.TaxGroup?.Name ?? string.Empty,
                 TransactionType = r.TransactionType,
                 ProductCategoryId = r.ProductCategoryId,
                 CustomerType = r.CustomerType,

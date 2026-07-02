@@ -136,7 +136,8 @@ export default function SupplierReturnsPage() {
               {formatCurrency(
                 filteredReturns
                   .filter((r: any) => r.status === 2 || r.status === 'Approved')
-                  .reduce((sum: number, r: any) => sum + r.baseCurrencyAmount, 0)
+                  .reduce((sum: number, r: any) => sum + (Number(r.baseCurrencyAmount) || 0), 0),
+                'GHS'
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Posted AP ledger reversals</p>
@@ -233,10 +234,10 @@ export default function SupplierReturnsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-bold text-slate-800 dark:text-slate-200">
-                        {formatCurrency(ret.totalAmount)} {ret.currencyCode}
+                        {formatCurrency(ret.totalAmount, ret.currencyCode || 'GHS')}
                         {ret.currencyCode !== 'GHS' && (
                           <span className="block text-xs font-normal text-muted-foreground">
-                            ({formatCurrency(ret.baseCurrencyAmount)} GHS)
+                            ({formatCurrency(ret.baseCurrencyAmount, 'GHS')})
                           </span>
                         )}
                       </TableCell>

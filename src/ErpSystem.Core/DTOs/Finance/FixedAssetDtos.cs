@@ -62,6 +62,7 @@ public class FixedAssetDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
     public Guid FixedAssetCategoryId { get; set; }
     public string? FixedAssetCategoryName { get; set; }
     public DateTime PurchaseDate { get; set; }
@@ -90,6 +91,7 @@ public class CreateFixedAssetDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
     public Guid FixedAssetCategoryId { get; set; }
     public DateTime PurchaseDate { get; set; }
     public DateTime? PlacedInServiceDate { get; set; }
@@ -110,6 +112,7 @@ public class UpdateFixedAssetDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
     public Guid FixedAssetCategoryId { get; set; }
     public DateTime PurchaseDate { get; set; }
     public DateTime? PlacedInServiceDate { get; set; }
@@ -306,6 +309,7 @@ public class BulkImportResultDto
     public int TotalRows { get; set; }
     public int SuccessCount { get; set; }
     public int ErrorCount { get; set; }
+    public bool IsDryRun { get; set; }
     public List<BulkImportErrorDto> Errors { get; set; } = new();
     public List<string> SuccessfulAssetCodes { get; set; } = new();
 }
@@ -323,12 +327,16 @@ public class BulkAssetImportRowDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
     public string CategoryCode { get; set; } = string.Empty;
     public DateTime? PurchaseDate { get; set; }
+    public DateTime? PlacedInServiceDate { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? InstallationCost { get; set; }
     public decimal? TaxAmount { get; set; }
     public int? UsefulLifeMonths { get; set; }
     public decimal? ResidualValue { get; set; }
     public string? SerialNumber { get; set; }
+    public FixedAssetStatus? Status { get; set; }
+    public string? RawStatus { get; set; }
 }

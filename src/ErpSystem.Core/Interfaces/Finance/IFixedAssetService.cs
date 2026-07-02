@@ -11,7 +11,7 @@ public interface IFixedAssetService
     Task DeleteAsync(Guid id);
     
     // Bulk Import
-    Task<BulkImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName);
+    Task<BulkImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName, bool dryRun = false);
     Task<byte[]> GenerateImportTemplateAsync();
 
     // Lifecycle Management

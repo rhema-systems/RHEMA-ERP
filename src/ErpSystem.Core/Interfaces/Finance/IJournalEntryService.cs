@@ -62,7 +62,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// Reverses a posted journal entry.
         /// Creates a reversing entry with opposite debits/credits.
         /// </summary>
-        Task<JournalEntryDto> ReverseJournalEntryAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+        Task<JournalEntryDto> ReverseJournalEntryAsync(Guid id, string reason, DateTime? reversalDate = null, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Validates if a journal entry is balanced (debits = credits).

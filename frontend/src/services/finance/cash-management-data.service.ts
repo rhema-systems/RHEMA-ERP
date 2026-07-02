@@ -39,7 +39,7 @@ class CashManagementDataService {
     }
 
     async getActiveBankAccounts(): Promise<BankAccount[]> {
-        return apiService.get<BankAccount[]>('/finance/bank-accounts?isActive=true');
+        return apiService.get<BankAccount[]>('/finance/bank-accounts/active');
     }
 
     async createBankAccount(dto: CreateBankAccountDto): Promise<BankAccount> {
@@ -71,27 +71,27 @@ class CashManagementDataService {
 
     async getTransactionsByBankAccount(bankAccountId: string, fromDate?: string, toDate?: string): Promise<CashTransaction[]> {
         const queryParams = new URLSearchParams();
-        queryParams.append('bankAccountId', bankAccountId);
         if (fromDate) queryParams.append('fromDate', fromDate);
         if (toDate) queryParams.append('toDate', toDate);
 
-        return apiService.get<CashTransaction[]>(`/finance/cash-transactions?${queryParams}`);
+        const endpoint = `/finance/cash-transactions/bank-account/${bankAccountId}${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<CashTransaction[]>(endpoint);
     }
 
     async getUnreconciledTransactions(bankAccountId: string): Promise<CashTransaction[]> {
-        return apiService.get<CashTransaction[]>(`/finance/cash-transactions?bankAccountId=${bankAccountId}&reconciled=false`);
+        return apiService.get<CashTransaction[]>(`/finance/cash-transactions/bank-account/${bankAccountId}/unreconciled`);
     }
 
     async createCashReceipt(dto: CreateCashReceiptDto): Promise<CashTransaction> {
-        return apiService.post<CashTransaction>('/finance/cash-transactions/receipts', dto);
+        return apiService.post<CashTransaction>('/finance/cash-transactions/receipt', dto);
     }
 
     async createCashPayment(dto: CreateCashPaymentDto): Promise<CashTransaction> {
-        return apiService.post<CashTransaction>('/finance/cash-transactions/payments', dto);
+        return apiService.post<CashTransaction>('/finance/cash-transactions/payment', dto);
     }
 
     async createBankTransfer(dto: CreateBankTransferDto): Promise<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }> {
-        return apiService.post<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }>('/finance/cash-transactions/transfers', dto);
+        return apiService.post<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }>('/finance/cash-transactions/transfer', dto);
     }
 
     async deleteCashTransaction(id: string): Promise<void> {

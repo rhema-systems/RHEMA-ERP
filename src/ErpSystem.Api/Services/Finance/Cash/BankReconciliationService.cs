@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -11,14 +12,22 @@ public class BankReconciliationService : IBankReconciliationService
 {
     private readonly ApplicationDbContext _context;
     private readonly BankReconciliationEngine _reconciliationEngine;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkflowService _workflowService;
 
     public BankReconciliationService(
         ApplicationDbContext context,
-        BankReconciliationEngine reconciliationEngine)
+        BankReconciliationEngine reconciliationEngine,
+        ICurrentUserService currentUserService,
+        IWorkflowService workflowService)
     {
         _context = context;
         _reconciliationEngine = reconciliationEngine;
+        _currentUserService = currentUserService;
+        _workflowService = workflowService;
     }
+
+    private Guid CurrentUserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
 
     public async Task<BankReconciliationDto?> GetByIdAsync(Guid id)
     {
@@ -272,9 +281,26 @@ public class BankReconciliationService : IBankReconciliationService
             throw new Exception("Reconciliation must be completed before approval");
         }
 
+        if (CurrentUserId == Guid.Empty)
+            throw new Exception("Unable to resolve the current approver");
+
+        var startResult = await _workflowService.StartApprovalWorkflowAsync("BankReconciliation", id);
+        if (!startResult.Success)
+            throw new Exception(startResult.Message ?? "Unable to start bank reconciliation approval workflow");
+
+        if (!await _workflowService.CanUserApproveAsync("BankReconciliation", id, CurrentUserId))
+            throw new Exception("This bank reconciliation is assigned to another workflow approver");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("BankReconciliation", id, CurrentUserId, "Approve");
+        if (!workflowResult.Success)
+            throw new Exception(workflowResult.Message ?? "Unable to process bank reconciliation approval");
+
+        if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+            return await GetByIdAsync(id) ?? throw new Exception("Failed to retrieve reconciliation");
+
         reconciliation.Status = ReconciliationStatus.Approved;
         reconciliation.ApprovedAt = DateTime.UtcNow;
-        // TODO: Set ApprovedBy from current user
+        reconciliation.ApprovedBy = CurrentUserId;
 
         await _context.SaveChangesAsync();
 

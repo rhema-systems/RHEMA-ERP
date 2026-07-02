@@ -5,12 +5,14 @@
 
 import type {
     Account,
+    AccountingBook,
     Currency,
     ExchangeRate,
     FiscalYear,
     FiscalPeriod,
     JournalEntry,
     JournalEntryAttachment,
+    FinanceJournalAuditLog,
     FinanceSettings,
     SegmentStructure,
     SegmentLookupValue,
@@ -25,6 +27,17 @@ import type {
     AddCurrencyLinkDto,
     ModuleDefinition,
     CreateFiscalYearDto,
+    BalanceSheetReportDto,
+    BalanceSheetRequestDto,
+    CashFlowStatementReportDto,
+    CashFlowStatementRequestDto,
+    DetailedLedgerReportDto,
+    DetailedLedgerRequestDto,
+    IncomeStatementReportDto,
+    IncomeStatementRequestDto,
+    MultiCurrencyDetailReportDto,
+    MultiCurrencyDetailRequestDto,
+    TrialBalanceReportDto,
 } from '@/types/finance';
 import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
@@ -53,16 +66,30 @@ class FinanceDataService {
 
     // ===== ACCOUNTS =====
 
+    async getAccountingBooks(includeInactive = false): Promise<AccountingBook[]> {
+        const queryParams = new URLSearchParams();
+        if (includeInactive) queryParams.append('includeInactive', 'true');
+
+        const endpoint = `/finance/accounting-books${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<AccountingBook[]>(endpoint);
+    }
+
     async getAccounts(filters?: {
         accountType?: string;
         status?: string;
         isMultiCurrency?: boolean;
         coaType?: 'Standard' | 'Segmented';
+        page?: number;
+        pageSize?: number;
+        take?: number;
     }): Promise<Account[]> {
         const queryParams = new URLSearchParams();
         if (filters?.accountType) queryParams.append('accountType', filters.accountType);
         if (filters?.status) queryParams.append('status', filters.status);
         if (filters?.isMultiCurrency !== undefined) queryParams.append('isMultiCurrency', String(filters.isMultiCurrency));
+        if (filters?.page !== undefined) queryParams.append('page', String(filters.page));
+        if (filters?.pageSize !== undefined) queryParams.append('pageSize', String(filters.pageSize));
+        if (filters?.take !== undefined) queryParams.append('take', String(filters.take));
 
         const endpoint = `/finance/accounts${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<Account[]>(endpoint);
@@ -180,7 +207,7 @@ class FinanceDataService {
 
     async getFiscalPeriods(fiscalYearId?: string): Promise<FiscalPeriod[]> {
         const endpoint = fiscalYearId
-            ? `/finance/fiscal-periods?fiscalYearId=${fiscalYearId}`
+            ? `/finance/fiscal-periods?yearId=${fiscalYearId}`
             : '/finance/fiscal-periods';
         return apiService.get<FiscalPeriod[]>(endpoint);
     }
@@ -236,9 +263,18 @@ class FinanceDataService {
         return normalizeJournalEntries(raw);
     }
 
+    async getPendingJournalApprovals(): Promise<JournalEntry[]> {
+        const raw = await apiService.get<any[]>('/finance/journal-entries/pending-approvals');
+        return normalizeJournalEntries(raw);
+    }
+
     async getJournalEntryById(id: string): Promise<JournalEntry> {
         const raw = await apiService.get<any>(`/finance/journal-entries/${id}`);
         return normalizeJournalEntry(raw);
+    }
+
+    async getJournalEntryAuditTrail(id: string): Promise<FinanceJournalAuditLog[]> {
+        return apiService.get<FinanceJournalAuditLog[]>(`/finance/journal-entries/${id}/audit-trail`);
     }
 
     async createJournalEntry(dto: CreateJournalEntryDto): Promise<JournalEntry> {
@@ -246,8 +282,9 @@ class FinanceDataService {
         return normalizeJournalEntry(raw);
     }
 
-    async updateJournalEntry(id: string, dto: Partial<JournalEntry>): Promise<JournalEntry> {
-        return apiService.put<JournalEntry>(`/finance/journal-entries/${id}`, dto);
+    async updateJournalEntry(id: string, dto: Partial<CreateJournalEntryDto>): Promise<JournalEntry> {
+        const raw = await apiService.put<any>(`/finance/journal-entries/${id}`, dto);
+        return normalizeJournalEntry(raw);
     }
 
     async deleteJournalEntry(id: string): Promise<void> {
@@ -259,11 +296,10 @@ class FinanceDataService {
     }
 
     async reverseJournalEntry(id: string, reason: string, reversalDate?: string): Promise<JournalEntry> {
-        const queryParams = new URLSearchParams({ reason });
-        if (reversalDate) {
-            queryParams.append('reversalDate', reversalDate);
-        }
-        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/reverse?${queryParams.toString()}`, {});
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/reverse`, {
+            reason,
+            reversalDate: reversalDate || undefined,
+        });
         return normalizeJournalEntry(raw);
     }
 
@@ -276,6 +312,13 @@ class FinanceDataService {
 
     async requestJournalEntryApproval(id: string): Promise<JournalEntry> {
         const raw = await apiService.post<any>(`/finance/journal-entries/${id}/request-approval`);
+        return normalizeJournalEntry(raw);
+    }
+
+    async withdrawJournalEntryApproval(id: string, reason?: string): Promise<JournalEntry> {
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/withdraw-approval`, {
+            reason: reason || 'Approval request withdrawn.',
+        });
         return normalizeJournalEntry(raw);
     }
 
@@ -339,39 +382,68 @@ class FinanceDataService {
 
     // ===== FINANCIAL STATEMENTS =====
 
-    async getTrialBalance(params: { asAtDate: string; bookClassification?: string; includeZeroBalances?: boolean; segmentFilters?: string[] }): Promise<any> {
+    async getTrialBalance(params: { asAtDate: string; bookClassification?: string; includeZeroBalances?: boolean }): Promise<TrialBalanceReportDto> {
         const queryParams = new URLSearchParams();
         if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeZeroBalances !== undefined) queryParams.append('includeZeroBalances', String(params.includeZeroBalances));
-        if (params.segmentFilters && params.segmentFilters.length > 0) {
-            params.segmentFilters.forEach(filter => queryParams.append('segmentFilters', filter));
-        }
 
-        return apiService.get<any>(`/finance/statements/trial-balance?${queryParams}`);
+        return apiService.get<TrialBalanceReportDto>(`/finance/statements/trial-balance?${queryParams}`);
     }
 
-    async getIncomeStatement(params: { periodStart: string; periodEnd: string; bookClassification?: string; segmentFilters?: string[] }): Promise<any> {
+    async getDetailedLedger(params: DetailedLedgerRequestDto): Promise<DetailedLedgerReportDto> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('startDate', params.startDate);
+        queryParams.append('endDate', params.endDate);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeReversed !== undefined) queryParams.append('includeReversed', String(params.includeReversed));
+        if (params.includeOpeningBalances !== undefined) queryParams.append('includeOpeningBalances', String(params.includeOpeningBalances));
+        if (params.accountIds && params.accountIds.length > 0) {
+            params.accountIds.forEach(accountId => queryParams.append('accountIds', accountId));
+        }
+
+        return apiService.get<DetailedLedgerReportDto>(`/finance/statements/detailed-ledger?${queryParams}`);
+    }
+
+    async getIncomeStatement(params: IncomeStatementRequestDto): Promise<IncomeStatementReportDto> {
         const queryParams = new URLSearchParams();
         if (params.periodStart) queryParams.append('periodStart', params.periodStart);
         if (params.periodEnd) queryParams.append('periodEnd', params.periodEnd);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
-        if (params.segmentFilters && params.segmentFilters.length > 0) {
-            params.segmentFilters.forEach(filter => queryParams.append('segmentFilters', filter));
-        }
+        if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
 
-        return apiService.get<any>(`/finance/statements/income-statement?${queryParams}`);
+        return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
     }
 
-    async getBalanceSheet(params: { asAtDate: string; bookClassification?: string; segmentFilters?: string[] }): Promise<any> {
+    async getBalanceSheet(params: BalanceSheetRequestDto): Promise<BalanceSheetReportDto> {
         const queryParams = new URLSearchParams();
         if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
-        if (params.segmentFilters && params.segmentFilters.length > 0) {
-            params.segmentFilters.forEach(filter => queryParams.append('segmentFilters', filter));
-        }
+        if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
 
-        return apiService.get<any>(`/finance/statements/balance-sheet?${queryParams}`);
+        return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
+    }
+
+    async getCashFlowStatement(params: CashFlowStatementRequestDto): Promise<CashFlowStatementReportDto> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('periodStart', params.periodStart);
+        queryParams.append('periodEnd', params.periodEnd);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        if (params.method) queryParams.append('method', params.method);
+
+        return apiService.get<CashFlowStatementReportDto>(`/finance/statements/cash-flow?${queryParams}`);
+    }
+
+    async getMultiCurrencyDetailReport(params: MultiCurrencyDetailRequestDto): Promise<MultiCurrencyDetailReportDto> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('startDate', params.startDate);
+        queryParams.append('endDate', params.endDate);
+        if (params.accountId) queryParams.append('accountId', params.accountId);
+        if (params.currencyCode) queryParams.append('currencyCode', params.currencyCode);
+        if (params.includeRevaluation !== undefined) queryParams.append('includeRevaluation', String(params.includeRevaluation));
+
+        return apiService.get<MultiCurrencyDetailReportDto>(`/finance/statements/multi-currency-detail?${queryParams}`);
     }
 
     // ===== SEGMENT STRUCTURES =====

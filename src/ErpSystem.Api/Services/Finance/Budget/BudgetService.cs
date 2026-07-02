@@ -1,5 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -9,12 +11,20 @@ namespace ErpSystem.Api.Services.Finance.Budget;
 public class BudgetService : IBudgetService
 {
     private readonly ApplicationDbContext _context;
-    // In a real app, I would inject ICurrentUserService for user IDs, but I'll stick to simple logic for now
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkflowService _workflowService;
 
-    public BudgetService(ApplicationDbContext context)
+    public BudgetService(
+        ApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        IWorkflowService workflowService)
     {
         _context = context;
+        _currentUserService = currentUserService;
+        _workflowService = workflowService;
     }
+
+    private Guid CurrentUserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
 
     // ========================================================================
     // SCENARIOS
@@ -189,6 +199,17 @@ public class BudgetService : IBudgetService
         budgetReturn.RejectionReason = null; // Clear rejection reason
 
         await _context.SaveChangesAsync();
+
+        var workflowResult = await _workflowService.StartApprovalWorkflowAsync("BudgetReturn", id);
+        if (!workflowResult.Success)
+        {
+            budgetReturn.Status = "Draft";
+            budgetReturn.SubmittedDate = null;
+            await _context.SaveChangesAsync();
+
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to start budget return approval workflow.");
+        }
+
         return await MapToReturnDto(budgetReturn);
     }
 
@@ -197,6 +218,20 @@ public class BudgetService : IBudgetService
         var budgetReturn = await GetReturnEntityAsync(id);
         if (budgetReturn.Status != "Submitted")
             throw new InvalidOperationException("Only Submitted returns can be approved.");
+
+        var workflowUserId = CurrentUserId != Guid.Empty ? CurrentUserId : approverId;
+        if (workflowUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("BudgetReturn", id, workflowUserId))
+            throw new InvalidOperationException("This budget return is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("BudgetReturn", id, workflowUserId, "Approve");
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process budget return approval.");
+
+        if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+            return await MapToReturnDto(budgetReturn);
 
         budgetReturn.Status = "Approved";
         budgetReturn.ApprovedDate = DateTime.UtcNow;
@@ -211,6 +246,20 @@ public class BudgetService : IBudgetService
         var budgetReturn = await GetReturnEntityAsync(id);
         if (budgetReturn.Status != "Submitted" && budgetReturn.Status != "Approved")
              throw new InvalidOperationException("Can only reject Submitted or Approved returns.");
+
+        var workflowUserId = CurrentUserId != Guid.Empty ? CurrentUserId : rejectorId;
+        if (workflowUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("BudgetReturn", id, workflowUserId))
+            throw new InvalidOperationException("This budget return is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("BudgetReturn", id, workflowUserId, "Reject", reason);
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process budget return rejection.");
+
+        if (workflowResult.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed))
+            return await MapToReturnDto(budgetReturn);
 
         budgetReturn.Status = "Rejected";
         budgetReturn.RejectionReason = reason;
@@ -337,10 +386,10 @@ public class BudgetService : IBudgetService
          return r;
     }
 
-    private async Task<BudgetScenarioDto> MapToDto(BudgetScenario s)
+    private Task<BudgetScenarioDto> MapToDto(BudgetScenario s)
     {
         // Re-fetch logic if navigation property missing logic omitted for brevity, assuming Include used
-        return new BudgetScenarioDto
+        return Task.FromResult(new BudgetScenarioDto
         {
             Id = s.Id,
             Name = s.Name,
@@ -353,7 +402,7 @@ public class BudgetService : IBudgetService
             LockedDate = s.LockedDate,
             CreatedAt = s.CreatedAt,
             ReturnCount = s.BudgetReturns.Count
-        };
+        });
     }
 
     private async Task<BudgetReturnDto> MapToReturnDto(BudgetReturn r)

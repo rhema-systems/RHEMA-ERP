@@ -39,6 +39,7 @@ public class VendorInvoiceDto
     public decimal BaseCurrencyAmount { get; set; }
 
     public int PaymentTermsDays { get; set; }
+    public Guid? PaymentTermId { get; set; }
 
     // Early-payment discount
     public decimal EarlyPaymentDiscountPercentage { get; set; }
@@ -66,6 +67,7 @@ public class VendorInvoiceDto
 
     public string? Notes { get; set; }
     public string? Reference { get; set; }
+    public bool IsOpeningBalance { get; set; }
 
     public List<VendorInvoiceLineItemDto> LineItems { get; set; } = new();
     public List<VendorPaymentAllocationDto> PaymentAllocations { get; set; } = new();
@@ -93,6 +95,7 @@ public class VendorInvoiceCreateDto
     public decimal ExchangeRate { get; set; } = 1.0m;
 
     public int PaymentTermsDays { get; set; } = 30;
+    public Guid? PaymentTermId { get; set; }
 
     // Early-payment discount
     public decimal EarlyPaymentDiscountPercentage { get; set; }
@@ -110,6 +113,7 @@ public class VendorInvoiceCreateDto
 
     public string? Notes { get; set; }
     public string? Reference { get; set; }
+    public bool IsOpeningBalance { get; set; }
 
     [Required]
     public List<VendorInvoiceLineItemCreateDto> LineItems { get; set; } = new();
@@ -131,6 +135,7 @@ public class VendorInvoiceUpdateDto
     public decimal ExchangeRate { get; set; } = 1.0m;
 
     public int PaymentTermsDays { get; set; } = 30;
+    public Guid? PaymentTermId { get; set; }
 
     public decimal EarlyPaymentDiscountPercentage { get; set; }
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
@@ -144,6 +149,7 @@ public class VendorInvoiceUpdateDto
 
     public string? Notes { get; set; }
     public string? Reference { get; set; }
+    public bool IsOpeningBalance { get; set; }
 
     public List<VendorInvoiceLineItemCreateDto> LineItems { get; set; } = new();
 }
@@ -162,6 +168,7 @@ public class VendorInvoiceQueryDto
     public DateTime? DueFromDate { get; set; }
     public DateTime? DueToDate { get; set; }
     public bool? OverdueOnly { get; set; }
+    public bool? IsOpeningBalance { get; set; }
     public string? SortBy { get; set; }
     public bool SortDescending { get; set; } = true;
 }

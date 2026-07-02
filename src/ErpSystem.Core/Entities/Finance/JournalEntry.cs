@@ -132,12 +132,12 @@ public class JournalEntry : BusinessEntity
     public string? PrimaryCurrency { get; set; }
 
     // ========================================================================
-    // CLASSIFICATION SUPPORT (IFRS/Base/Local)
+    // CLASSIFICATION SUPPORT (IFRS / LOCAL_STATUTORY / MANAGEMENT)
     // ========================================================================
     
     /// <summary>
     /// Book classification for parallel accounting frameworks.
-    /// Values: "IFRS", "Base", "Local"
+    /// Values: "IFRS", "LOCAL_STATUTORY", "MANAGEMENT"
     /// All transaction lines inherit this classification.
     /// </summary>
     [Required]

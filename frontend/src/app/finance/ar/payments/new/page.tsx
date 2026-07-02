@@ -43,6 +43,7 @@ import { formatCurrency, cn } from '@/lib/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
+import { format } from 'date-fns';
 
 const paymentSchema = z.object({
     customerId: z.string().min(1, 'Customer is required'),
@@ -65,6 +66,7 @@ export default function NewPaymentPage() {
     const queryClient = useQueryClient();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [allocations, setAllocations] = useState<Record<string, number>>({});
+    const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
     const [createdPaymentId, setCreatedPaymentId] = useState<string | null>(null);
 
     // Fetch customers
@@ -74,7 +76,7 @@ export default function NewPaymentPage() {
     });
 
     const form = useForm<PaymentFormValues>({
-        resolver: zodResolver(paymentSchema),
+        resolver: zodResolver(paymentSchema) as any,
         defaultValues: {
             customerId: preselectedCustomerId || '',
             paymentDate: new Date(),
@@ -102,6 +104,7 @@ export default function NewPaymentPage() {
                 form.setValue('totalAmount', invoice.balanceAmount);
                 // Auto-allocate logic could go here, but let's keep it manual for explicit confirmation
                 setAllocations({ [invoice.id]: invoice.balanceAmount });
+                setDiscountAllocations({ [invoice.id]: 0 });
             }
         }
     }, [preselectedInvoiceId, outstandingInvoices, form]);
@@ -130,16 +133,25 @@ export default function NewPaymentPage() {
 
     const allocatePaymentMutation = useMutation({
         mutationFn: async (paymentId: string) => {
-            // Process allocations sequentially or concurrently
-            const allocationPromises = Object.entries(allocations).map(([invoiceId, amount]) => {
-                if (amount <= 0) return Promise.resolve();
-                return arService.allocatePayment({
-                    customerPaymentId: paymentId,
+            const invoiceIds = new Set([
+                ...Object.keys(allocations),
+                ...Object.keys(discountAllocations),
+            ]);
+
+            const allocationRows = Array.from(invoiceIds)
+                .map(invoiceId => ({
                     invoiceId,
-                    amount
-                });
+                    allocatedAmount: Number(allocations[invoiceId]) || 0,
+                    discountAmount: Number(discountAllocations[invoiceId]) || 0,
+                }))
+                .filter(row => row.allocatedAmount > 0 || row.discountAmount > 0);
+
+            if (allocationRows.length === 0) return;
+
+            await arService.allocatePayment({
+                customerPaymentId: paymentId,
+                allocations: allocationRows,
             });
-            await Promise.all(allocationPromises);
         },
         onSuccess: () => {
             toast({ title: 'Success', description: 'Payment allocated successfully' });
@@ -163,7 +175,8 @@ export default function NewPaymentPage() {
 
             // 2. Allocate if any allocations set
             const totalAllocated = Object.values(allocations).reduce((a, b) => a + b, 0);
-            if (totalAllocated > 0) {
+            const totalDiscounts = Object.values(discountAllocations).reduce((a, b) => a + b, 0);
+            if (totalAllocated > 0 || totalDiscounts > 0) {
                 await allocatePaymentMutation.mutateAsync(payment.id);
             } else {
                 toast({ title: 'Success', description: 'Payment recorded (unallocated)' });
@@ -182,7 +195,9 @@ export default function NewPaymentPage() {
     };
 
     const currentAmount = form.watch('totalAmount');
+    const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
     const totalAllocated = Object.values(allocations).reduce((acc, curr) => acc + curr, 0);
+    const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
     const remainingAmount = currentAmount - totalAllocated;
 
     const handleAutoAllocate = () => {
@@ -200,6 +215,7 @@ export default function NewPaymentPage() {
             remaining -= allocateAmount;
         }
         setAllocations(newAllocations);
+        setDiscountAllocations({});
     };
 
     return (
@@ -227,7 +243,13 @@ export default function NewPaymentPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="customer">Customer</Label>
                                 <Select
-                                    onValueChange={(val) => form.setValue('customerId', val)}
+                                    onValueChange={(val) => {
+                                        form.setValue('customerId', val);
+                                        const customer = customersData?.items.find(c => c.id === val);
+                                        if (customer?.currencyCode) {
+                                            form.setValue('currencyCode', customer.currencyCode);
+                                        }
+                                    }}
                                     defaultValue={preselectedCustomerId || ''}
                                     disabled={!!createdPaymentId} // Disable after creation
                                 >
@@ -283,11 +305,11 @@ export default function NewPaymentPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="amount">Amount Received</Label>
                                 <div className="relative">
-                                    <span className="absolute left-3 top-2.5 text-gray-500">$</span>
+                                    <span className="absolute left-3 top-2.5 text-gray-500">{currentCurrencyCode}</span>
                                     <Input
                                         id="amount"
                                         type="number"
-                                        className="pl-7"
+                                        className="pl-14"
                                         step="0.01"
                                         {...form.register('totalAmount')}
                                         disabled={!!createdPaymentId}
@@ -364,7 +386,14 @@ export default function NewPaymentPage() {
                         ) : (
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center bg-muted/50 p-4 rounded-lg font-medium">
-                                    <span>Remaining to Allocate:</span>
+                                    <div>
+                                        <div>Remaining Cash to Allocate:</div>
+                                        {totalDiscounts > 0 && (
+                                            <div className="text-xs text-muted-foreground">
+                                                Discounts allowed: {formatCurrency(totalDiscounts)}
+                                            </div>
+                                        )}
+                                    </div>
                                     <span className={remainingAmount < 0 ? 'text-red-500' : 'text-green-600'}>
                                         {formatCurrency(remainingAmount)}
                                     </span>
@@ -378,6 +407,7 @@ export default function NewPaymentPage() {
                                                 <th className="p-3 text-left">Date</th>
                                                 <th className="p-3 text-right">Balance Due</th>
                                                 <th className="p-3 text-right w-[150px]">Allocate</th>
+                                                <th className="p-3 text-right w-[150px]">Discount</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -401,6 +431,23 @@ export default function NewPaymentPage() {
                                                             onChange={(e) => {
                                                                 const val = Number(e.target.value);
                                                                 setAllocations(prev => ({
+                                                                    ...prev,
+                                                                    [inv.id]: val
+                                                                }));
+                                                            }}
+                                                            disabled={!!createdPaymentId}
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <Input
+                                                            type="number"
+                                                            className="text-right h-8"
+                                                            min={0}
+                                                            max={inv.balanceAmount}
+                                                            value={discountAllocations[inv.id] || ''}
+                                                            onChange={(e) => {
+                                                                const val = Number(e.target.value);
+                                                                setDiscountAllocations(prev => ({
                                                                     ...prev,
                                                                     [inv.id]: val
                                                                 }));

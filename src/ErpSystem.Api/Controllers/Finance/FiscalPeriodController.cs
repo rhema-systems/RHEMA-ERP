@@ -220,11 +220,14 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Returns the list of fiscal periods</response>
         /// <response code="500">Internal server error</response>
         [HttpGet("fiscal-periods")]
-        public async Task<ActionResult<List<FiscalPeriodDto>>> GetFiscalPeriods([FromQuery] Guid? yearId = null)
+        public async Task<ActionResult<List<FiscalPeriodDto>>> GetFiscalPeriods(
+            [FromQuery] Guid? yearId = null,
+            [FromQuery] Guid? fiscalYearId = null,
+            [FromQuery] string? status = null)
         {
             try
             {
-                var periods = await _fiscalPeriodService.GetFiscalPeriodsAsync(yearId);
+                var periods = await _fiscalPeriodService.GetFiscalPeriodsAsync(yearId ?? fiscalYearId, status);
                 return Ok(periods);
             }
             catch (Exception ex)
@@ -464,7 +467,8 @@ namespace ErpSystem.Api.Controllers.Finance
             if (!ModelState.IsValid) return BadRequest(ModelState);
             try
             {
-                var result = await _fiscalPeriodService.LockPeriodForModuleAsync(id, dto.ModuleCode, dto.Reason);
+                var reason = string.IsNullOrWhiteSpace(dto.Reason) ? "Module locked from finance administration." : dto.Reason;
+                var result = await _fiscalPeriodService.LockPeriodForModuleAsync(id, dto.ModuleCode, reason);
                 return Ok(new { message = $"Module {dto.ModuleCode} locked successfully", id = result });
             }
             catch (ArgumentException ex) { return NotFound(ex.Message); }
@@ -498,7 +502,8 @@ namespace ErpSystem.Api.Controllers.Finance
             if (!ModelState.IsValid) return BadRequest(ModelState);
             try
             {
-                var result = await _fiscalPeriodService.UnlockPeriodForModuleAsync(id, dto.ModuleCode, dto.Reason);
+                var reason = string.IsNullOrWhiteSpace(dto.Reason) ? "Module unlocked from finance administration." : dto.Reason;
+                var result = await _fiscalPeriodService.UnlockPeriodForModuleAsync(id, dto.ModuleCode, reason);
                 return Ok(new { message = $"Module {dto.ModuleCode} unlocked successfully" });
             }
             catch (ArgumentException ex) { return NotFound(ex.Message); }

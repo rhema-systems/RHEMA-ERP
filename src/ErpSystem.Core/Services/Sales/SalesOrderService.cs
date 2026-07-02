@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services.Projects;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,8 @@ public class SalesOrderService : ISalesOrderService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<SalesOrderService> _logger;
+    private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
 
     public SalesOrderService(
         IGenericRepository<SalesOrder> salesOrderRepo,
@@ -31,7 +34,9 @@ public class SalesOrderService : ISalesOrderService
         IGenericRepository<Quote> quoteRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
-        ILogger<SalesOrderService> logger)
+        ILogger<SalesOrderService> logger,
+        IDocumentNumberingService documentNumberingService,
+        IWorkflowIntegrationService workflowIntegrationService)
     {
         _salesOrderRepo = salesOrderRepo;
         _lineRepo = lineRepo;
@@ -41,6 +46,8 @@ public class SalesOrderService : ISalesOrderService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _documentNumberingService = documentNumberingService;
+        _workflowIntegrationService = workflowIntegrationService;
     }
 
     #region CRUD
@@ -378,6 +385,19 @@ public class SalesOrderService : ISalesOrderService
             await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
+            var workflowResult = await _workflowIntegrationService.SubmitAsync("SalesOrder", id);
+            if (!workflowResult.ExecutionResult.Success)
+            {
+                so.OrderStatus = SalesOrderStatus.Draft;
+                so.ApprovalStatus = "Draft";
+                so.SubmittedById = null;
+                so.SubmittedDate = null;
+                await _salesOrderRepo.UpdateAsync(so);
+                await _unitOfWork.SaveChangesAsync();
+
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to start sales order approval workflow.");
+            }
+
             _logger.LogInformation("Sales Order {OrderNumber} submitted for approval", so.DocumentNumber);
             return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
         }
@@ -398,11 +418,28 @@ public class SalesOrderService : ISalesOrderService
             if (so.OrderStatus != SalesOrderStatus.PendingApproval)
                 throw new InvalidOperationException($"Sales Order is not pending approval");
 
+            var workflowAction = dto.Approved ? "Approve" : "Reject";
+            var workflowComments = dto.Approved ? dto.Comments : dto.RejectionReason ?? dto.Comments;
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                "SalesOrder",
+                id,
+                _currentUserProvider.UserId,
+                workflowAction,
+                workflowComments);
+
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to process sales order approval workflow.");
+
+            if (workflowResult.Outcome == WorkflowOutcome.Pending)
+            {
+                return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+            }
+
             so.ApprovedById = _currentUserProvider.UserId;
             so.ApprovedDate = DateTime.UtcNow;
             so.ApprovalComments = dto.Comments;
 
-            if (dto.Approved)
+            if (workflowResult.Outcome == WorkflowOutcome.Approved)
             {
                 so.OrderStatus = SalesOrderStatus.Confirmed;
                 so.ApprovalStatus = "Approved";
@@ -632,8 +669,12 @@ public class SalesOrderService : ISalesOrderService
 
     public async Task<string> GenerateOrderNumberAsync()
     {
-        var count = await _salesOrderRepo.CountAsync() + 1;
-        return $"SO-{count:D6}";
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.SalesOrder,
+            _currentUserProvider.TenantId,
+            DateTime.UtcNow,
+            nameof(SalesOrder));
     }
 
     public async Task<bool> ValidateCreditLimitAsync(Guid businessPartnerId, decimal orderAmount)

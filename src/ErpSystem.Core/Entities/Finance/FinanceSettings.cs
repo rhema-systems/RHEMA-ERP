@@ -125,6 +125,18 @@ namespace ErpSystem.Core.Entities.Finance
         public Guid? DefaultBankAccountId { get; set; }
 
         /// <summary>
+        /// Contra-revenue / expense account debited when customer settlement discounts are allowed.
+        /// </summary>
+        public Guid? DiscountAllowedAccountId { get; set; }
+        public virtual Account? DiscountAllowedAccount { get; set; }
+
+        /// <summary>
+        /// Other-income / contra-expense account credited when supplier settlement discounts are taken.
+        /// </summary>
+        public Guid? DiscountReceivedAccountId { get; set; }
+        public virtual Account? DiscountReceivedAccount { get; set; }
+
+        /// <summary>
         /// Migration/Opening Balance Clearing Account.
         /// Used during go-live to offset subledger opening balance entries.
         /// The balance of this account should be zero after migration is complete.

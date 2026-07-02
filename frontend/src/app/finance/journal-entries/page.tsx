@@ -65,8 +65,8 @@ export default function JournalEntriesPage() {
         return <Badge variant={variants[status]} className={className}>{status}</Badge>;
     };
 
-    const getTypeBadge = (type: JournalType) => {
-        return <Badge variant="outline">{type}</Badge>;
+    const getTypeBadge = (type?: JournalType) => {
+        return <Badge variant="outline">{type || 'General'}</Badge>;
     };
 
     const formatCurrency = (amount: number, currency: string) => {

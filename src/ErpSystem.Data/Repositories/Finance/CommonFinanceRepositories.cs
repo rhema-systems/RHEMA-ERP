@@ -34,8 +34,18 @@ public class PaymentTermRepository : GenericRepository<PaymentTerm>, IPaymentTer
 
     public async Task<IEnumerable<PaymentTerm>> GetByApplicableToAsync(string applicableTo)
     {
+        var normalizedApplicableTo = string.IsNullOrWhiteSpace(applicableTo)
+            ? "All"
+            : applicableTo.Trim();
+        var applicableAliases = normalizedApplicableTo.Equals("Supplier", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "Supplier", "Vendor", "All" }
+            : normalizedApplicableTo.Equals("Customer", StringComparison.OrdinalIgnoreCase)
+                ? new[] { "Customer", "Client", "All" }
+                : new[] { normalizedApplicableTo, "All" };
+        var normalizedAliases = applicableAliases.Select(alias => alias.ToUpper()).ToArray();
+
         return await _dbSet
-            .Where(pt => (pt.ApplicableTo == applicableTo || pt.ApplicableTo == "All") && pt.IsActive && pt.TenantId == TenantId && !pt.IsDeleted)
+            .Where(pt => normalizedAliases.Contains(pt.ApplicableTo.ToUpper()) && pt.IsActive && pt.TenantId == TenantId && !pt.IsDeleted)
             .OrderBy(pt => pt.DisplayOrder)
             .ThenBy(pt => pt.Name)
             .ToListAsync();

@@ -2237,7 +2237,7 @@ public class WorkflowController : ControllerBase
             RequiredRole = step.RequiredRole,
             EstimatedHours = step.EstimatedHours,
             Configuration = step.Configuration != null ?
-                System.Text.Json.JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(step.Configuration) : null
+                JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(step.Configuration, WorkflowJsonOptions) : null
         };
     }
 
@@ -2256,7 +2256,7 @@ public class WorkflowController : ControllerBase
             IsDefault = transition.IsDefault,
             Priority = transition.Priority,
             Condition = transition.Condition != null ?
-                System.Text.Json.JsonSerializer.Deserialize<WorkflowConditionDto>(transition.Condition) : null
+                JsonSerializer.Deserialize<WorkflowConditionDto>(transition.Condition, WorkflowJsonOptions) : null
         };
     }
 

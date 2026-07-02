@@ -58,8 +58,15 @@ public class FixedAssetsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<FixedAssetDto>> Create(CreateFixedAssetDto dto)
     {
-        var result = await _fixedAssetService.CreateAsync(dto);
-        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        try
+        {
+            var result = await _fixedAssetService.CreateAsync(dto);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpPut("{id}")]
@@ -356,7 +363,7 @@ public class FixedAssetsController : ControllerBase
 
     // Bulk Import
     [HttpPost("bulk-import")]
-    public async Task<ActionResult<BulkImportResultDto>> BulkImport(IFormFile file)
+    public async Task<ActionResult<BulkImportResultDto>> BulkImport(IFormFile file, [FromQuery] bool dryRun = false)
     {
         try
         {
@@ -367,7 +374,7 @@ public class FixedAssetsController : ControllerBase
                 return BadRequest("Only Excel files (.xlsx) are supported.");
 
             using var stream = file.OpenReadStream();
-            var result = await _fixedAssetService.ImportAssetsFromExcelAsync(stream, file.FileName);
+            var result = await _fixedAssetService.ImportAssetsFromExcelAsync(stream, file.FileName, dryRun);
             
             return Ok(result);
         }

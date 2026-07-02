@@ -6,7 +6,7 @@ namespace ErpSystem.Core.Entities.Finance;
 
 /// <summary>
 /// Core double-entry transaction line item entity.
-/// Supports segmented accounts, multi-currency, parallel books (IFRS/Base/Local),
+/// Supports segmented accounts, multi-currency, parallel books (IFRS/Local Statutory/Management),
 /// and comprehensive audit trails per Finance Module Enhanced Workflows.
 /// </summary>
 public class AccountTransaction : BusinessEntity
@@ -136,12 +136,12 @@ public class AccountTransaction : BusinessEntity
     public string? SourceReferenceNumber { get; set; }
 
     // ========================================================================
-    // CLASSIFICATION SUPPORT (Section 3.2.6 - IFRS/Base/Local)
+    // CLASSIFICATION SUPPORT (Section 3.2.6 - IFRS / LOCAL_STATUTORY / MANAGEMENT)
     // ========================================================================
     
     /// <summary>
     /// Book/Classification for parallel accounting frameworks.
-    /// Values: "IFRS", "Base", "Local"
+    /// Values: "IFRS", "LOCAL_STATUTORY", "MANAGEMENT"
     /// Enables separate GL for IFRS reporting, statutory reporting, and tax reporting.
     /// </summary>
     [Required]

@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,15 +14,18 @@ public class CashTransactionService : ICashTransactionService
     private readonly ApplicationDbContext _context;
     private readonly IBankAccountService _bankAccountService;
     private readonly ITenantSettingsService _tenantSettingsService;
+    private readonly IDocumentNumberingService _documentNumberingService;
 
     public CashTransactionService(
         ApplicationDbContext context,
         IBankAccountService bankAccountService,
-        ITenantSettingsService tenantSettingsService)
+        ITenantSettingsService tenantSettingsService,
+        IDocumentNumberingService documentNumberingService)
     {
         _context = context;
         _bankAccountService = bankAccountService;
         _tenantSettingsService = tenantSettingsService;
+        _documentNumberingService = documentNumberingService;
     }
 
     public async Task<CashTransactionDto?> GetByIdAsync(Guid id)
@@ -141,9 +145,11 @@ public class CashTransactionService : ICashTransactionService
 
     public async Task<CashTransactionDto> CreateReceiptAsync(CreateCashReceiptDto dto)
     {
-        var transactionNumber = await GenerateTransactionNumberAsync("RCT");
+        var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.CashReceipt, dto.TransactionDate);
         var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
         var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
+        var exchangeRate = ResolveExchangeRate(transactionCurrency, baseCurrencyCode, dto.ExchangeRate);
+        var baseAmount = ToBaseAmount(dto.Amount, exchangeRate);
 
         var transaction = new CashTransaction
         {
@@ -153,7 +159,8 @@ public class CashTransactionService : ICashTransactionService
             BankAccountId = dto.BankAccountId,
             Amount = dto.Amount,
             Currency = transactionCurrency,
-            BaseAmount = dto.Amount, // TODO: Apply exchange rate if needed
+            ExchangeRate = exchangeRate,
+            BaseAmount = baseAmount,
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
             PayeeOrPayer = dto.PayerName,
@@ -174,9 +181,11 @@ public class CashTransactionService : ICashTransactionService
 
     public async Task<CashTransactionDto> CreatePaymentAsync(CreateCashPaymentDto dto)
     {
-        var transactionNumber = await GenerateTransactionNumberAsync("PMT");
+        var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.CashPayment, dto.TransactionDate);
         var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
         var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
+        var exchangeRate = ResolveExchangeRate(transactionCurrency, baseCurrencyCode, dto.ExchangeRate);
+        var baseAmount = ToBaseAmount(dto.Amount, exchangeRate);
 
         var transaction = new CashTransaction
         {
@@ -186,7 +195,8 @@ public class CashTransactionService : ICashTransactionService
             BankAccountId = dto.BankAccountId,
             Amount = dto.Amount,
             Currency = transactionCurrency,
-            BaseAmount = dto.Amount, // TODO: Apply exchange rate if needed
+            ExchangeRate = exchangeRate,
+            BaseAmount = baseAmount,
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
             PayeeOrPayer = dto.PayeeName,
@@ -208,12 +218,14 @@ public class CashTransactionService : ICashTransactionService
 
     public async Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(CreateBankTransferDto dto)
     {
-        var transactionNumber = await GenerateTransactionNumberAsync("TRF");
+        var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.BankTransfer, dto.TransactionDate);
         var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
         var fromBankAccount = await _context.Set<BankAccount>().FindAsync(dto.FromBankAccountId);
         var toBankAccount = await _context.Set<BankAccount>().FindAsync(dto.ToBankAccountId);
         var fromCurrencyCode = string.IsNullOrWhiteSpace(fromBankAccount?.Currency) ? baseCurrencyCode : fromBankAccount.Currency.Trim().ToUpperInvariant();
         var toCurrencyCode = string.IsNullOrWhiteSpace(toBankAccount?.Currency) ? baseCurrencyCode : toBankAccount.Currency.Trim().ToUpperInvariant();
+        var fromExchangeRate = ResolveExchangeRate(fromCurrencyCode, baseCurrencyCode, dto.ExchangeRate);
+        var toExchangeRate = ResolveExchangeRate(toCurrencyCode, baseCurrencyCode, dto.ExchangeRate);
 
         // Create debit transaction (from account)
         var fromTransaction = new CashTransaction
@@ -225,7 +237,8 @@ public class CashTransactionService : ICashTransactionService
             ToBankAccountId = dto.ToBankAccountId,
             Amount = dto.Amount,
             Currency = fromCurrencyCode,
-            BaseAmount = dto.Amount,
+            ExchangeRate = fromExchangeRate,
+            BaseAmount = ToBaseAmount(dto.Amount, fromExchangeRate),
             ReferenceNumber = dto.ReferenceNumber,
             Description = dto.Description,
             IsReconciled = false,
@@ -242,7 +255,8 @@ public class CashTransactionService : ICashTransactionService
             ToBankAccountId = dto.FromBankAccountId,
             Amount = dto.Amount,
             Currency = toCurrencyCode,
-            BaseAmount = dto.Amount,
+            ExchangeRate = toExchangeRate,
+            BaseAmount = ToBaseAmount(dto.Amount, toExchangeRate),
             ReferenceNumber = dto.ReferenceNumber,
             Description = dto.Description,
             IsReconciled = false,
@@ -296,27 +310,33 @@ public class CashTransactionService : ICashTransactionService
         await _context.SaveChangesAsync();
     }
 
-    private async Task<string> GenerateTransactionNumberAsync(string prefix)
+    private async Task<string> GenerateTransactionNumberAsync(string documentType, DateTime transactionDate)
     {
-        var today = DateTime.UtcNow;
-        var yearMonth = today.ToString("yyyyMM");
-        
-        var lastNumber = await _context.Set<CashTransaction>()
-            .Where(t => t.TransactionNumber.StartsWith($"{prefix}-{yearMonth}"))
-            .OrderByDescending(t => t.TransactionNumber)
-            .Select(t => t.TransactionNumber)
-            .FirstOrDefaultAsync();
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Finance,
+            documentType,
+            documentDate: transactionDate,
+            entityType: nameof(CashTransaction));
+    }
 
-        int sequence = 1;
-        if (lastNumber != null)
+    private static decimal ResolveExchangeRate(string transactionCurrency, string baseCurrencyCode, decimal? exchangeRate)
+    {
+        if (string.Equals(transactionCurrency, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
         {
-            var parts = lastNumber.Split('-');
-            if (parts.Length == 3 && int.TryParse(parts[2], out int lastSeq))
-            {
-                sequence = lastSeq + 1;
-            }
+            return 1m;
         }
 
-        return $"{prefix}-{yearMonth}-{sequence:D4}";
+        var resolvedRate = exchangeRate.GetValueOrDefault();
+        if (resolvedRate <= 0m)
+        {
+            throw new InvalidOperationException($"An exchange rate is required for {transactionCurrency} cash transactions.");
+        }
+
+        return resolvedRate;
+    }
+
+    private static decimal ToBaseAmount(decimal amount, decimal exchangeRate)
+    {
+        return decimal.Round(amount * exchangeRate, 2, MidpointRounding.AwayFromZero);
     }
 }

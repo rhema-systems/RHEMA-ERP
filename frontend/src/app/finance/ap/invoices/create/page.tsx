@@ -32,6 +32,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Popover,
     PopoverContent,
@@ -84,6 +85,7 @@ const invoiceSchema = z.object({
     reference: z.string().optional(),
     taxGroupId: z.string().optional(),
     withholdingTaxRate: z.coerce.number().min(0).max(100).optional().default(0),
+    isOpeningBalance: z.boolean().default(false),
     lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
 });
 
@@ -111,8 +113,24 @@ export default function CreateVendorInvoicePage() {
 
     // Queries
     const { data: suppliersData, isLoading: suppliersLoading } = useQuery({
-        queryKey: ['suppliers'],
-        queryFn: () => businessPartnerService.getPartners({ partnerType: 'Supplier', pageSize: 100 }),
+        queryKey: ['active-ap-supplier-business-partners'],
+        queryFn: async () => {
+            const partners = await businessPartnerService.getActivePartners();
+            const payablePartners = (partners || [])
+                .filter((partner: any) => String(partner.partnerType || '').toLowerCase() !== 'customer')
+                .map((partner: any) => ({
+                    ...partner,
+                    name: partner.name || partner.partnerName || partner.companyName || 'Unknown supplier',
+                    code: partner.code || partner.partnerCode || '',
+                }))
+                .sort((a: any, b: any) => a.name.localeCompare(b.name));
+
+            return {
+                items: Array.from(
+                    new Map(payablePartners.map((partner: any) => [partner.id, partner])).values()
+                )
+            };
+        },
     });
 
     const { data: glAccountsData, isLoading: glAccountsLoading } = useQuery({
@@ -179,9 +197,10 @@ export default function CreateVendorInvoicePage() {
             exchangeRate: 1.0,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
+            isOpeningBalance: false,
             notes: '',
             lineItems: [
-                { lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxCode: '' }
+                { lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' }
             ],
         },
     });
@@ -343,6 +362,7 @@ export default function CreateVendorInvoicePage() {
                 taxGroupId: data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
                 withholdingTaxRate: Number(data.withholdingTaxRate) || 0,
+                isOpeningBalance: data.isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
                     lineItemType: item.lineItemType,
                     glAccountId: item.glAccountId || null,
@@ -556,6 +576,23 @@ export default function CreateVendorInvoicePage() {
                             </div>
                         )}
 
+                        <div className="flex items-center gap-3 rounded-md border p-3">
+                            <Controller
+                                control={form.control}
+                                name="isOpeningBalance"
+                                render={({ field }) => (
+                                    <Checkbox
+                                        id="isOpeningBalance"
+                                        checked={field.value}
+                                        onCheckedChange={(checked) => field.onChange(checked === true)}
+                                    />
+                                )}
+                            />
+                            <Label htmlFor="isOpeningBalance" className="font-medium">
+                                Opening Balance
+                            </Label>
+                        </div>
+
                         <div className="space-y-2">
                             <Label>Default Tax Group (For new lines)</Label>
                             <Controller
@@ -660,7 +697,7 @@ export default function CreateVendorInvoicePage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxCode: '' })}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </CardHeader>

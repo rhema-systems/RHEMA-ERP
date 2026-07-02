@@ -39,6 +39,7 @@
 import type {
     CreateJournalEntryDto,
     CreateAccountTransactionDto,
+    JournalType,
 } from '@/types/finance';
 
 // ─── Frontend Form Shapes ────────────────────────────────────────────────────
@@ -79,7 +80,7 @@ export interface JournalEntryFormLine {
 export function mapJournalEntryFormToCreateDto(
     header: JournalEntryFormHeader,
     lines: JournalEntryFormLine[],
-    journalNumber: string,
+    journalNumber: string | undefined,
     baseCurrency: string = 'GHS',
 ): CreateJournalEntryDto {
     // Filter to only lines with an account and at least one amount
@@ -125,17 +126,20 @@ export function mapJournalEntryFormToCreateDto(
     }
 
     // Clean up journal number (remove UI formatting like '*')
-    const cleanJournalNumber = journalNumber
+    const cleanJournalNumber = (journalNumber ?? '')
         .replace('*', '')
         .replace('Generating...', '')
         .replace('Unavailable', '')
+        .replace('Assigned on save', '')
         .trim();
 
     return {
-        journalNumber: cleanJournalNumber,
+        journalNumber: cleanJournalNumber || undefined,
         transactionDate: header.entryDate,
+        journalType: header.journalType as JournalType,
         description: header.description || undefined,
         reference: header.referenceNumber || undefined,
+        notes: header.notes || undefined,
         bookClassification: header.bookClassification || undefined,
         sourceDocumentType: header.journalType === 'Opening Balance' ? 'ManualOpeningBalance' : undefined,
         // SourceModule is intentionally omitted for manual entries
@@ -151,16 +155,17 @@ export function mapJournalEntryFormToCreateDto(
 export function validateJournalEntryForm(
     header: JournalEntryFormHeader,
     lines: JournalEntryFormLine[],
-    journalNumber: string,
+    journalNumber: string | undefined,
     options?: {
         openingBalanceAutoRoutingEnabled?: boolean;
+        requireJournalNumber?: boolean;
     },
 ): string[] {
     const errors: string[] = [];
 
-    // Journal number must be present
-    const cleanNumber = journalNumber.replace('*', '').trim();
-    if (!cleanNumber || cleanNumber === 'Generating...' || cleanNumber === 'Unavailable') {
+    // Manual number entry only needs a value when the sequence policy requires it.
+    const cleanNumber = (journalNumber ?? '').replace('*', '').trim();
+    if (options?.requireJournalNumber && (!cleanNumber || cleanNumber === 'Generating...' || cleanNumber === 'Unavailable')) {
         errors.push('Journal number is not available. Please wait or refresh.');
     }
 

@@ -118,6 +118,31 @@ if (args.Length > 0 && args[0] == "seed-db")
     return;
 }
 
+// Check for workflow-only seeding command.
+if (args.Length > 0 && args[0] == "seed-workflows")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedWorkflowDefinitionsAsync();
+    }
+
+    Console.WriteLine("Workflow definition seeding completed!");
+    return;
+}
+
 // Check for development database rebuild command.
 // This bypasses the current migration chain and recreates the schema directly from the EF model.
 if (args.Length > 0 && args[0] == "rebuild-db")
@@ -140,11 +165,116 @@ if (args.Length > 0 && args[0] == "rebuild-db")
         Console.WriteLine("⚠️  Rebuilding database from the current EF model...");
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
-        await StampAllKnownMigrationsAsAppliedAsync(db, logger);
+        await StampCurrentModelMigrationsAsAppliedAsync(db, logger);
         await seedingService.SeedWithoutMigrationAsync();
     }
 
     Console.WriteLine("✅ Database rebuild completed!");
+    return;
+}
+
+if (args.Length > 0 && args[0] == "repair-finance-po-schema")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await RepairFinanceSettingsSchemaAsync(db);
+        await RepairAccountingBooksSchemaAsync(db);
+        await RepairFinancePurchaseOrderSchemaAsync(db);
+    }
+
+    Console.WriteLine("Finance schema repair completed.");
+    return;
+}
+
+if (args.Length > 0 && args[0] == "post-finance-grv")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    tempBuilder.Services.AddSingleton(new MaintenanceCurrentUserContext(tenantId));
+    tempBuilder.Services.AddSingleton<ErpSystem.Core.Interfaces.ICurrentUserService>(sp =>
+        sp.GetRequiredService<MaintenanceCurrentUserContext>());
+    tempBuilder.Services.AddSingleton<ErpSystem.Core.Interfaces.ICurrentUserProvider>(sp =>
+        sp.GetRequiredService<MaintenanceCurrentUserContext>());
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ITenantSettingsService, ErpSystem.Api.Services.TenantSettingsService>();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Numbering.IDocumentNumberingService, ErpSystem.Data.Services.DocumentNumberingService>();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService>(_ =>
+        NoopServiceProxy.Create<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService>());
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookService, ErpSystem.Api.Services.Finance.Settings.AccountingBookService>();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.IGeneralLedgerService, ErpSystem.Api.Services.Finance.GL.GeneralLedgerService>();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISubledgerPostingService, ErpSystem.Api.Services.Finance.GL.SubledgerPostingService>();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Services.IAuditLogService>(_ =>
+        NoopServiceProxy.Create<ErpSystem.Core.Services.IAuditLogService>());
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.INotificationService>(_ =>
+        NoopServiceProxy.Create<ErpSystem.Core.Interfaces.INotificationService>());
+
+    var tempApp = tempBuilder.Build();
+    var selector = args.Length > 1 ? args[1] : "all-unposted";
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await RepairFinanceSettingsSchemaAsync(db);
+        await RepairAccountingBooksSchemaAsync(db);
+        await RepairFinancePurchaseOrderSchemaAsync(db);
+
+        var receiptQuery = db.FinancePurchaseOrderReceipts
+            .Where(r => r.TenantId == tenantId && !r.IsDeleted);
+
+        if (string.Equals(selector, "all-unposted", StringComparison.OrdinalIgnoreCase))
+        {
+            receiptQuery = receiptQuery.Where(r => !db.JournalEntries.Any(j =>
+                j.SourceDocumentId == r.Id &&
+                j.SourceDocumentType == "FinancePurchaseOrderReceipt" &&
+                !j.IsDeleted));
+        }
+        else if (Guid.TryParse(selector, out var receiptId))
+        {
+            receiptQuery = receiptQuery.Where(r => r.Id == receiptId);
+        }
+        else
+        {
+            receiptQuery = receiptQuery.Where(r => r.ReceiptNumber == selector);
+        }
+
+        var receipts = await receiptQuery
+            .OrderBy(r => r.ReceiptDate)
+            .ThenBy(r => r.ReceiptNumber)
+            .Select(r => new { r.Id, r.ReceiptNumber })
+            .ToListAsync();
+
+        if (receipts.Count == 0)
+        {
+            Console.WriteLine($"No finance GRVs matched '{selector}'.");
+            return;
+        }
+
+        var postingService = scope.ServiceProvider.GetRequiredService<ErpSystem.Core.Interfaces.Finance.ISubledgerPostingService>();
+        foreach (var receipt in receipts)
+        {
+            var journal = await postingService.PostFinancePurchaseOrderReceiptAsync(receipt.Id);
+            Console.WriteLine($"{receipt.ReceiptNumber} posted as {journal.JournalNumber} ({journal.Status}).");
+        }
+    }
+
+    return;
+}
+
+if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
+{
+    Console.Error.WriteLine(
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, rebuild-db, repair-finance-po-schema, post-finance-grv.");
     return;
 }
 
@@ -182,6 +312,7 @@ builder.Services.AddErpSystemDatabase(builder.Configuration);
 builder.Services.AddErpSystemIdentity();
 builder.Services.AddErpSystemRepositories();
 builder.Services.AddErpSystemServices();
+builder.Services.AddErpSystemFinanceServices();
 builder.Services.AddErpSystemJwtAuthentication(builder.Configuration);
 builder.Services.AddErpSystemAuthorization();
 builder.Services.AddErpSystemApi();
@@ -340,6 +471,7 @@ var failFastOnDatabaseInitializationError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDatabaseInitializationError",
     true);
 var seedDevelopmentData = app.Configuration.GetValue("StartupInitialization:SeedDevelopmentData", true);
+var seedWorkflowDefinitions = app.Configuration.GetValue("StartupInitialization:SeedWorkflowDefinitions", true);
 var failFastOnDevelopmentSeedError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDevelopmentSeedError",
     false);
@@ -361,6 +493,24 @@ if (!skipStartupInitialization)
         if (failFastOnDatabaseInitializationError)
         {
             throw;
+        }
+    }
+
+    if (seedWorkflowDefinitions && databaseInitializationSucceeded)
+    {
+        app.Logger.LogInformation("Starting baseline workflow seeding...");
+        try
+        {
+            await SeedWorkflowDefinitionsAsync(app);
+            app.Logger.LogInformation("Baseline workflow seeding completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Baseline workflow seeding failed");
+            if (failFastOnDevelopmentSeedError)
+            {
+                throw;
+            }
         }
     }
 
@@ -436,6 +586,9 @@ async Task InitializeDatabaseAsync(
     {
         await RepairDevelopmentMigrationHistoryIfNeededAsync(app.Environment, context, logger, migrationCts.Token);
         await context.Database.MigrateAsync(migrationCts.Token);
+        await RepairFinanceSettingsSchemaAsync(context, migrationCts.Token);
+        await RepairAccountingBooksSchemaAsync(context, migrationCts.Token);
+        await RepairFinancePurchaseOrderSchemaAsync(context, migrationCts.Token);
     }
     catch (OperationCanceledException ex)
     {
@@ -462,6 +615,13 @@ async Task SeedDatabaseAsync(WebApplication app)
     await app.Services.SeedDatabaseAsync();
 }
 
+async Task SeedWorkflowDefinitionsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+    await seedingService.SeedWorkflowDefinitionsAsync();
+}
+
 static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(
     IWebHostEnvironment environment,
     ApplicationDbContext context,
@@ -484,14 +644,16 @@ static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(
         return;
     }
 
-    logger.LogWarning(
-        "Detected a development database with current-model tables but missing migration history. " +
-        "Stamping known migrations as applied before running startup migrations.");
+    var guidance =
+        "Detected migration history drift in development: schema objects exist while migration history is behind. " +
+        "Automatic migration stamping is disabled to avoid masking missing columns. " +
+        "Recommended: recreate local dev DB and rerun migrations/seeding.";
 
-    await StampAllKnownMigrationsAsAppliedAsync(context, logger, cancellationToken);
+    logger.LogError(guidance);
+    throw new InvalidOperationException(guidance);
 }
 
-static async Task StampAllKnownMigrationsAsAppliedAsync(
+static async Task StampCurrentModelMigrationsAsAppliedAsync(
     ApplicationDbContext context,
     Microsoft.Extensions.Logging.ILogger logger,
     CancellationToken cancellationToken = default)
@@ -505,8 +667,10 @@ static async Task StampAllKnownMigrationsAsAppliedAsync(
         await context.Database.ExecuteSqlRawAsync(createHistoryScript, cancellationToken);
     }
 
-    var appliedMigrations = (await context.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var appliedMigrations = (await context.Database.GetAppliedMigrationsAsync(cancellationToken))
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
     var productVersion = typeof(DbContext).Assembly.GetName().Version?.ToString(3) ?? "9.0.0";
+    var stampedCount = 0;
 
     foreach (var migrationId in migrationsAssembly.Migrations.Keys.OrderBy(id => id))
     {
@@ -518,9 +682,10 @@ static async Task StampAllKnownMigrationsAsAppliedAsync(
         var insertScript = historyRepository.GetInsertScript(new HistoryRow(migrationId, productVersion));
         await context.Database.ExecuteSqlRawAsync(insertScript, cancellationToken);
         appliedMigrations.Add(migrationId);
+        stampedCount++;
     }
 
-    logger.LogInformation("Stamped {MigrationCount} migrations as applied in EF migration history.", appliedMigrations.Count);
+    logger.LogInformation("Stamped {MigrationCount} EF migrations as applied after current-model database rebuild.", stampedCount);
 }
 
 static async Task<bool> TableExistsAsync(
@@ -558,6 +723,437 @@ static async Task<bool> TableExistsAsync(
     }
 }
 
+static async Task RepairFinanceSettingsSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
+{
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinanceSettings]', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'DiscountAllowedAccountId') IS NULL
+    BEGIN
+        ALTER TABLE [dbo].[FinanceSettings] ADD [DiscountAllowedAccountId] uniqueidentifier NULL;
+    END;
+
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'DiscountReceivedAccountId') IS NULL
+    BEGIN
+        ALTER TABLE [dbo].[FinanceSettings] ADD [DiscountReceivedAccountId] uniqueidentifier NULL;
+    END;
+
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'ControlAccountGRVAccrualId') IS NULL
+    BEGIN
+        ALTER TABLE [dbo].[FinanceSettings] ADD [ControlAccountGRVAccrualId] uniqueidentifier NULL;
+    END;
+END
+""", cancellationToken);
+
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinanceSettings]', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'DiscountAllowedAccountId') IS NOT NULL
+       AND NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE [name] = N'IX_FinanceSettings_DiscountAllowedAccountId'
+              AND [object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+       )
+    BEGIN
+        CREATE INDEX [IX_FinanceSettings_DiscountAllowedAccountId]
+            ON [dbo].[FinanceSettings] ([DiscountAllowedAccountId]);
+    END;
+
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'DiscountReceivedAccountId') IS NOT NULL
+       AND NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE [name] = N'IX_FinanceSettings_DiscountReceivedAccountId'
+              AND [object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+       )
+    BEGIN
+        CREATE INDEX [IX_FinanceSettings_DiscountReceivedAccountId]
+            ON [dbo].[FinanceSettings] ([DiscountReceivedAccountId]);
+    END;
+
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'ControlAccountGRVAccrualId') IS NOT NULL
+       AND NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE [name] = N'IX_FinanceSettings_ControlAccountGRVAccrualId'
+              AND [object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+       )
+    BEGIN
+        CREATE INDEX [IX_FinanceSettings_ControlAccountGRVAccrualId]
+            ON [dbo].[FinanceSettings] ([ControlAccountGRVAccrualId]);
+    END;
+
+    IF OBJECT_ID(N'[dbo].[Accounts]', N'U') IS NOT NULL
+    BEGIN
+        IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'DiscountAllowedAccountId') IS NOT NULL
+           AND NOT EXISTS (
+                SELECT 1 FROM sys.foreign_keys
+                WHERE [name] = N'FK_FinanceSettings_Accounts_DiscountAllowedAccountId'
+                  AND [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+           )
+        BEGIN
+            ALTER TABLE [dbo].[FinanceSettings]
+                ADD CONSTRAINT [FK_FinanceSettings_Accounts_DiscountAllowedAccountId]
+                FOREIGN KEY ([DiscountAllowedAccountId]) REFERENCES [dbo].[Accounts] ([Id]);
+        END;
+
+        IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'DiscountReceivedAccountId') IS NOT NULL
+           AND NOT EXISTS (
+                SELECT 1 FROM sys.foreign_keys
+                WHERE [name] = N'FK_FinanceSettings_Accounts_DiscountReceivedAccountId'
+                  AND [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+           )
+        BEGIN
+            ALTER TABLE [dbo].[FinanceSettings]
+                ADD CONSTRAINT [FK_FinanceSettings_Accounts_DiscountReceivedAccountId]
+                FOREIGN KEY ([DiscountReceivedAccountId]) REFERENCES [dbo].[Accounts] ([Id]);
+        END;
+
+        IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'ControlAccountGRVAccrualId') IS NOT NULL
+           AND NOT EXISTS (
+                SELECT 1 FROM sys.foreign_keys
+                WHERE [name] = N'FK_FinanceSettings_Accounts_ControlAccountGRVAccrualId'
+                  AND [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+           )
+        BEGIN
+            ALTER TABLE [dbo].[FinanceSettings]
+                ADD CONSTRAINT [FK_FinanceSettings_Accounts_ControlAccountGRVAccrualId]
+                FOREIGN KEY ([ControlAccountGRVAccrualId]) REFERENCES [dbo].[Accounts] ([Id]);
+        END;
+    END;
+END
+""", cancellationToken);
+
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinanceSettings]', N'U') IS NOT NULL
+   AND OBJECT_ID(N'[dbo].[Accounts]', N'U') IS NOT NULL
+BEGIN
+        UPDATE fs
+            SET [DiscountAllowedAccountId] = '00000005-4210-0000-0000-000000000001'
+        FROM [dbo].[FinanceSettings] fs
+        WHERE fs.[DiscountAllowedAccountId] IS NULL
+          AND EXISTS (
+              SELECT 1 FROM [dbo].[Accounts] a
+              WHERE a.[Id] = '00000005-4210-0000-0000-000000000001'
+                AND a.[TenantId] = fs.[TenantId]
+          );
+
+        UPDATE fs
+            SET [DiscountReceivedAccountId] = '00000005-4910-0000-0000-000000000001'
+        FROM [dbo].[FinanceSettings] fs
+        WHERE fs.[DiscountReceivedAccountId] IS NULL
+          AND EXISTS (
+              SELECT 1 FROM [dbo].[Accounts] a
+              WHERE a.[Id] = '00000005-4910-0000-0000-000000000001'
+                AND a.[TenantId] = fs.[TenantId]
+          );
+
+        UPDATE fs
+            SET [ControlAccountGRVAccrualId] = '00000005-2100-0000-0000-000000000001'
+        FROM [dbo].[FinanceSettings] fs
+        WHERE fs.[ControlAccountGRVAccrualId] IS NULL
+          AND EXISTS (
+              SELECT 1 FROM [dbo].[Accounts] a
+              WHERE a.[Id] = '00000005-2100-0000-0000-000000000001'
+                AND a.[TenantId] = fs.[TenantId]
+          );
+END
+""", cancellationToken);
+}
+
+static async Task RepairFinancePurchaseOrderSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
+{
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinancePurchaseOrders]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[FinancePurchaseOrders] (
+        [Id] uniqueidentifier NOT NULL,
+        [OrderNumber] nvarchar(50) NOT NULL,
+        [VendorId] uniqueidentifier NOT NULL,
+        [OrderDate] datetime2 NOT NULL,
+        [ExpectedDeliveryDate] datetime2 NULL,
+        [PaymentTermId] uniqueidentifier NULL,
+        [Status] int NOT NULL,
+        [CurrencyCode] nvarchar(3) NOT NULL,
+        [ExchangeRate] decimal(18,4) NOT NULL,
+        [TotalAmount] decimal(18,2) NOT NULL,
+        [DiscountAmount] decimal(18,2) NOT NULL CONSTRAINT [DF_FinancePurchaseOrders_DiscountAmount] DEFAULT 0,
+        [TaxGroupId] uniqueidentifier NULL,
+        [Remarks] nvarchar(500) NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [UpdatedAt] datetime2 NULL,
+        [CreatedBy] nvarchar(max) NULL,
+        [UpdatedBy] nvarchar(max) NULL,
+        [CreatedById] uniqueidentifier NULL,
+        [LastModifiedById] uniqueidentifier NULL,
+        [IsDeleted] bit NOT NULL,
+        [DeletedAt] datetime2 NULL,
+        [DeletedBy] nvarchar(max) NULL,
+        [TenantId] uniqueidentifier NOT NULL,
+        CONSTRAINT [PK_FinancePurchaseOrders] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrders_BusinessPartners_VendorId] FOREIGN KEY ([VendorId]) REFERENCES [dbo].[BusinessPartners] ([Id]) ON DELETE CASCADE,
+        CONSTRAINT [FK_FinancePurchaseOrders_PaymentTerms_PaymentTermId] FOREIGN KEY ([PaymentTermId]) REFERENCES [dbo].[PaymentTerms] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [FK_FinancePurchaseOrders_TaxGroups_TaxGroupId] FOREIGN KEY ([TaxGroupId]) REFERENCES [dbo].[TaxGroups] ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrders_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
+    );
+
+    CREATE INDEX [IX_FinancePurchaseOrders_TenantId] ON [dbo].[FinancePurchaseOrders] ([TenantId]);
+    CREATE INDEX [IX_FinancePurchaseOrders_VendorId] ON [dbo].[FinancePurchaseOrders] ([VendorId]);
+    CREATE INDEX [IX_FinancePurchaseOrders_PaymentTermId] ON [dbo].[FinancePurchaseOrders] ([PaymentTermId]);
+    CREATE INDEX [IX_FinancePurchaseOrders_TaxGroupId] ON [dbo].[FinancePurchaseOrders] ([TaxGroupId]);
+END
+""", cancellationToken);
+
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinancePurchaseOrders]', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'dbo.FinancePurchaseOrders', N'PaymentTermId') IS NULL
+    BEGIN
+        ALTER TABLE [dbo].[FinancePurchaseOrders] ADD [PaymentTermId] uniqueidentifier NULL;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_FinancePurchaseOrders_PaymentTermId'
+          AND [object_id] = OBJECT_ID(N'[dbo].[FinancePurchaseOrders]')
+    )
+    BEGIN
+        CREATE INDEX [IX_FinancePurchaseOrders_PaymentTermId] ON [dbo].[FinancePurchaseOrders] ([PaymentTermId]);
+    END;
+
+    IF OBJECT_ID(N'[dbo].[PaymentTerms]', N'U') IS NOT NULL
+       AND NOT EXISTS (
+            SELECT 1
+            FROM sys.foreign_keys
+            WHERE [name] = N'FK_FinancePurchaseOrders_PaymentTerms_PaymentTermId'
+              AND [parent_object_id] = OBJECT_ID(N'[dbo].[FinancePurchaseOrders]')
+       )
+    BEGIN
+        ALTER TABLE [dbo].[FinancePurchaseOrders]
+            ADD CONSTRAINT [FK_FinancePurchaseOrders_PaymentTerms_PaymentTermId]
+            FOREIGN KEY ([PaymentTermId]) REFERENCES [dbo].[PaymentTerms] ([Id]) ON DELETE NO ACTION;
+    END;
+END
+""", cancellationToken);
+
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinancePurchaseOrderItems]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[FinancePurchaseOrderItems] (
+        [Id] uniqueidentifier NOT NULL,
+        [FinancePurchaseOrderId] uniqueidentifier NOT NULL,
+        [LineType] int NOT NULL,
+        [InventoryItemId] uniqueidentifier NULL,
+        [WarehouseId] uniqueidentifier NULL,
+        [GlAccountId] uniqueidentifier NULL,
+        [Description] nvarchar(500) NOT NULL,
+        [OrderedQuantity] decimal(18,4) NOT NULL,
+        [ReceivedQuantity] decimal(18,4) NOT NULL,
+        [InvoicedQuantity] decimal(18,4) NOT NULL,
+        [CancelledQuantity] decimal(18,4) NOT NULL,
+        [UnitPrice] decimal(18,2) NOT NULL,
+        [CurrencyCode] nvarchar(3) NULL,
+        [ExchangeRate] decimal(18,4) NOT NULL,
+        [TaxCode] nvarchar(50) NULL,
+        [TaxRate] decimal(18,4) NOT NULL,
+        [TaxAmount] decimal(18,2) NOT NULL,
+        [TaxGroupId] uniqueidentifier NULL,
+        [DiscountPercentage] decimal(18,4) NOT NULL CONSTRAINT [DF_FinancePurchaseOrderItems_DiscountPercentage] DEFAULT 0,
+        [DiscountAmount] decimal(18,2) NOT NULL CONSTRAINT [DF_FinancePurchaseOrderItems_DiscountAmount] DEFAULT 0,
+        [LineTotal] decimal(18,2) NOT NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [UpdatedAt] datetime2 NULL,
+        [CreatedBy] nvarchar(max) NULL,
+        [UpdatedBy] nvarchar(max) NULL,
+        [CreatedById] uniqueidentifier NULL,
+        [LastModifiedById] uniqueidentifier NULL,
+        [IsDeleted] bit NOT NULL,
+        [DeletedAt] datetime2 NULL,
+        [DeletedBy] nvarchar(max) NULL,
+        [TenantId] uniqueidentifier NOT NULL,
+        CONSTRAINT [PK_FinancePurchaseOrderItems] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrderItems_Accounts_GlAccountId] FOREIGN KEY ([GlAccountId]) REFERENCES [dbo].[Accounts] ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrderItems_FinancePurchaseOrders_FinancePurchaseOrderId] FOREIGN KEY ([FinancePurchaseOrderId]) REFERENCES [dbo].[FinancePurchaseOrders] ([Id]) ON DELETE CASCADE,
+        CONSTRAINT [FK_FinancePurchaseOrderItems_InventoryItems_InventoryItemId] FOREIGN KEY ([InventoryItemId]) REFERENCES [dbo].[InventoryItems] ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrderItems_TaxGroups_TaxGroupId] FOREIGN KEY ([TaxGroupId]) REFERENCES [dbo].[TaxGroups] ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrderItems_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
+    );
+
+    CREATE INDEX [IX_FinancePurchaseOrderItems_FinancePurchaseOrderId] ON [dbo].[FinancePurchaseOrderItems] ([FinancePurchaseOrderId]);
+    CREATE INDEX [IX_FinancePurchaseOrderItems_GlAccountId] ON [dbo].[FinancePurchaseOrderItems] ([GlAccountId]);
+    CREATE INDEX [IX_FinancePurchaseOrderItems_InventoryItemId] ON [dbo].[FinancePurchaseOrderItems] ([InventoryItemId]);
+    CREATE INDEX [IX_FinancePurchaseOrderItems_TaxGroupId] ON [dbo].[FinancePurchaseOrderItems] ([TaxGroupId]);
+    CREATE INDEX [IX_FinancePurchaseOrderItems_TenantId] ON [dbo].[FinancePurchaseOrderItems] ([TenantId]);
+END
+""", cancellationToken);
+
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinancePurchaseOrderReceipts]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[FinancePurchaseOrderReceipts] (
+        [Id] uniqueidentifier NOT NULL,
+        [FinancePurchaseOrderId] uniqueidentifier NOT NULL,
+        [ReceiptNumber] nvarchar(50) NOT NULL,
+        [ReceiptDate] datetime2 NOT NULL,
+        [Remarks] nvarchar(500) NULL,
+        [VendorInvoiceId] uniqueidentifier NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [UpdatedAt] datetime2 NULL,
+        [CreatedBy] nvarchar(max) NULL,
+        [UpdatedBy] nvarchar(max) NULL,
+        [CreatedById] uniqueidentifier NULL,
+        [LastModifiedById] uniqueidentifier NULL,
+        [IsDeleted] bit NOT NULL,
+        [DeletedAt] datetime2 NULL,
+        [DeletedBy] nvarchar(max) NULL,
+        [TenantId] uniqueidentifier NOT NULL,
+        CONSTRAINT [PK_FinancePurchaseOrderReceipts] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrderReceipts_FinancePurchaseOrders_FinancePurchaseOrderId] FOREIGN KEY ([FinancePurchaseOrderId]) REFERENCES [dbo].[FinancePurchaseOrders] ([Id]) ON DELETE CASCADE,
+        CONSTRAINT [FK_FinancePurchaseOrderReceipts_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [FK_FinancePurchaseOrderReceipts_VendorInvoice_VendorInvoiceId] FOREIGN KEY ([VendorInvoiceId]) REFERENCES [dbo].[VendorInvoice] ([Id])
+    );
+
+    CREATE INDEX [IX_FinancePurchaseOrderReceipts_FinancePurchaseOrderId] ON [dbo].[FinancePurchaseOrderReceipts] ([FinancePurchaseOrderId]);
+    CREATE INDEX [IX_FinancePurchaseOrderReceipts_TenantId] ON [dbo].[FinancePurchaseOrderReceipts] ([TenantId]);
+    CREATE INDEX [IX_FinancePurchaseOrderReceipts_VendorInvoiceId] ON [dbo].[FinancePurchaseOrderReceipts] ([VendorInvoiceId]);
+END
+""", cancellationToken);
+
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[FinancePurchaseOrderReceiptItems]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[FinancePurchaseOrderReceiptItems] (
+        [Id] uniqueidentifier NOT NULL,
+        [FinancePurchaseOrderReceiptId] uniqueidentifier NOT NULL,
+        [FinancePurchaseOrderItemId] uniqueidentifier NOT NULL,
+        [QuantityReceived] decimal(18,4) NOT NULL,
+        [InvoicedQuantity] decimal(18,4) NOT NULL,
+        [DiscountPercentage] decimal(18,4) NOT NULL CONSTRAINT [DF_FinancePurchaseOrderReceiptItems_DiscountPercentage] DEFAULT 0,
+        [DiscountAmount] decimal(18,2) NOT NULL CONSTRAINT [DF_FinancePurchaseOrderReceiptItems_DiscountAmount] DEFAULT 0,
+        [CreatedAt] datetime2 NOT NULL,
+        [UpdatedAt] datetime2 NULL,
+        [CreatedBy] nvarchar(max) NULL,
+        [UpdatedBy] nvarchar(max) NULL,
+        [CreatedById] uniqueidentifier NULL,
+        [LastModifiedById] uniqueidentifier NULL,
+        [IsDeleted] bit NOT NULL,
+        [DeletedAt] datetime2 NULL,
+        [DeletedBy] nvarchar(max) NULL,
+        [TenantId] uniqueidentifier NOT NULL,
+        CONSTRAINT [PK_FinancePurchaseOrderReceiptItems] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_FinancePurchaseOrderReceiptItems_FinancePurchaseOrderItems_FinancePurchaseOrderItemId] FOREIGN KEY ([FinancePurchaseOrderItemId]) REFERENCES [dbo].[FinancePurchaseOrderItems] ([Id]) ON DELETE CASCADE,
+        CONSTRAINT [FK_FinancePurchaseOrderReceiptItems_FinancePurchaseOrderReceipts_FinancePurchaseOrderReceiptId] FOREIGN KEY ([FinancePurchaseOrderReceiptId]) REFERENCES [dbo].[FinancePurchaseOrderReceipts] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [FK_FinancePurchaseOrderReceiptItems_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
+    );
+
+    CREATE INDEX [IX_FinancePurchaseOrderReceiptItems_FinancePurchaseOrderItemId] ON [dbo].[FinancePurchaseOrderReceiptItems] ([FinancePurchaseOrderItemId]);
+    CREATE INDEX [IX_FinancePurchaseOrderReceiptItems_FinancePurchaseOrderReceiptId] ON [dbo].[FinancePurchaseOrderReceiptItems] ([FinancePurchaseOrderReceiptId]);
+    CREATE INDEX [IX_FinancePurchaseOrderReceiptItems_TenantId] ON [dbo].[FinancePurchaseOrderReceiptItems] ([TenantId]);
+END
+""", cancellationToken);
+}
+
+static async Task RepairAccountingBooksSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
+{
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[AccountingBooks]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[AccountingBooks] (
+        [Id] uniqueidentifier NOT NULL,
+        [Code] nvarchar(20) NOT NULL,
+        [Name] nvarchar(100) NOT NULL,
+        [Description] nvarchar(500) NULL,
+        [Purpose] nvarchar(50) NOT NULL,
+        [IsActive] bit NOT NULL,
+        [IsDefault] bit NOT NULL,
+        [AllowsPosting] bit NOT NULL,
+        [IsSystemDefined] bit NOT NULL,
+        [SortOrder] int NOT NULL,
+        [TenantId] uniqueidentifier NOT NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [CreatedBy] nvarchar(max) NULL,
+        [CreatedById] uniqueidentifier NULL,
+        [UpdatedAt] datetime2 NULL,
+        [UpdatedBy] nvarchar(max) NULL,
+        [LastModifiedById] uniqueidentifier NULL,
+        [IsDeleted] bit NOT NULL,
+        [DeletedAt] datetime2 NULL,
+        [DeletedBy] nvarchar(max) NULL,
+        CONSTRAINT [PK_AccountingBooks] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_AccountingBooks_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
+    );
+END;
+
+IF OBJECT_ID(N'[dbo].[AccountingBooks]', N'U') IS NOT NULL
+   AND NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE [name] = N'IX_AccountingBooks_TenantId_Code'
+          AND [object_id] = OBJECT_ID(N'[dbo].[AccountingBooks]')
+   )
+BEGIN
+    CREATE UNIQUE INDEX [IX_AccountingBooks_TenantId_Code]
+        ON [dbo].[AccountingBooks] ([TenantId], [Code]);
+END;
+
+IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[AccountAccountingBooks] (
+        [Id] uniqueidentifier NOT NULL,
+        [AccountId] uniqueidentifier NOT NULL,
+        [AccountingBookId] uniqueidentifier NOT NULL,
+        [IsEnabled] bit NOT NULL,
+        [FinancialStatementLineItem] nvarchar(100) NULL,
+        [TenantId] uniqueidentifier NOT NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [CreatedBy] nvarchar(max) NULL,
+        [CreatedById] uniqueidentifier NULL,
+        [UpdatedAt] datetime2 NULL,
+        [UpdatedBy] nvarchar(max) NULL,
+        [LastModifiedById] uniqueidentifier NULL,
+        [IsDeleted] bit NOT NULL,
+        [DeletedAt] datetime2 NULL,
+        [DeletedBy] nvarchar(max) NULL,
+        CONSTRAINT [PK_AccountAccountingBooks] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_AccountAccountingBooks_Accounts_AccountId] FOREIGN KEY ([AccountId]) REFERENCES [dbo].[Accounts] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [FK_AccountAccountingBooks_AccountingBooks_AccountingBookId] FOREIGN KEY ([AccountingBookId]) REFERENCES [dbo].[AccountingBooks] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [FK_AccountAccountingBooks_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
+    );
+END;
+
+IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NOT NULL
+   AND NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE [name] = N'IX_AccountAccountingBooks_AccountId'
+          AND [object_id] = OBJECT_ID(N'[dbo].[AccountAccountingBooks]')
+   )
+BEGIN
+    CREATE INDEX [IX_AccountAccountingBooks_AccountId]
+        ON [dbo].[AccountAccountingBooks] ([AccountId]);
+END;
+
+IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NOT NULL
+   AND NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE [name] = N'IX_AccountAccountingBooks_AccountingBookId'
+          AND [object_id] = OBJECT_ID(N'[dbo].[AccountAccountingBooks]')
+   )
+BEGIN
+    CREATE INDEX [IX_AccountAccountingBooks_AccountingBookId]
+        ON [dbo].[AccountAccountingBooks] ([AccountingBookId]);
+END;
+
+IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NOT NULL
+   AND NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE [name] = N'IX_AccountAccountingBooks_TenantId_AccountId_AccountingBookId'
+          AND [object_id] = OBJECT_ID(N'[dbo].[AccountAccountingBooks]')
+   )
+BEGIN
+    CREATE UNIQUE INDEX [IX_AccountAccountingBooks_TenantId_AccountId_AccountingBookId]
+        ON [dbo].[AccountAccountingBooks] ([TenantId], [AccountId], [AccountingBookId]);
+END;
+""", cancellationToken);
+}
+
 static string SummarizeConnectionTarget(string? connectionString)
 {
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -580,6 +1176,92 @@ static string SummarizeConnectionTarget(string? connectionString)
     return safeParts.Length == 0
         ? "Configured connection string target unavailable"
         : string.Join("; ", safeParts);
+}
+
+sealed class MaintenanceCurrentUserContext : ErpSystem.Core.Interfaces.ICurrentUserService, ErpSystem.Core.Interfaces.ICurrentUserProvider
+{
+    private static readonly Guid SystemUserId = Guid.Empty;
+    private static readonly string[] SystemRoles = ["SuperAdmin"];
+    private readonly Guid _tenantId;
+
+    public MaintenanceCurrentUserContext(Guid tenantId)
+    {
+        _tenantId = tenantId;
+    }
+
+    public string? UserId => SystemUserId.ToString();
+    public string? UserName => "system";
+    public string? Email => "system@local";
+    public Guid? TenantId => _tenantId;
+    public Guid? EmployeeId => null;
+    public bool IsAuthenticated => true;
+    public IEnumerable<string> Roles => SystemRoles;
+    public string? IpAddress => null;
+    public string? UserAgent => "MaintenanceCommand";
+    public bool IsInRole(string role) => HasRole(role);
+
+    Guid ErpSystem.Core.Interfaces.ICurrentUserProvider.UserId => SystemUserId;
+    Guid ErpSystem.Core.Interfaces.ICurrentUserProvider.TenantId => _tenantId;
+    public string Username => UserName!;
+    public string FullName => "System";
+    public bool HasRole(string role) => SystemRoles.Contains(role, StringComparer.OrdinalIgnoreCase);
+    public IDictionary<string, string> Claims => new Dictionary<string, string>
+    {
+        ["tenant_id"] = _tenantId.ToString()
+    };
+    public bool IsExternalUser => false;
+    public string AuthenticationProvider => "MaintenanceCommand";
+}
+
+class NoopServiceProxy : System.Reflection.DispatchProxy
+{
+    protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+    {
+        if (targetMethod == null)
+        {
+            return null;
+        }
+
+        var returnType = targetMethod.ReturnType;
+        if (returnType == typeof(void))
+        {
+            return null;
+        }
+
+        if (returnType == typeof(Task))
+        {
+            return Task.CompletedTask;
+        }
+
+        if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
+        {
+            var resultType = returnType.GetGenericArguments()[0];
+            var defaultValue = resultType.IsValueType ? Activator.CreateInstance(resultType) : null;
+            return typeof(Task)
+                .GetMethod(nameof(Task.FromResult))!
+                .MakeGenericMethod(resultType)
+                .Invoke(null, [defaultValue]);
+        }
+
+        if (returnType == typeof(ValueTask))
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ValueTask<>))
+        {
+            var resultType = returnType.GetGenericArguments()[0];
+            var defaultValue = resultType.IsValueType ? Activator.CreateInstance(resultType) : null;
+            return Activator.CreateInstance(returnType, defaultValue);
+        }
+
+        return returnType.IsValueType ? Activator.CreateInstance(returnType) : null;
+    }
+
+    public static T Create<T>() where T : class
+    {
+        return System.Reflection.DispatchProxy.Create<T, NoopServiceProxy>();
+    }
 }
 
 public partial class Program;

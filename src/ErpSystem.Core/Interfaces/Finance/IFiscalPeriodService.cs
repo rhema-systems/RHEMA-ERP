@@ -41,6 +41,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// </summary>
         Task<IReadOnlyList<FiscalPeriodDto>> GetFiscalPeriodsAsync(
             Guid? fiscalYearId = null,
+            string? status = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>

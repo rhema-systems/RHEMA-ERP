@@ -57,6 +57,7 @@ public class InvoiceQueryDto
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public bool? IsOverdue { get; set; }
+    public bool? IsOpeningBalance { get; set; }
     public int PageNumber { get; set; } = 1;
     public int PageSize { get; set; } = 50;
     public string? SortBy { get; set; }
@@ -72,8 +73,10 @@ public class InvoiceCreateDto
     public string? Notes { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? PaymentTermId { get; set; }
     public decimal DiscountAmount { get; set; }
     public Guid? TaxGroupId { get; set; }
+    public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemCreateDto> LineItems { get; set; } = new();
 }
 
@@ -100,8 +103,9 @@ public class InvoiceUpdateDto
     public string? Notes { get; set; }
     public decimal DiscountAmount { get; set; }
     public Guid? TaxGroupId { get; set; }
-    public string CurrencyCode { get; set; } = "USD";
+    public string CurrencyCode { get; set; } = "GHS";
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemUpdateDto> LineItems { get; set; } = new();
 }
 

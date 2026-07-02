@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { ArrowLeft, Save, Loader2, Check, ChevronsUpDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { AccountType, AccountStatus, Account } from '@/types/finance';
+import type { AccountType, AccountStatus, Account, UpdateAccountDto } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -121,7 +121,13 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
             try {
                 setLoading(true);
                 const accountData = await financeDataService.getAccountById(id);
-                setFormData(accountData);
+                setFormData({
+                    ...accountData,
+                    allowDirectPosting: accountData.allowDirectPosting ?? accountData.isPostingAllowed ?? true,
+                    isBaseClassified: accountData.isBaseClassified ?? accountData.isBaseFrameworkClassified ?? accountData.isManagementClassified ?? true,
+                    isLocalClassified: accountData.isLocalClassified ?? accountData.isLocalFrameworkClassified ?? true,
+                    budgetTrackingEnabled: accountData.budgetTrackingEnabled ?? false,
+                });
             } catch (error) {
                 console.error('Error loading account:', error);
                 toast({
@@ -144,15 +150,29 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
             setSaving(true);
             setTransactionError(null);
 
-            // Map Account to UpdateAccountDto structure if needed, or send as is if compatible
-            // Assuming the service can handle the partial update or full matching object
-            // Just sending the modified formData, but strictly we should use DTO interface
-
-            await financeDataService.updateAccount(id, {
-                ...formData,
-                // Ensure required fields for UpdateDto are present
+            const selectedClassification = formData.accountSubCategory || formData.accountCategory;
+            const updateDto: UpdateAccountDto = {
                 id: formData.id,
-            });
+                accountCode: formData.accountCode,
+                accountNumber: formData.accountNumber,
+                accountName: formData.accountName,
+                accountType: formData.accountType,
+                accountCategory: selectedClassification,
+                accountSubCategory: selectedClassification,
+                currencyCode: formData.currencyCode,
+                isMultiCurrency: formData.isMultiCurrency,
+                isIFRSClassified: formData.isIFRSClassified,
+                isManagementClassified: formData.isBaseClassified ?? formData.isBaseFrameworkClassified ?? true,
+                isBaseFrameworkClassified: formData.isBaseClassified ?? formData.isBaseFrameworkClassified ?? true,
+                isLocalFrameworkClassified: formData.isLocalClassified ?? formData.isLocalFrameworkClassified ?? true,
+                isPostingAllowed: formData.allowDirectPosting ?? formData.isPostingAllowed ?? true,
+                isControlAccount: formData.isControlAccount,
+                budgetTrackingEnabled: formData.budgetTrackingEnabled,
+                status: formData.status,
+                isSegmented: formData.isSegmented,
+            };
+
+            await financeDataService.updateAccount(id, updateDto);
 
             toast({
                 title: 'Success',

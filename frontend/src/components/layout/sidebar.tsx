@@ -20,6 +20,10 @@ import {
   X,
   Shield,
   FileText,
+  Scale,
+  Banknote,
+  Globe,
+  ListTree,
   Mail,
   Building,
   BarChart3,
@@ -87,12 +91,24 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
       {
+        title: 'Approval Workbench',
+        href: '/finance/approvals',
+        icon: ShieldCheck,
+        roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'],
+      },
+      {
         title: 'General Ledger',
         href: '/finance/general-ledger',
         icon: FileText,
         children: [
           { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
           { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
+          {
+            title: 'Journal Approval Queue',
+            href: '/finance/journal-entries/approvals',
+            icon: ShieldCheck,
+            roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'],
+          },
         ],
       },
       {
@@ -127,11 +143,21 @@ const navigationItems: NavItem[] = [
           { title: 'Transfers', href: '/finance/fixed-assets/transfers', icon: Activity },
           { title: 'Disposals', href: '/finance/fixed-assets/disposals', icon: FileText },
           { title: 'Verification', href: '/finance/fixed-assets/verification', icon: ClipboardCheck },
-          { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: TrendingUp },
+          // { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: TrendingUp },
           { title: 'Capital Projects', href: '/finance/fixed-assets/capital-projects', icon: Briefcase },
           { title: 'Leases (IFRS 16)', href: '/finance/fixed-assets/leases', icon: FileText },
           { title: 'Import', href: '/finance/fixed-assets/import', icon: FileText },
-          { title: 'Reports', href: '/finance/fixed-assets/reports', icon: BarChart3 },
+          {
+            title: 'Reports',
+            href: '/finance/fixed-assets/reports',
+            icon: BarChart3,
+            children: [
+              { title: 'Reports Overview', href: '/finance/fixed-assets/reports', icon: LayoutDashboard },
+              { title: 'Asset Register', href: '/finance/fixed-assets/reports?report=asset-register', icon: FileText },
+              { title: 'Disposal Activity', href: '/finance/fixed-assets/reports?report=disposal-activity', icon: RotateCcw },
+              { title: 'Transfer History', href: '/finance/fixed-assets/reports?report=transfer-history', icon: Activity },
+            ],
+          },
         ],
       },
       {
@@ -140,12 +166,24 @@ const navigationItems: NavItem[] = [
         icon: FileText,
         children: [
           { title: 'Dashboard', href: '/finance/ap/dashboard', icon: LayoutDashboard },
+          { title: 'Suppliers', href: '/procurement/business-partners?partnerType=Supplier', icon: Users },
           { title: 'Purchase Orders', href: '/finance/ap/purchase-orders', icon: ShoppingCart },
+          { title: 'PO Approval Queue', href: '/finance/ap/purchase-orders/approvals', icon: ShieldCheck, roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'] },
           { title: 'Goods Receipts', href: '/finance/ap/receipts', icon: Package },
           { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
           { title: 'Supplier Returns', href: '/finance/ap/returns', icon: RotateCcw },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
-          { title: 'Reports', href: '/finance/ap/reports', icon: BarChart3 },
+          {
+            title: 'Reports',
+            href: '/finance/ap/reports',
+            icon: BarChart3,
+            children: [
+              { title: 'Reports Overview', href: '/finance/ap/reports', icon: LayoutDashboard },
+              { title: 'AP Aging Analysis', href: '/finance/ap/reports?tab=aging', icon: CalendarClock },
+              { title: 'Cash Requirements', href: '/finance/ap/reports?tab=cash', icon: Banknote },
+              { title: 'Supplier Statements', href: '/finance/ap/reports?tab=statements', icon: FileText },
+            ],
+          },
         ],
       },
       {
@@ -154,6 +192,7 @@ const navigationItems: NavItem[] = [
         icon: Users,
         children: [
           { title: 'Dashboard', href: '/finance/ar/dashboard', icon: LayoutDashboard },
+          { title: 'Customer Partners', href: '/procurement/business-partners?partnerType=Customer', icon: Users },
           { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
           { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
           { title: 'Deliveries', href: '/sales/deliveries', icon: Truck },
@@ -164,7 +203,16 @@ const navigationItems: NavItem[] = [
           { title: 'Payments', href: '/finance/ar/payments', icon: CreditCard },
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
           { title: 'Journals', href: '/finance/ar/journals', icon: FileText },
-          { title: 'Reports', href: '/finance/ar/reports', icon: BarChart3 },
+          {
+            title: 'Reports',
+            href: '/finance/ar/reports',
+            icon: BarChart3,
+            children: [
+              { title: 'Reports Overview', href: '/finance/ar/reports', icon: LayoutDashboard },
+              { title: 'AR Aging Analysis', href: '/finance/ar/reports?tab=aging', icon: CalendarClock },
+              { title: 'Customer Statements', href: '/finance/ar/reports?tab=statements', icon: FileText },
+            ],
+          },
         ],
       },
 
@@ -176,7 +224,16 @@ const navigationItems: NavItem[] = [
           { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building },
           { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
           { title: 'Bank Reconciliation', href: '/finance/cash/reconciliation', icon: ClipboardCheck },
-          { title: 'Cash Reports', href: '/finance/cash/reports', icon: BarChart3 },
+          {
+            title: 'Cash Reports',
+            href: '/finance/cash/reports',
+            icon: BarChart3,
+            children: [
+              { title: 'Reports Overview', href: '/finance/cash/reports', icon: LayoutDashboard },
+              { title: 'Cash Position', href: '/finance/cash/reports/cash-position', icon: Banknote },
+              { title: 'Cash Flow Statement', href: '/finance/reports/cash-flow', icon: TrendingUp },
+            ],
+          },
         ],
       },
       {
@@ -221,10 +278,34 @@ const navigationItems: NavItem[] = [
           { title: 'Taxes', href: '/finance/tax/configuration/taxes', icon: FileText },
           { title: 'Tax Groups', href: '/finance/tax/configuration/groups', icon: FileText },
           { title: 'Tax Calculator', href: '/finance/tax/calculator', icon: BarChart3 },
-          { title: 'Tax Reports', href: '/finance/tax/reports', icon: FileText },
+          {
+            title: 'Tax Reports',
+            href: '/finance/tax/reports',
+            icon: FileText,
+            children: [
+              { title: 'Reports Overview', href: '/finance/tax/reports', icon: LayoutDashboard },
+              { title: 'Input VAT Register', href: '/finance/tax/reports/input-vat', icon: FileText },
+              { title: 'Output VAT Register', href: '/finance/tax/reports/output-vat', icon: TrendingUp },
+              { title: 'VAT Reconciliation', href: '/finance/tax/reports/vat-reconciliation', icon: Scale },
+              { title: 'WHT Summary', href: '/finance/tax/reports/withholding-tax', icon: FileCheck },
+            ],
+          },
         ],
       },
-      { title: 'Financial Reports', href: '/finance/reports', icon: BarChart3 },
+      {
+        title: 'Financial Reports',
+        href: '/finance/reports',
+        icon: BarChart3,
+        children: [
+          { title: 'Reports Overview', href: '/finance/reports', icon: LayoutDashboard },
+          { title: 'Trial Balance', href: '/finance/reports/trial-balance', icon: FileText },
+          { title: 'Income Statement', href: '/finance/reports/income-statement', icon: TrendingUp },
+          { title: 'Balance Sheet', href: '/finance/reports/balance-sheet', icon: Scale },
+          { title: 'Cash Flow Statement', href: '/finance/reports/cash-flow', icon: Banknote },
+          { title: 'Multi-Currency Detail', href: '/finance/reports/multi-currency', icon: Globe },
+          { title: 'Detailed Ledger', href: '/finance/reports/detailed-ledger', icon: ListTree },
+        ],
+      },
       { title: 'Settings', href: '/finance/settings', icon: Settings },
     ],
   },
@@ -609,6 +690,7 @@ const navigationItems: NavItem[] = [
           { title: 'Currency Settings', href: '/administration/finance/currency', icon: CreditCard },
           { title: 'Payment Methods', href: '/administration/finance/payment-methods', icon: CreditCard },
           { title: 'Financial Periods', href: '/administration/finance/periods', icon: CreditCard },
+          { title: 'Document Numbering', href: '/administration/finance/document-numbering', icon: FileText },
         ],
       },
       {
@@ -633,6 +715,7 @@ const navigationItems: NavItem[] = [
         icon: Briefcase,
         children: [
           { title: 'Pending Partners', href: '/administration/procurement/business-partners/pending', icon: Users },
+          { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
           { title: 'Purchase Order Settings', href: '/administration/procurement/purchase-order-settings', icon: Settings },
           { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
           { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },

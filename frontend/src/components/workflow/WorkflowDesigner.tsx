@@ -77,6 +77,7 @@ import { NotificationNode } from './nodes/NotificationNode';
 import { DocumentNode } from './nodes/DocumentNode';
 import { EscalationNode } from './nodes/EscalationNode';
 import { IntegrationNode } from './nodes/IntegrationNode';
+import { WorkflowInstanceMonitor } from './WorkflowInstanceMonitor';
 
 interface WorkflowDesignerProps {
   workflowId: string | null;
@@ -185,6 +186,69 @@ const normalizeStepType = (stepType: unknown): WorkflowStepType => {
   return WorkflowStepType.Manual;
 };
 
+// The API serializes enums as their string names (e.g. "Role"), but the generated
+// DTO types declare numeric enum members, so comparisons against WorkflowAssignmentType.*
+// need this normalizer or they silently never match.
+const normalizeAssignmentType = (assignmentType: unknown): WorkflowAssignmentType | undefined => {
+  if (typeof assignmentType === 'number') {
+    return assignmentType as WorkflowAssignmentType;
+  }
+
+  if (typeof assignmentType === 'string') {
+    const normalized = assignmentType.trim().toLowerCase();
+    switch (normalized) {
+      case 'user':
+      case '0':
+        return WorkflowAssignmentType.User;
+      case 'role':
+      case '1':
+        return WorkflowAssignmentType.Role;
+      case 'dynamic':
+      case '2':
+        return WorkflowAssignmentType.Dynamic;
+      case 'requestormanager':
+      case '3':
+        return WorkflowAssignmentType.RequestorManager;
+      case 'previousstepuser':
+      case '4':
+        return WorkflowAssignmentType.PreviousStepUser;
+      default:
+        return undefined;
+    }
+  }
+
+  return undefined;
+};
+
+// Same issue as normalizeAssignmentType above, for WorkflowApprovalType values.
+const normalizeApprovalType = (approvalType: unknown): WorkflowApprovalType | undefined => {
+  if (typeof approvalType === 'number') {
+    return approvalType as WorkflowApprovalType;
+  }
+
+  if (typeof approvalType === 'string') {
+    const normalized = approvalType.trim().toLowerCase();
+    switch (normalized) {
+      case 'single':
+      case '0':
+        return WorkflowApprovalType.Single;
+      case 'multiple':
+      case '1':
+        return WorkflowApprovalType.Multiple;
+      case 'consensus':
+      case '2':
+        return WorkflowApprovalType.Consensus;
+      case 'majority':
+      case '3':
+        return WorkflowApprovalType.Majority;
+      default:
+        return undefined;
+    }
+  }
+
+  return undefined;
+};
+
 // Node palette for drag and drop
 const nodePalette = [
   { type: 'start', label: 'Start', icon: Play, color: 'bg-green-500' },
@@ -245,10 +309,33 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   const [entityTypesLoading, setEntityTypesLoading] = useState(false);
   const [entityTypesError, setEntityTypesError] = useState<string | null>(null);
   const [isCustomEntityType, setIsCustomEntityType] = useState(false);
+  const [isInstanceMonitorOpen, setIsInstanceMonitorOpen] = useState(false);
 
   const customEntityTypeValue = '__custom__';
 
   const isGuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  const normalizeApproverKey = (value?: string | null) => (value || '').trim().toLowerCase();
+  const normalizeApproverValues = (value: unknown): string[] => {
+    if (!value) return [];
+
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => normalizeApproverValues(item)).filter(Boolean);
+    }
+
+    if (typeof value === 'string') {
+      return value.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+
+    if (typeof value === 'object') {
+      const item = value as Record<string, unknown>;
+      const candidates = [item.id, item.role, item.roleName, item.name, item.userId, item.userName, item.email];
+      return candidates
+        .filter((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0)
+        .slice(0, 1);
+    }
+
+    return [];
+  };
 
   const selectedWorkflowOption =
     activeWorkflowId ? workflowOptions.find((item) => item.id === activeWorkflowId) : undefined;
@@ -1267,11 +1354,11 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     if (normalizeStepType(step.stepType) === WorkflowStepType.Approval) {
       const approvalConfig = step.configuration?.approvalConfig;
       const approverRoles = approvalConfig?.approverRules
-        ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.Role && rule.role)
+        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.Role && rule.role)
         .map(rule => rule.role ?? '')
         .filter(Boolean) ?? [];
       const approverUsers = approvalConfig?.approverRules
-        ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.User && rule.userId)
+        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.User && rule.userId)
         .map(rule => rule.userId ?? '')
         .filter(Boolean) ?? [];
       return {
@@ -1279,7 +1366,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         approvers: approverRoles,
         approverRoles,
         approverUsers,
-        approvalType: approvalConfig ? mapApprovalTypeToLabel(approvalConfig.approvalType) : 'any',
+        approvalType: approvalConfig ? mapApprovalTypeToLabel(normalizeApprovalType(approvalConfig.approvalType)) : 'any',
         approvalChecklist: step.configuration?.qualityConfig?.qualityChecks?.map((item, index) => ({
           ...item,
           id: item.id || `check-${index + 1}`,
@@ -1299,7 +1386,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.Role && assignmentRule.role) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.Role && assignmentRule.role) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1311,7 +1398,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.User && assignmentRule.userId) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.User && assignmentRule.userId) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1323,7 +1410,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.Dynamic && assignmentRule.dynamicExpression) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.Dynamic && assignmentRule.dynamicExpression) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1335,7 +1422,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.RequestorManager) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.RequestorManager) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1346,7 +1433,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         };
       }
 
-      if (assignmentRule.assignmentType === WorkflowAssignmentType.PreviousStepUser) {
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.PreviousStepUser) {
         return {
           ...baseData,
           taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
@@ -1882,12 +1969,21 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
   const selectedApproverRoles =
     selectedNode?.type === 'approval'
-      ? ((selectedNode.data?.approverRoles || selectedNode.data?.approvers || []) as string[])
+      ? normalizeApproverValues(selectedNode.data?.approverRoles || selectedNode.data?.approvers || selectedNode.data?.approvalConfig?.approverRoles)
       : [];
   const selectedApproverUsers =
     selectedNode?.type === 'approval'
-      ? ((selectedNode.data?.approverUsers || []) as string[])
+      ? normalizeApproverValues(selectedNode.data?.approverUsers || selectedNode.data?.approvalConfig?.approverUsers)
       : [];
+  const selectedApproverRoleKeys = new Set(selectedApproverRoles.map((role) => normalizeApproverKey(role)));
+  const selectedApproverUserKeys = new Set(selectedApproverUsers.map((userId) => normalizeApproverKey(userId)));
+  const isRoleSelected = (role: Role) =>
+    selectedApproverRoleKeys.has(normalizeApproverKey(role.id)) ||
+    selectedApproverRoleKeys.has(normalizeApproverKey(role.name));
+  const isUserSelected = (user: User) =>
+    selectedApproverUserKeys.has(normalizeApproverKey(user.id)) ||
+    selectedApproverUserKeys.has(normalizeApproverKey((user as any).userName)) ||
+    selectedApproverUserKeys.has(normalizeApproverKey((user as any).email));
   const selectedApprovalChecklist =
     selectedNode?.type === 'approval'
       ? ((selectedNode.data?.approvalChecklist || []) as WorkflowQualityCheckDto[])
@@ -1944,9 +2040,19 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
             </div>
 
             {selectedWorkflowHasLiveInstances && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{workflowLiveInstanceLockMessage}</span>
+              <div className="flex items-start justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{workflowLiveInstanceLockMessage}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                  onClick={() => setIsInstanceMonitorOpen(true)}
+                >
+                  View live instances
+                </Button>
               </div>
             )}
 
@@ -2923,6 +3029,27 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
             </DialogDescription>
           </DialogHeader>
 
+          {selectedWorkflowHasLiveInstances && (
+            <div className="flex items-start justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Approver configuration is read-only because this workflow still has {selectedWorkflowLiveInstanceCount} live instance{selectedWorkflowLiveInstanceCount === 1 ? '' : 's'}.
+                  Cancel or complete the live instance{selectedWorkflowLiveInstanceCount === 1 ? '' : 's'} before editing this workflow.
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                onClick={() => setIsInstanceMonitorOpen(true)}
+              >
+                View live instances
+              </Button>
+            </div>
+          )}
+
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -2943,18 +3070,22 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                     <div className="text-xs text-muted-foreground">No matching roles</div>
                   )}
                   {filteredAvailableRoles.map((role) => {
-                    const isChecked = selectedApproverRoles.includes(role.name);
+                    const isChecked = isRoleSelected(role);
                     return (
                       <div key={role.id} className="flex items-center space-x-2">
                         <Checkbox
                           checked={isChecked}
                           disabled={selectedWorkflowHasLiveInstances}
                           onCheckedChange={(checked) => {
-                            const currentRoles: string[] =
-                              selectedNode?.data?.approverRoles || selectedNode?.data?.approvers || [];
+                            const currentRoles = normalizeApproverValues(
+                              selectedNode?.data?.approverRoles || selectedNode?.data?.approvers || []
+                            );
                             const nextRoles = checked
                               ? Array.from(new Set([...currentRoles, role.name]))
-                              : currentRoles.filter((r: string) => r !== role.name);
+                              : currentRoles.filter((r: string) => {
+                                  const key = normalizeApproverKey(r);
+                                  return key !== normalizeApproverKey(role.name) && key !== normalizeApproverKey(role.id);
+                                });
                             updateSelectedNode({ approverRoles: nextRoles, approvers: nextRoles });
                           }}
                         />
@@ -2985,17 +3116,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                     <div className="text-xs text-muted-foreground">No matching users</div>
                   )}
                   {filteredAvailableUsers.map((user) => {
-                    const isChecked = selectedApproverUsers.includes(user.id);
+                    const isChecked = isUserSelected(user);
                     return (
                       <div key={user.id} className="flex items-center space-x-2">
                         <Checkbox
                           checked={isChecked}
                           disabled={selectedWorkflowHasLiveInstances}
                           onCheckedChange={(checked) => {
-                            const currentUsers: string[] = selectedNode?.data?.approverUsers || [];
+                            const currentUsers = normalizeApproverValues(selectedNode?.data?.approverUsers || []);
                             const nextUsers = checked
                               ? Array.from(new Set([...currentUsers, user.id]))
-                              : currentUsers.filter((u: string) => u !== user.id);
+                              : currentUsers.filter((u: string) => normalizeApproverKey(u) !== normalizeApproverKey(user.id));
                             updateSelectedNode({ approverUsers: nextUsers });
                           }}
                         />
@@ -3103,8 +3234,25 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
               Done
             </Button>
           </DialogFooter>
-        </DialogContent>
+      </DialogContent>
       </Dialog>
+
+      <WorkflowInstanceMonitor
+        isOpen={isInstanceMonitorOpen}
+        onClose={() => setIsInstanceMonitorOpen(false)}
+        workflowDefinitionId={activeWorkflowId || undefined}
+        workflowName={selectedWorkflowOption?.name || workflowName || undefined}
+        onLiveInstancesCountChanged={(count) => {
+          if (!activeWorkflowId) return;
+          setWorkflowOptions((items) =>
+            items.map((item) =>
+              item.id === activeWorkflowId
+                ? { ...item, activeInstancesCount: count }
+                : item
+            )
+          );
+        }}
+      />
     </>
   );
 }

@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 
 namespace ErpSystem.Api.Services.Finance.MultiCurrency
@@ -25,19 +26,22 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         private readonly ICurrentUserService _currentUserService;
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<CurrencyRevaluationService> _logger;
+        private readonly IDocumentNumberingService _documentNumberingService;
 
         public CurrencyRevaluationService(
             ApplicationDbContext context,
             ReportingDbContext reportingContext,
             ICurrentUserService currentUserService,
             ITenantSettingsService tenantSettingsService,
-            ILogger<CurrencyRevaluationService> logger)
+            ILogger<CurrencyRevaluationService> logger,
+            IDocumentNumberingService documentNumberingService)
         {
             _context = context;
             _reportingContext = reportingContext;
             _currentUserService = currentUserService;
             _tenantSettingsService = tenantSettingsService;
             _logger = logger;
+            _documentNumberingService = documentNumberingService;
         }
 
         private Guid TenantId => _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
@@ -104,7 +108,13 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             var journalEntry = new JournalEntry
             {
                 Id = Guid.NewGuid(),
-                JournalEntryNumber = $"REV-{revaluationDate:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 8)}",
+                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
+                    DocumentNumberingModules.Finance,
+                    FinanceDocumentTypes.CurrencyRevaluation,
+                    tenantIdValue,
+                    revaluationDate,
+                    nameof(JournalEntry),
+                    cancellationToken: cancellationToken),
                 EntryDate = revaluationDate,
                 Description = $"Currency Revaluation - {request.RevaluationType} - {revaluationDate:d}",
                 ReferenceNumber = request.RevaluationType,

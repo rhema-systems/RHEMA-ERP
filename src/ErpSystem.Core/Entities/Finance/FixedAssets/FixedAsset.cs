@@ -19,6 +19,9 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [MaxLength(1000)]
         public string? Description { get; set; }
 
+        [MaxLength(500)]
+        public string? Location { get; set; }
+
         [Required]
         public Guid FixedAssetCategoryId { get; set; }
         public virtual FixedAssetCategory Category { get; set; } = null!;

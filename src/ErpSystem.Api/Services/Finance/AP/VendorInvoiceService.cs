@@ -3,8 +3,10 @@ using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -25,23 +27,30 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly ILogger<VendorInvoiceService> _logger;
         private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService _inventoryValuationService;
+        private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IWorkflowService _workflowService;
 
         public VendorInvoiceService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ISubledgerPostingService subledgerPostingService,
             ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService inventoryValuationService,
-            ILogger<VendorInvoiceService> logger)
+            ILogger<VendorInvoiceService> logger,
+            IDocumentNumberingService documentNumberingService,
+            IWorkflowService workflowService)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _subledgerPostingService = subledgerPostingService;
             _inventoryValuationService = inventoryValuationService;
             _logger = logger;
+            _documentNumberingService = documentNumberingService;
+            _workflowService = workflowService;
         }
 
         private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
         private string UserName => _currentUser.UserName ?? "system";
+        private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
         // ═════════════════════════════════════════════════════════════════
         //  GET
@@ -121,6 +130,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     (i.TotalAmount - i.PaidAmount) > 0);
             }
 
+            if (query.IsOpeningBalance.HasValue)
+                queryable = queryable.Where(i => i.IsOpeningBalance == query.IsOpeningBalance.Value);
+
             var totalCount = await queryable.CountAsync(cancellationToken);
 
             // Sorting
@@ -167,17 +179,19 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         public async Task<VendorInvoiceDto> CreateAsync(VendorInvoiceCreateDto dto, CancellationToken cancellationToken = default)
         {
-            // Validate supplier
-            var supplier = await _unitOfWork.Repository<Supplier>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.Id == dto.SupplierId);
+            var supplier = await ResolveSupplierForInvoiceAsync(dto.SupplierId, cancellationToken);
 
-            if (supplier == null)
-                throw new KeyNotFoundException($"Supplier with Id '{dto.SupplierId}' not found.");
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? supplier.PaymentTermId, "Supplier", cancellationToken);
+            var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
+            var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? dto.EarlyPaymentDiscountPercentage;
+            var earlyPaymentDiscountDueDate = paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0
+                ? dto.InvoiceDate.AddDays(paymentTerm.DiscountDays)
+                : dto.EarlyPaymentDiscountDueDate;
 
             // Duplicate check
             if (!string.IsNullOrWhiteSpace(dto.SupplierInvoiceNumber))
             {
-                var isDup = await IsDuplicateAsync(dto.SupplierId, dto.SupplierInvoiceNumber, dto.InvoiceDate, null, cancellationToken);
+                var isDup = await IsDuplicateAsync(supplier.Id, dto.SupplierInvoiceNumber, dto.InvoiceDate, null, cancellationToken);
                 if (isDup)
                     throw new InvalidOperationException($"Duplicate invoice detected with supplier reference '{dto.SupplierInvoiceNumber}'.");
             }
@@ -191,17 +205,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TenantId = TenantId,
                 InvoiceNumber = invoiceNumber,
                 SupplierInvoiceNumber = dto.SupplierInvoiceNumber,
-                SupplierId = dto.SupplierId,
+                SupplierId = supplier.Id,
                 SupplierName = supplier.Name,
                 PurchaseOrderId = dto.PurchaseOrderId,
                 InvoiceDate = dto.InvoiceDate,
                 ReceivedDate = dto.ReceivedDate ?? now,
-                DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(dto.PaymentTermsDays),
+                DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
                 CurrencyCode = dto.CurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
-                PaymentTermsDays = dto.PaymentTermsDays,
-                EarlyPaymentDiscountPercentage = dto.EarlyPaymentDiscountPercentage,
-                EarlyPaymentDiscountDueDate = dto.EarlyPaymentDiscountDueDate,
+                PaymentTermsDays = paymentTermsDays,
+                PaymentTermId = paymentTerm?.Id,
+                EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
+                EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate,
                 WithholdingTaxRate = dto.WithholdingTaxRate,
                 MatchingType = dto.MatchingType,
                 MatchingStatus = InvoiceMatchingStatus.Unmatched,
@@ -211,6 +226,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ApAccountId = dto.ApAccountId,
                 Notes = dto.Notes,
                 Reference = dto.Reference,
+                IsOpeningBalance = dto.IsOpeningBalance,
                 CreatedAt = now,
                 CreatedBy = UserName
             };
@@ -294,23 +310,34 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.Draft && invoice.Status != VendorInvoiceStatus.Rejected)
                 throw new InvalidOperationException("Only draft or rejected invoices can be updated.");
 
+            var supplier = await _unitOfWork.Repository<Supplier>()
+                .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.Id == invoice.SupplierId);
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? supplier?.PaymentTermId, "Supplier", cancellationToken);
+            var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
+            var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? dto.EarlyPaymentDiscountPercentage;
+            var earlyPaymentDiscountDueDate = paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0
+                ? dto.InvoiceDate.AddDays(paymentTerm.DiscountDays)
+                : dto.EarlyPaymentDiscountDueDate;
+
             var now = DateTime.UtcNow;
             invoice.SupplierInvoiceNumber = dto.SupplierInvoiceNumber;
             invoice.PurchaseOrderId = dto.PurchaseOrderId;
             invoice.InvoiceDate = dto.InvoiceDate;
             invoice.ReceivedDate = dto.ReceivedDate;
-            invoice.DueDate = dto.DueDate;
+            invoice.DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays);
             invoice.CurrencyCode = dto.CurrencyCode;
             invoice.ExchangeRate = dto.ExchangeRate;
-            invoice.PaymentTermsDays = dto.PaymentTermsDays;
-            invoice.EarlyPaymentDiscountPercentage = dto.EarlyPaymentDiscountPercentage;
-            invoice.EarlyPaymentDiscountDueDate = dto.EarlyPaymentDiscountDueDate;
+            invoice.PaymentTermsDays = paymentTermsDays;
+            invoice.PaymentTermId = paymentTerm?.Id;
+            invoice.EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage;
+            invoice.EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate;
             invoice.WithholdingTaxRate = dto.WithholdingTaxRate;
             invoice.MatchingType = dto.MatchingType;
             invoice.ExpenseAccountId = dto.ExpenseAccountId;
             invoice.ApAccountId = dto.ApAccountId;
             invoice.Notes = dto.Notes;
             invoice.Reference = dto.Reference;
+            invoice.IsOpeningBalance = dto.IsOpeningBalance;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
@@ -424,13 +451,28 @@ namespace ErpSystem.Api.Services.Finance.AP
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.PendingApproval;
             invoice.ApprovalStatus = "PendingApproval";
-            invoice.SubmittedById = _currentUser.UserId != null ? Guid.Parse(_currentUser.UserId) : null;
+            invoice.SubmittedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
             invoice.SubmittedDate = now;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
             await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("VendorInvoice", id);
+            if (!workflowResult.Success)
+            {
+                invoice.Status = VendorInvoiceStatus.Draft;
+                invoice.ApprovalStatus = "Draft";
+                invoice.SubmittedById = null;
+                invoice.SubmittedDate = null;
+                invoice.UpdatedAt = DateTime.UtcNow;
+                invoice.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to start vendor invoice approval workflow.");
+            }
 
             _logger.LogInformation("Vendor invoice {InvoiceNumber} submitted for approval", invoice.InvoiceNumber);
             return MapToDto(invoice);
@@ -449,17 +491,37 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be approved.");
 
+            var approverId = CurrentUserId;
+            if (approverId == Guid.Empty)
+                throw new InvalidOperationException("Unable to resolve the current approver.");
+
+            if (!await _workflowService.CanUserApproveAsync("VendorInvoice", id, approverId))
+                throw new InvalidOperationException("This vendor invoice is assigned to another workflow approver.");
+
+            var workflowResult = await _workflowService.ProcessApprovalStepAsync("VendorInvoice", id, approverId, "Approve", comments);
+            if (!workflowResult.Success)
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to process vendor invoice approval.");
+
+            if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+            {
+                _logger.LogInformation(
+                    "Recorded intermediate approval for vendor invoice {InvoiceNumber}; workflow status is {WorkflowStatus}",
+                    invoice.InvoiceNumber,
+                    workflowResult.Status);
+                return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
+            }
+
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.Approved;
             invoice.ApprovalStatus = "Approved";
-            invoice.ApprovedById = _currentUser.UserId != null ? Guid.Parse(_currentUser.UserId) : null;
+            invoice.ApprovedById = approverId;
             invoice.ApprovedDate = now;
             invoice.ApprovalComments = comments;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
             // Process Inventory Receivals for Inventory lines
-            foreach (var line in invoice.LineItems.Where(l => l.LineItemType == "Inventory"))
+            foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
             {
                 if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
                 {
@@ -496,6 +558,26 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be rejected.");
+
+            var approverId = CurrentUserId;
+            if (approverId == Guid.Empty)
+                throw new InvalidOperationException("Unable to resolve the current approver.");
+
+            if (!await _workflowService.CanUserApproveAsync("VendorInvoice", id, approverId))
+                throw new InvalidOperationException("This vendor invoice is assigned to another workflow approver.");
+
+            var workflowResult = await _workflowService.ProcessApprovalStepAsync("VendorInvoice", id, approverId, "Reject", comments);
+            if (!workflowResult.Success)
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to process vendor invoice rejection.");
+
+            if (workflowResult.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed))
+            {
+                _logger.LogInformation(
+                    "Recorded vendor invoice rejection workflow action for {InvoiceNumber}; workflow status is {WorkflowStatus}",
+                    invoice.InvoiceNumber,
+                    workflowResult.Status);
+                return MapToDto(invoice);
+            }
 
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.Rejected;
@@ -775,6 +857,95 @@ namespace ErpSystem.Api.Services.Finance.AP
         //  UTILITIES
         // ═════════════════════════════════════════════════════════════════
 
+        private async Task<Supplier> ResolveSupplierForInvoiceAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
+        {
+            var supplierRepository = _unitOfWork.Repository<Supplier>();
+            var supplier = await supplierRepository
+                .GetQueryable(s =>
+                    s.TenantId == TenantId &&
+                    !s.IsDeleted &&
+                    s.Id == supplierOrBusinessPartnerId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (supplier != null)
+            {
+                return supplier;
+            }
+
+            var partner = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    !p.IsDeleted &&
+                    p.Id == supplierOrBusinessPartnerId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (partner == null)
+            {
+                throw new KeyNotFoundException($"Supplier or business partner with Id '{supplierOrBusinessPartnerId}' not found.");
+            }
+
+            if (string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Customer business partners cannot be used for AP supplier invoices.");
+            }
+
+            if (partner.IsBlacklisted)
+            {
+                throw new InvalidOperationException($"Business partner '{partner.PartnerName}' is blacklisted and cannot be used for AP supplier invoices.");
+            }
+
+            supplier = await supplierRepository
+                .GetQueryable(s =>
+                    s.TenantId == TenantId &&
+                    !s.IsDeleted &&
+                    (s.Id == partner.Id ||
+                     s.SupplierCode == partner.PartnerCode ||
+                     s.Name == partner.PartnerName))
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (supplier != null)
+            {
+                return supplier;
+            }
+
+            supplier = new Supplier
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                SupplierCode = string.IsNullOrWhiteSpace(partner.PartnerCode)
+                    ? $"BP-{partner.Id.ToString("N")[..8].ToUpperInvariant()}"
+                    : partner.PartnerCode,
+                Name = partner.PartnerName,
+                SupplierType = partner.PartnerType.Contains("Manufacturer", StringComparison.OrdinalIgnoreCase)
+                    ? "Manufacturer"
+                    : "Vendor",
+                Address = partner.PhysicalAddress ?? partner.MailingAddress,
+                City = partner.PhysicalCity ?? partner.MailingCity,
+                State = partner.PhysicalState ?? partner.MailingState,
+                Country = partner.PhysicalCountry ?? partner.MailingCountry,
+                ZipCode = partner.PhysicalPostalCode ?? partner.MailingPostalCode,
+                Phone = partner.PrimaryPhone,
+                Email = partner.PrimaryEmail,
+                Website = partner.Website,
+                PrimaryContactName = partner.PrimaryContactName,
+                PrimaryContactTitle = partner.PrimaryContactTitle,
+                PrimaryContactPhone = partner.PrimaryPhone,
+                PrimaryContactEmail = partner.PrimaryEmail,
+                TaxId = partner.TaxIdentificationNumber ?? partner.VATNumber,
+                PaymentTerms = partner.PaymentTerms ?? "Net 30",
+                PaymentTermId = partner.PaymentTermId,
+                IsActive = partner.IsActive,
+                IsPreferred = partner.IsPreferred,
+                Status = partner.IsActive ? "Active" : "Inactive",
+                Notes = $"Auto-created from business partner {partner.PartnerCode} for AP supplier invoice entry.",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+
+            await supplierRepository.AddAsync(supplier);
+            return supplier;
+        }
+
         public async Task<bool> IsDuplicateAsync(Guid supplierId, string? supplierInvoiceNumber, DateTime invoiceDate, Guid? excludeId = null, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(supplierInvoiceNumber)) return false;
@@ -807,24 +978,13 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private async Task<string> GenerateInvoiceNumberAsync(CancellationToken cancellationToken)
         {
-            var prefix = "VI";
-            var currentYear = DateTime.UtcNow.Year;
-
-            var lastInvoice = await _unitOfWork.Repository<VendorInvoice>()
-                .GetQueryable(i =>
-                    i.TenantId == TenantId &&
-                    i.InvoiceNumber.StartsWith($"{prefix}-{currentYear}"))
-                .OrderByDescending(i => i.InvoiceNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (lastInvoice == null)
-                return $"{prefix}-{currentYear}-00001";
-
-            var parts = lastInvoice.InvoiceNumber.Split('-');
-            if (parts.Length >= 3 && int.TryParse(parts[2], out var lastSeq))
-                return $"{prefix}-{currentYear}-{(lastSeq + 1):00000}";
-
-            return $"{prefix}-{currentYear}-00001";
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.APInvoice,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(VendorInvoice),
+                cancellationToken: cancellationToken);
         }
 
         private VendorInvoiceDto MapToDto(VendorInvoice invoice)
@@ -851,6 +1011,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ExchangeRate = invoice.ExchangeRate,
                 BaseCurrencyAmount = invoice.BaseCurrencyAmount,
                 PaymentTermsDays = invoice.PaymentTermsDays,
+                PaymentTermId = invoice.PaymentTermId,
                 EarlyPaymentDiscountPercentage = invoice.EarlyPaymentDiscountPercentage,
                 EarlyPaymentDiscountDueDate = invoice.EarlyPaymentDiscountDueDate,
                 EarlyPaymentDiscountAmount = invoice.EarlyPaymentDiscountAmount,
@@ -867,6 +1028,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ApAccountName = invoice.ApAccount?.AccountName,
                 Notes = invoice.Notes,
                 Reference = invoice.Reference,
+                IsOpeningBalance = invoice.IsOpeningBalance,
                 LineItems = invoice.LineItems.Select(li => new VendorInvoiceLineItemDto
                 {
                     Id = li.Id,
@@ -901,6 +1063,34 @@ namespace ErpSystem.Api.Services.Finance.AP
                 CreatedAt = invoice.CreatedAt,
                 UpdatedAt = invoice.UpdatedAt
             };
+        }
+
+        private async Task<PaymentTerm?> ResolvePaymentTermAsync(Guid? paymentTermId, string applicableTo, CancellationToken cancellationToken)
+        {
+            if (!paymentTermId.HasValue || paymentTermId.Value == Guid.Empty)
+            {
+                return null;
+            }
+
+            var paymentTerm = await _unitOfWork.Repository<PaymentTerm>()
+                .FirstOrDefaultAsync(t =>
+                    t.TenantId == TenantId &&
+                    t.Id == paymentTermId.Value &&
+                    !t.IsDeleted &&
+                    t.IsActive);
+
+            if (paymentTerm == null)
+            {
+                throw new InvalidOperationException($"Active payment term with Id '{paymentTermId.Value}' was not found.");
+            }
+
+            if (!string.Equals(paymentTerm.ApplicableTo, "All", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(paymentTerm.ApplicableTo, applicableTo, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Payment term '{paymentTerm.Code}' is not applicable to {applicableTo} transactions.");
+            }
+
+            return paymentTerm;
         }
     }
 }

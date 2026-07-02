@@ -54,6 +54,10 @@ export default function InvoiceDetailsPage() {
         );
     }
 
+    const lineSubtotal = invoice.lineItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
+    const lineDiscounts = invoice.lineItems.reduce((sum, item) => sum + (Number(item.discountAmount) || 0), 0);
+    const documentDiscount = Number(invoice.discountAmount) || 0;
+
     return (
         <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
             {/* Header Actions */}
@@ -163,9 +167,20 @@ export default function InvoiceDetailsPage() {
                         <div className="w-1/3 space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">Subtotal</span>
-                                <span>{formatCurrency(invoice.totalAmount)}</span> {/* Assuming totalAmount includes tax for now or we calculate tax separately if provided */}
+                                <span>{formatCurrency(lineSubtotal || invoice.totalAmount)}</span>
                             </div>
-                            {/* Add Tax/Discount rows if available in Invoice object */}
+                            {lineDiscounts > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Line Discounts</span>
+                                    <span>-{formatCurrency(lineDiscounts)}</span>
+                                </div>
+                            )}
+                            {documentDiscount > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Discount Allowed</span>
+                                    <span>-{formatCurrency(documentDiscount)}</span>
+                                </div>
+                            )}
                             <Separator className="my-2" />
                             <div className="flex justify-between font-bold text-lg">
                                 <span>Total</span>

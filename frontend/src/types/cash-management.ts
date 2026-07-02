@@ -204,6 +204,7 @@ export interface CreateBankAccountDto {
     accountType: BankAccountType;
     glAccountId?: string;
     openingBalance: number;
+    openingBalanceExchangeRate?: number;
     openingDate: string;
     notes?: string;
 }
@@ -222,6 +223,7 @@ export interface CreateCashReceiptDto {
     bankAccountId: string;
     amount: number;
     currency: string;
+    exchangeRate?: number;
     paymentMethodId?: string;
     referenceNumber?: string;
     payerName?: string;
@@ -234,6 +236,7 @@ export interface CreateCashPaymentDto {
     bankAccountId: string;
     amount: number;
     currency: string;
+    exchangeRate?: number;
     paymentMethodId?: string;
     referenceNumber?: string;
     payeeName?: string;
@@ -247,6 +250,7 @@ export interface CreateBankTransferDto {
     fromBankAccountId: string;
     toBankAccountId: string;
     amount: number;
+    exchangeRate?: number;
     referenceNumber?: string;
     description?: string;
 }

@@ -37,6 +37,7 @@ public class CreateBankAccountDto
     public BankAccountType AccountType { get; set; }
     public Guid? GLAccountId { get; set; }
     public decimal OpeningBalance { get; set; }
+    public decimal? OpeningBalanceExchangeRate { get; set; }
     public DateTime OpeningDate { get; set; }
     public string? Notes { get; set; }
 }

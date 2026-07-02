@@ -387,7 +387,11 @@ public class NotificationTopicsController : ControllerBase
                 et.TenantId == tenantId.Value && !et.IsDeleted && et.IsActive);
 
             var normalizedEntityTypes = workflowEntityTypes
-                .Select(et => NormalizeSegment(et.Name))
+                .SelectMany(et => new[]
+                {
+                    NormalizeSegment(et.Name),
+                    NormalizeSegment(et.Code)
+                })
                 .Where(s => !string.IsNullOrWhiteSpace(s))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -457,6 +461,7 @@ public class NotificationTopicsController : ControllerBase
                             EnableEmail = defaultEmailActivities.Contains(activity),
                             InAppTitleTemplate = "{{Title}}",
                             InAppBodyTemplate = "{{Message}}",
+                            ActionUrlTemplate = "{{ActionUrl}}",
                             CreatedAt = DateTime.UtcNow,
                             CreatedById = userId
                         };
@@ -480,6 +485,11 @@ public class NotificationTopicsController : ControllerBase
                         {
                             // Ensure required topics always have at least one channel.
                             topic.EnableInApp = true;
+                            changed = true;
+                        }
+                        if (string.IsNullOrWhiteSpace(topic.ActionUrlTemplate))
+                        {
+                            topic.ActionUrlTemplate = "{{ActionUrl}}";
                             changed = true;
                         }
 

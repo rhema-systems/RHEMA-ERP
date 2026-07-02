@@ -41,6 +41,7 @@ export interface InvoiceQuery {
     endDate?: string;
     status?: string;
     searchTerm?: string;
+    isOpeningBalance?: boolean;
 }
 
 export interface PaymentQuery {
@@ -95,6 +96,7 @@ class ArService {
         if (query.endDate) params.append('EndDate', query.endDate);
         if (query.status) params.append('Status', query.status);
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
+        if (query.isOpeningBalance !== undefined) params.append('IsOpeningBalance', query.isOpeningBalance.toString());
 
         return apiService.get<PagedResult<Invoice>>(`${this.baseUrl}/invoices?${params.toString()}`);
     }

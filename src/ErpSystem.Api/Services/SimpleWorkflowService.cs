@@ -124,11 +124,17 @@ public class SimpleWorkflowService : IWorkflowService
         {
             // Self-heal: if the active step is an approval step and approvals are missing, materialize them.
             currentStepInstance ??= await EnsureCurrentStepInstanceAsync(existingActiveInstance, entityTypeRecord, entityId);
+            var existingDataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
+            var startAdvanceResult = await AdvanceStartStepIfNeededAsync(existingActiveInstance, currentStepInstance, initiatedById, existingDataContext);
+            if (startAdvanceResult != null)
+            {
+                return startAdvanceResult;
+            }
+
             if (currentStepInstance?.WorkflowStep?.StepType == WorkflowStepType.Approval)
             {
                 try
                 {
-                    var existingDataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
                     await _workflowEngine.EnsureApprovalsForStepAsync(currentStepInstance.Id, existingDataContext);
                 }
                 catch (Exception ex)
@@ -157,6 +163,13 @@ public class SimpleWorkflowService : IWorkflowService
 
         await AttachWorkflowInstanceAsync(entityTypeRecord, entityId, workflowInstance.Id);
 
+        var currentStepInstanceAfterStart = await _stepInstanceRepository.GetCurrentStepAsync(workflowInstance.Id);
+        var advanceResult = await AdvanceStartStepIfNeededAsync(workflowInstance, currentStepInstanceAfterStart, initiatedById, dataContext);
+        if (advanceResult != null)
+        {
+            return advanceResult;
+        }
+
         return new WorkflowExecutionResult
         {
             Success = true,
@@ -165,6 +178,44 @@ public class SimpleWorkflowService : IWorkflowService
             WorkflowInstanceId = workflowInstance.Id,
             CurrentStepId = workflowInstance.CurrentStepId
         };
+    }
+
+    private async Task<WorkflowExecutionResult?> AdvanceStartStepIfNeededAsync(
+        WorkflowInstance instance,
+        WorkflowStepInstance? currentStepInstance,
+        Guid userId,
+        object? dataContext)
+    {
+        var currentStep = currentStepInstance?.WorkflowStep;
+        if (currentStepInstance == null ||
+            currentStep == null ||
+            !currentStep.IsStartStep ||
+            currentStep.StepType == WorkflowStepType.Approval ||
+            instance.Status is not (WorkflowInstanceStatus.Created or WorkflowInstanceStatus.InProgress or WorkflowInstanceStatus.Waiting or WorkflowInstanceStatus.Suspended))
+        {
+            return null;
+        }
+
+        var result = await _workflowEngine.ExecuteNextStepAsync(instance.Id, userId, dataContext);
+        if (!result.Success)
+        {
+            return result;
+        }
+
+        var advancedStepInstance = await _stepInstanceRepository.GetCurrentStepAsync(instance.Id);
+        if (advancedStepInstance?.WorkflowStep?.StepType == WorkflowStepType.Approval)
+        {
+            try
+            {
+                await _workflowEngine.EnsureApprovalsForStepAsync(advancedStepInstance.Id, dataContext);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to ensure approvals after advancing workflow instance {WorkflowInstanceId}", instance.Id);
+            }
+        }
+
+        return result;
     }
 
     public async Task<bool> CanUserApproveAsync(string entityType, Guid entityId, Guid userId)

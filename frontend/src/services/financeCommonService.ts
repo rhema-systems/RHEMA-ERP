@@ -166,7 +166,7 @@ export const paymentTermService = {
 
   // Get payment terms by applicable type
   getByApplicableTo: async (applicableTo: string): Promise<PaymentTermListDto[]> => {
-    return api.get<PaymentTermListDto[]>(`/finance/PaymentTerms/applicable/${applicableTo}`);
+    return api.get<PaymentTermListDto[]>(`/finance/PaymentTerms/by-type/${applicableTo}`);
   },
 
   // Create payment term

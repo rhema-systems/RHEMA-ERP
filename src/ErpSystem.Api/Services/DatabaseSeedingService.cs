@@ -1,11 +1,15 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -23,6 +27,7 @@ namespace ErpSystem.Web.Services
         Task SeedAsync();
         Task SeedWithoutMigrationAsync();
         Task SeedBasicDataAsync();
+        Task SeedWorkflowDefinitionsAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
         Task<bool> HasSeedDataAsync();
@@ -35,6 +40,37 @@ namespace ErpSystem.Web.Services
         private readonly RoleManager<ApplicationRole> _roleManager;
         private readonly ILogger<DatabaseSeedingService> _logger;
         private readonly IWebHostEnvironment _environment;
+
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Accounts Officer Review",
+                    new[] { "Accounts Officer", "Senior Accountant" },
+                    "Initial finance review for completeness, coding, supporting documents, and policy compliance."),
+                new(
+                    "Finance Manager Approval",
+                    new[] { "Finance Manager" },
+                    "Finance manager approval for budget, cash, accounting, and operational control."),
+                new(
+                    "Financial Controller Final Approval",
+                    new[] { "Financial Controller" },
+                    "Final finance control approval before the document is released to downstream processing.")
+            };
+
+        private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
+
+        private sealed record FinanceWorkflowSeedSpec(
+            string EntityCode,
+            string EntityName,
+            string? EntityClassName,
+            string DefinitionName,
+            string Description);
+
+        private sealed record WorkflowApprovalStageSeed(
+            string StepName,
+            IReadOnlyCollection<string> RoleNames,
+            string Description);
 
         public DatabaseSeedingService(
             ApplicationDbContext context,
@@ -87,11 +123,8 @@ namespace ErpSystem.Web.Services
                     await SeedDefaultTenantModulesAsync();
                 }
 
-                // Always ensure baseline EHC workflow exists (required for ticket lifecycle management)
-                _logger.LogInformation("Ensuring EHC workflow is seeded...");
-                await EnsureEhcWorkflowSeededAsync();
-                _logger.LogInformation("Ensuring project workflows are seeded...");
-                await EnsureProjectWorkflowsSeededAsync();
+                await SeedWorkflowDefinitionsAsync();
+
                 _logger.LogInformation("Ensuring project catalog defaults are seeded...");
                 await EnsureProjectCatalogDefaultsSeededAsync();
 
@@ -197,12 +230,26 @@ namespace ErpSystem.Web.Services
             // Seed finance data (currencies, accounts, fiscal years, settings)
             await SeedFinanceDataAsync();
 
-            // Seed baseline EHC workflow definition
-            await EnsureEhcWorkflowSeededAsync();
-            await EnsureProjectWorkflowsSeededAsync();
+            await SeedWorkflowDefinitionsAsync();
             await EnsureProjectCatalogDefaultsSeededAsync();
 
             _logger.LogInformation("Basic data seeding completed");
+        }
+
+        public async Task SeedWorkflowDefinitionsAsync()
+        {
+            // Keep this lightweight and idempotent so startup can repair baseline workflow definitions
+            // without enabling the broader development/demo data seed.
+            _logger.LogInformation("Ensuring EHC workflow is seeded...");
+            await EnsureEhcWorkflowSeededAsync();
+            _logger.LogInformation("Ensuring finance workflows are seeded...");
+            await EnsureFinanceWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring business partner workflows are seeded...");
+            await EnsureBusinessPartnerWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring project workflows are seeded...");
+            await EnsureProjectWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring workflow notification topics are seeded...");
+            await EnsureWorkflowNotificationTopicsSeededAsync();
         }
 
         private async Task EnsureProjectWorkflowsSeededAsync()
@@ -243,6 +290,135 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed project workflows");
+            }
+        }
+
+        private async Task EnsureFinanceWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in GetFinanceWorkflowSeedSpecs())
+                    {
+                        await EnsureSequentialWorkflowDefinitionSeededAsync(
+                            tenant.Id,
+                            spec.EntityCode,
+                            spec.EntityName,
+                            spec.EntityClassName,
+                            spec.DefinitionName,
+                            spec.Description,
+                            FinanceApprovalStages);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed finance workflows");
+            }
+        }
+
+        private static IReadOnlyList<FinanceWorkflowSeedSpec> GetFinanceWorkflowSeedSpecs()
+        {
+            return new List<FinanceWorkflowSeedSpec>
+            {
+                // General Ledger
+                new("JournalEntry", "Journal Entry", typeof(JournalEntry).FullName, "Journal Entry Approval",
+                    "Sequential finance journal approval: Accounts Officer review -> Finance Manager approval -> Financial Controller final approval."),
+
+                // Accounts Payable
+                new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
+                    "AP purchase order approval before supplier commitment, receiving, invoicing, or closure."),
+                new("FinancePurchaseOrderReceipt", "Finance Goods Receipt", typeof(FinancePurchaseOrderReceipt).FullName, "Finance Goods Receipt Approval",
+                    "Goods receipt approval before AP invoice matching and inventory/expense recognition."),
+                new("VendorInvoice", "Vendor Invoice", typeof(VendorInvoice).FullName, "Accounts Payable Invoice Approval",
+                    "Supplier invoice approval workflow for AP controls before payment or posting."),
+                new("VendorPayment", "Vendor Payment", typeof(VendorPayment).FullName, "Vendor Payment Approval",
+                    "Supplier payment approval before authorization, clearing, or reconciliation."),
+                new("PaymentBatch", "Payment Batch", typeof(PaymentBatch).FullName, "Vendor Payment Batch Approval",
+                    "Bulk supplier payment batch approval before processing."),
+                new("PurchaseReturn", "Supplier Return", typeof(PurchaseReturn).FullName, "Supplier Return Approval",
+                    "Supplier return approval before goods are shipped back, debit notes are issued, or refunds are tracked."),
+
+                // Accounts Receivable
+                new("Quote", "Quotation", typeof(Quote).FullName, "Quotation Approval",
+                    "Customer quotation approval before sending, acceptance, conversion, or expiry."),
+                new("SalesOrder", "Sales Order", typeof(SalesOrder).FullName, "Sales Order Approval",
+                    "Sales order approval before confirmation, delivery, invoicing, or cancellation."),
+                new("DeliveryNote", "Delivery", typeof(DeliveryNote).FullName, "Delivery Approval",
+                    "Delivery document approval before shipping, delivery confirmation, or stock issue."),
+                new("Invoice", "Customer Invoice", typeof(Invoice).FullName, "Accounts Receivable Invoice Approval",
+                    "Customer invoice approval workflow for controlled finalization, sending, or voiding."),
+                new("ReturnOrder", "Customer Return", typeof(ReturnOrder).FullName, "Customer Return Approval",
+                    "Customer return approval before receipt, inspection, credit note, or refund."),
+                new("CreditNote", "Credit Note", typeof(CreditNote).FullName, "Credit Note Approval",
+                    "Credit note approval before application, posting, or voiding."),
+                new("CustomerPayment", "Customer Payment", typeof(CustomerPayment).FullName, "Customer Payment Approval",
+                    "Customer payment approval before clearing, allocation, or reversal."),
+                new("Refund", "Refund", typeof(Refund).FullName, "Customer Refund Approval",
+                    "Customer refund approval before processing and payment reference capture."),
+
+                // Budgeting and unit accounting
+                new("BudgetScenario", "Budget Scenario", typeof(BudgetScenario).FullName, "Budget Scenario Approval",
+                    "Budget scenario approval before locking, activation, or archival."),
+                new("BudgetReturn", "Budget Return", typeof(BudgetReturn).FullName, "Budget Return Approval",
+                    "Department budget worksheet approval workflow before consolidation."),
+                new("UnitJournalEntry", "Unit Journal Entry", typeof(UnitJournalEntry).FullName, "Unit Journal Entry Approval",
+                    "Unit accounting journal approval before posting quantity balances."),
+                new("UnitAccountBudget", "Unit Budget", typeof(UnitAccountBudget).FullName, "Unit Budget Approval",
+                    "Unit budget approval before use in unit-account budget variance reporting."),
+                new("AllocationRule", "Allocation", typeof(AllocationRule).FullName, "Allocation Rule Approval",
+                    "Allocation rule approval before use in finance allocation runs."),
+
+                // Cash and bank
+                new("CashTransaction", "Bank Transaction", typeof(CashTransaction).FullName, "Bank Transaction Approval",
+                    "Cash and bank transaction approval before posting, reconciliation, or clearing."),
+                new("BankReconciliation", "Bank Reconciliation", typeof(BankReconciliation).FullName, "Bank Reconciliation Approval",
+                    "Bank reconciliation approval for month-end bank sign-off."),
+                new("Cheque", "Cheque", typeof(Cheque).FullName, "Cheque Approval",
+                    "Cheque approval before issue, clearing, cancellation, or voiding."),
+
+                // Fixed assets
+                new("FixedAsset", "Fixed Asset", typeof(FixedAsset).FullName, "Fixed Asset Approval",
+                    "Fixed asset registration approval before activation, depreciation, transfer, or disposal."),
+                new("AssetDepreciationSchedule", "Asset Depreciation", typeof(AssetDepreciationSchedule).FullName, "Asset Depreciation Approval",
+                    "Depreciation run approval before GL posting."),
+                new("AssetValuation", "Asset Valuation", typeof(AssetValuation).FullName, "Asset Valuation Approval",
+                    "Asset valuation, impairment, or revaluation approval before GL posting."),
+                new("AssetTransfer", "Asset Transfer", typeof(AssetTransfer).FullName, "Asset Transfer Approval",
+                    "Fixed asset transfer approval before completion."),
+                new("AssetDisposal", "Asset Disposal", typeof(AssetDisposal).FullName, "Asset Disposal Approval",
+                    "Fixed asset disposal approval before completion and GL posting."),
+                new("AssetVerificationSession", "Asset Verification", typeof(AssetVerificationSession).FullName, "Asset Verification Approval",
+                    "Asset verification session approval before completion is accepted."),
+                new("CapitalProject", "Capital Project", typeof(CapitalProject).FullName, "Capital Project Approval",
+                    "Capital project approval before capitalization, settlement, or closure."),
+                new("LeaseContract", "Lease Contract", typeof(LeaseContract).FullName, "Lease Contract Approval",
+                    "IFRS 16 lease contract approval before activation and recognition.")
+            };
+        }
+
+        private async Task EnsureBusinessPartnerWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    await EnsureWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode: "BusinessPartner",
+                        entityName: "Business Partner",
+                        entityClassName: typeof(BusinessPartner).FullName,
+                        definitionName: "Business Partner Approval",
+                        description: "Business partner onboarding workflow: Draft/PendingApproval -> PendingApproval -> Approved/Active.",
+                        approvalRoleNames: new[] { "Finance Manager", "Financial Controller", Constants.Roles.Manager, Constants.Roles.SuperAdmin });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed business partner workflows");
             }
         }
 
@@ -751,7 +927,16 @@ namespace ErpSystem.Web.Services
 
             await EnsureProjectDemoInterdependenciesSeededAsync(tenantId, projectManager, financeOwner, now);
             await EnsureProjectDemoQualityDataSeededAsync(tenantId, sponsor, financeOwner, teamMember, now);
-            await EnsureProjectDemoProcurementAndMaterialDataSeededAsync(tenantId, customer, financeOwner, department, now);
+            try
+            {
+                await EnsureProjectDemoProcurementAndMaterialDataSeededAsync(tenantId, customer, financeOwner, department, now);
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Skipping project procurement/material demo seed because project schema appears behind code (missing columns). Apply latest migrations and rerun seeding.");
+            }
         }
 
         private async Task EnsureProjectDemoSeededAsync(Guid tenantId, string projectCode, Action create)
@@ -3900,8 +4085,20 @@ namespace ErpSystem.Web.Services
             string description,
             IReadOnlyCollection<string> approvalRoleNames)
         {
-            var entityType = await _context.WorkflowEntityTypes
-                .FirstOrDefaultAsync(et => !et.IsDeleted && et.TenantId == tenantId && et.Code == entityCode);
+            var entityTypeCandidates = await _context.WorkflowEntityTypes
+                .Where(et => !et.IsDeleted && et.TenantId == tenantId)
+                .ToListAsync();
+
+            var entityType = entityTypeCandidates
+                .Where(et =>
+                    WorkflowEntityTypeKeyMatches(et.Code, entityCode) ||
+                    WorkflowEntityTypeKeyMatches(et.Name, entityCode) ||
+                    WorkflowEntityTypeKeyMatches(et.Code, entityName) ||
+                    WorkflowEntityTypeKeyMatches(et.Name, entityName))
+                .OrderByDescending(et => et.IsActive)
+                .ThenBy(et => WorkflowEntityTypeKeyMatches(et.Name, entityCode) ? 0 : 1)
+                .ThenBy(et => WorkflowEntityTypeKeyMatches(et.Code, entityCode) ? 0 : 1)
+                .FirstOrDefault();
 
             if (entityType == null)
             {
@@ -3924,12 +4121,65 @@ namespace ErpSystem.Web.Services
                 _context.WorkflowEntityTypes.Add(entityType);
                 await _context.SaveChangesAsync();
             }
-
-            var hasDefinition = await _context.WorkflowDefinitions
-                .AnyAsync(d => !d.IsDeleted && d.TenantId == tenantId && d.EntityTypeId == entityType.Id);
-
-            if (hasDefinition)
+            else
             {
+                var changed = false;
+
+                if (!entityType.IsActive)
+                {
+                    entityType.IsActive = true;
+                    changed = true;
+                }
+
+                if (string.IsNullOrWhiteSpace(entityType.EntityClassName) && !string.IsNullOrWhiteSpace(entityClassName))
+                {
+                    entityType.EntityClassName = entityClassName;
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    entityType.UpdatedAt = DateTime.UtcNow;
+                    entityType.UpdatedBy = "System";
+                    await _context.SaveChangesAsync();
+                }
+            }
+
+            var existingDefinition = await _context.WorkflowDefinitions
+                .Include(d => d.Steps)
+                .FirstOrDefaultAsync(d =>
+                    !d.IsDeleted
+                    && d.TenantId == tenantId
+                    && (d.EntityTypeId == entityType.Id || d.Name == definitionName));
+
+            if (existingDefinition != null)
+            {
+                var changed = false;
+
+                if (!existingDefinition.IsActive)
+                {
+                    existingDefinition.IsActive = true;
+                    changed = true;
+                }
+
+                if (existingDefinition.EntityTypeId != entityType.Id && existingDefinition.Name == definitionName)
+                {
+                    existingDefinition.EntityTypeId = entityType.Id;
+                    changed = true;
+                }
+
+                if (EnsureApprovalStepConfigurations(existingDefinition.Steps, approvalRoleNames))
+                {
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    existingDefinition.UpdatedAt = DateTime.UtcNow;
+                    existingDefinition.UpdatedBy = "System";
+                    await _context.SaveChangesAsync();
+                }
+
                 return;
             }
 
@@ -4020,28 +4270,518 @@ namespace ErpSystem.Web.Services
             await _context.SaveChangesAsync();
         }
 
+        private async Task EnsureSequentialWorkflowDefinitionSeededAsync(
+            Guid tenantId,
+            string entityCode,
+            string entityName,
+            string? entityClassName,
+            string definitionName,
+            string description,
+            IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
+        {
+            var entityType = await EnsureWorkflowEntityTypeAsync(
+                tenantId,
+                entityCode,
+                entityName,
+                entityClassName,
+                description);
+
+            var definitions = await _context.WorkflowDefinitions
+                .Include(d => d.Steps)
+                .Where(d =>
+                    !d.IsDeleted
+                    && d.TenantId == tenantId
+                    && (d.EntityTypeId == entityType.Id
+                        || d.Name == definitionName
+                        || d.Name.StartsWith($"{definitionName} ")))
+                .ToListAsync();
+
+            var sequentialDefinition = definitions
+                .Where(d => HasExpectedApprovalStages(d, approvalStages))
+                .OrderByDescending(d => d.Version)
+                .ThenByDescending(d => d.UpdatedAt ?? d.CreatedAt)
+                .FirstOrDefault();
+
+            if (sequentialDefinition != null)
+            {
+                var changed = false;
+                var repairNow = DateTime.UtcNow;
+                if (!sequentialDefinition.IsActive)
+                {
+                    sequentialDefinition.IsActive = true;
+                    changed = true;
+                }
+
+                if (sequentialDefinition.Description != description)
+                {
+                    sequentialDefinition.Description = description;
+                    changed = true;
+                }
+
+                if (EnsureSequentialApprovalStepConfigurations(sequentialDefinition, approvalStages))
+                {
+                    changed = true;
+                }
+
+                if (RepairLegacyApprovalDefinitions(definitions, definitionName, approvalStages, repairNow))
+                {
+                    changed = true;
+                }
+
+                if (DeactivateLegacyWorkflowDefinitions(
+                        definitions,
+                        sequentialDefinition.Id,
+                        definitionName,
+                        approvalStages,
+                        repairNow))
+                {
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    sequentialDefinition.UpdatedAt = repairNow;
+                    sequentialDefinition.UpdatedBy = "System";
+                    await _context.SaveChangesAsync();
+                }
+
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            var version = definitions.Count == 0 ? 1 : definitions.Max(d => d.Version) + 1;
+            var safeDefinitionName = definitions.Any(d => string.Equals(d.Name, definitionName, StringComparison.OrdinalIgnoreCase))
+                ? $"{definitionName} Sequential"
+                : definitionName;
+
+            if (definitions.Any(d => string.Equals(d.Name, safeDefinitionName, StringComparison.OrdinalIgnoreCase)))
+            {
+                safeDefinitionName = $"{definitionName} Sequential v{version}";
+            }
+
+            var definitionId = Guid.NewGuid();
+            var draftStep = new WorkflowStep
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                WorkflowDefinitionId = definitionId,
+                Name = "Draft",
+                StepType = WorkflowStepType.Manual,
+                Order = 1,
+                IsStartStep = true,
+                IsRequired = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            };
+
+            var approvalSteps = approvalStages
+                .Select((stage, index) => new WorkflowStep
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    WorkflowDefinitionId = definitionId,
+                    Name = stage.StepName,
+                    Description = stage.Description,
+                    StepType = WorkflowStepType.Approval,
+                    Order = index + 2,
+                    IsRequired = true,
+                    Configuration = BuildApprovalConfigurationJson(stage.RoleNames),
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                })
+                .ToList();
+
+            var approvedStep = new WorkflowStep
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                WorkflowDefinitionId = definitionId,
+                Name = "Approved",
+                StepType = WorkflowStepType.Manual,
+                Order = approvalStages.Count + 2,
+                IsEndStep = true,
+                IsRequired = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            };
+
+            _context.WorkflowDefinitions.Add(new WorkflowDefinition
+            {
+                Id = definitionId,
+                TenantId = tenantId,
+                Name = safeDefinitionName,
+                Description = description,
+                EntityTypeId = entityType.Id,
+                Version = version,
+                IsActive = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+
+            var steps = new List<WorkflowStep> { draftStep };
+            steps.AddRange(approvalSteps);
+            steps.Add(approvedStep);
+            _context.WorkflowSteps.AddRange(steps);
+
+            var transitions = new List<WorkflowTransition>();
+            for (var index = 0; index < steps.Count - 1; index++)
+            {
+                transitions.Add(new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    WorkflowDefinitionId = definitionId,
+                    FromStepId = steps[index].Id,
+                    ToStepId = steps[index + 1].Id,
+                    Name = index == 0 ? "Submit" : index == steps.Count - 2 ? "Final Approve" : "Approve",
+                    IsDefault = true,
+                    Priority = 0,
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                });
+            }
+
+            _context.WorkflowTransitions.AddRange(transitions);
+
+            RepairLegacyApprovalDefinitions(definitions, definitionName, approvalStages, now);
+            DeactivateLegacyWorkflowDefinitions(definitions, definitionId, definitionName, approvalStages, now);
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task<WorkflowEntityType> EnsureWorkflowEntityTypeAsync(
+            Guid tenantId,
+            string entityCode,
+            string entityName,
+            string? entityClassName,
+            string description)
+        {
+            var entityTypeCandidates = await _context.WorkflowEntityTypes
+                .Where(et => !et.IsDeleted && et.TenantId == tenantId)
+                .ToListAsync();
+
+            var entityType = entityTypeCandidates
+                .Where(et =>
+                    WorkflowEntityTypeKeyMatches(et.Code, entityCode) ||
+                    WorkflowEntityTypeKeyMatches(et.Name, entityCode) ||
+                    WorkflowEntityTypeKeyMatches(et.Code, entityName) ||
+                    WorkflowEntityTypeKeyMatches(et.Name, entityName))
+                .OrderByDescending(et => et.IsActive)
+                .ThenBy(et => WorkflowEntityTypeKeyMatches(et.Name, entityCode) ? 0 : 1)
+                .ThenBy(et => WorkflowEntityTypeKeyMatches(et.Code, entityCode) ? 0 : 1)
+                .FirstOrDefault();
+
+            if (entityType == null)
+            {
+                entityType = new WorkflowEntityType
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = entityCode,
+                    Name = entityName,
+                    Description = description,
+                    EntityClassName = entityClassName,
+                    IsActive = true,
+                    DisplayOrder = 60,
+                    Icon = "workflow",
+                    ColorCode = "#0F766E",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.WorkflowEntityTypes.Add(entityType);
+                await _context.SaveChangesAsync();
+                return entityType;
+            }
+
+            var changed = false;
+            if (!entityType.IsActive)
+            {
+                entityType.IsActive = true;
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(entityType.EntityClassName) && !string.IsNullOrWhiteSpace(entityClassName))
+            {
+                entityType.EntityClassName = entityClassName;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                entityType.UpdatedAt = DateTime.UtcNow;
+                entityType.UpdatedBy = "System";
+                await _context.SaveChangesAsync();
+            }
+
+            return entityType;
+        }
+
+        private static bool RepairLegacyApprovalDefinitions(
+            IEnumerable<WorkflowDefinition> definitions,
+            string definitionName,
+            IReadOnlyList<WorkflowApprovalStageSeed> approvalStages,
+            DateTime now)
+        {
+            var changed = false;
+            var baselineRoleNames = approvalStages
+                .SelectMany(stage => stage.RoleNames)
+                .Where(role => !string.IsNullOrWhiteSpace(role))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var definition in definitions.Where(d => IsLegacySeededWorkflowDefinition(d, definitionName, approvalStages)))
+            {
+                if (EnsureApprovalStepConfigurations(definition.Steps, baselineRoleNames, now))
+                {
+                    definition.UpdatedAt = now;
+                    definition.UpdatedBy = "System";
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        private static bool DeactivateLegacyWorkflowDefinitions(
+            IEnumerable<WorkflowDefinition> definitions,
+            Guid activeDefinitionId,
+            string definitionName,
+            IReadOnlyList<WorkflowApprovalStageSeed> approvalStages,
+            DateTime now)
+        {
+            var changed = false;
+
+            foreach (var definition in definitions.Where(d =>
+                         d.Id != activeDefinitionId
+                         && d.IsActive
+                         && IsLegacySeededWorkflowDefinition(d, definitionName, approvalStages)))
+            {
+                definition.IsActive = false;
+                definition.UpdatedAt = now;
+                definition.UpdatedBy = "System";
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static bool IsLegacySeededWorkflowDefinition(
+            WorkflowDefinition definition,
+            string definitionName,
+            IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
+        {
+            if (!string.Equals(definition.Name, definitionName, StringComparison.OrdinalIgnoreCase)
+                && !definition.Name.StartsWith($"{definitionName} ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (HasExpectedApprovalStages(definition, approvalStages))
+            {
+                return false;
+            }
+
+            return definition.Steps.Count(s => s.StepType == WorkflowStepType.Approval && !s.IsDeleted) <= 1;
+        }
+
+        private static bool EnsureSequentialApprovalStepConfigurations(
+            WorkflowDefinition definition,
+            IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
+        {
+            var changed = false;
+            var now = DateTime.UtcNow;
+
+            foreach (var stage in approvalStages)
+            {
+                var step = definition.Steps.FirstOrDefault(s =>
+                    s.StepType == WorkflowStepType.Approval
+                    && !s.IsDeleted
+                    && WorkflowEntityTypeKeyMatches(s.Name, stage.StepName));
+
+                if (step != null && EnsureApprovalStepConfiguration(step, stage.RoleNames, now))
+                {
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        private static bool EnsureApprovalStepConfigurations(
+            IEnumerable<WorkflowStep> steps,
+            IReadOnlyCollection<string> approvalRoleNames)
+        {
+            return EnsureApprovalStepConfigurations(steps, approvalRoleNames, DateTime.UtcNow);
+        }
+
+        private static bool EnsureApprovalStepConfigurations(
+            IEnumerable<WorkflowStep> steps,
+            IReadOnlyCollection<string> approvalRoleNames,
+            DateTime now)
+        {
+            var approvalSteps = steps
+                .Where(s => s.StepType == WorkflowStepType.Approval && !s.IsDeleted)
+                .OrderBy(s => s.Order)
+                .ToList();
+
+            if (approvalSteps.Count == 0)
+            {
+                return false;
+            }
+
+            var targetSteps = approvalSteps.Count == 1
+                ? approvalSteps
+                : approvalSteps.Where(s => WorkflowEntityTypeKeyMatches(s.Name, "PendingApproval")).ToList();
+
+            var changed = false;
+            foreach (var step in targetSteps)
+            {
+                if (EnsureApprovalStepConfiguration(step, approvalRoleNames, now))
+                {
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        private static bool EnsureApprovalStepConfiguration(
+            WorkflowStep step,
+            IReadOnlyCollection<string> approvalRoleNames,
+            DateTime now)
+        {
+            if (ApprovalRolesMatch(step.Configuration, approvalRoleNames))
+            {
+                return false;
+            }
+
+            var configuration = DeserializeWorkflowStepConfiguration(step.Configuration) ?? new WorkflowStepConfigurationDto();
+            configuration.ApprovalConfig = BuildApprovalConfig(approvalRoleNames);
+
+            step.Configuration = JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
+            step.UpdatedAt = now;
+            step.UpdatedBy = "System";
+            return true;
+        }
+
+        private static bool HasExpectedApprovalStages(WorkflowDefinition definition, IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
+        {
+            var approvalStepNames = definition.Steps
+                .Where(s => s.StepType == WorkflowStepType.Approval && !s.IsDeleted)
+                .OrderBy(s => s.Order)
+                .Select(s => NormalizeWorkflowEntityTypeKey(s.Name))
+                .ToList();
+
+            if (approvalStepNames.Count != approvalStages.Count)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < approvalStages.Count; index++)
+            {
+                if (approvalStepNames[index] != NormalizeWorkflowEntityTypeKey(approvalStages[index].StepName))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool ApprovalRolesMatch(string? configurationJson, IReadOnlyCollection<string> approvalRoleNames)
+        {
+            var expectedRoles = approvalRoleNames
+                .Where(role => !string.IsNullOrWhiteSpace(role))
+                .Select(role => role.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var actualRoles = GetApprovalRolesFromConfiguration(configurationJson)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return expectedRoles.SetEquals(actualRoles);
+        }
+
+        private static IReadOnlyList<string> GetApprovalRolesFromConfiguration(string? configurationJson)
+        {
+            var approvalConfig = DeserializeWorkflowStepConfiguration(configurationJson)?.ApprovalConfig;
+            if (approvalConfig == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return approvalConfig.ApproverRules
+                .Where(rule => rule.AssignmentType == WorkflowAssignmentType.Role && !string.IsNullOrWhiteSpace(rule.Role))
+                .Select(rule => rule.Role!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static WorkflowStepConfigurationDto? DeserializeWorkflowStepConfiguration(string? configurationJson)
+        {
+            if (string.IsNullOrWhiteSpace(configurationJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, WorkflowSeedJsonOptions);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        private static bool WorkflowEntityTypeKeyMatches(string? left, string? right)
+            => NormalizeWorkflowEntityTypeKey(left) == NormalizeWorkflowEntityTypeKey(right);
+
+        private static string NormalizeWorkflowEntityTypeKey(string? value)
+            => new((value ?? string.Empty)
+                .Where(char.IsLetterOrDigit)
+                .Select(char.ToUpperInvariant)
+                .ToArray());
+
         private static string BuildApprovalConfigurationJson(IReadOnlyCollection<string> approvalRoleNames)
         {
             var configuration = new WorkflowStepConfigurationDto
             {
-                ApprovalConfig = new WorkflowApprovalConfigDto
-                {
-                    ApprovalType = WorkflowApprovalType.Single,
-                    MinApprovalsRequired = 1,
-                    RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
-                    ApproverRules = approvalRoleNames
-                        .Where(role => !string.IsNullOrWhiteSpace(role))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .Select(role => new WorkflowAssignmentRuleDto
-                        {
-                            AssignmentType = WorkflowAssignmentType.Role,
-                            Role = role
-                        })
-                        .ToList()
-                }
+                ApprovalConfig = BuildApprovalConfig(approvalRoleNames)
             };
 
-            return JsonSerializer.Serialize(configuration);
+            return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
+        }
+
+        private static WorkflowApprovalConfigDto BuildApprovalConfig(IReadOnlyCollection<string> approvalRoleNames)
+        {
+            return new WorkflowApprovalConfigDto
+            {
+                ApprovalType = WorkflowApprovalType.Single,
+                MinApprovalsRequired = 1,
+                RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
+                ApproverRules = approvalRoleNames
+                    .Where(role => !string.IsNullOrWhiteSpace(role))
+                    .Select(role => role.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(role => new WorkflowAssignmentRuleDto
+                    {
+                        AssignmentType = WorkflowAssignmentType.Role,
+                        Role = role
+                    })
+                    .ToList()
+            };
+        }
+
+        private static JsonSerializerOptions CreateWorkflowSeedJsonOptions()
+        {
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+            options.Converters.Add(new JsonStringEnumConverter());
+            return options;
         }
 
         private async Task EnsureEhcWorkflowSeededAsync()
@@ -4843,6 +5583,218 @@ namespace ErpSystem.Web.Services
             await _context.SaveChangesAsync();
         }
 
+        private async Task EnsureWorkflowNotificationTopicsSeededAsync()
+        {
+            var tenants = await _context.Tenants
+                .AsNoTracking()
+                .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
+                .Select(t => t.Id)
+                .ToListAsync();
+
+            var workflowActivities = new[]
+            {
+                "WorkflowSubmitted",
+                "WorkflowStepAssignment",
+                "WorkflowApprovalRequest",
+                "WorkflowStepEscalated",
+                "WorkflowCompleted",
+                "WorkflowRejected",
+                "WorkflowStepOverdue"
+            };
+
+            var requiredActivities = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "WorkflowStepAssignment",
+                "WorkflowApprovalRequest"
+            };
+
+            var defaultEmailActivities = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "WorkflowSubmitted",
+                "WorkflowStepAssignment",
+                "WorkflowApprovalRequest"
+            };
+
+            var createdTopics = 0;
+            var updatedTopics = 0;
+            var createdRecipients = 0;
+            var updatedRecipients = 0;
+
+            foreach (var tenantId in tenants)
+            {
+                var workflowEntityTypes = await _context.WorkflowEntityTypes
+                    .AsNoTracking()
+                    .Where(et => et.TenantId == tenantId && !et.IsDeleted && et.IsActive)
+                    .Select(et => new { et.Name, et.Code })
+                    .ToListAsync();
+
+                var normalizedEntityTypes = workflowEntityTypes
+                    .SelectMany(et => new[]
+                    {
+                        NormalizeNotificationTopicSegment(et.Name),
+                        NormalizeNotificationTopicSegment(et.Code)
+                    })
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var entityType in normalizedEntityTypes)
+                {
+                    foreach (var activity in workflowActivities)
+                    {
+                        var normalizedActivity = NormalizeNotificationTopicSegment(activity);
+                        var key = GenerateNotificationTopicKey(entityType, normalizedActivity, "Internal");
+                        if (string.IsNullOrWhiteSpace(key)) continue;
+
+                        var isRequired = requiredActivities.Contains(activity);
+                        var emailEnabledByDefault = defaultEmailActivities.Contains(activity);
+                        var now = DateTime.UtcNow;
+
+                        var topic = await _context.NotificationTopics
+                            .Include(t => t.Recipients)
+                            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Key == key && !t.IsDeleted);
+
+                        if (topic == null)
+                        {
+                            topic = new NotificationTopic
+                            {
+                                Id = Guid.NewGuid(),
+                                TenantId = tenantId,
+                                Key = key,
+                                Name = $"{entityType}: {activity}",
+                                Description = "System-seeded workflow notification topic.",
+                                EntityType = entityType,
+                                IsSystem = true,
+                                IsRequired = isRequired,
+                                IsActive = true,
+                                EnableInApp = true,
+                                EnableEmail = emailEnabledByDefault,
+                                InAppTitleTemplate = "{{Title}}",
+                                InAppBodyTemplate = "{{Message}}",
+                                ActionUrlTemplate = "{{ActionUrl}}",
+                                CreatedAt = now,
+                                CreatedBy = "System"
+                            };
+
+                            _context.NotificationTopics.Add(topic);
+                            createdTopics++;
+                        }
+                        else
+                        {
+                            var changed = false;
+                            if (!topic.IsSystem) { topic.IsSystem = true; changed = true; }
+                            if (isRequired && !topic.IsRequired) { topic.IsRequired = true; changed = true; }
+                            if (string.IsNullOrWhiteSpace(topic.EntityType)) { topic.EntityType = entityType; changed = true; }
+                            if (!topic.IsActive) { topic.IsActive = true; changed = true; }
+                            if (!topic.EnableInApp) { topic.EnableInApp = true; changed = true; }
+                            if (emailEnabledByDefault && !topic.EnableEmail) { topic.EnableEmail = true; changed = true; }
+                            if (string.IsNullOrWhiteSpace(topic.InAppTitleTemplate)) { topic.InAppTitleTemplate = "{{Title}}"; changed = true; }
+                            if (string.IsNullOrWhiteSpace(topic.InAppBodyTemplate)) { topic.InAppBodyTemplate = "{{Message}}"; changed = true; }
+                            if (string.IsNullOrWhiteSpace(topic.ActionUrlTemplate)) { topic.ActionUrlTemplate = "{{ActionUrl}}"; changed = true; }
+
+                            if (changed)
+                            {
+                                topic.UpdatedAt = now;
+                                topic.UpdatedBy = "System";
+                                updatedTopics++;
+                            }
+                        }
+
+                        var recipients = (topic.Recipients ?? new List<NotificationTopicRecipient>())
+                            .Where(r => !r.IsDeleted)
+                            .ToList();
+
+                        foreach (var (kind, value) in GetWorkflowNotificationRecipients(activity))
+                        {
+                            var recipient = recipients.FirstOrDefault(r =>
+                                string.Equals(r.RecipientKind, kind, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(r.RecipientValue, value, StringComparison.OrdinalIgnoreCase));
+
+                            if (recipient == null)
+                            {
+                                _context.NotificationTopicRecipients.Add(new NotificationTopicRecipient
+                                {
+                                    Id = Guid.NewGuid(),
+                                    TenantId = tenantId,
+                                    TopicId = topic.Id,
+                                    RecipientKind = kind,
+                                    RecipientValue = value,
+                                    IsSystem = true,
+                                    SendInApp = true,
+                                    SendEmail = true,
+                                    CreatedAt = now,
+                                    CreatedBy = "System"
+                                });
+                                createdRecipients++;
+                                continue;
+                            }
+
+                            var recipientChanged = false;
+                            if (!recipient.IsSystem) { recipient.IsSystem = true; recipientChanged = true; }
+                            if (!recipient.SendInApp) { recipient.SendInApp = true; recipientChanged = true; }
+                            if (!recipient.SendEmail) { recipient.SendEmail = true; recipientChanged = true; }
+
+                            if (recipientChanged)
+                            {
+                                recipient.UpdatedAt = now;
+                                recipient.UpdatedBy = "System";
+                                updatedRecipients++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Workflow notification topic seed completed. Created {CreatedTopics} topics, updated {UpdatedTopics} topics, created {CreatedRecipients} recipient rules, updated {UpdatedRecipients} recipient rules.",
+                createdTopics,
+                updatedTopics,
+                createdRecipients,
+                updatedRecipients);
+        }
+
+        private static string NormalizeNotificationTopicSegment(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            var chars = value.Trim().Where(char.IsLetterOrDigit).ToArray();
+            return chars.Length == 0 ? string.Empty : new string(chars);
+        }
+
+        private static string GenerateNotificationTopicKey(string entityType, string activity, string audience)
+        {
+            if (string.IsNullOrWhiteSpace(entityType)) return string.Empty;
+            if (string.IsNullOrWhiteSpace(activity)) return string.Empty;
+            if (string.IsNullOrWhiteSpace(audience)) return string.Empty;
+            return $"{entityType}.{activity}.{audience}";
+        }
+
+        private static List<(string Kind, string Value)> GetWorkflowNotificationRecipients(string activity)
+        {
+            if (string.Equals(activity, "WorkflowApprovalRequest", StringComparison.OrdinalIgnoreCase))
+            {
+                return new List<(string, string)>
+                {
+                    ("UserFromData", "TargetUserId"),
+                    ("RoleFromData", "TargetRole")
+                };
+            }
+
+            if (string.Equals(activity, "WorkflowStepEscalated", StringComparison.OrdinalIgnoreCase))
+            {
+                return new List<(string, string)>
+                {
+                    ("UsersFromData", "TargetUserIds")
+                };
+            }
+
+            return new List<(string, string)>
+            {
+                ("UserFromData", "TargetUserId")
+            };
+        }
+
         private async Task<Guid?> EnsureEmailTemplateAsync(Guid tenantId, string name, string subject, string htmlBody)
         {
             var existing = await _context.EmailTemplates
@@ -5190,6 +6142,30 @@ namespace ErpSystem.Web.Services
             await CreateTestUserAsync("external", "external@default.com", "External123!",
                 "External", "User", defaultTenant.Id, Constants.Roles.ExternalUser, AuthenticationProvider.Local);
 
+            await CreateTestUserAsync("finance.clerk", "finance.clerk@default.com", "Finance123!",
+                "Ama", "Mensah", defaultTenant.Id, "Finance Clerk", AuthenticationProvider.Local);
+
+            await CreateTestUserAsync("accounts.officer", "accounts.officer@default.com", "Finance123!",
+                "Kofi", "Boateng", defaultTenant.Id, "Accounts Officer", AuthenticationProvider.Local);
+
+            await CreateTestUserAsync("ap.officer", "ap.officer@default.com", "Finance123!",
+                "Akua", "Owusu", defaultTenant.Id, "Accounts Payable Officer", AuthenticationProvider.Local);
+
+            await CreateTestUserAsync("ar.officer", "ar.officer@default.com", "Finance123!",
+                "Kwame", "Asante", defaultTenant.Id, "Accounts Receivable Officer", AuthenticationProvider.Local);
+
+            await CreateTestUserAsync("senior.accountant", "senior.accountant@default.com", "Finance123!",
+                "Efua", "Addo", defaultTenant.Id, "Senior Accountant", AuthenticationProvider.Local);
+
+            await CreateTestUserAsync("finance.manager", "finance.manager@default.com", "Finance123!",
+                "Yaw", "Osei", defaultTenant.Id, "Finance Manager", AuthenticationProvider.Local);
+
+            await CreateTestUserAsync("financial.controller", "financial.controller@default.com", "Finance123!",
+                "Abena", "Dapaah", defaultTenant.Id, "Financial Controller", AuthenticationProvider.Local);
+
+            await CreateTestUserAsync("budget.officer", "budget.officer@default.com", "Finance123!",
+                "Kojo", "Nkrumah", defaultTenant.Id, "Budget Officer", AuthenticationProvider.Local);
+
             _logger.LogInformation("Test users seeding completed");
         }
         
@@ -5342,6 +6318,14 @@ namespace ErpSystem.Web.Services
                 new { Name = Constants.Roles.HelpdeskSupervisor, Description = "Helpdesk supervisor for assignment and escalation" },
                 new { Name = Constants.Roles.HelpdeskManager, Description = "Helpdesk manager for dashboards and configuration" },
                 new { Name = "Finance User", Description = "User with access to finance module" },
+                new { Name = "Finance Clerk", Description = "Finance data entry role for journals, invoices, and supporting schedules" },
+                new { Name = "Accounts Officer", Description = "Operational finance role for AP, AR, journals, and reconciliations" },
+                new { Name = "Accounts Payable Officer", Description = "Supplier invoice and payables processing role" },
+                new { Name = "Accounts Receivable Officer", Description = "Customer invoice, receivables, and collection processing role" },
+                new { Name = "Senior Accountant", Description = "Review role for journals, AP/AR transactions, budgets, and period activities" },
+                new { Name = "Finance Manager", Description = "Finance approval role for journals, budgets, AP/AR, and reporting" },
+                new { Name = "Financial Controller", Description = "Senior finance control role for posting, period close, and finance administration" },
+                new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
                 new { Name = "HR User", Description = "User with access to HR module" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
                 new { Name = "Inventory User", Description = "User with access to inventory module" },
@@ -5537,7 +6521,7 @@ namespace ErpSystem.Web.Services
 
         private async Task SeedRolePermissionAssignmentsAsync()
         {
-            var helpdeskPermissions = new[]
+            var permissionSeeds = new[]
             {
                 new
                 {
@@ -5566,10 +6550,234 @@ namespace ErpSystem.Web.Services
                     DisplayName = "Access External Helpdesk & Complaints",
                     Description = "Access the external helpdesk and complaints backoffice branch",
                     Category = "Helpdesk Branch Access"
+                },
+                new
+                {
+                    Name = "Finance.Read",
+                    DisplayName = "View Finance",
+                    Description = "View finance module records, setup, and reports",
+                    Category = "Finance"
+                },
+                new
+                {
+                    Name = "Finance.Write",
+                    DisplayName = "Maintain Finance",
+                    Description = "Create and update operational finance records",
+                    Category = "Finance"
+                },
+                new
+                {
+                    Name = "Finance.Admin",
+                    DisplayName = "Administer Finance",
+                    Description = "Manage finance setup, periods, segments, and control settings",
+                    Category = "Finance"
+                },
+                new
+                {
+                    Name = "Finance.PeriodClose",
+                    DisplayName = "Close Fiscal Periods",
+                    Description = "Close fiscal periods after month-end checks",
+                    Category = "Finance"
+                },
+                new
+                {
+                    Name = "Finance.PeriodReopen",
+                    DisplayName = "Reopen Fiscal Periods",
+                    Description = "Reopen previously closed fiscal periods",
+                    Category = "Finance"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.Create",
+                    DisplayName = "Create Journal Entries",
+                    Description = "Create manual journal entries",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.Edit",
+                    DisplayName = "Edit Journal Entries",
+                    Description = "Edit draft journal entries",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.Delete",
+                    DisplayName = "Delete Journal Entries",
+                    Description = "Delete draft journal entries",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.Write",
+                    DisplayName = "Maintain Journal Entries",
+                    Description = "Create and update journal entries",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.SubmitForApproval",
+                    DisplayName = "Submit Journal Entries",
+                    Description = "Submit journal entries for approval",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.Approve",
+                    DisplayName = "Approve Journal Entries",
+                    Description = "Approve or reject submitted journal entries",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.Post",
+                    DisplayName = "Post Journal Entries",
+                    Description = "Post approved journal entries to the ledger",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.JournalEntries.Reverse",
+                    DisplayName = "Reverse Journal Entries",
+                    Description = "Create reversals for posted journal entries",
+                    Category = "Finance - General Ledger"
+                },
+                new
+                {
+                    Name = "Finance.AP.Invoices.Create",
+                    DisplayName = "Create AP Invoices",
+                    Description = "Capture supplier invoices",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = "Finance.AP.Invoices.Edit",
+                    DisplayName = "Edit AP Invoices",
+                    Description = "Edit draft supplier invoices",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = "Finance.AP.Invoices.Delete",
+                    DisplayName = "Delete AP Invoices",
+                    Description = "Delete draft supplier invoices",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = "Finance.AP.Invoices.Write",
+                    DisplayName = "Maintain AP Invoices",
+                    Description = "Create and update supplier invoices",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = "Finance.AP.Invoices.SubmitForApproval",
+                    DisplayName = "Submit AP Invoices",
+                    Description = "Submit supplier invoices for approval",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = "Finance.AP.Invoices.Approve",
+                    DisplayName = "Approve AP Invoices",
+                    Description = "Approve or reject supplier invoices",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = "Finance.AP.Invoices.Void",
+                    DisplayName = "Void AP Invoices",
+                    Description = "Void supplier invoices with reversal controls",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = "Finance.AR.Invoices.Create",
+                    DisplayName = "Create AR Invoices",
+                    Description = "Create customer invoices",
+                    Category = "Finance - Accounts Receivable"
+                },
+                new
+                {
+                    Name = "Finance.AR.Invoices.Edit",
+                    DisplayName = "Edit AR Invoices",
+                    Description = "Edit draft customer invoices",
+                    Category = "Finance - Accounts Receivable"
+                },
+                new
+                {
+                    Name = "Finance.AR.Invoices.Delete",
+                    DisplayName = "Delete AR Invoices",
+                    Description = "Delete draft customer invoices",
+                    Category = "Finance - Accounts Receivable"
+                },
+                new
+                {
+                    Name = "Finance.AR.Invoices.Write",
+                    DisplayName = "Maintain AR Invoices",
+                    Description = "Create and update customer invoices",
+                    Category = "Finance - Accounts Receivable"
+                },
+                new
+                {
+                    Name = "Finance.AR.Invoices.Send",
+                    DisplayName = "Send AR Invoices",
+                    Description = "Finalize and send customer invoices",
+                    Category = "Finance - Accounts Receivable"
+                },
+                new
+                {
+                    Name = "Finance.AR.Invoices.Void",
+                    DisplayName = "Void AR Invoices",
+                    Description = "Void customer invoices with reversal controls",
+                    Category = "Finance - Accounts Receivable"
+                },
+                new
+                {
+                    Name = "Finance.Budgeting.Read",
+                    DisplayName = "View Budgets",
+                    Description = "View budget scenarios, returns, and worksheets",
+                    Category = "Finance - Budgeting"
+                },
+                new
+                {
+                    Name = "Finance.Budgeting.Write",
+                    DisplayName = "Maintain Budgets",
+                    Description = "Create budget scenarios, returns, and entries",
+                    Category = "Finance - Budgeting"
+                },
+                new
+                {
+                    Name = "Finance.BudgetReturns.Assign",
+                    DisplayName = "Assign Budget Returns",
+                    Description = "Assign budget worksheets to preparers",
+                    Category = "Finance - Budgeting"
+                },
+                new
+                {
+                    Name = "Finance.BudgetReturns.Submit",
+                    DisplayName = "Submit Budget Returns",
+                    Description = "Submit assigned budget worksheets",
+                    Category = "Finance - Budgeting"
+                },
+                new
+                {
+                    Name = "Finance.BudgetReturns.Approve",
+                    DisplayName = "Approve Budget Returns",
+                    Description = "Approve or reject submitted budget worksheets",
+                    Category = "Finance - Budgeting"
+                },
+                new
+                {
+                    Name = "Finance.Budgeting.Lock",
+                    DisplayName = "Lock Budgets",
+                    Description = "Lock approved budget scenarios",
+                    Category = "Finance - Budgeting"
                 }
             };
 
-            foreach (var permissionInfo in helpdeskPermissions)
+            foreach (var permissionInfo in permissionSeeds)
             {
                 var existingPermission = await _context.Permissions
                     .FirstOrDefaultAsync(p => p.Name == permissionInfo.Name);
@@ -5594,24 +6802,169 @@ namespace ErpSystem.Web.Services
 
             await _context.SaveChangesAsync();
 
-            var helpdeskRoles = new[]
-            {
-                Constants.Roles.HelpdeskAgent,
-                Constants.Roles.HelpdeskSupervisor,
-                Constants.Roles.HelpdeskManager
-            };
-
             var permissions = await _context.Permissions
-                .Where(p => helpdeskPermissions.Select(info => info.Name).Contains(p.Name))
+                .Where(p => permissionSeeds.Select(info => info.Name).Contains(p.Name))
                 .ToListAsync();
 
             if (!permissions.Any())
             {
-                _logger.LogWarning("Helpdesk branch permissions not found yet; skipping role-permission seed.");
+                _logger.LogWarning("Seed permissions not found yet; skipping role-permission seed.");
                 return;
             }
 
-            foreach (var roleName in helpdeskRoles)
+            var rolePermissionMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Constants.Roles.HelpdeskAgent] = new[]
+                {
+                    "enquiry.internal.access",
+                    "enquiry.external.access",
+                    "support.internal.access",
+                    "support.external.access"
+                },
+                [Constants.Roles.HelpdeskSupervisor] = new[]
+                {
+                    "enquiry.internal.access",
+                    "enquiry.external.access",
+                    "support.internal.access",
+                    "support.external.access"
+                },
+                [Constants.Roles.HelpdeskManager] = new[]
+                {
+                    "enquiry.internal.access",
+                    "enquiry.external.access",
+                    "support.internal.access",
+                    "support.external.access"
+                },
+                ["Finance User"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Budgeting.Read",
+                    "Finance.JournalEntries.Create",
+                    "Finance.JournalEntries.Edit",
+                    "Finance.JournalEntries.Write"
+                },
+                ["Finance Clerk"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.JournalEntries.Create",
+                    "Finance.JournalEntries.Edit",
+                    "Finance.JournalEntries.Write",
+                    "Finance.AP.Invoices.Create",
+                    "Finance.AP.Invoices.Edit",
+                    "Finance.AP.Invoices.Write",
+                    "Finance.AR.Invoices.Create",
+                    "Finance.AR.Invoices.Edit",
+                    "Finance.AR.Invoices.Write",
+                    "Finance.Budgeting.Read"
+                },
+                ["Accounts Officer"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.JournalEntries.Create",
+                    "Finance.JournalEntries.Edit",
+                    "Finance.JournalEntries.Write",
+                    "Finance.JournalEntries.SubmitForApproval",
+                    "Finance.AP.Invoices.Create",
+                    "Finance.AP.Invoices.Edit",
+                    "Finance.AP.Invoices.Write",
+                    "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AR.Invoices.Create",
+                    "Finance.AR.Invoices.Edit",
+                    "Finance.AR.Invoices.Write",
+                    "Finance.AR.Invoices.Send",
+                    "Finance.Budgeting.Read",
+                    "Finance.BudgetReturns.Submit"
+                },
+                ["Accounts Payable Officer"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.AP.Invoices.Create",
+                    "Finance.AP.Invoices.Edit",
+                    "Finance.AP.Invoices.Write",
+                    "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.JournalEntries.Create",
+                    "Finance.JournalEntries.Edit",
+                    "Finance.JournalEntries.Write"
+                },
+                ["Accounts Receivable Officer"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.AR.Invoices.Create",
+                    "Finance.AR.Invoices.Edit",
+                    "Finance.AR.Invoices.Write",
+                    "Finance.AR.Invoices.Send",
+                    "Finance.JournalEntries.Create",
+                    "Finance.JournalEntries.Edit",
+                    "Finance.JournalEntries.Write"
+                },
+                ["Senior Accountant"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.JournalEntries.Create",
+                    "Finance.JournalEntries.Edit",
+                    "Finance.JournalEntries.Write",
+                    "Finance.JournalEntries.SubmitForApproval",
+                    "Finance.AP.Invoices.Create",
+                    "Finance.AP.Invoices.Edit",
+                    "Finance.AP.Invoices.Write",
+                    "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AR.Invoices.Create",
+                    "Finance.AR.Invoices.Edit",
+                    "Finance.AR.Invoices.Write",
+                    "Finance.AR.Invoices.Send",
+                    "Finance.Budgeting.Read",
+                    "Finance.Budgeting.Write",
+                    "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Submit"
+                },
+                ["Finance Manager"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.JournalEntries.Approve",
+                    "Finance.AP.Invoices.Approve",
+                    "Finance.AR.Invoices.Void",
+                    "Finance.Budgeting.Read",
+                    "Finance.Budgeting.Write",
+                    "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Approve",
+                    "Finance.Budgeting.Lock"
+                },
+                ["Financial Controller"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.Admin",
+                    "Finance.PeriodClose",
+                    "Finance.PeriodReopen",
+                    "Finance.JournalEntries.Approve",
+                    "Finance.JournalEntries.Post",
+                    "Finance.JournalEntries.Reverse",
+                    "Finance.AP.Invoices.Approve",
+                    "Finance.AP.Invoices.Void",
+                    "Finance.AR.Invoices.Void",
+                    "Finance.Budgeting.Read",
+                    "Finance.Budgeting.Write",
+                    "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Approve",
+                    "Finance.Budgeting.Lock"
+                },
+                ["Budget Officer"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Budgeting.Read",
+                    "Finance.Budgeting.Write",
+                    "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Submit"
+                }
+            };
+
+            foreach (var (roleName, permissionNames) in rolePermissionMap)
             {
                 var role = await _roleManager.FindByNameAsync(roleName);
                 if (role == null)
@@ -5624,7 +6977,9 @@ namespace ErpSystem.Web.Services
                     .Select(rp => rp.PermissionId)
                     .ToListAsync();
 
+                var requestedPermissionNames = permissionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var missingPermissions = permissions
+                    .Where(permission => requestedPermissionNames.Contains(permission.Name))
                     .Where(permission => !existingPermissionIds.Contains(permission.Id))
                     .Select(permission => new RolePermission
                     {
@@ -5703,6 +7058,13 @@ namespace ErpSystem.Web.Services
 
         private async Task EnsureFileUploadPoliciesSeededAsync()
         {
+            const string financeJournalCategory = "finance-journal-attachments";
+            const string financeJournalExtensions = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.jpg,.jpeg,.png";
+            const string financeJournalMimeTypes =
+                "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document," +
+                "application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv," +
+                "text/plain,application/rtf,image/jpeg,image/png";
+
             var tenants = await _context.Tenants.AsNoTracking().Where(t => !t.IsDeleted).Select(t => new { t.Id }).ToListAsync();
             if (tenants.Count == 0) return;
 
@@ -5730,9 +7092,79 @@ namespace ErpSystem.Web.Services
                         CreatedBy = "System"
                     });
                 }
+
+                var journalPolicy = await _context.FileUploadPolicies
+                    .FirstOrDefaultAsync(p => p.TenantId == tenantId && !p.IsDeleted && p.Category == financeJournalCategory);
+
+                if (journalPolicy == null)
+                {
+                    _context.FileUploadPolicies.Add(new FileUploadPolicy
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        Category = financeJournalCategory,
+                        IsEnabled = true,
+                        MaxFileSizeBytes = 10 * 1024 * 1024,
+                        MaxCategoryTotalBytes = 1024L * 1024 * 1024,
+                        AllowedExtensionsCsv = financeJournalExtensions,
+                        AllowedMimeTypesCsv = financeJournalMimeTypes,
+                        RequireVirusScan = false,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    });
+                }
+                else
+                {
+                    var updated = false;
+                    var extensions = MergeCsvValues(journalPolicy.AllowedExtensionsCsv, financeJournalExtensions, ensureLeadingDot: true);
+                    if (!string.Equals(journalPolicy.AllowedExtensionsCsv, extensions, StringComparison.OrdinalIgnoreCase))
+                    {
+                        journalPolicy.AllowedExtensionsCsv = extensions;
+                        updated = true;
+                    }
+
+                    var mimeTypes = MergeCsvValues(journalPolicy.AllowedMimeTypesCsv, financeJournalMimeTypes, ensureLeadingDot: false);
+                    if (!string.Equals(journalPolicy.AllowedMimeTypesCsv, mimeTypes, StringComparison.OrdinalIgnoreCase))
+                    {
+                        journalPolicy.AllowedMimeTypesCsv = mimeTypes;
+                        updated = true;
+                    }
+
+                    if (!journalPolicy.IsEnabled)
+                    {
+                        journalPolicy.IsEnabled = true;
+                        updated = true;
+                    }
+
+                    if (updated)
+                    {
+                        journalPolicy.UpdatedAt = DateTime.UtcNow;
+                        journalPolicy.UpdatedBy = "System";
+                    }
+                }
             }
 
             await _context.SaveChangesAsync();
+
+            static string MergeCsvValues(string? existingCsv, string requiredCsv, bool ensureLeadingDot)
+            {
+                var values = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var csv in new[] { existingCsv, requiredCsv })
+                {
+                    if (string.IsNullOrWhiteSpace(csv)) continue;
+
+                    foreach (var raw in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        var value = raw.Trim();
+                        if (string.IsNullOrWhiteSpace(value)) continue;
+                        if (ensureLeadingDot && !value.StartsWith('.')) value = "." + value;
+                        values.Add(value);
+                    }
+                }
+
+                return string.Join(",", values);
+            }
         }
 
         private async Task CreateTestUserAsync(

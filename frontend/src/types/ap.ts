@@ -42,6 +42,7 @@ export interface VendorInvoice {
     apAccountName?: string;
     notes?: string;
     reference?: string;
+    isOpeningBalance: boolean;
     approvedByUserId?: string;
     approvedAt?: string;
     lineItems: VendorInvoiceLineItem[];
@@ -62,12 +63,14 @@ export interface VendorInvoiceCreateRequest {
     paymentTermsDays?: number;
     earlyPaymentDiscountPercentage?: number;
     earlyPaymentDiscountDueDate?: string;
+    taxGroupId?: string | null;
     withholdingTaxRate?: number;
     matchingType?: InvoiceMatchingType;
     expenseAccountId?: string;
     apAccountId?: string;
     notes?: string;
     reference?: string;
+    isOpeningBalance?: boolean;
     lineItems: VendorInvoiceLineItemCreateRequest[];
 }
 
@@ -89,6 +92,7 @@ export interface VendorInvoiceLineItem {
     taxRate: number;
     taxAmount: number;
     taxCode?: string;
+    taxGroupId?: string | null;
     discountPercentage: number;
     discountAmount: number;
     unit?: string;
@@ -109,6 +113,7 @@ export interface VendorInvoiceLineItemCreateRequest {
     unitPrice: number;
     taxRate?: number;
     taxCode?: string;
+    taxGroupId?: string | null;
     discountPercentage?: number;
     unit?: string;
     inventoryItemId?: string;

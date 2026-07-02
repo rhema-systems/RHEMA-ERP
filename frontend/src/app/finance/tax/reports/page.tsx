@@ -80,7 +80,7 @@ export default function TaxReportsPage() {
             <div>
                 <h2 className="text-xl font-semibold mb-4">Withholding Tax Reports</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Link href="/finance/tax/reports/wht-summary">
+                    <Link href="/finance/tax/reports/withholding-tax">
                         <Card className="hover:bg-accent cursor-pointer transition-colors h-full">
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">

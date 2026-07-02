@@ -106,6 +106,9 @@ export default function FinanceSettingsPage() {
         controlAccountInventoryId: undefined,
         controlAccountPayrollId: undefined,
         controlAccountTaxId: undefined,
+        controlAccountGRVAccrualId: undefined,
+        discountAllowedAccountId: undefined,
+        discountReceivedAccountId: undefined,
         migrationClearingAccountId: undefined,
         openingBalanceAutoRoutingEnabled: true,
     });
@@ -138,6 +141,9 @@ export default function FinanceSettingsPage() {
                 controlAccountInventoryId: data.controlAccountInventoryId,
                 controlAccountPayrollId: data.controlAccountPayrollId,
                 controlAccountTaxId: data.controlAccountTaxId,
+                controlAccountGRVAccrualId: data.controlAccountGRVAccrualId,
+                discountAllowedAccountId: data.discountAllowedAccountId,
+                discountReceivedAccountId: data.discountReceivedAccountId,
                 migrationClearingAccountId: data.migrationClearingAccountId,
                 openingBalanceAutoRoutingEnabled: data.openingBalanceAutoRoutingEnabled ?? true,
             });
@@ -481,6 +487,51 @@ export default function FinanceSettingsPage() {
                                 accounts={accounts.filter(a => a.accountType === 'Liability')}
                                 onChange={(value) => setFormData({ ...formData, controlAccountTaxId: value })}
                             />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="controlAccountGrvAccrual">GRV Accrual Control</Label>
+                            <AccountPicker
+                                id="controlAccountGrvAccrual"
+                                value={formData.controlAccountGRVAccrualId}
+                                placeholder="Search GRV accrual accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Liability')}
+                                onChange={(value) => setFormData({ ...formData, controlAccountGRVAccrualId: value })}
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                Credited when finance GRVs are posted, then cleared when the AP invoice is approved.
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="discountAllowedAccount">Sales Discounts Allowed</Label>
+                            <AccountPicker
+                                id="discountAllowedAccount"
+                                value={formData.discountAllowedAccountId}
+                                placeholder="Search discount allowed accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
+                                onChange={(value) => setFormData({ ...formData, discountAllowedAccountId: value })}
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                Debited when AR/customer discounts are allowed.
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="discountReceivedAccount">Purchase Discounts Received</Label>
+                            <AccountPicker
+                                id="discountReceivedAccount"
+                                value={formData.discountReceivedAccountId}
+                                placeholder="Search discount received accounts..."
+                                disabled={settings?.transactionsExist}
+                                accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
+                                onChange={(value) => setFormData({ ...formData, discountReceivedAccountId: value })}
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                Credited when AP/supplier discounts are received or taken.
+                            </p>
                         </div>
                     </div>
 

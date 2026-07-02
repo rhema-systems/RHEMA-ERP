@@ -1,6 +1,9 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,10 +12,23 @@ namespace ErpSystem.Api.Services.Finance.Cash;
 public class BankAccountService : IBankAccountService
 {
     private readonly ApplicationDbContext _context;
+    private readonly ITenantSettingsService _tenantSettingsService;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IJournalEntryService _journalEntryService;
+    private readonly IDocumentNumberingService _documentNumberingService;
 
-    public BankAccountService(ApplicationDbContext context)
+    public BankAccountService(
+        ApplicationDbContext context,
+        ITenantSettingsService tenantSettingsService,
+        ICurrentUserService currentUserService,
+        IJournalEntryService journalEntryService,
+        IDocumentNumberingService documentNumberingService)
     {
         _context = context;
+        _tenantSettingsService = tenantSettingsService;
+        _currentUserService = currentUserService;
+        _journalEntryService = journalEntryService;
+        _documentNumberingService = documentNumberingService;
     }
 
     public async Task<BankAccountDto?> GetByIdAsync(Guid id)
@@ -90,13 +106,18 @@ public class BankAccountService : IBankAccountService
 
     public async Task<BankAccountDto> CreateAsync(CreateBankAccountDto dto)
     {
+        var currency = NormalizeCurrency(dto.Currency);
+        var exchangeRate = await ResolveOpeningBalanceExchangeRateAsync(currency, dto.OpeningBalanceExchangeRate);
+
+        await using var dbTransaction = await _context.Database.BeginTransactionAsync();
+
         var account = new BankAccount
         {
             AccountNumber = dto.AccountNumber,
             AccountName = dto.AccountName,
             BankName = dto.BankName,
             BankBranch = dto.BankBranch,
-            Currency = dto.Currency,
+            Currency = currency,
             AccountType = dto.AccountType,
             GLAccountId = dto.GLAccountId,
             OpeningBalance = dto.OpeningBalance,
@@ -109,6 +130,13 @@ public class BankAccountService : IBankAccountService
 
         _context.BankAccounts.Add(account);
         await _context.SaveChangesAsync();
+
+        if (dto.OpeningBalance != 0m)
+        {
+            await CreateOpeningBalancePostingAsync(account, exchangeRate);
+        }
+
+        await dbTransaction.CommitAsync();
 
         return await GetByIdAsync(account.Id) ?? throw new Exception("Failed to create bank account");
     }
@@ -212,5 +240,166 @@ public class BankAccountService : IBankAccountService
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    private async Task CreateOpeningBalancePostingAsync(BankAccount account, decimal exchangeRate)
+    {
+        if (!account.GLAccountId.HasValue)
+        {
+            throw new InvalidOperationException("A linked GL account is required when creating a bank account with an opening balance.");
+        }
+
+        var tenantId = _currentUserService.TenantId
+            ?? throw new InvalidOperationException("Tenant context is required to post a bank opening balance.");
+
+        var settings = await _context.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted)
+            ?? throw new InvalidOperationException("Finance settings not configured for this tenant.");
+
+        if (!settings.MigrationClearingAccountId.HasValue)
+        {
+            throw new InvalidOperationException("Migration Clearing Account is not configured in Finance Settings.");
+        }
+
+        var openingAmount = Math.Abs(account.OpeningBalance);
+        var baseAmount = ToBaseAmount(openingAmount, exchangeRate);
+        if (baseAmount <= 0m)
+        {
+            throw new InvalidOperationException("Bank opening balance base amount must be greater than zero.");
+        }
+
+        var isPositiveBankBalance = account.OpeningBalance > 0m;
+        var documentType = isPositiveBankBalance
+            ? FinanceDocumentTypes.CashReceipt
+            : FinanceDocumentTypes.CashPayment;
+        var transactionNumber = await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Finance,
+            documentType,
+            tenantId,
+            account.OpeningDate,
+            nameof(CashTransaction));
+
+        var cashTransaction = new CashTransaction
+        {
+            Id = Guid.NewGuid(),
+            TransactionNumber = transactionNumber,
+            TransactionDate = account.OpeningDate,
+            TransactionType = isPositiveBankBalance ? CashTransactionType.Receipt : CashTransactionType.Payment,
+            BankAccountId = account.Id,
+            Amount = openingAmount,
+            Currency = account.Currency,
+            ExchangeRate = exchangeRate,
+            BaseAmount = baseAmount,
+            ReferenceNumber = $"OPEN-{account.AccountNumber}",
+            PayeeOrPayer = "Opening Balance",
+            Description = $"Opening bank balance - {account.AccountName}",
+            GLAccountId = settings.MigrationClearingAccountId.Value,
+            IsReconciled = false,
+            IsPosted = false
+        };
+
+        _context.Set<CashTransaction>().Add(cashTransaction);
+        await _context.SaveChangesAsync();
+
+        var journalTransactions = isPositiveBankBalance
+            ? new List<CreateAccountTransactionDto>
+            {
+                new()
+                {
+                    AccountId = account.GLAccountId.Value,
+                    Description = $"Opening bank balance - {account.AccountName}",
+                    TransactionType = "Debit",
+                    Amount = baseAmount,
+                    Reference = cashTransaction.TransactionNumber,
+                    CurrencyCode = account.Currency,
+                    ExchangeRate = exchangeRate,
+                    ForeignAmount = openingAmount
+                },
+                new()
+                {
+                    AccountId = settings.MigrationClearingAccountId.Value,
+                    Description = $"Opening bank balance - {account.AccountName}",
+                    TransactionType = "Credit",
+                    Amount = baseAmount,
+                    Reference = cashTransaction.TransactionNumber,
+                    CurrencyCode = account.Currency,
+                    ExchangeRate = exchangeRate,
+                    ForeignAmount = openingAmount
+                }
+            }
+            : new List<CreateAccountTransactionDto>
+            {
+                new()
+                {
+                    AccountId = settings.MigrationClearingAccountId.Value,
+                    Description = $"Opening bank overdraft/balance - {account.AccountName}",
+                    TransactionType = "Debit",
+                    Amount = baseAmount,
+                    Reference = cashTransaction.TransactionNumber,
+                    CurrencyCode = account.Currency,
+                    ExchangeRate = exchangeRate,
+                    ForeignAmount = openingAmount
+                },
+                new()
+                {
+                    AccountId = account.GLAccountId.Value,
+                    Description = $"Opening bank overdraft/balance - {account.AccountName}",
+                    TransactionType = "Credit",
+                    Amount = baseAmount,
+                    Reference = cashTransaction.TransactionNumber,
+                    CurrencyCode = account.Currency,
+                    ExchangeRate = exchangeRate,
+                    ForeignAmount = openingAmount
+                }
+            };
+
+        var journal = await _journalEntryService.CreateJournalEntryAsync(new CreateJournalEntryDto
+        {
+            TransactionDate = account.OpeningDate,
+            JournalType = "Opening Balance",
+            Description = $"Opening Bank Balance {account.AccountName}",
+            Reference = cashTransaction.TransactionNumber,
+            SourceModule = "BANK",
+            SourceDocumentId = cashTransaction.Id,
+            SourceDocumentType = "BankOpeningBalance",
+            Transactions = journalTransactions
+        });
+
+        await _journalEntryService.PostJournalEntryAsync(journal.Id);
+
+        cashTransaction.IsPosted = true;
+        cashTransaction.PostedDate = DateTime.UtcNow;
+        cashTransaction.PostedBy = Guid.TryParse(_currentUserService.UserId, out var postedById) ? postedById : null;
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task<decimal> ResolveOpeningBalanceExchangeRateAsync(string currency, decimal? exchangeRate)
+    {
+        var baseCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync());
+        if (string.Equals(currency, baseCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            return 1m;
+        }
+
+        var resolvedRate = exchangeRate.GetValueOrDefault();
+        if (resolvedRate <= 0m)
+        {
+            throw new InvalidOperationException($"An exchange rate is required for {currency} bank opening balances.");
+        }
+
+        return resolvedRate;
+    }
+
+    private static decimal ToBaseAmount(decimal amount, decimal exchangeRate)
+    {
+        return decimal.Round(amount * exchangeRate, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static string NormalizeCurrency(string? currency)
+    {
+        return string.IsNullOrWhiteSpace(currency)
+            ? "GHS"
+            : currency.Trim().ToUpperInvariant();
     }
 }
