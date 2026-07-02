@@ -1,6 +1,6 @@
 # Offline Fleet Inspection Mobile Requirement Tracker
 
-Last updated: 2026-06-27
+Last updated: 2026-07-02
 
 ## Active Scope
 
@@ -41,6 +41,7 @@ This tracker follows the standalone offline-first mobile inspection flow for fle
 | Done | QR package endpoint | `/api/inspection-templates/{id}/qr-package` now generates a short signed reference URL with template, asset/category, trip, inspection kind, and label details; checklist content is never embedded in the printed QR. |
 | Done | QR label admin UI | Inspection Template setup provides a Fleet QR label dialog with assignment selectors, a medium-error-correction QR preview, reference mode/status, mobile URL, and print action without payload-capacity failures. Printed asset labels identify the asset name, asset number, asset type/category, inspection kind, and checklist beside the QR reference. |
 | Done | Standalone mobile shell | Added `/mobile/fleet/inspection` with phone-first checklist entry, online/offline indicator, local drafts, pending count, manual sync, and result feedback. |
+| Done | Installed PWA airplane-mode launch | The service worker now warms and versions the `/mobile` and `/mobile/fleet/inspection` app shells plus their Next.js assets, serves query-based inspection launches from the normalized cached route, requests persistent browser storage, and uses full-page navigation while offline. A first online login and checklist catalog sync are still required before disconnected use. |
 | Done | Mobile app home and tile menu | Added `/mobile` as the simple mobile entry point with login, automatic default/single tenant scoping, logout, and large action tiles for Asset Inspection, checklist sync, and pending uploads. |
 | Done | Mobile sent confirmation and submitted status review | Successful online inspection submission now shows a sent confirmation, returns the user to the mobile home screen, records the submitted request locally, and exposes a Submitted Requests tile where the driver can review and refresh workflow/status details. |
 | Done | QR scan and package resolver | The mobile route resolves the short scanned reference from the online server when connected or selects the matching asset/category/kind template from the synchronized local Fleet checklist catalog when offline. |

@@ -241,6 +241,23 @@ function FleetInspectionMobilePage() {
   const [syncingCatalog, setSyncingCatalog] = useState(false);
   const [manualQrValue, setManualQrValue] = useState('');
   const [submittedItems, setSubmittedItems] = useState<SubmittedInspection[]>([]);
+
+  const navigateMobile = useCallback((href: string, replace = false) => {
+    if (!window.navigator.onLine) {
+      if (replace) {
+        window.location.replace(href);
+      } else {
+        window.location.assign(href);
+      }
+      return;
+    }
+
+    if (replace) {
+      router.replace(href);
+    } else {
+      router.push(href);
+    }
+  }, [router]);
   const [selectedSubmitted, setSelectedSubmitted] = useState<SubmittedInspection | null>(null);
   const [refreshingSubmittedId, setRefreshingSubmittedId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -413,7 +430,7 @@ function FleetInspectionMobilePage() {
       const url = new URL(value, window.location.origin);
       if (url.pathname.startsWith('/mobile/fleet/inspection')) {
         stopScanner();
-        router.push(`${url.pathname}${url.search}`);
+        navigateMobile(`${url.pathname}${url.search}`);
         return;
       }
 
@@ -422,7 +439,7 @@ function FleetInspectionMobilePage() {
     } catch {
       setError('The QR link could not be opened.');
     }
-  }, [router, stopScanner]);
+  }, [navigateMobile, stopScanner]);
 
   const openQrValue = useCallback(() => {
     openQrLink(manualQrValue);
@@ -694,7 +711,7 @@ function FleetInspectionMobilePage() {
       localStorage.removeItem(draftKey);
       localStorage.setItem(MOBILE_FLASH_KEY, 'Inspection sent successfully.');
       setMessage('Inspection sent successfully.');
-      setTimeout(() => router.replace('/mobile?sent=1'), 900);
+      setTimeout(() => navigateMobile('/mobile?sent=1', true), 900);
     } catch {
       const queue = readQueue();
       if (!queue.some((item) => item.dto.clientSubmissionId === dto.clientSubmissionId)) {
@@ -727,7 +744,7 @@ function FleetInspectionMobilePage() {
       localStorage.removeItem(draftKey);
       localStorage.setItem(MOBILE_FLASH_KEY, 'Inspection saved and will send when the phone is online.');
       setMessage('Inspection saved and will send when the phone is online.');
-      setTimeout(() => router.replace('/mobile?queued=1'), 900);
+      setTimeout(() => navigateMobile('/mobile?queued=1', true), 900);
     } finally {
       setSubmitting(false);
     }
@@ -750,7 +767,7 @@ function FleetInspectionMobilePage() {
               <h1 className="text-xl font-semibold">Mobile Login</h1>
               <p className="mt-1 text-sm text-muted-foreground">Sign in to continue this inspection.</p>
             </div>
-            <Button className="h-11 w-full" onClick={() => router.push(`/mobile?redirect=${encodeURIComponent(redirect)}`)}>
+            <Button className="h-11 w-full" onClick={() => navigateMobile(`/mobile?redirect=${encodeURIComponent(redirect)}`)}>
               Login
             </Button>
           </CardContent>
@@ -767,7 +784,7 @@ function FleetInspectionMobilePage() {
             <p className="text-xs font-medium text-muted-foreground">MOBILE INSPECTION</p>
             <h1 className="text-xl font-semibold">Submitted Requests</h1>
           </div>
-          <Button variant="outline" onClick={() => router.push('/mobile')}>
+          <Button variant="outline" onClick={() => navigateMobile('/mobile')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
@@ -841,7 +858,7 @@ function FleetInspectionMobilePage() {
             <p className="text-xs font-medium text-muted-foreground">OFFLINE CATALOG</p>
             <h1 className="text-xl font-semibold">Sync Checklists</h1>
           </div>
-          <Button variant="outline" onClick={() => router.push('/mobile')}>
+          <Button variant="outline" onClick={() => navigateMobile('/mobile')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
@@ -901,7 +918,7 @@ function FleetInspectionMobilePage() {
             <p className="text-xs font-medium text-muted-foreground">OFFLINE SUBMISSIONS</p>
             <h1 className="text-xl font-semibold">Pending Uploads</h1>
           </div>
-          <Button variant="outline" onClick={() => router.push('/mobile')}>
+          <Button variant="outline" onClick={() => navigateMobile('/mobile')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
@@ -958,7 +975,7 @@ function FleetInspectionMobilePage() {
             <p className="text-xs font-medium text-muted-foreground">MOBILE INSPECTION</p>
             <h1 className="text-xl font-semibold">Asset QR</h1>
           </div>
-          <Button variant="outline" onClick={() => router.push('/mobile')}>
+          <Button variant="outline" onClick={() => navigateMobile('/mobile')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
@@ -1068,7 +1085,7 @@ function FleetInspectionMobilePage() {
     <main className={mobileShellClass} style={{ colorScheme: 'light' }}>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Button variant="ghost" className="-ml-3 mb-2 h-8 px-2" onClick={() => router.push('/mobile')}>
+          <Button variant="ghost" className="-ml-3 mb-2 h-8 px-2" onClick={() => navigateMobile('/mobile')}>
             <ArrowLeft className="mr-1 h-4 w-4" />
             Back
           </Button>

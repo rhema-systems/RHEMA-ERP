@@ -41,6 +41,8 @@ export class PWAManager {
       if ('serviceWorker' in navigator) {
         try {
           await this.registerServiceWorker()
+          await this.warmMobileShell()
+          void this.requestPersistentStorage()
         } catch (error) {
           console.error('Failed to register service worker:', error)
         }
@@ -123,6 +125,7 @@ export class PWAManager {
       this.isOnline = true
       this.notifyOnlineHandlers()
       this.syncOfflineData()
+      void this.warmMobileShell()
     })
 
     window.addEventListener('offline', () => {
@@ -237,6 +240,14 @@ export class PWAManager {
         sync: { register: (tag: string) => Promise<void> }
       }).sync.register('background-sync')
     }
+  }
+
+  private async warmMobileShell() {
+    if (!this.serviceWorkerRegistration || !navigator.onLine) return
+
+    const registration = await navigator.serviceWorker.ready
+    const worker = registration.active || navigator.serviceWorker.controller
+    worker?.postMessage({ type: 'WARM_MOBILE_SHELL' })
   }
 
   private urlBase64ToUint8Array(base64String: string): ArrayBuffer {

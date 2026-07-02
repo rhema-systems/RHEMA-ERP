@@ -1,11 +1,13 @@
  
 // Service Worker for ERP System PWA
-const CACHE_NAME = 'erp-system-v2026-07-02-asset-mobile-polish'
-const STATIC_CACHE_NAME = 'erp-static-v2026-07-02-asset-mobile-polish'
-const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-07-02-asset-mobile-polish'
+const CACHE_NAME = 'erp-system-v2026-07-02-offline-mobile-shell'
+const STATIC_CACHE_NAME = 'erp-static-v2026-07-02-offline-mobile-shell'
+const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-07-02-offline-mobile-shell'
+const MOBILE_SHELL_CACHE_NAME = 'erp-mobile-shell-v2026-07-02-offline-mobile-shell'
 const OFFLINE_PAGE = '/offline'
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const IS_LOCAL_DEV = LOCAL_DEV_HOSTS.has(self.location.hostname)
+const MOBILE_SHELL_ROUTES = ['/mobile', '/mobile/fleet/inspection']
 
 // Define what to cache during install
 const STATIC_ASSETS = [
@@ -58,6 +60,7 @@ self.addEventListener('activate', (event) => {
           cacheNames.map((cacheName) => {
             if (cacheName !== STATIC_CACHE_NAME && 
                 cacheName !== RUNTIME_CACHE_NAME &&
+                cacheName !== MOBILE_SHELL_CACHE_NAME &&
                 cacheName !== CACHE_NAME) {
               console.log('[SW] Deleting old cache:', cacheName)
               return caches.delete(cacheName)
@@ -202,8 +205,21 @@ async function handleRuntimeCache(request) {
 // Handle navigation requests
 async function handleNavigationRequest(request) {
   try {
-    return await fetch(request)
+    const networkResponse = await fetch(request)
+
+    if (networkResponse.ok && isMobileShellRoute(request.url)) {
+      await cacheMobileDocument(request.url, networkResponse.clone())
+    }
+
+    return networkResponse
   } catch (error) {
+    if (isMobileShellRoute(request.url)) {
+      const cachedResponse = await getCachedMobileDocument(request.url)
+      if (cachedResponse) {
+        return cachedResponse
+      }
+    }
+
     return new Response(`
       <!DOCTYPE html>
       <html>
@@ -250,6 +266,69 @@ async function handleNavigationRequest(request) {
       headers: { 'Content-Type': 'text/html' }
     })
   }
+}
+
+function isMobileShellRoute(url) {
+  const parsedUrl = new URL(url, self.location.origin)
+  return parsedUrl.origin === self.location.origin
+    && MOBILE_SHELL_ROUTES.includes(parsedUrl.pathname.replace(/\/$/, '') || '/')
+}
+
+function mobileShellCacheKey(url) {
+  const parsedUrl = new URL(url, self.location.origin)
+  return new Request(`${parsedUrl.origin}${parsedUrl.pathname.replace(/\/$/, '') || '/'}`, {
+    credentials: 'same-origin'
+  })
+}
+
+async function getCachedMobileDocument(url) {
+  const cache = await caches.open(MOBILE_SHELL_CACHE_NAME)
+  return cache.match(mobileShellCacheKey(url))
+}
+
+async function cacheMobileDocument(url, response) {
+  const cache = await caches.open(MOBILE_SHELL_CACHE_NAME)
+  await cache.put(mobileShellCacheKey(url), response.clone())
+
+  const html = await response.text()
+  const assetUrls = new Set()
+  const assetPattern = /(?:src|href)=["']([^"']+)["']/g
+  let match
+
+  while ((match = assetPattern.exec(html)) !== null) {
+    const assetUrl = new URL(match[1], self.location.origin)
+    if (assetUrl.origin === self.location.origin && assetUrl.pathname.startsWith('/_next/static/')) {
+      assetUrls.add(assetUrl.href)
+    }
+  }
+
+  const staticCache = await caches.open(STATIC_CACHE_NAME)
+  await Promise.allSettled(
+    [...assetUrls].map(async (assetUrl) => {
+      const assetRequest = new Request(assetUrl, { credentials: 'same-origin' })
+      if (await staticCache.match(assetRequest)) return
+
+      const assetResponse = await fetch(assetRequest)
+      if (assetResponse.ok) {
+        await staticCache.put(assetRequest, assetResponse)
+      }
+    })
+  )
+}
+
+async function warmMobileShell() {
+  await Promise.allSettled(
+    MOBILE_SHELL_ROUTES.map(async (route) => {
+      const request = new Request(new URL(route, self.location.origin).href, {
+        credentials: 'same-origin',
+        headers: { 'X-PWA-Shell-Warmup': '1' }
+      })
+      const response = await fetch(request)
+      if (response.ok) {
+        await cacheMobileDocument(route, response)
+      }
+    })
+  )
 }
 
 // Utility functions
@@ -436,10 +515,15 @@ self.addEventListener('message', (event) => {
         event.ports[0].postMessage({
           caches: {
             static: STATIC_CACHE_NAME,
-            runtime: RUNTIME_CACHE_NAME
+            runtime: RUNTIME_CACHE_NAME,
+            mobileShell: MOBILE_SHELL_CACHE_NAME
           },
           version: CACHE_NAME
         })
+        break
+
+      case 'WARM_MOBILE_SHELL':
+        event.waitUntil(warmMobileShell())
         break
         
       case 'CLEAR_CACHE':

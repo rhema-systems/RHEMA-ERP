@@ -58,6 +58,15 @@ function MobileHomeContent() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const navigateMobile = (href: string) => {
+    if (!window.navigator.onLine) {
+      window.location.assign(href);
+      return;
+    }
+
+    router.push(href);
+  };
+
   useEffect(() => {
     if (authService.isAuthenticated() && hasValidMobileSession()) {
       setUser(getStoredUser());
@@ -282,7 +291,7 @@ function MobileHomeContent() {
 
           <button
             type="button"
-            onClick={() => router.push('/mobile/fleet/inspection?scan=1')}
+            onClick={() => navigateMobile('/mobile/fleet/inspection?scan=1')}
             className="flex min-h-28 items-center gap-4 rounded-lg border border-emerald-200 bg-emerald-600 p-5 text-left text-white shadow-lg shadow-emerald-200"
           >
             <span className="flex h-12 w-12 items-center justify-center rounded-md bg-white/15 text-white">
@@ -296,7 +305,7 @@ function MobileHomeContent() {
 
           <button
             type="button"
-            onClick={() => router.push('/mobile/fleet/inspection?sync=1')}
+            onClick={() => navigateMobile('/mobile/fleet/inspection?sync=1')}
             className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm"
           >
             <span className="flex h-11 w-11 items-center justify-center rounded-md bg-cyan-50 text-cyan-700">
@@ -310,7 +319,7 @@ function MobileHomeContent() {
 
           <button
             type="button"
-            onClick={() => router.push('/mobile/fleet/inspection?pending=1')}
+            onClick={() => navigateMobile('/mobile/fleet/inspection?pending=1')}
             className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm"
           >
             <span className="flex h-11 w-11 items-center justify-center rounded-md bg-blue-50 text-blue-700">
@@ -324,7 +333,7 @@ function MobileHomeContent() {
 
           <button
             type="button"
-            onClick={() => router.push('/mobile/fleet/inspection?submitted=1')}
+            onClick={() => navigateMobile('/mobile/fleet/inspection?submitted=1')}
             className="flex min-h-24 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm"
           >
             <span className="flex h-11 w-11 items-center justify-center rounded-md bg-violet-50 text-violet-700">
