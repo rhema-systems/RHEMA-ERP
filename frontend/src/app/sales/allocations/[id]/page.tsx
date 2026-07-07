@@ -35,8 +35,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowApprovalActions, WorkflowApprovalHistoryPanel, useWorkflowRecord } from '@/components/workflow';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import {
   salesAllocationService,
@@ -195,29 +194,32 @@ export default function SalesAllocationDetailPage() {
     }
   };
 
-  const handleWorkflowSubmit = async () => {
-    const updated = await salesAllocationService.submitForApproval(allocationId);
-    setAllocation(updated);
-  };
-
-  const handleWorkflowApprove = async (comments: string) => {
-    const updated = await salesAllocationService.processApproval(allocationId, { isApproved: true, comments });
-    setAllocation(updated);
-  };
-
-  const handleWorkflowReject = async (comments: string) => {
-    const updated = await salesAllocationService.processApproval(allocationId, {
-      isApproved: false,
-      comments,
-      rejectionReason: comments,
-    });
-    setAllocation(updated);
-  };
-
   const getStatusBadge = (status: string) => {
     const config = STATUS_CONFIG[status] || { variant: 'outline' as const, className: '' };
     return <Badge variant={config.variant} className={config.className}>{formatLabel(status)}</Badge>;
   };
+
+  const workflow = useWorkflowRecord({
+    entityType: 'SalesAllocation',
+    entityId: allocationId,
+    entityLabel: 'Sales Allocation',
+    entityNumber: allocation?.sourceItemCode || allocation?.sourceItemName,
+    status: allocation?.status ?? '',
+    canSubmit: allocation?.status === 'Reserved',
+    canApproveReject: allocation?.status === 'PendingApproval',
+    enabled: Boolean(allocation),
+    commands: {
+      submit: async () => setAllocation(await salesAllocationService.submitForApproval(allocationId)),
+      approve: async ({ comments }) => setAllocation(await salesAllocationService.processApproval(allocationId, { isApproved: true, comments })),
+      reject: async ({ comments }) => setAllocation(await salesAllocationService.processApproval(allocationId, {
+        isApproved: false,
+        comments,
+        rejectionReason: comments,
+      })),
+      afterAction: loadAllocation,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
 
   if (loading) {
     return (
@@ -247,8 +249,6 @@ export default function SalesAllocationDetailPage() {
     );
   }
 
-  const canSubmit = allocation.status === 'Reserved';
-  const canApprove = allocation.status === 'PendingApproval';
   const isActive = ACTIVE_STATUSES.has(allocation.status);
   const canMarkAllocated = ['Reserved', 'Approved'].includes(allocation.status);
   const canRelease = isActive && !['Sold', 'Leased'].includes(allocation.status);
@@ -279,20 +279,8 @@ export default function SalesAllocationDetailPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <WorkflowApprovalActions
-            entityType="SalesAllocation"
-            entityId={allocation.id}
-            entityLabel="Sales Allocation"
-            entityNumber={entityNumber}
-            status={allocation.status}
+            {...workflow.actionProps}
             showStepBadge
-            loadWorkflowSummary
-            canSubmit={canSubmit}
-            canApproveReject={canApprove}
-            onSubmit={handleWorkflowSubmit}
-            onApprove={handleWorkflowApprove}
-            onReject={handleWorkflowReject}
-            onAfterAction={loadAllocation}
-            onOpenWorkflows={() => router.push('/administration/workflow')}
           />
           {canMarkAllocated ? (
             <Button variant="outline" onClick={() => openStatusDialog('Allocated')}>
@@ -467,18 +455,7 @@ export default function SalesAllocationDetailPage() {
       </div>
 
       <WorkflowApprovalHistoryPanel
-        entityType="SalesAllocation"
-        entityId={allocation.id}
-        entityLabel="Sales Allocation"
-        entityNumber={entityNumber}
-        status={allocation.status}
-        canSubmit={canSubmit}
-        canApproveReject={canApprove}
-        onSubmit={handleWorkflowSubmit}
-        onApprove={handleWorkflowApprove}
-        onReject={handleWorkflowReject}
-        onAfterAction={loadAllocation}
-        onOpenWorkflows={() => router.push('/administration/workflow')}
+        {...workflow.actionProps}
         showActions={false}
       />
 

@@ -46,6 +46,7 @@ import type {
   CreateWorkflowTransitionDto,
   WorkflowStepConfigurationDto,
   WorkflowAssignmentRuleDto,
+  WorkflowApprovalConflictRuleDto,
   WorkflowQualityCheckDto,
   WorkflowVariableInfo,
   WorkflowEntityTypeInfo
@@ -53,11 +54,15 @@ import type {
 import { buildFallbackEntityTypes, filterEntityTypesByModule, isEntityTypeInList, moduleEntityTypeMap } from './entityTypeMapping';
 import {
   WorkflowStepType,
+  WorkflowDefinitionLifecycleStatus,
   WorkflowApprovalType,
+  WorkflowApprovalActivationMode,
+  WorkflowApprovalActorSource,
   WorkflowAssignmentType,
   WorkflowRejectionHandling,
   WorkflowConditionType,
-  WorkflowLogicalOperator
+  WorkflowLogicalOperator,
+  WorkflowSignatureMethod
 } from '@/types/workflow';
 
 import {
@@ -326,9 +331,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   const selectedWorkflowOption =
     activeWorkflowId ? workflowOptions.find((item) => item.id === activeWorkflowId) : undefined;
   const selectedWorkflowLiveInstanceCount = selectedWorkflowOption?.activeInstancesCount ?? 0;
-  const selectedWorkflowHasLiveInstances = selectedWorkflowLiveInstanceCount > 0;
+  const selectedWorkflowIsImmutable = selectedWorkflowOption != null &&
+    selectedWorkflowOption.lifecycleStatus !== WorkflowDefinitionLifecycleStatus.Draft;
+  const selectedWorkflowHasLiveInstances = selectedWorkflowLiveInstanceCount > 0 || selectedWorkflowIsImmutable;
   const workflowLiveInstanceLockMessage =
-    selectedWorkflowLiveInstanceCount === 1
+    selectedWorkflowIsImmutable
+      ? `Version ${selectedWorkflowOption?.version ?? ''} is ${selectedWorkflowOption?.lifecycleStatus === WorkflowDefinitionLifecycleStatus.Published ? 'published' : 'retired'} and is read-only. Clone it as a new draft to make changes.`
+      : selectedWorkflowLiveInstanceCount === 1
       ? 'This workflow has 1 live instance and cannot be edited. Complete or cancel that instance first, or create a separate workflow for future records.'
       : `This workflow has ${selectedWorkflowLiveInstanceCount} live instances and cannot be edited. Complete or cancel those instances first, or create a separate workflow for future records.`;
 
@@ -981,7 +990,12 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           approvers: [],
           approverRoles: [],
           approverUsers: [],
-          approvalType: 'any', // any, all, sequence
+          approvalType: 'any',
+          approvalActivationMode: 'parallel',
+          minApprovalsRequired: 1,
+          preventInitiatorApproval: true,
+          requireDistinctApprovers: true,
+          approvalConflictRules: [],
           escalationTimeout: 24,
           escalationTo: '',
           conditions: []
@@ -1045,6 +1059,10 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       return;
     }
 
+    if (!handleValidate(false)) {
+      return;
+    }
+
     setIsSaving(true);
     try {
       const payload = buildDefinitionPayload();
@@ -1056,7 +1074,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         const updateDto: UpdateWorkflowDefinitionAdminDto = {
           name: payload.name,
           description: payload.description,
-          isActive: true,
+          entityType: payload.entityType,
+          isActive: false,
           configuration: payload.configuration,
           steps: payload.steps,
           transitions: payload.transitions,
@@ -1067,7 +1086,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           name: payload.name,
           description: payload.description,
           entityType: payload.entityType,
-          isActive: true,
+          isActive: false,
           configuration: payload.configuration,
           steps: payload.steps,
           transitions: payload.transitions,
@@ -1087,11 +1106,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         }
         return [...prev, {
           id: savedDefinition.id,
+          definitionKey: savedDefinition.definitionKey,
           name: savedDefinition.name,
           description: savedDefinition.description,
           entityType: savedDefinition.entityType,
           version: savedDefinition.version,
           isActive: savedDefinition.isActive,
+          lifecycleStatus: savedDefinition.lifecycleStatus,
+          changeSummary: savedDefinition.changeSummary,
+          supersedesDefinitionId: savedDefinition.supersedesDefinitionId,
+          publishedAt: savedDefinition.publishedAt,
+          retiredAt: savedDefinition.retiredAt,
           configuration: savedDefinition.configuration,
           createdDate: savedDefinition.createdDate,
           lastModifiedDate: savedDefinition.lastModifiedDate,
@@ -1334,11 +1359,16 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const buildNodeDataFromStep = (step: WorkflowDefinitionDto['steps'][number]) => {
+    const stepChecklist = step.configuration?.qualityConfig?.qualityChecks?.map((item, index) => ({
+      ...item,
+      id: item.id || `check-${index + 1}`,
+    })) ?? [];
     const baseData: Record<string, any> = {
       label: step.name,
       instructions: step.description || '',
       estimatedHours: step.estimatedHours?.toString() || '',
       dueDate: step.estimatedHours ? `${step.estimatedHours}h` : '',
+      stepChecklist,
     };
     if (normalizeStepType(step.stepType) === WorkflowStepType.Approval) {
       const approvalConfig = step.configuration?.approvalConfig;
@@ -1360,11 +1390,26 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         approvers: approverRoles,
         approverRoles,
         approverUsers,
-        approvalType: approvalConfig ? mapApprovalTypeToLabel(approvalConfig.approvalType) : 'any',
-        approvalChecklist: step.configuration?.qualityConfig?.qualityChecks?.map((item, index) => ({
-          ...item,
-          id: item.id || `check-${index + 1}`,
-        })) ?? [],
+        approvalType: approvalConfig
+          ? normalizeApprovalType(approvalConfig.approvalType) === WorkflowApprovalType.Single && approvalConfig.minApprovalsRequired > 1
+            ? 'minimum'
+            : mapApprovalTypeToLabel(approvalConfig.approvalType)
+          : 'any',
+        approvalActivationMode:
+          approvalConfig?.activationMode === WorkflowApprovalActivationMode.Sequential ||
+          String(approvalConfig?.activationMode).toLowerCase() === 'sequential'
+            ? 'sequential'
+            : 'parallel',
+        minApprovalsRequired: approvalConfig?.minApprovalsRequired || 1,
+        preventInitiatorApproval: approvalConfig?.preventInitiatorApproval === true,
+        requireDistinctApprovers: approvalConfig?.requireDistinctApprovers === true,
+        approvalConflictRules: approvalConfig?.conflictRules || [],
+        requireElectronicSignature: approvalConfig?.signaturePolicy?.isRequired === true,
+        signatureMethod: approvalConfig?.signaturePolicy?.method ?? WorkflowSignatureMethod.Attestation,
+        requiredSigningRole: approvalConfig?.signaturePolicy?.requiredSigningRole || '',
+        requireValidCertificateChain: approvalConfig?.signaturePolicy?.requireValidCertificateChain === true,
+        signatureAttestation: approvalConfig?.signaturePolicy?.attestationText || 'I confirm that I reviewed and approve this transaction.',
+        approvalChecklist: stepChecklist,
       };
     }
 
@@ -1459,16 +1504,46 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     return normalized || 'task-document';
   };
 
+  const readStepChecklist = (data?: any): WorkflowQualityCheckDto[] =>
+    ((data?.stepChecklist || data?.approvalChecklist || []) as WorkflowQualityCheckDto[]);
+
+  const buildStepChecklist = (data?: any): WorkflowQualityCheckDto[] =>
+    readStepChecklist(data)
+      .filter(item => item?.name?.trim())
+      .map((item, index) => ({
+        id: item.id || `check-${index + 1}`,
+        name: item.name.trim(),
+        description: item.description?.trim() || '',
+        isRequired: item.isRequired !== false,
+        requiresDocument: item.requiresDocument === true,
+        documentType: item.documentType?.trim() || undefined,
+        documentName: item.documentName?.trim() || undefined,
+        applicabilityCondition: item.applicabilityCondition,
+        expectedValue: item.expectedValue,
+        validationExpression: item.validationExpression,
+      }));
+
   const buildStepConfiguration = (node: Node): WorkflowStepConfigurationDto | undefined => {
+    const stepChecklist = buildStepChecklist(node.data);
+    const qualityConfig = stepChecklist.length > 0
+      ? {
+          qualityConfig: {
+            qualityChecks: stepChecklist,
+          },
+        }
+      : {};
+
     if (node.type === 'approval') {
       const approverRoles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
       const approverUsers = normalizeStringList(node.data?.approverUsers);
       const approverRules: WorkflowAssignmentRuleDto[] = [];
+      const sequentialApprovals = node.data?.approvalActivationMode === 'sequential';
 
       approverRoles.forEach((role: string, index: number) => {
         approverRules.push({
           assignmentType: WorkflowAssignmentType.Role,
           role,
+          approvalGroup: sequentialApprovals ? index + 1 : 1,
           priority: approverRoles.length - index,
         });
       });
@@ -1477,36 +1552,42 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         approverRules.push({
           assignmentType: WorkflowAssignmentType.User,
           userId,
+          approvalGroup: sequentialApprovals ? approverRoles.length + index + 1 : 1,
           priority: approverUsers.length - index,
         });
       });
 
-      const approvalChecklist = ((node.data?.approvalChecklist || []) as WorkflowQualityCheckDto[])
-        .filter(item => item?.name?.trim())
-        .map((item, index) => ({
-          id: item.id || `check-${index + 1}`,
-          name: item.name.trim(),
-          description: item.description?.trim() || '',
-          isRequired: item.isRequired !== false,
-          applicabilityCondition: item.applicabilityCondition,
-          expectedValue: item.expectedValue,
-          validationExpression: item.validationExpression,
-        }));
-
       return {
         approvalConfig: {
           approvalType: mapApprovalTypeToEnum(node.data?.approvalType),
+          activationMode: sequentialApprovals
+            ? WorkflowApprovalActivationMode.Sequential
+            : WorkflowApprovalActivationMode.Parallel,
           approverRules,
-          minApprovalsRequired: 1,
+          minApprovalsRequired: Math.max(Number(node.data?.minApprovalsRequired) || 1, 1),
           rejectionHandling: WorkflowRejectionHandling.StopWorkflow,
+          preventInitiatorApproval: node.data?.preventInitiatorApproval === true,
+          requireDistinctApprovers: node.data?.requireDistinctApprovers === true,
+          conflictRules: ((node.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[])
+            .filter(rule => rule?.name?.trim())
+            .map(rule => ({
+              id: rule.id,
+              name: rule.name.trim(),
+              isEnabled: rule.isEnabled !== false,
+              actorSource: rule.actorSource,
+              sourceStepName: rule.sourceStepName?.trim() || undefined,
+              contextField: rule.contextField?.trim() || undefined,
+              message: rule.message?.trim() || undefined,
+            })),
+          signaturePolicy: node.data?.requireElectronicSignature === true ? {
+            isRequired: true,
+            method: Number(node.data?.signatureMethod ?? WorkflowSignatureMethod.Attestation) as WorkflowSignatureMethod,
+            requiredSigningRole: node.data?.requiredSigningRole?.trim() || undefined,
+            requireValidCertificateChain: node.data?.requireValidCertificateChain === true,
+            attestationText: node.data?.signatureAttestation?.trim() || 'I confirm that I reviewed and approve this transaction.',
+          } : undefined,
         },
-        ...(approvalChecklist.length > 0
-          ? {
-              qualityConfig: {
-                qualityChecks: approvalChecklist,
-              },
-            }
-          : {}),
+        ...qualityConfig,
       };
     }
 
@@ -1523,7 +1604,10 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           : undefined,
         instructions: node.data?.instructions?.trim() || undefined,
       };
-      const configuration: WorkflowStepConfigurationDto = { taskConfig };
+      const configuration: WorkflowStepConfigurationDto = {
+        taskConfig,
+        ...qualityConfig,
+      };
 
       if (taskAssigneeType === 'user' && node.data?.taskAssigneeUserId) {
         return {
@@ -1603,8 +1687,10 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     switch ((typeof value === 'string' ? value : '').toLowerCase()) {
       case 'all':
         return WorkflowApprovalType.Consensus;
-      case 'sequence':
-        return WorkflowApprovalType.Multiple;
+      case 'majority':
+        return WorkflowApprovalType.Majority;
+      case 'minimum':
+        return WorkflowApprovalType.Single;
       case 'any':
       default:
         return WorkflowApprovalType.Single;
@@ -1616,7 +1702,9 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       case WorkflowApprovalType.Consensus:
         return 'all';
       case WorkflowApprovalType.Multiple:
-        return 'sequence';
+        return 'all';
+      case WorkflowApprovalType.Majority:
+        return 'majority';
       case WorkflowApprovalType.Single:
       default:
         return 'any';
@@ -1668,7 +1756,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     console.log('Testing workflow...');
   };
 
-  const handleValidate = () => {
+  const handleValidate = (showSuccess = true) => {
     // Validate workflow structure
     const errors = [];
     
@@ -1694,12 +1782,24 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         errors.push(`Approval step "${node.data?.label || 'Approval'}" must have at least one approver role or user`);
       }
 
-      const checklist = (node.data?.approvalChecklist || []) as WorkflowQualityCheckDto[];
-      checklist.forEach((item, index) => {
-        if (!item.name?.trim()) {
-          errors.push(`Approval step "${node.data?.label || 'Approval'}" has a blank checklist item at row ${index + 1}`);
+      const minimumApprovals = Math.max(Number(node.data?.minApprovalsRequired) || 1, 1);
+      if (minimumApprovals > roles.length + users.length) {
+        errors.push(`Approval step "${node.data?.label || 'Approval'}" requires ${minimumApprovals} approvals but only ${roles.length + users.length} approval slots are configured`);
+      }
+
+      const conflictRules = (node.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+      conflictRules.forEach((rule, index) => {
+        if (!rule.name?.trim()) {
+          errors.push(`Approval step "${node.data?.label || 'Approval'}" has an unnamed SOD rule at row ${index + 1}`);
+        }
+        if (rule.actorSource === WorkflowApprovalActorSource.SpecificStepActor && !rule.sourceStepName?.trim()) {
+          errors.push(`SOD rule "${rule.name || index + 1}" must select a source workflow step`);
+        }
+        if (rule.actorSource === WorkflowApprovalActorSource.ContextUser && !rule.contextField?.trim()) {
+          errors.push(`SOD rule "${rule.name || index + 1}" must define a workflow context user field`);
         }
       });
+
     });
 
     const taskNodes = nodes.filter(node => node.type === 'task');
@@ -1721,13 +1821,32 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         errors.push(`Task step "${node.data?.label || 'Task'}" must name the required document`);
       }
     });
+
+    nodes
+      .filter(node => !['start', 'end'].includes(node.type || ''))
+      .forEach(node => {
+        const checklist = readStepChecklist(node.data);
+        checklist.forEach((item, index) => {
+          if (!item.name?.trim()) {
+            errors.push(`Step "${node.data?.label || 'Workflow step'}" has a blank checklist item at row ${index + 1}`);
+          }
+          if (item.requiresDocument && !item.documentType?.trim()) {
+            errors.push(`Checklist item "${item.name || index + 1}" in step "${node.data?.label || 'Workflow step'}" must define a document type`);
+          }
+          if (item.requiresDocument && !item.documentName?.trim()) {
+            errors.push(`Checklist item "${item.name || index + 1}" in step "${node.data?.label || 'Workflow step'}" must define a document name`);
+          }
+        });
+      });
     
     if (errors.length > 0) {
       toast.error(errors.length === 1 ? errors[0] : `Validation errors: ${errors.join(' • ')}`);
       return false;
     }
     
-    toast.success('Workflow validation successful');
+    if (showSuccess) {
+      toast.success('Workflow validation successful');
+    }
     return true;
   };
 
@@ -1880,11 +1999,14 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const updateApprovalChecklist = (nextChecklist: WorkflowQualityCheckDto[]) => {
-    updateSelectedNode({ approvalChecklist: nextChecklist });
+    updateSelectedNode({
+      stepChecklist: nextChecklist,
+      ...(selectedNode?.type === 'approval' ? { approvalChecklist: nextChecklist } : {}),
+    });
   };
 
   const addApprovalChecklistItem = () => {
-    const currentChecklist = (selectedNode?.data?.approvalChecklist || []) as WorkflowQualityCheckDto[];
+    const currentChecklist = readStepChecklist(selectedNode?.data);
     updateApprovalChecklist([
       ...currentChecklist,
       {
@@ -1892,12 +2014,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         name: '',
         description: '',
         isRequired: true,
+        requiresDocument: false,
       },
     ]);
   };
 
   const updateApprovalChecklistItem = (itemId: string, updates: Partial<WorkflowQualityCheckDto>) => {
-    const currentChecklist = (selectedNode?.data?.approvalChecklist || []) as WorkflowQualityCheckDto[];
+    const currentChecklist = readStepChecklist(selectedNode?.data);
     updateApprovalChecklist(
       currentChecklist.map((item) =>
         item.id === itemId
@@ -1908,8 +2031,56 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const removeApprovalChecklistItem = (itemId: string) => {
-    const currentChecklist = (selectedNode?.data?.approvalChecklist || []) as WorkflowQualityCheckDto[];
+    const currentChecklist = readStepChecklist(selectedNode?.data);
     updateApprovalChecklist(currentChecklist.filter((item) => item.id !== itemId));
+  };
+
+  const updateApprovalConflictRules = (rules: WorkflowApprovalConflictRuleDto[]) => {
+    updateSelectedNode({ approvalConflictRules: rules });
+  };
+
+  const addApprovalConflictRule = () => {
+    const currentRules = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    updateApprovalConflictRules([
+      ...currentRules,
+      {
+        id: `sod-${Date.now()}`,
+        name: '',
+        isEnabled: true,
+        actorSource: WorkflowApprovalActorSource.PreviousStepActor,
+      },
+    ]);
+  };
+
+  const applyEnterpriseSodPreset = () => {
+    const fields = [
+      ['Requester cannot approve', 'requestedById'],
+      ['Document creator cannot approve', 'createdById'],
+      ['Evaluator cannot approve award', 'evaluatorUserId'],
+      ['PO creator cannot confirm receipt', 'purchaseOrderCreatedById'],
+      ['Invoice processor cannot approve payment', 'invoiceProcessedById'],
+      ['Inventory issuer cannot approve adjustment', 'inventoryIssuedById'],
+    ];
+    const existing = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    const existingFields = new Set(existing.map(rule => rule.contextField).filter(Boolean));
+    updateApprovalConflictRules([
+      ...existing,
+      ...fields.filter(([, contextField]) => !existingFields.has(contextField)).map(([name, contextField]) => ({
+        id: crypto.randomUUID(), name, isEnabled: true,
+        actorSource: WorkflowApprovalActorSource.ContextUser, contextField,
+        message: `${name}.`,
+      })),
+    ]);
+  };
+
+  const updateApprovalConflictRule = (ruleId: string, updates: Partial<WorkflowApprovalConflictRuleDto>) => {
+    const currentRules = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    updateApprovalConflictRules(currentRules.map(rule => rule.id === ruleId ? { ...rule, ...updates } : rule));
+  };
+
+  const removeApprovalConflictRule = (ruleId: string) => {
+    const currentRules = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    updateApprovalConflictRules(currentRules.filter(rule => rule.id !== ruleId));
   };
 
   const updateSelectedEdge = (updates: Record<string, any>) => {
@@ -1974,9 +2145,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       ? normalizeStringList(selectedNode.data?.approverUsers)
       : [];
   const selectedApprovalChecklist =
-    selectedNode?.type === 'approval'
-      ? ((selectedNode.data?.approvalChecklist || []) as WorkflowQualityCheckDto[])
+    selectedNode && !['start', 'end'].includes(selectedNode.type || '')
+      ? readStepChecklist(selectedNode.data)
       : [];
+  const selectedApprovalConflictRules =
+    selectedNode?.type === 'approval'
+      ? ((selectedNode.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[])
+      : [];
+  const availableSodSourceSteps = nodes
+    .filter(node => node.id !== selectedNode?.id && !['start', 'end'].includes(node.type || ''))
+    .map(node => String(node.data?.label || '').trim())
+    .filter(Boolean);
   const requiredApprovalChecklistCount = selectedApprovalChecklist.filter((item) => item.isRequired !== false).length;
   const filteredAvailableRoles = availableRoles.filter((role) =>
     role.name.toLowerCase().includes(roleSearch.toLowerCase())
@@ -2001,14 +2180,14 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
             <div className="flex items-start justify-between gap-3 pr-12">
               <div>
                 <DialogTitle className="text-xl font-semibold">
-                  {workflowId ? 'Edit Workflow' : 'Create New Workflow'}
+                  {selectedWorkflowIsImmutable ? 'View Workflow' : workflowId ? 'Edit Workflow' : 'Create New Workflow'}
                 </DialogTitle>
                 <div className="text-xs text-muted-foreground mt-1">
                   Pick an existing workflow to load it, or start a new one.
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handleValidate}>
+                <Button variant="outline" size="sm" onClick={() => handleValidate()}>
                   Validate
                 </Button>
                 <Button variant="outline" size="sm" onClick={handleTest}>
@@ -2554,6 +2733,30 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                               onChange={(e) => updateSelectedNode({ instructions: e.target.value })}
                             />
                           </div>
+
+                          <div className="rounded-md border bg-white p-3 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <Label>Step Checklist</Label>
+                                <p className="text-xs text-muted-foreground">
+                                  The task owner must complete required checks before submitting this step.
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setChecklistDialogOpen(true)}
+                              >
+                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                                Configure
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary">{selectedApprovalChecklist.length} items</Badge>
+                              <Badge variant="secondary">{requiredApprovalChecklistCount} required</Badge>
+                            </div>
+                          </div>
                         </>
                       )}
 
@@ -2572,9 +2775,193 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                               <SelectContent>
                                 <SelectItem value="any">Any Approver</SelectItem>
                                 <SelectItem value="all">All Approvers</SelectItem>
-                                <SelectItem value="sequence">Sequential</SelectItem>
+                                <SelectItem value="majority">Majority</SelectItem>
+                                <SelectItem value="minimum">Minimum Number</SelectItem>
                               </SelectContent>
                             </Select>
+                          </div>
+
+                          <div>
+                            <Label>Approval Sequence</Label>
+                            <Select
+                              value={selectedNode.data?.approvalActivationMode || 'parallel'}
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onValueChange={(value) => updateSelectedNode({ approvalActivationMode: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select approval sequence" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="parallel">Parallel</SelectItem>
+                                <SelectItem value="sequential">Sequential</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Sequential mode activates approvers one at a time in the configured order.
+                            </p>
+                          </div>
+
+                          {(selectedNode.data?.approvalType === 'minimum' || selectedNode.data?.approvalType === 'majority') && (
+                            <div>
+                              <Label>Minimum Approvals</Label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={selectedNode.data?.minApprovalsRequired || 1}
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onChange={(event) =>
+                                  updateSelectedNode({ minApprovalsRequired: Math.max(Number(event.target.value) || 1, 1) })
+                                }
+                              />
+                            </div>
+                          )}
+
+                          <div className="space-y-2 rounded-md border bg-white p-3">
+                            <Label>Approval Controls</Label>
+                            <label className="flex items-start gap-2 text-sm">
+                              <Checkbox
+                                checked={selectedNode.data?.preventInitiatorApproval === true}
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onCheckedChange={(checked) =>
+                                  updateSelectedNode({ preventInitiatorApproval: checked === true })
+                                }
+                              />
+                              <span>Prevent the workflow initiator from approving this step</span>
+                            </label>
+                            <label className="flex items-start gap-2 text-sm">
+                              <Checkbox
+                                checked={selectedNode.data?.requireDistinctApprovers === true}
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onCheckedChange={(checked) =>
+                                  updateSelectedNode({ requireDistinctApprovers: checked === true })
+                                }
+                              />
+                              <span>Require a different user for each approval slot</span>
+                            </label>
+                          </div>
+
+                          <div className="space-y-3 rounded-md border bg-white p-3">
+                            <label className="flex items-center gap-2 text-sm"><Checkbox checked={selectedNode.data?.requireElectronicSignature === true} disabled={selectedWorkflowHasLiveInstances} onCheckedChange={checked => updateSelectedNode({ requireElectronicSignature: checked === true })} />Require electronic signature</label>
+                            {selectedNode.data?.requireElectronicSignature === true && <>
+                              <Select value={String(selectedNode.data?.signatureMethod ?? WorkflowSignatureMethod.Attestation)} disabled={selectedWorkflowHasLiveInstances} onValueChange={value => updateSelectedNode({ signatureMethod: Number(value) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                                <SelectItem value={String(WorkflowSignatureMethod.Attestation)}>Attestation</SelectItem><SelectItem value={String(WorkflowSignatureMethod.DigitalCertificate)}>Digital certificate</SelectItem><SelectItem value={String(WorkflowSignatureMethod.ExternalProvider)}>External provider</SelectItem>
+                              </SelectContent></Select>
+                              <Input value={selectedNode.data?.requiredSigningRole || ''} placeholder="Required signing role (optional)" disabled={selectedWorkflowHasLiveInstances} onChange={event => updateSelectedNode({ requiredSigningRole: event.target.value })} />
+                              <Textarea value={selectedNode.data?.signatureAttestation || 'I confirm that I reviewed and approve this transaction.'} disabled={selectedWorkflowHasLiveInstances} onChange={event => updateSelectedNode({ signatureAttestation: event.target.value })} />
+                              {Number(selectedNode.data?.signatureMethod) === WorkflowSignatureMethod.DigitalCertificate && <label className="flex items-center gap-2 text-sm"><Checkbox checked={selectedNode.data?.requireValidCertificateChain === true} disabled={selectedWorkflowHasLiveInstances} onCheckedChange={checked => updateSelectedNode({ requireValidCertificateChain: checked === true })} />Require valid certificate chain</label>}
+                            </>}
+                          </div>
+
+                          <div className="space-y-3 rounded-md border bg-white p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <Label>Cross-Step SOD Rules</Label>
+                                <p className="text-xs text-muted-foreground">Block conflicting actors from approving this step.</p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onClick={addApprovalConflictRule}
+                              >
+                                <Plus className="mr-1 h-3.5 w-3.5" />
+                                Add
+                              </Button>
+                              <Button type="button" variant="outline" size="sm" disabled={selectedWorkflowHasLiveInstances} onClick={applyEnterpriseSodPreset}>
+                                ERP preset
+                              </Button>
+                            </div>
+
+                            {selectedApprovalConflictRules.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No cross-step conflicts configured.</p>
+                            ) : (
+                              <div className="space-y-3">
+                                {selectedApprovalConflictRules.map((rule) => (
+                                  <div key={rule.id} className="space-y-2 border-t pt-3 first:border-t-0 first:pt-0">
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        value={rule.name || ''}
+                                        placeholder="Rule name"
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onChange={(event) => updateApprovalConflictRule(rule.id, { name: event.target.value })}
+                                      />
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="shrink-0 text-red-600"
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onClick={() => removeApprovalConflictRule(rule.id)}
+                                        aria-label="Remove SOD rule"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                    <Select
+                                      value={String(rule.actorSource)}
+                                      disabled={selectedWorkflowHasLiveInstances}
+                                      onValueChange={(value) => updateApprovalConflictRule(rule.id, {
+                                        actorSource: Number(value) as WorkflowApprovalActorSource,
+                                        sourceStepName: undefined,
+                                        contextField: undefined,
+                                      })}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Conflicting actor" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.PreviousStepActor)}>Previous step actor</SelectItem>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.AnyPreviousApprover)}>Any prior approver</SelectItem>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.SpecificStepActor)}>Actor from named step</SelectItem>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.ContextUser)}>User from workflow field</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+
+                                    {rule.actorSource === WorkflowApprovalActorSource.SpecificStepActor && (
+                                      <Select
+                                        value={rule.sourceStepName || ''}
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onValueChange={(value) => updateApprovalConflictRule(rule.id, { sourceStepName: value })}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select source step" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {availableSodSourceSteps.map((stepName) => (
+                                            <SelectItem key={stepName} value={stepName}>{stepName}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    )}
+
+                                    {rule.actorSource === WorkflowApprovalActorSource.ContextUser && (
+                                      <Input
+                                        value={rule.contextField || ''}
+                                        placeholder="Context user field, e.g. requestedById"
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onChange={(event) => updateApprovalConflictRule(rule.id, { contextField: event.target.value })}
+                                      />
+                                    )}
+
+                                    <Input
+                                      value={rule.message || ''}
+                                      placeholder="Optional blocking message"
+                                      disabled={selectedWorkflowHasLiveInstances}
+                                      onChange={(event) => updateApprovalConflictRule(rule.id, { message: event.target.value })}
+                                    />
+                                    <label className="flex items-center gap-2 text-xs">
+                                      <Checkbox
+                                        checked={rule.isEnabled !== false}
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onCheckedChange={(checked) => updateApprovalConflictRule(rule.id, { isEnabled: checked === true })}
+                                      />
+                                      Enabled
+                                    </label>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           
                           <div>
@@ -2620,9 +3007,9 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                           <div className="rounded-md border bg-white p-3 space-y-3">
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <Label>Approval Checklist</Label>
+                                <Label>Step Checklist</Label>
                                 <p className="text-xs text-muted-foreground">
-                                  Required checks must be satisfied before completion.
+                                  Required checks must be satisfied before this approval can be completed.
                                 </p>
                               </div>
                               <Button
@@ -3104,9 +3491,9 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       <Dialog open={checklistDialogOpen} onOpenChange={setChecklistDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
           <DialogHeader>
-            <DialogTitle>Configure Approval Checklist</DialogTitle>
+            <DialogTitle>Configure Step Checklist</DialogTitle>
             <DialogDescription>
-              Define the checks that must be satisfied before this approval step can complete.
+              Define the checks and evidence required before this workflow step can continue.
             </DialogDescription>
           </DialogHeader>
 
@@ -3130,7 +3517,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           <ScrollArea className="h-[430px] pr-4">
             {selectedApprovalChecklist.length === 0 ? (
               <div className="rounded-md border border-dashed bg-white p-4 text-sm text-muted-foreground">
-                No checklist items for this approval step.
+                No checklist items for this step.
               </div>
             ) : (
               <div className="space-y-3">
@@ -3166,16 +3553,63 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          checked={item.isRequired !== false}
-                          disabled={selectedWorkflowHasLiveInstances}
-                          onCheckedChange={(checked) =>
-                            updateApprovalChecklistItem(itemId, { isRequired: checked === true })
-                          }
-                        />
-                        <span className="text-sm">Required for approval</span>
+                      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={item.isRequired !== false}
+                            disabled={selectedWorkflowHasLiveInstances}
+                            onCheckedChange={(checked) =>
+                              updateApprovalChecklistItem(itemId, { isRequired: checked === true })
+                            }
+                          />
+                          Required
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={item.requiresDocument === true}
+                            disabled={selectedWorkflowHasLiveInstances}
+                            onCheckedChange={(checked) =>
+                              updateApprovalChecklistItem(itemId, {
+                                requiresDocument: checked === true,
+                                ...(
+                                  checked === true
+                                    ? {}
+                                    : { documentType: undefined, documentName: undefined }
+                                ),
+                              })
+                            }
+                          />
+                          Requires document evidence
+                        </label>
                       </div>
+                      {item.requiresDocument === true && (
+                        <div className="grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`check-document-type-${itemId}`}>Document type</Label>
+                            <Input
+                              id={`check-document-type-${itemId}`}
+                              value={item.documentType || ''}
+                              placeholder="e.g. Tax clearance certificate"
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onChange={(event) =>
+                                updateApprovalChecklistItem(itemId, { documentType: event.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`check-document-name-${itemId}`}>Document name</Label>
+                            <Input
+                              id={`check-document-name-${itemId}`}
+                              value={item.documentName || ''}
+                              placeholder="e.g. Current GRA clearance"
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onChange={(event) =>
+                                updateApprovalChecklistItem(itemId, { documentName: event.target.value })
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

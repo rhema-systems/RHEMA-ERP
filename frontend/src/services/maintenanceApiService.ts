@@ -6,6 +6,7 @@ export interface Asset {
   assetNumber: string;
   description?: string;
   location?: string;
+  currentSiteLocationId?: string;
   status: 'Active' | 'Inactive' | 'Maintenance' | 'OutOfService' | 'Retired' | 'Disposed';
   criticality: 'Low' | 'Medium' | 'High' | 'Critical';
   assetCategoryId: string;

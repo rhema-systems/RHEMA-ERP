@@ -938,12 +938,15 @@ public sealed class EhcHelpdeskDemoSeeder
             wfDef = new WorkflowDefinition
             {
                 Id = Guid.NewGuid(),
+                DefinitionKey = Guid.NewGuid(),
                 TenantId = tenantId,
                 EntityTypeId = entityType.Id,
                 Name = wfName,
                 Description = $"{demoTag} Minimal approval workflow for service requests",
                 Version = 1,
                 IsActive = true,
+                LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                PublishedAt = now,
                 Configuration = "{}",
                 CreatedAt = now,
                 CreatedBy = "System"

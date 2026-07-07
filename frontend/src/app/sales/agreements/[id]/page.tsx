@@ -13,8 +13,7 @@ import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowApprovalActions, WorkflowApprovalHistoryPanel, useWorkflowRecord } from '@/components/workflow';
 import {
   FileText, ArrowLeft, Pause, Play,
   RefreshCw, Ban, AlertTriangle, Calendar, Building2, Home
@@ -90,21 +89,6 @@ export default function SalesAgreementDetailPage() {
     }
   };
 
-  const handleWorkflowSubmit = async () => {
-    const updated = await salesAgreementService.submitForApproval(agreementId);
-    setAgreement(updated);
-  };
-
-  const handleWorkflowApprove = async (comments: string) => {
-    const updated = await salesAgreementService.processApproval(agreementId, { isApproved: true, comments });
-    setAgreement(updated);
-  };
-
-  const handleWorkflowReject = async (comments: string) => {
-    const updated = await salesAgreementService.processApproval(agreementId, { isApproved: false, comments });
-    setAgreement(updated);
-  };
-
   const handleSuspend = () => handleAction(() => salesAgreementService.suspend(agreementId, suspendReason), 'Agreement suspended').then(() => setSuspendDialogOpen(false));
   const handleResume = () => handleAction(() => salesAgreementService.resume(agreementId), 'Agreement resumed');
   const handleTerminate = () => handleAction(() => salesAgreementService.terminate(agreementId, terminateReason), 'Agreement terminated').then(() => setTerminateDialogOpen(false));
@@ -132,11 +116,27 @@ export default function SalesAgreementDetailPage() {
     return <Badge variant={c.variant} className={c.className}>{s.replace(/([A-Z])/g, ' $1').trim()}</Badge>;
   };
 
+  const workflow = useWorkflowRecord({
+    entityType: 'SalesAgreement',
+    entityId: agreementId,
+    entityLabel: 'Sales Agreement',
+    entityNumber: agreement?.documentNumber,
+    status: agreement?.agreementStatus ?? '',
+    canSubmit: agreement?.agreementStatus === 'Draft',
+    canApproveReject: agreement?.agreementStatus === 'PendingApproval',
+    enabled: Boolean(agreement),
+    commands: {
+      submit: async () => setAgreement(await salesAgreementService.submitForApproval(agreementId)),
+      approve: async ({ comments }) => setAgreement(await salesAgreementService.processApproval(agreementId, { isApproved: true, comments })),
+      reject: async ({ comments }) => setAgreement(await salesAgreementService.processApproval(agreementId, { isApproved: false, comments })),
+      afterAction: loadAgreement,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
   if (loading) return <div className="container mx-auto py-6 text-center py-16"><FileText className="h-12 w-12 animate-pulse mx-auto mb-4 text-purple-500" /><p className="text-gray-500">Loading...</p></div>;
   if (!agreement) return <div className="container mx-auto py-6 text-center py-16"><AlertTriangle className="h-12 w-12 mx-auto mb-4 text-yellow-500" /><p className="text-gray-500">Agreement not found</p><Button variant="outline" className="mt-4" onClick={() => router.push('/sales/agreements')}><ArrowLeft className="h-4 w-4 mr-2" />Back</Button></div>;
 
-  const canSubmit = agreement.agreementStatus === 'Draft';
-  const canApprove = agreement.agreementStatus === 'PendingApproval';
   const canSuspend = agreement.agreementStatus === 'Active';
   const canResume = agreement.agreementStatus === 'Suspended';
   const canTerminate = !['Terminated', 'Expired'].includes(agreement.agreementStatus);
@@ -160,20 +160,8 @@ export default function SalesAgreementDetailPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <WorkflowApprovalActions
-            entityType="SalesAgreement"
-            entityId={agreementId}
-            entityLabel="Sales Agreement"
-            entityNumber={agreement.documentNumber}
-            status={agreement.agreementStatus}
+            {...workflow.actionProps}
             showStepBadge
-            loadWorkflowSummary
-            canSubmit={canSubmit}
-            canApproveReject={canApprove}
-            onSubmit={handleWorkflowSubmit}
-            onApprove={handleWorkflowApprove}
-            onReject={handleWorkflowReject}
-            onAfterAction={loadAgreement}
-            onOpenWorkflows={() => router.push('/administration/workflow')}
           />
           {canRenew && (
             <Dialog open={renewDialogOpen} onOpenChange={setRenewDialogOpen}>
@@ -330,18 +318,7 @@ export default function SalesAgreementDetailPage() {
       </div>
 
       <WorkflowApprovalHistoryPanel
-        entityType="SalesAgreement"
-        entityId={agreementId}
-        entityLabel="Sales Agreement"
-        entityNumber={agreement.documentNumber}
-        status={agreement.agreementStatus}
-        canSubmit={canSubmit}
-        canApproveReject={canApprove}
-        onSubmit={handleWorkflowSubmit}
-        onApprove={handleWorkflowApprove}
-        onReject={handleWorkflowReject}
-        onAfterAction={loadAgreement}
-        onOpenWorkflows={() => router.push('/administration/workflow')}
+        {...workflow.actionProps}
         showActions={false}
       />
 

@@ -15,7 +15,7 @@ import { format } from 'date-fns';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowApprovalActions, useWorkflowRecord } from '@/components/workflow';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { TenderAward } from '@/components/procurement/tenders/TenderAward';
 import { AnswerClarificationDialog } from '@/components/procurement/tenders/AnswerClarificationDialog';
@@ -191,6 +191,25 @@ export default function TenderDetailPage() {
     }
   };
 
+  const workflow = useWorkflowRecord({
+    entityType: 'Tender',
+    entityId: tenderId,
+    entityLabel: 'Tender',
+    entityNumber: tender?.tenderNumber,
+    status: tender?.status ?? '',
+    currentStepName: tender?.currentWorkflowStepName,
+    canSubmit: tender?.status === 'Draft',
+    canApproveReject: tender?.status === 'Submitted',
+    enabled: Boolean(tender),
+    commands: {
+      submit: async () => { await tenderService.submitTenderForApproval(tenderId); },
+      approve: async ({ comments }) => { await tenderService.approveTender(tenderId, comments || undefined); },
+      reject: async ({ comments }) => { await tenderService.rejectTender(tenderId, comments); },
+      afterAction: loadTenderDetails,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -248,28 +267,8 @@ export default function TenderDetailPage() {
 
           {(tender.status === 'Draft' || tender.status === 'Submitted') && (
             <WorkflowApprovalActions
-              entityType="Tender"
-              entityId={tender.id}
-              entityLabel="Tender"
-              entityNumber={tender.tenderNumber}
-              status={tender.status}
-              currentStepName={tender.currentWorkflowStepName}
-              loadWorkflowSummary={tender.status === 'Submitted'}
-              canSubmit={tender.status === 'Draft'}
-              canApproveReject={tender.status === 'Submitted'}
-              onSubmit={async () => {
-                await tenderService.submitTenderForApproval(tender.id);
-                await loadTenderDetails();
-              }}
-              onApprove={async (comments) => {
-                await tenderService.approveTender(tender.id, comments || undefined);
-                await loadTenderDetails();
-              }}
-              onReject={async (comments) => {
-                await tenderService.rejectTender(tender.id, comments);
-                await loadTenderDetails();
-              }}
-              onOpenWorkflows={() => router.push('/administration/workflow')}
+              {...workflow.actionProps}
+              showStepBadge
             />
           )}
 
@@ -1164,25 +1163,7 @@ export default function TenderDetailPage() {
         {/* Approvals Tab */}
         <WorkflowTabContent
           value="approvals"
-          entityType="Tender"
-          entityId={tenderId}
-          entityLabel="Tender"
-          entityNumber={tender.tenderNumber}
-          status={tender.status}
-          currentStepName={tender.currentWorkflowStepName}
-          canSubmit={tender.status === 'Draft'}
-          canApproveReject={tender.status === 'Submitted'}
-          onSubmit={async () => {
-            await tenderService.submitTenderForApproval(tender.id);
-          }}
-          onApprove={async (comments) => {
-            await tenderService.approveTender(tender.id, comments || undefined);
-          }}
-          onReject={async (comments) => {
-            await tenderService.rejectTender(tender.id, comments);
-          }}
-          onAfterAction={loadTenderDetails}
-          onOpenWorkflows={() => router.push('/administration/workflow')}
+          {...workflow.actionProps}
         />
       </Tabs>
 

@@ -8,6 +8,8 @@ export interface Employee {
   email: string;
   department?: string;
   position?: string;
+  locationId?: string;
+  locationName?: string;
   isActive: boolean;
 }
 
@@ -174,6 +176,8 @@ class MaintenanceDataService {
           email: emp.emailAddress,
           department: emp.departmentName,
           position: emp.positionTitle,
+          locationId: emp.locationId,
+          locationName: emp.locationName,
           isActive: emp.isActive !== false,
         }));
       

@@ -3,11 +3,17 @@
 // Workflow Definition DTOs
 export interface WorkflowDefinitionAdminDto {
   id: string;
+  definitionKey: string;
   name: string;
   description?: string;
   entityType: string;
   version: number;
   isActive: boolean;
+  lifecycleStatus: WorkflowDefinitionLifecycleStatus;
+  changeSummary?: string;
+  supersedesDefinitionId?: string;
+  publishedAt?: Date;
+  retiredAt?: Date;
   configuration?: string;
   createdDate: Date;
   lastModifiedDate?: Date;
@@ -31,6 +37,7 @@ export interface CreateWorkflowDefinitionAdminDto {
 export interface UpdateWorkflowDefinitionAdminDto {
   name: string;
   description?: string;
+  entityType?: string;
   isActive: boolean;
   configuration?: string;
   steps?: CreateWorkflowStepDto[];
@@ -39,12 +46,18 @@ export interface UpdateWorkflowDefinitionAdminDto {
 
 export interface WorkflowDefinitionDto {
   id: string;
+  definitionKey: string;
   name: string;
   description?: string;
   entityType: string;
   configuration?: string;
   isActive: boolean;
   version: number;
+  lifecycleStatus: WorkflowDefinitionLifecycleStatus;
+  changeSummary?: string;
+  supersedesDefinitionId?: string;
+  publishedAt?: Date;
+  retiredAt?: Date;
   createdById: string;
   createdByName: string;
   createdDate: Date;
@@ -53,6 +66,32 @@ export interface WorkflowDefinitionDto {
   lastModifiedDate?: Date;
   steps: WorkflowStepDto[];
   transitions: WorkflowTransitionDto[];
+}
+
+export interface WorkflowDefinitionVersionDto {
+  id: string;
+  definitionKey: string;
+  name: string;
+  version: number;
+  lifecycleStatus: WorkflowDefinitionLifecycleStatus;
+  isActive: boolean;
+  changeSummary?: string;
+  supersedesDefinitionId?: string;
+  createdDate: Date;
+  publishedAt?: Date;
+  retiredAt?: Date;
+  activeInstancesCount: number;
+}
+
+export interface WorkflowDefinitionComparisonDto {
+  definitionKey: string;
+  fromDefinitionId: string;
+  fromVersion: number;
+  toDefinitionId: string;
+  toVersion: number;
+  hasChanges: boolean;
+  hasPotentiallyBreakingChanges: boolean;
+  changes: string[];
 }
 
 export interface WorkflowStepDto {
@@ -120,6 +159,7 @@ export interface WorkflowConditionDto {
 }
 
 export interface WorkflowAssignmentRuleDto {
+  approvalGroup?: number;
   condition?: WorkflowConditionDto;
   assignmentType: WorkflowAssignmentType;
   userId?: string;
@@ -130,10 +170,41 @@ export interface WorkflowAssignmentRuleDto {
 
 export interface WorkflowApprovalConfigDto {
   approvalType: WorkflowApprovalType;
+  activationMode?: WorkflowApprovalActivationMode;
   approverRules: WorkflowAssignmentRuleDto[];
   minApprovalsRequired: number;
   autoApprovalCondition?: WorkflowConditionDto;
   rejectionHandling: WorkflowRejectionHandling;
+  preventInitiatorApproval: boolean;
+  requireDistinctApprovers: boolean;
+  conflictRules: WorkflowApprovalConflictRuleDto[];
+  signaturePolicy?: WorkflowSignaturePolicyDto;
+}
+
+export enum WorkflowSignatureMethod { Attestation = 0, DigitalCertificate = 1, ExternalProvider = 2 }
+export interface WorkflowSignaturePolicyDto {
+  isRequired: boolean;
+  method: WorkflowSignatureMethod;
+  requiredSigningRole?: string;
+  requireValidCertificateChain: boolean;
+  attestationText: string;
+}
+export interface WorkflowSignatureSubmissionDto {
+  method: WorkflowSignatureMethod;
+  attestation: string;
+  certificateBase64?: string;
+  externalReference?: string;
+  signedAt: string;
+}
+
+export interface WorkflowApprovalConflictRuleDto {
+  id: string;
+  name: string;
+  isEnabled: boolean;
+  actorSource: WorkflowApprovalActorSource;
+  sourceStepName?: string;
+  contextField?: string;
+  message?: string;
 }
 
 export interface WorkflowQualityConfigDto {
@@ -147,6 +218,9 @@ export interface WorkflowQualityCheckDto {
   name: string;
   description: string;
   isRequired: boolean;
+  requiresDocument: boolean;
+  documentType?: string;
+  documentName?: string;
   applicabilityCondition?: WorkflowConditionDto;
   expectedValue?: any;
   validationExpression?: string;
@@ -157,6 +231,10 @@ export interface WorkflowApprovalChecklistResponseDto {
   name: string;
   isSatisfied: boolean;
   notes?: string;
+  attachmentIds?: string[];
+  completedById?: string;
+  completedByName?: string;
+  completedAt?: string;
 }
 
 export interface WorkflowTaskConfigDto {
@@ -170,6 +248,8 @@ export interface WorkflowTaskConfigDto {
 export interface WorkflowTaskAttachmentDto {
   id: string;
   requirementKey?: string;
+  checklistItemId?: string;
+  documentType?: string;
   documentName?: string;
   fileName: string;
   filePath: string;
@@ -178,6 +258,15 @@ export interface WorkflowTaskAttachmentDto {
   uploadedAt: string;
   uploadedById: string;
   uploadedByName?: string;
+  documentOwnerId?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  version?: number;
+  replacesAttachmentId?: string;
+  verificationStatus?: number;
+  malwareScanStatus?: number;
+  isLegalHold?: boolean;
+  sha256?: string;
 }
 
 export interface WorkflowNotificationConfigDto {
@@ -247,6 +336,7 @@ export interface WorkflowStepStatusDto {
 
 export interface WorkflowApprovalStatusDto {
   approvalId: string;
+  approvalGroup?: number;
   stepName: string;
   approverId: string;
   approverName: string;
@@ -255,6 +345,7 @@ export interface WorkflowApprovalStatusDto {
   requestedDate: Date;
   dueDate?: Date;
   isOverdue: boolean;
+  isAdHoc?: boolean;
 }
 
 export interface WorkflowPendingApproverDto {
@@ -274,16 +365,23 @@ export interface WorkflowEntitySummaryDto {
   currentStepInstanceId?: string;
   currentStepType?: WorkflowStepType;
   canCurrentUserApprove: boolean;
+  currentUserApprovalId?: string;
+  currentUserCorrectionId?: string;
+  canCurrentUserResubmit?: boolean;
+  correctionInstructions?: string;
   canCurrentUserRecall?: boolean;
   canCurrentUserComplete?: boolean;
   pendingApprovers: WorkflowPendingApproverDto[];
   currentStepChecklist?: WorkflowQualityCheckDto[];
   currentStepTaskConfig?: WorkflowTaskConfigDto;
   currentStepTaskAttachments?: WorkflowTaskAttachmentDto[];
+  currentStepSignaturePolicy?: WorkflowSignaturePolicyDto;
 }
 
 export interface WorkflowApprovalAuditDto {
   approvalId: string;
+  approvalGroup?: number;
+  isAdHoc?: boolean;
   approverId?: string;
   approverName?: string;
   approverRole?: string;
@@ -306,6 +404,7 @@ export interface WorkflowStepAuditDto {
   assignedToName?: string;
   comments?: string;
   checklist?: WorkflowQualityCheckDto[];
+  checklistResponses?: WorkflowApprovalChecklistResponseDto[];
   taskConfig?: WorkflowTaskConfigDto;
   taskAttachments?: WorkflowTaskAttachmentDto[];
   approvals: WorkflowApprovalAuditDto[];
@@ -428,6 +527,39 @@ export interface CancelWorkflowRequest {
   reason: string;
 }
 
+export interface WorkflowModuleConformanceReport {
+  isConformant: boolean;
+  activeEntityTypeCount: number;
+  supportedEntityTypes: string[];
+  missingStatusAdapters: string[];
+}
+
+export interface WorkflowApprovalPolicySetDto {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  module?: string;
+  entityType?: string;
+  category?: string;
+  locationId?: string;
+  legalEntityId?: string;
+  minimumAmount?: number;
+  maximumAmount?: number;
+  currencyCode?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  priority: number;
+  isActive: boolean;
+  lifecycleStatus: WorkflowDefinitionLifecycleStatus;
+  approvalConfig: WorkflowApprovalConfigDto;
+}
+
+export type SaveWorkflowApprovalPolicyRequest = Omit<
+  WorkflowApprovalPolicySetDto,
+  'id' | 'lifecycleStatus'
+>;
+
 export interface RecallWorkflowRequest {
   reason?: string;
 }
@@ -446,6 +578,196 @@ export interface ProcessApprovalRequest {
   action: WorkflowApprovalAction;
   comments?: string;
   checklistResponses?: WorkflowApprovalChecklistResponseDto[];
+  delegateToId?: string;
+  signature?: WorkflowSignatureSubmissionDto;
+}
+
+export enum WorkflowDelegationKind { Authority = 0, OutOfOffice = 1 }
+
+export interface WorkflowDirectoryUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  userName?: string;
+}
+
+export interface WorkflowDelegationDto {
+  id: string;
+  principalUserId: string;
+  delegateUserId: string;
+  kind: WorkflowDelegationKind;
+  module?: string;
+  entityType?: string;
+  workflowDefinitionId?: string;
+  workflowStepId?: string;
+  maximumAmount?: number;
+  currencyCode?: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+  reason: string;
+  allowRedelegation: boolean;
+  isActive: boolean;
+  revokedAt?: string;
+  revocationReason?: string;
+}
+
+export type SaveWorkflowDelegationRequest = Omit<
+  WorkflowDelegationDto,
+  'id' | 'principalUserId' | 'isActive' | 'revokedAt' | 'revocationReason'
+> & { principalUserId?: string };
+
+export interface WorkflowWorkingCalendarDto {
+  id?: string;
+  name: string;
+  timeZoneId: string;
+  workingDaysMask: number;
+  workDayStart: string;
+  workDayEnd: string;
+  holidays: string[];
+}
+
+export interface WorkflowModuleOptionDto {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+}
+
+export interface WorkflowDelegationStepOptionDto {
+  id: string;
+  name: string;
+  stepType: WorkflowStepType;
+  order: number;
+  isStartStep: boolean;
+  isEndStep: boolean;
+}
+
+export interface WorkflowDelegationWorkflowOptionDto {
+  id: string;
+  name: string;
+  version: number;
+  lifecycleStatus: WorkflowDefinitionLifecycleStatus;
+  entityType: string;
+  entityTypeCode?: string;
+  module?: string;
+  steps: WorkflowDelegationStepOptionDto[];
+}
+
+export interface WorkflowDelegationScopeOptionsDto {
+  modules: WorkflowModuleOptionDto[];
+  entityTypes: WorkflowEntityTypeInfo[];
+  workflowDefinitions: WorkflowDelegationWorkflowOptionDto[];
+}
+
+export interface WorkflowEvidenceCountDto {
+  total: number;
+  pending: number;
+  verified: number;
+  rejected: number;
+  legalHold: number;
+}
+
+export interface WorkflowEvidenceReviewStepDto {
+  stepInstanceId: string;
+  workflowStepId: string;
+  stepName: string;
+  status: WorkflowStepInstanceStatus;
+  startedDate?: string;
+  completedDate?: string;
+  dueDate?: string;
+  evidence: WorkflowEvidenceCountDto;
+}
+
+export interface WorkflowEvidenceReviewInstanceDto {
+  id: string;
+  workflowDefinitionId: string;
+  workflowName: string;
+  entityType: string;
+  entityId: string;
+  status: WorkflowInstanceStatus;
+  startedDate?: string;
+  completedDate?: string;
+  createdDate: string;
+  currentStepInstanceId?: string;
+  steps: WorkflowEvidenceReviewStepDto[];
+}
+
+export interface WorkflowSlaBreachApprovalDto {
+  approvalId: string;
+  workflowInstanceId: string;
+  workflowName: string;
+  entityType: string;
+  entityId: string;
+  stepInstanceId: string;
+  stepName: string;
+  approverId?: string;
+  approverName?: string;
+  approverRole?: string;
+  dueDate?: string;
+  hoursOverdue: number;
+}
+
+export interface WorkflowEscalationExecutionDto {
+  id: string;
+  approvalId: string;
+  ruleIndex: number;
+  action: WorkflowEscalationAction;
+  targetUserId?: string;
+  targetUserName?: string;
+  targetRole?: string;
+  executedAt: string;
+  result?: string;
+  approval?: WorkflowSlaBreachApprovalDto;
+}
+
+export interface WorkflowSlaBreachesDto {
+  generatedAt: string;
+  breaches: WorkflowSlaBreachApprovalDto[];
+  escalations: WorkflowEscalationExecutionDto[];
+}
+
+export interface WorkflowCorrectionRequestDto {
+  id: string;
+  workflowInstanceId: string;
+  approvalId: string;
+  correctionOwnerId: string;
+  targetStepInstanceId?: string;
+  instructions: string;
+  status: number;
+  requestedAt: string;
+  dueAt?: string;
+}
+
+export interface WorkflowEvidencePolicyDto {
+  id?: string;
+  allowedExtensions: string[];
+  maximumFileSizeBytes: number;
+  retentionDays: number;
+  requireMalwareScan: boolean;
+}
+
+export interface WorkflowEvidenceDocumentDto {
+  id: string;
+  attachmentId: string;
+  documentName?: string;
+  documentType?: string;
+  fileName: string;
+  sha256: string;
+  documentOwnerId: string;
+  issueDate?: string;
+  expiryDate?: string;
+  isExpired: boolean;
+  version: number;
+  replacesEvidenceId?: string;
+  isCurrent: boolean;
+  verificationStatus: number;
+  verifiedById?: string;
+  verifiedAt?: string;
+  verificationNotes?: string;
+  malwareScanStatus: number;
+  retainUntil: string;
+  isLegalHold: boolean;
 }
 
 // Workflow Entities (for responses)
@@ -529,7 +851,8 @@ export enum WorkflowApprovalStatus {
   Rejected = 2,
   Delegated = 3,
   Expired = 4,
-  MoreInfoRequested = 5
+  MoreInfoRequested = 5,
+  Queued = 6,
 }
 
 export enum WorkflowPriority {
@@ -581,6 +904,24 @@ export enum WorkflowApprovalType {
   Multiple = 1,
   Consensus = 2,
   Majority = 3
+}
+
+export enum WorkflowApprovalActivationMode {
+  Parallel = 0,
+  Sequential = 1,
+}
+
+export enum WorkflowDefinitionLifecycleStatus {
+  Draft = 'Draft',
+  Published = 'Published',
+  Retired = 'Retired',
+}
+
+export enum WorkflowApprovalActorSource {
+  PreviousStepActor = 0,
+  AnyPreviousApprover = 1,
+  SpecificStepActor = 2,
+  ContextUser = 3,
 }
 
 export enum WorkflowRejectionHandling {

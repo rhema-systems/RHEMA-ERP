@@ -3959,12 +3959,15 @@ namespace ErpSystem.Web.Services
             _context.WorkflowDefinitions.Add(new WorkflowDefinition
             {
                 Id = definitionId,
+                DefinitionKey = definitionId,
                 TenantId = tenantId,
                 Name = definitionName,
                 Description = description,
                 EntityTypeId = entityType.Id,
                 Version = 1,
                 IsActive = true,
+                LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                PublishedAt = now,
                 CreatedAt = now,
                 CreatedBy = "System"
             });
@@ -4069,12 +4072,15 @@ namespace ErpSystem.Web.Services
                     var definition = new WorkflowDefinition
                     {
                         Id = definitionId,
+                        DefinitionKey = definitionId,
                         TenantId = tenant.Id,
                         Name = "EHC Ticket",
                         Description = "Baseline ticket lifecycle: New → Acknowledged → InProgress → Resolved → Closed",
                         EntityTypeId = entityType.Id,
                         Version = 1,
                         IsActive = true,
+                        LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                        PublishedAt = DateTime.UtcNow,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = "System"
                     };

@@ -22,12 +22,17 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { workflowApiService } from '@/services/workflow-api.service';
+import { toast } from 'sonner';
 import Link from 'next/link';
 import type {
   WorkflowStatusDto,
   WorkflowStepStatusDto,
-  WorkflowApprovalStatusDto
+  WorkflowApprovalStatusDto,
+  WorkflowDirectoryUser
 } from '@/types/workflow';
 import {
   WorkflowInstanceStatus,
@@ -36,7 +41,7 @@ import {
 
 import {
   Play, Pause, Clock, CheckCircle, AlertCircle,
-  XCircle, Timer, RefreshCw, Eye, Filter, Search
+  XCircle, Timer, RefreshCw, Eye, Filter, Search, UserRoundPlus, UserMinus
 } from 'lucide-react';
 
 // Import custom node types
@@ -98,6 +103,13 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
   const [activeTab, setActiveTab] = useState('list');
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [approverDialogOpen, setApproverDialogOpen] = useState(false);
+  const [directoryUsers, setDirectoryUsers] = useState<WorkflowDirectoryUser[]>([]);
+  const [adHocUserId, setAdHocUserId] = useState('');
+  const [adHocRole, setAdHocRole] = useState('');
+  const [adHocReason, setAdHocReason] = useState('');
+  const [adHocGroup, setAdHocGroup] = useState(1);
+  const [approverSaving, setApproverSaving] = useState(false);
 
   const instanceStatusName = (status: WorkflowInstanceStatus | string | number | undefined) => {
     if (typeof status === 'number') {
@@ -297,6 +309,37 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const openApproverDialog = async () => {
+    setApproverDialogOpen(true);
+    if (directoryUsers.length === 0) {
+      try { setDirectoryUsers(await workflowApiService.getWorkflowDirectoryUsers()); }
+      catch (error: any) { toast.error(error?.message || 'Unable to load users'); }
+    }
+  };
+
+  const addAdHocApprover = async () => {
+    if (!selectedInstance?.currentStepId || (!adHocUserId && !adHocRole.trim()) || !adHocReason.trim()) {
+      toast.error('Select a user or enter a role, and provide a reason.'); return;
+    }
+    try {
+      setApproverSaving(true);
+      await workflowApiService.addAdHocApprover(selectedInstance.currentStepId, {
+        userId: adHocUserId || undefined, role: adHocUserId ? undefined : adHocRole.trim(),
+        approvalGroup: adHocGroup, reason: adHocReason.trim(),
+      });
+      setAdHocUserId(''); setAdHocRole(''); setAdHocReason(''); await loadInstances();
+      toast.success('Ad hoc approver added');
+    } catch (error: any) { toast.error(error?.message || 'Failed to add approver'); }
+    finally { setApproverSaving(false); }
+  };
+
+  const removeAdHocApprover = async (approvalId: string) => {
+    const reason = window.prompt('Reason for removing this approver');
+    if (!reason?.trim()) return;
+    try { await workflowApiService.removeAdHocApprover(approvalId, reason); await loadInstances(); toast.success('Ad hoc approver removed'); }
+    catch (error: any) { toast.error(error?.message || 'Failed to remove approver'); }
   };
 
   useEffect(() => {
@@ -615,6 +658,9 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-lg font-semibold">{selectedInstance.workflowName}</h3>
                     <div className="flex items-center space-x-2">
+                      {selectedInstance.currentStepId && selectedInstance.pendingApprovals.length > 0 && (
+                        <Button size="sm" variant="outline" onClick={() => void openApproverDialog()}><UserRoundPlus className="mr-2 h-4 w-4" />Approvers</Button>
+                      )}
                       {getStatusIcon(selectedInstance.status)}
                       <Badge className={`${getStatusColor(selectedInstance.status)}`}>
                         {selectedInstance.status.toUpperCase()}
@@ -815,6 +861,21 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                     </div>
                   </TabsContent>
                 </Tabs>
+
+                <Dialog open={approverDialogOpen} onOpenChange={setApproverDialogOpen}>
+                  <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Manage step approvers</DialogTitle></DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">{selectedInstance.pendingApprovals.map(approval => <div key={approval.approvalId} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                        <div><span className="font-medium">{approval.approverName || approval.approverRole}</span>{approval.isAdHoc && <Badge variant="outline" className="ml-2">Ad hoc</Badge>}</div>
+                        {approval.isAdHoc && <Button size="icon" variant="ghost" title="Remove approver" onClick={() => void removeAdHocApprover(approval.approvalId)}><UserMinus className="h-4 w-4" /></Button>}
+                      </div>)}</div>
+                      <div className="grid gap-3 sm:grid-cols-2"><div><Label>User</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={adHocUserId} onChange={event => setAdHocUserId(event.target.value)}><option value="">Use role instead</option>{directoryUsers.map(user => <option key={user.id} value={user.id}>{user.firstName} {user.lastName}</option>)}</select></div>
+                        <div><Label>Role</Label><Input value={adHocRole} onChange={event => setAdHocRole(event.target.value)} disabled={!!adHocUserId} /></div>
+                        <div><Label>Approval group</Label><Input type="number" min="1" value={adHocGroup} onChange={event => setAdHocGroup(Math.max(1, Number(event.target.value)))} /></div>
+                        <div className="sm:col-span-2"><Label>Reason</Label><Textarea value={adHocReason} onChange={event => setAdHocReason(event.target.value)} /></div></div>
+                    </div><DialogFooter><Button variant="outline" onClick={() => setApproverDialogOpen(false)}>Close</Button><Button onClick={() => void addAdHocApprover()} disabled={approverSaving}>Add approver</Button></DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-gray-500">

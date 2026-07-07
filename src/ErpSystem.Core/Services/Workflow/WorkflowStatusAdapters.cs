@@ -26,7 +26,14 @@ public class WorkflowStatusAdapterRegistry : IWorkflowStatusAdapterRegistry
                     continue;
                 }
 
-                _adapters[entityType.Trim()] = adapter;
+                var alias = entityType.Trim();
+                if (_adapters.TryGetValue(alias, out var existingAdapter) && existingAdapter.GetType() != adapter.GetType())
+                {
+                    throw new InvalidOperationException(
+                        $"Workflow entity alias '{alias}' is registered by both '{existingAdapter.GetType().Name}' and '{adapter.GetType().Name}'.");
+                }
+
+                _adapters[alias] = adapter;
             }
         }
     }
@@ -112,6 +119,149 @@ public sealed class JobCardWorkflowStatusAdapter : IWorkflowStatusAdapter
 
     private static JobCard RequireJobCard(object entity)
         => entity as JobCard ?? throw new InvalidOperationException("Expected JobCard entity.");
+}
+
+public sealed class WorkOrderWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[] { "WorkOrder", "Work Order", "WORK_ORDER" };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => Apply(Require(entity), outcome, userId);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => Apply(Require(entity), outcome, userId);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+    {
+        var workOrder = Require(entity);
+        workOrder.Status = "Draft";
+        workOrder.ApprovedById = null;
+        workOrder.ApprovedAt = null;
+    }
+
+    private static void Apply(WorkOrder workOrder, WorkflowOutcome outcome, Guid? userId)
+    {
+        workOrder.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "PendingApproval"
+        };
+        workOrder.ApprovedById = outcome == WorkflowOutcome.Approved ? userId : null;
+        workOrder.ApprovedAt = outcome == WorkflowOutcome.Approved ? DateTime.UtcNow : null;
+    }
+
+    private static WorkOrder Require(object entity)
+        => entity as WorkOrder ?? throw new InvalidOperationException("Expected WorkOrder entity.");
+}
+
+public sealed class RequestForQuotationWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[] { "RFQ", "RequestForQuotation", "Request For Quotation" };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId) => Apply(Require(entity), outcome);
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null) => Apply(Require(entity), outcome);
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null) => Require(entity).Status = "Draft";
+
+    private static void Apply(RequestForQuotation rfq, WorkflowOutcome outcome)
+        => rfq.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "PendingApproval"
+        };
+
+    private static RequestForQuotation Require(object entity)
+        => entity as RequestForQuotation ?? throw new InvalidOperationException("Expected RequestForQuotation entity.");
+}
+
+public sealed class SupplierQuoteWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[] { "SupplierQuote", "Supplier Quote", "SUPPLIER_QUOTE" };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId) => Apply(Require(entity), outcome);
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null) => Apply(Require(entity), outcome);
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null) => Require(entity).Status = "Draft";
+
+    private static void Apply(RequestForQuotationQuote quote, WorkflowOutcome outcome)
+        => quote.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Accepted",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "PendingApproval"
+        };
+
+    private static RequestForQuotationQuote Require(object entity)
+        => entity as RequestForQuotationQuote ?? throw new InvalidOperationException("Expected RequestForQuotationQuote entity.");
+}
+
+public sealed class TenderBidWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[] { "Bid", "TenderBid", "Tender Bid", "TENDER_BID" };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId) => Apply(Require(entity), outcome);
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null) => Apply(Require(entity), outcome);
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null) => Require(entity).Status = "Submitted";
+
+    private static void Apply(TenderBid bid, WorkflowOutcome outcome)
+        => bid.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Accepted",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "UnderEvaluation"
+        };
+
+    private static TenderBid Require(object entity)
+        => entity as TenderBid ?? throw new InvalidOperationException("Expected TenderBid entity.");
+}
+
+public sealed class TenderEvaluationWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[] { "Evaluation", "TenderEvaluation", "Tender Evaluation", "TENDER_EVALUATION" };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId) => Apply(Require(entity), outcome);
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null) => Apply(Require(entity), outcome);
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null) => Require(entity).Status = "Draft";
+
+    private static void Apply(TenderEvaluation evaluation, WorkflowOutcome outcome)
+        => evaluation.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "Submitted"
+        };
+
+    private static TenderEvaluation Require(object entity)
+        => entity as TenderEvaluation ?? throw new InvalidOperationException("Expected TenderEvaluation entity.");
+}
+
+public sealed class CustomerWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[] { "Customer", "SalesCustomer", "Sales Customer" };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId) => Apply(Require(entity), outcome);
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null) => Apply(Require(entity), outcome);
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null) => ApplyDraft(Require(entity));
+
+    private static void Apply(Customer customer, WorkflowOutcome outcome)
+    {
+        customer.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Active",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "PendingApproval"
+        };
+        customer.IsActive = outcome == WorkflowOutcome.Approved;
+    }
+
+    private static void ApplyDraft(Customer customer)
+    {
+        customer.Status = "Draft";
+        customer.IsActive = false;
+    }
+
+    private static Customer Require(object entity)
+        => entity as Customer ?? throw new InvalidOperationException("Expected Customer entity.");
 }
 
 public sealed class PurchaseOrderWorkflowStatusAdapter : IWorkflowStatusAdapter
@@ -1284,7 +1434,8 @@ public sealed class BusinessPartnerWorkflowStatusAdapter : IWorkflowStatusAdapte
         "Business Partner",
         "BUSINESS_PARTNER",
         "Supplier",
-        "Contractor"
+        "Contractor",
+        "Vendor"
     };
 
     public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
@@ -1431,4 +1582,56 @@ public sealed class ServiceRequestWorkflowStatusAdapter : IWorkflowStatusAdapter
 
     private static EhcServiceRequest RequireServiceRequest(object entity)
         => entity as EhcServiceRequest ?? throw new InvalidOperationException("Expected EhcServiceRequest entity.");
+}
+
+public sealed class EhcTicketWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "EhcTicket",
+        "EHC Ticket",
+        "EHC_TICKET"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var ticket = RequireTicket(entity);
+        ticket.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => NextActiveStatus(ticket.Status),
+            WorkflowOutcome.Rejected => EhcTicketStatus.New,
+            _ => EhcTicketStatus.Acknowledged
+        };
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var ticket = RequireTicket(entity);
+        ticket.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => NextActiveStatus(ticket.Status),
+            WorkflowOutcome.Rejected => EhcTicketStatus.New,
+            _ => EhcTicketStatus.Acknowledged
+        };
+
+        if (ticket.Status == EhcTicketStatus.InProgress && ticket.FirstRespondedAt == null)
+        {
+            ticket.FirstRespondedAt = DateTime.UtcNow;
+        }
+    }
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+    {
+        var ticket = RequireTicket(entity);
+        ticket.Status = EhcTicketStatus.New;
+        ticket.FirstRespondedAt = null;
+    }
+
+    private static EhcTicketStatus NextActiveStatus(EhcTicketStatus currentStatus)
+        => currentStatus is EhcTicketStatus.Resolved or EhcTicketStatus.Closed
+            ? currentStatus
+            : EhcTicketStatus.InProgress;
+
+    private static EhcTicket RequireTicket(object entity)
+        => entity as EhcTicket ?? throw new InvalidOperationException("Expected EhcTicket entity.");
 }

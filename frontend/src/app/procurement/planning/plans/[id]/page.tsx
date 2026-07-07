@@ -20,7 +20,7 @@ import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/in
 import { format } from 'date-fns';
 import { FileCheck, ShoppingCart } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowApprovalActions, useWorkflowRecord } from '@/components/workflow';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { ProcurementPlanItemDialogBody } from '@/app/procurement/planning/components/ProcurementPlanItemDialogBody';
 
@@ -497,34 +497,39 @@ export default function ProcurementPlanDetailPage() {
   const pendingPlanItemsTotal = pendingPlanItems.reduce((total, item) => total + getItemEstimatedTotal(item), 0);
   const unitOfMeasureOptions = buildUnitOfMeasureOptions(unitsOfMeasure, newItemForm.unitOfMeasure);
 
-  const handleWorkflowSubmit = async () => {
-    if (!plan) return;
-    await procurementPlanService.submitForApproval(planId, { comments: '' });
-    await loadPlanDetails();
-  };
-
-  const handleWorkflowApprove = async (comments: string) => {
-    if (!plan) return;
-    await procurementPlanService.approvePlan(planId, {
-      isApproved: true,
-      approvedBudget: plan.approvedBudget || plan.totalEstimatedBudget,
-      comments: comments || undefined,
-      autoGenerateSchedules: true,
-      autoLinkBudget: true,
-    });
-    await loadPlanDetails();
-  };
-
-  const handleWorkflowReject = async (comments: string) => {
-    if (!plan) return;
-    await procurementPlanService.approvePlan(planId, {
-      isApproved: false,
-      comments: comments || undefined,
-      autoGenerateSchedules: false,
-      autoLinkBudget: false,
-    });
-    await loadPlanDetails();
-  };
+  const workflow = useWorkflowRecord({
+    entityType: 'ProcurementPlan',
+    entityId: planId,
+    entityLabel: 'Procurement Plan',
+    entityNumber: plan?.planNumber,
+    status: plan?.status ?? '',
+    canSubmit: plan?.status === 'Draft',
+    canApproveReject: plan?.status === 'Submitted' || plan?.status === 'UnderReview',
+    enabled: Boolean(plan),
+    commands: {
+      submit: async () => { await procurementPlanService.submitForApproval(planId, { comments: '' }); },
+      approve: async ({ comments }) => {
+        if (!plan) return;
+        await procurementPlanService.approvePlan(planId, {
+          isApproved: true,
+          approvedBudget: plan.approvedBudget || plan.totalEstimatedBudget,
+          comments: comments || undefined,
+          autoGenerateSchedules: true,
+          autoLinkBudget: true,
+        });
+      },
+      reject: async ({ comments }) => {
+        await procurementPlanService.approvePlan(planId, {
+          isApproved: false,
+          comments: comments || undefined,
+          autoGenerateSchedules: false,
+          autoLinkBudget: false,
+        });
+      },
+      afterAction: loadPlanDetails,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
 
   const handleOpenPublishDialog = () => {
     setPublishComments('');
@@ -824,20 +829,8 @@ export default function ProcurementPlanDetailPage() {
             </Button>
           )}
           <WorkflowApprovalActions
-            entityType="ProcurementPlan"
-            entityId={plan.id}
-            entityLabel="Procurement Plan"
-            entityNumber={plan.planNumber}
-            status={plan.status}
+            {...workflow.actionProps}
             showStepBadge
-            loadWorkflowSummary
-            canSubmit={plan.status === 'Draft'}
-            canApproveReject={plan.status === 'Submitted' || plan.status === 'UnderReview'}
-            onSubmit={handleWorkflowSubmit}
-            onApprove={handleWorkflowApprove}
-            onReject={handleWorkflowReject}
-            onAfterAction={loadPlanDetails}
-            onOpenWorkflows={() => router.push('/administration/workflow')}
           />
           {plan.status === 'Approved' && (
             <Button onClick={handleOpenPublishDialog} disabled={publishLoading || !plan.items?.length}>
@@ -1232,18 +1225,8 @@ export default function ProcurementPlanDetailPage() {
         </TabsContent>
 
         <WorkflowTabContent
+          {...workflow.actionProps}
           entityType="ProcurementPlan"
-          entityId={plan.id}
-          entityLabel="Procurement Plan"
-          entityNumber={plan.planNumber}
-          status={plan.status}
-          canSubmit={plan.status === 'Draft'}
-          canApproveReject={plan.status === 'Submitted' || plan.status === 'UnderReview'}
-          onSubmit={handleWorkflowSubmit}
-          onApprove={handleWorkflowApprove}
-          onReject={handleWorkflowReject}
-          onAfterAction={loadPlanDetails}
-          onOpenWorkflows={() => router.push('/administration/workflow')}
           showActions
         />
       </Tabs>

@@ -271,6 +271,9 @@ public class WorkOrderService : IWorkOrderService
                 return result;
             }
 
+            var linkedFleetDefects = await GetLinkedFleetDefectsAsync(workOrder);
+            EnsureLatestQualityCheckPassedForLinkedDefects(workOrder, linkedFleetDefects);
+
             // Complete all tasks if not already done
             await CompleteAllTasksAsync(completionDto.WorkOrderId, completedById);
 
@@ -387,6 +390,8 @@ public class WorkOrderService : IWorkOrderService
 
             // Post internal maintenance cost to fleet ledger when this work order involves exactly one vehicle asset (best-effort).
             await UpsertFleetInternalMaintenanceCostEntryAsync(workOrder, actualCost, result.CompletionDate, completedById);
+
+            await CloseLinkedFleetDefectsAsync(linkedFleetDefects, completedById, result.CompletionDate);
 
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
@@ -1155,6 +1160,8 @@ public class WorkOrderService : IWorkOrderService
                     throw new InvalidOperationException($"Employee {technician.FirstName} {technician.LastName} is not qualified for maintenance assignments");
                 }
 
+                EnsureTechnicianMatchesAssetLocation(technician, workOrder);
+
                 _logger.LogInformation("Assigning work order {WorkOrderId} to technician {TechnicianName} (ID: {TechnicianId})",
                     id, $"{technician.FirstName} {technician.LastName}", technicianId.Value);
             }
@@ -1266,6 +1273,17 @@ public class WorkOrderService : IWorkOrderService
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
 
+            var qualityValidation = await _qualityControlService.ValidateWorkOrderCompletionAsync(id);
+            if (!qualityValidation.CanComplete)
+            {
+                throw new InvalidOperationException(
+                    qualityValidation.ValidationFailures.FirstOrDefault()
+                    ?? "Work order cannot be completed until quality control requirements are met.");
+            }
+
+            var linkedFleetDefects = await GetLinkedFleetDefectsAsync(workOrder);
+            EnsureLatestQualityCheckPassedForLinkedDefects(workOrder, linkedFleetDefects);
+
             // Release vehicles back to Active status
             await UpdateVehicleStatusOnWorkOrderCompleteAsync(id);
 
@@ -1308,6 +1326,11 @@ public class WorkOrderService : IWorkOrderService
             // Best-effort fleet cost posting for vehicle work orders.
             var completedByUserId = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
             await UpsertFleetInternalMaintenanceCostEntryAsync(workOrder, workOrder.ActualCost, workOrder.ActualCompletionDate ?? DateTime.UtcNow, completedByUserId);
+
+            await CloseLinkedFleetDefectsAsync(
+                linkedFleetDefects,
+                completedByUserId,
+                workOrder.ActualCompletionDate ?? DateTime.UtcNow);
 
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
@@ -2440,6 +2463,69 @@ public class WorkOrderService : IWorkOrderService
     #endregion
 
     #region Additional Required Methods
+
+    private static void EnsureTechnicianMatchesAssetLocation(
+        ErpSystem.Core.Entities.HR.Employee technician,
+        WorkOrder workOrder)
+    {
+        var assetLocationId = workOrder.Asset?.CurrentSiteLocationId;
+        if (!assetLocationId.HasValue)
+        {
+            throw new InvalidOperationException(
+                $"Asset {workOrder.Asset?.AssetNumber ?? workOrder.AssetId.ToString()} must have a current site location before a technician can be assigned.");
+        }
+
+        if (technician.LocationId != assetLocationId)
+        {
+            throw new InvalidOperationException(
+                $"Technician {technician.FullName} is not assigned to the asset's current location.");
+        }
+    }
+
+    private async Task<List<FleetDefect>> GetLinkedFleetDefectsAsync(WorkOrder workOrder)
+    {
+        return await _unitOfWork.Repository<FleetDefect>()
+            .GetQueryable(defect =>
+                defect.TenantId == workOrder.TenantId &&
+                defect.WorkOrderId == workOrder.Id &&
+                !defect.IsDeleted &&
+                defect.Status != "Closed")
+            .ToListAsync();
+    }
+
+    private static void EnsureLatestQualityCheckPassedForLinkedDefects(
+        WorkOrder workOrder,
+        IReadOnlyCollection<FleetDefect> linkedFleetDefects)
+    {
+        if (linkedFleetDefects.Count == 0)
+            return;
+
+        var latestQualityCheck = workOrder.QualityChecks
+            .OrderByDescending(check => check.InspectionDate)
+            .FirstOrDefault();
+
+        if (latestQualityCheck == null ||
+            !string.Equals(latestQualityCheck.OverallResult, "Pass", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The work order is linked to an inspection defect and cannot be completed until its latest QC result is Pass.");
+        }
+    }
+
+    private async Task CloseLinkedFleetDefectsAsync(
+        IEnumerable<FleetDefect> linkedFleetDefects,
+        Guid? completedById,
+        DateTime completedAt)
+    {
+        var defectRepository = _unitOfWork.Repository<FleetDefect>();
+        foreach (var defect in linkedFleetDefects)
+        {
+            defect.Status = "Closed";
+            defect.UpdatedAt = completedAt;
+            defect.LastModifiedById = completedById;
+            await defectRepository.UpdateAsync(defect);
+        }
+    }
 
     /// <summary>
     /// Gets work orders due soon

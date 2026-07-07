@@ -1,6 +1,35 @@
 namespace ErpSystem.Core.Enums;
 
 /// <summary>
+/// Lifecycle state of an immutable workflow definition version.
+/// </summary>
+public enum WorkflowDefinitionLifecycleStatus
+{
+    Draft = 0,
+    Published = 1,
+    Retired = 2
+}
+
+public enum WorkflowDelegationKind
+{
+    Authority = 0,
+    OutOfOffice = 1
+}
+
+public enum WorkflowCorrectionStatus
+{
+    Open = 0,
+    Resubmitted = 1,
+    Accepted = 2,
+    Cancelled = 3
+}
+
+public enum WorkflowEvidenceVerificationStatus { Pending = 0, Verified = 1, Rejected = 2 }
+public enum WorkflowMalwareScanStatus { Pending = 0, Clean = 1, Infected = 2, Failed = 3 }
+public enum WorkflowSignatureMethod { Attestation = 0, DigitalCertificate = 1, ExternalProvider = 2 }
+public enum WorkflowExecutionQueueStatus { Pending = 0, Processing = 1, Succeeded = 2, Failed = 3, DeadLetter = 4 }
+
+/// <summary>
 /// Types of workflow steps
 /// </summary>
 public enum WorkflowStepType
@@ -182,7 +211,12 @@ public enum WorkflowApprovalStatus
     /// <summary>
     /// More information was requested
     /// </summary>
-    MoreInfoRequested = 5
+    MoreInfoRequested = 5,
+
+    /// <summary>
+    /// Approval is configured but waits for an earlier sequential group.
+    /// </summary>
+    Queued = 6
 }
 
 /// <summary>
@@ -501,6 +535,26 @@ public enum WorkflowApprovalType
     /// Majority approval
     /// </summary>
     Majority = 3
+}
+
+/// <summary>
+/// Controls whether approval groups are available together or activated in order.
+/// </summary>
+public enum WorkflowApprovalActivationMode
+{
+    Parallel = 0,
+    Sequential = 1
+}
+
+/// <summary>
+/// Actor sources used by cross-step approval segregation rules.
+/// </summary>
+public enum WorkflowApprovalActorSource
+{
+    PreviousStepActor = 0,
+    AnyPreviousApprover = 1,
+    SpecificStepActor = 2,
+    ContextUser = 3
 }
 
 /// <summary>

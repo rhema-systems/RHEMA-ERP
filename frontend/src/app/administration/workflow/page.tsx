@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Plus, Search, Download, Upload, Settings, Play, Pause, BarChart3, Eye, Edit3, Trash2, RefreshCw, Info } from 'lucide-react';
+import { Plus, Search, Download, Upload, Settings, Play, Pause, BarChart3, Eye, Edit3, Trash2, RefreshCw, Info, Copy, Rocket, Archive, History, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,18 +11,26 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { WorkflowDesigner } from '@/components/workflow/WorkflowDesigner';
 import { WorkflowInstanceMonitor } from '@/components/workflow/WorkflowInstanceMonitor';
 import { WorkflowCreationWizard } from '@/components/workflow/WorkflowCreationWizard';
+import { WorkflowApprovalPoliciesPanel } from '@/components/workflow/WorkflowApprovalPoliciesPanel';
+import { WorkflowGovernancePanel } from '@/components/workflow/WorkflowGovernancePanel';
+import { WorkflowTemplateCataloguePanel } from '@/components/workflow/WorkflowTemplateCataloguePanel';
+import { WorkflowAnalyticsPanel } from '@/components/workflow/WorkflowAnalyticsPanel';
 import { workflowApiService } from '@/services/workflow-api.service';
 import type { 
   WorkflowDefinitionAdminDto, 
   WorkflowDefinitionDto,
-  WorkflowDefinitionFilterDto
+  WorkflowDefinitionFilterDto,
+  WorkflowDefinitionVersionDto,
+  WorkflowDefinitionComparisonDto,
+  WorkflowModuleConformanceReport,
+  WorkflowEntityTypeInfo
 } from '@/types/workflow';
+import { WorkflowDefinitionLifecycleStatus } from '@/types/workflow';
 import { toast } from '@/hooks/use-toast';
 
 function WorkflowAdministrationPageInner() {
@@ -36,8 +44,9 @@ function WorkflowAdministrationPageInner() {
   const [isInstanceMonitorOpen, setIsInstanceMonitorOpen] = useState(false);
   const [isCreationWizardOpen, setIsCreationWizardOpen] = useState(false);
   const [isSeedingEntityTypes, setIsSeedingEntityTypes] = useState(false);
-  const [entityTypes, setEntityTypes] = useState<Array<{ code: string; name: string }>>([]);
+  const [entityTypes, setEntityTypes] = useState<WorkflowEntityTypeInfo[]>([]);
   const [initializedFromQuery, setInitializedFromQuery] = useState(false);
+  const [conformance, setConformance] = useState<WorkflowModuleConformanceReport | null>(null);
 
   // Workflow statistics
   const [stats, setStats] = useState({
@@ -57,17 +66,33 @@ function WorkflowAdministrationPageInner() {
   const [editDefinition, setEditDefinition] = useState<WorkflowDefinitionDto | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
-  const [editIsActive, setEditIsActive] = useState(false);
+  const [lifecycleSavingId, setLifecycleSavingId] = useState<string | null>(null);
+  const [versionsDialogOpen, setVersionsDialogOpen] = useState(false);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versions, setVersions] = useState<WorkflowDefinitionVersionDto[]>([]);
+  const [versionComparison, setVersionComparison] = useState<WorkflowDefinitionComparisonDto | null>(null);
+  const [simulationResult, setSimulationResult] = useState<any>(null);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WorkflowDefinitionAdminDto | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
+
+  const handleSimulate = async (definitionId: string) => {
+    try { setSimulationResult(await workflowApiService.simulateWorkflowDefinition(definitionId, {})); }
+    catch (error: any) { toast({ title: 'Simulation failed', description: error?.message, variant: 'destructive' }); }
+  };
+
+  const handleRollback = async (definitionId: string) => {
+    try { await workflowApiService.rollbackWorkflowDefinition(definitionId); setVersionsDialogOpen(false); await fetchDefinitions(); toast({ title: 'Rollback draft created' }); }
+    catch (error: any) { toast({ title: 'Rollback failed', description: error?.message, variant: 'destructive' }); }
+  };
 
   useEffect(() => {
     // Load workflow statistics and definitions on mount
     fetchWorkflowStats();
     fetchDefinitions();
     fetchEntityTypes();
+    fetchConformance();
   }, []);
 
   useEffect(() => {
@@ -232,7 +257,7 @@ function WorkflowAdministrationPageInner() {
       const types = await workflowApiService.getWorkflowEntityTypes();
       const data = (types || [])
         .filter((t) => t && t.code && t.name)
-        .map((t) => ({ code: String(t.code), name: String(t.name) }))
+        .map((t) => ({ ...t, code: String(t.code), name: String(t.name) }))
         .sort((a, b) => a.name.localeCompare(b.name));
       setEntityTypes(data);
     } catch (error) {
@@ -261,7 +286,6 @@ function WorkflowAdministrationPageInner() {
       setEditDefinition(def);
       setEditName(def.name ?? '');
       setEditDescription(def.description ?? '');
-      setEditIsActive(!!def.isActive);
     } catch (error: any) {
       console.error('Failed to load workflow definition for edit:', error);
       const status = (error as any)?.status;
@@ -290,7 +314,7 @@ function WorkflowAdministrationPageInner() {
       await workflowApiService.updateWorkflowDefinition(editDefinition.id, {
         name: trimmedName,
         description: editDescription?.trim() || undefined,
-        isActive: editIsActive,
+        isActive: false,
         // IMPORTANT: backend overwrites configuration when null/omitted.
         // Keep existing configuration unless the designer is used.
         configuration: editDefinition.configuration ?? undefined,
@@ -315,6 +339,75 @@ function WorkflowAdministrationPageInner() {
       setEditSaving(false);
     }
   };
+
+  const handleCloneDraft = async (definition: WorkflowDefinitionAdminDto) => {
+    setLifecycleSavingId(definition.id);
+    try {
+      const draft = await workflowApiService.cloneWorkflowDefinitionDraft(
+        definition.id,
+        `Changes after version ${definition.version}`
+      );
+      toast({ title: `Draft version ${draft.version} created`, variant: 'success' });
+      await fetchDefinitions();
+      handleDesignWorkflow(draft.id);
+    } catch (error: any) {
+      toast({ title: 'Unable to create draft', description: error?.message, variant: 'destructive' });
+    } finally {
+      setLifecycleSavingId(null);
+    }
+  };
+
+  const handlePublish = async (definition: WorkflowDefinitionAdminDto) => {
+    setLifecycleSavingId(definition.id);
+    try {
+      await workflowApiService.publishWorkflowDefinition(definition.id);
+      toast({ title: `Version ${definition.version} published`, variant: 'success' });
+      await Promise.all([fetchDefinitions(), fetchWorkflowStats()]);
+    } catch (error: any) {
+      toast({ title: 'Publish failed', description: error?.message, variant: 'destructive' });
+    } finally {
+      setLifecycleSavingId(null);
+    }
+  };
+
+  const handleRetire = async (definition: WorkflowDefinitionAdminDto) => {
+    setLifecycleSavingId(definition.id);
+    try {
+      await workflowApiService.retireWorkflowDefinition(definition.id);
+      toast({ title: `Version ${definition.version} retired`, variant: 'success' });
+      await Promise.all([fetchDefinitions(), fetchWorkflowStats()]);
+    } catch (error: any) {
+      toast({ title: 'Retire failed', description: error?.message, variant: 'destructive' });
+    } finally {
+      setLifecycleSavingId(null);
+    }
+  };
+
+  const handleViewVersions = async (definition: WorkflowDefinitionAdminDto) => {
+    setVersionsDialogOpen(true);
+    setVersionsLoading(true);
+    setVersions([]);
+    setVersionComparison(null);
+    try {
+      const result = await workflowApiService.getWorkflowDefinitionVersions(definition.id);
+      setVersions(result);
+      if (result.length >= 2) {
+        setVersionComparison(await workflowApiService.compareWorkflowDefinitions(result[1].id, result[0].id));
+      }
+    } catch (error: any) {
+      toast({ title: 'Unable to load version history', description: error?.message, variant: 'destructive' });
+      setVersionsDialogOpen(false);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const lifecycleLabel = (status: WorkflowDefinitionLifecycleStatus) =>
+    status === WorkflowDefinitionLifecycleStatus.Published
+      ? 'Published'
+      : status === WorkflowDefinitionLifecycleStatus.Retired
+        ? 'Retired'
+        : 'Draft';
 
   const handleDeleteWorkflow = (definition: WorkflowDefinitionAdminDto) => {
     setDeleteTarget(definition);
@@ -354,6 +447,7 @@ function WorkflowAdministrationPageInner() {
     try {
       setIsSeedingEntityTypes(true);
       const seeded = await workflowApiService.seedWorkflowEntityTypes();
+      await Promise.all([fetchEntityTypes(), fetchConformance()]);
       toast({
         title: 'Entity types seeded',
         description: `${seeded.length} entity types are now available.`
@@ -366,6 +460,14 @@ function WorkflowAdministrationPageInner() {
       });
     } finally {
       setIsSeedingEntityTypes(false);
+    }
+  };
+
+  const fetchConformance = async () => {
+    try {
+      setConformance(await workflowApiService.getWorkflowModuleConformance());
+    } catch (error) {
+      console.error('Failed to load workflow module conformance:', error);
     }
   };
 
@@ -398,6 +500,35 @@ function WorkflowAdministrationPageInner() {
           </Button>
         </div>
       </div>
+
+      {conformance && (
+        <div className={`flex flex-col gap-3 border px-4 py-3 md:flex-row md:items-center md:justify-between ${
+          conformance.isConformant
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+            : 'border-amber-300 bg-amber-50 text-amber-950'
+        }`}>
+          <div className="flex items-start gap-3">
+            {conformance.isConformant
+              ? <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
+              : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />}
+            <div>
+              <p className="text-sm font-semibold">
+                {conformance.isConformant ? 'Module integrations conformant' : 'Workflow module integration gaps'}
+              </p>
+              <p className="text-sm opacity-80">
+                {conformance.supportedEntityTypes.length} of {conformance.activeEntityTypeCount} active entity types have a status adapter.
+              </p>
+              {!conformance.isConformant && (
+                <p className="mt-1 text-xs">{conformance.missingStatusAdapters.join(', ')}</p>
+              )}
+            </div>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={fetchConformance}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
+      )}
 
       {/* UX Helper: Wizard vs Designer */}
       <Card className="border-blue-200 bg-blue-50">
@@ -468,9 +599,11 @@ function WorkflowAdministrationPageInner() {
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="definitions">Definitions</TabsTrigger>
           <TabsTrigger value="instances">Live Instances</TabsTrigger>
+          <TabsTrigger value="policies">Approval Policies</TabsTrigger>
+          <TabsTrigger value="governance">Governance</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
         </TabsList>
@@ -537,7 +670,9 @@ function WorkflowAdministrationPageInner() {
                       <CardDescription>{def.description || 'No description provided'}</CardDescription>
                     </div>
                     <div className="flex space-x-2">
-                      <Badge variant={def.isActive ? 'default' : 'secondary'}>{def.isActive ? 'Active' : 'Inactive'}</Badge>
+                      <Badge variant={def.lifecycleStatus === WorkflowDefinitionLifecycleStatus.Published ? 'default' : 'secondary'}>
+                        {lifecycleLabel(def.lifecycleStatus)}
+                      </Badge>
                       <Badge variant="outline">{def.entityType}</Badge>
                     </div>
                   </div>
@@ -550,16 +685,42 @@ function WorkflowAdministrationPageInner() {
                     <div className="flex space-x-2">
                       <Button variant="outline" size="sm" onClick={() => handleDesignWorkflow(def.id)}>
                         <Settings className="h-4 w-4 mr-1" />
-                        Design
+                        {def.lifecycleStatus === WorkflowDefinitionLifecycleStatus.Draft ? 'Design' : 'View'}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleEditWorkflow(def.id)}>
-                        <Edit3 className="h-4 w-4 mr-1" />
-                        Edit
+                      <Button variant="outline" size="sm" onClick={() => handleViewVersions(def)}>
+                        <History className="h-4 w-4 mr-1" />
+                        Versions
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleDeleteWorkflow(def)}>
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        Delete
-                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void handleSimulate(def.id)}><Play className="mr-1 h-4 w-4" />Simulate</Button>
+                      {def.lifecycleStatus === WorkflowDefinitionLifecycleStatus.Draft ? (
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => handleEditWorkflow(def.id)}>
+                            <Edit3 className="h-4 w-4 mr-1" />
+                            Edit
+                          </Button>
+                          <Button size="sm" onClick={() => handlePublish(def)} disabled={lifecycleSavingId === def.id}>
+                            <Rocket className="h-4 w-4 mr-1" />
+                            Publish
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleDeleteWorkflow(def)}>
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => handleCloneDraft(def)} disabled={lifecycleSavingId === def.id}>
+                            <Copy className="h-4 w-4 mr-1" />
+                            Clone Draft
+                          </Button>
+                          {def.lifecycleStatus === WorkflowDefinitionLifecycleStatus.Published && (
+                            <Button variant="outline" size="sm" onClick={() => handleRetire(def)} disabled={lifecycleSavingId === def.id}>
+                              <Archive className="h-4 w-4 mr-1" />
+                              Retire
+                            </Button>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -627,114 +788,20 @@ function WorkflowAdministrationPageInner() {
           </div>
         </TabsContent>
 
+        <TabsContent value="policies" className="space-y-4">
+          <WorkflowApprovalPoliciesPanel entityTypes={entityTypes} />
+        </TabsContent>
+
+        <TabsContent value="governance" className="space-y-4">
+          <WorkflowGovernancePanel />
+        </TabsContent>
+
         <TabsContent value="templates" className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold">Workflow Templates</h3>
-            <p className="text-muted-foreground">
-              Pre-built workflow templates to get you started quickly with common business processes.
-            </p>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Standard Approval Process</CardTitle>
-                <CardDescription>Basic approval workflow with escalation</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant="outline" className="w-full" onClick={() => handleDesignWorkflow('template-approval')}>
-                  Use Template
-                </Button>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>Document Review Process</CardTitle>
-                <CardDescription>Multi-stage document review with feedback loops</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant="outline" className="w-full" onClick={() => handleDesignWorkflow('template-document')}>
-                  Use Template
-                </Button>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>Request-to-Fulfillment</CardTitle>
-                <CardDescription>Complete request processing from submission to completion</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant="outline" className="w-full" onClick={() => handleDesignWorkflow('template-request')}>
-                  Use Template
-                </Button>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>Incident Management</CardTitle>
-                <CardDescription>Incident reporting, investigation, and resolution workflow</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant="outline" className="w-full" onClick={() => handleDesignWorkflow('template-incident')}>
-                  Use Template
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
+          <WorkflowTemplateCataloguePanel onImported={fetchDefinitions} />
         </TabsContent>
 
         <TabsContent value="analytics" className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold">Workflow Analytics</h3>
-            <p className="text-muted-foreground">
-              Performance metrics and insights for your workflows to optimize processes.
-            </p>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Average Duration</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">4.2h</div>
-                <p className="text-xs text-muted-foreground">-15% from last week</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Success Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">94.7%</div>
-                <p className="text-xs text-muted-foreground">+2.3% from last week</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Bottlenecks</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">3</div>
-                <p className="text-xs text-muted-foreground">Identified this week</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">SLA Compliance</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">89.2%</div>
-                <p className="text-xs text-muted-foreground">+5.1% from last week</p>
-              </CardContent>
-            </Card>
-          </div>
+          <WorkflowAnalyticsPanel />
         </TabsContent>
       </Tabs>
 
@@ -781,7 +848,6 @@ function WorkflowAdministrationPageInner() {
             setEditDefinition(null);
             setEditName('');
             setEditDescription('');
-            setEditIsActive(false);
             setEditLoading(false);
             setEditSaving(false);
           }
@@ -828,18 +894,8 @@ function WorkflowAdministrationPageInner() {
                 />
               </div>
 
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-0.5">
-                  <div className="text-sm font-medium">Active</div>
-                  <div className="text-xs text-muted-foreground">
-                    Activating will validate the definition before it can be used by submissions.
-                  </div>
-                </div>
-                <Switch checked={editIsActive} onCheckedChange={setEditIsActive} disabled={editSaving} />
-              </div>
-
               <div className="text-xs text-muted-foreground">
-                Version {editDefinition.version} • {editDefinition.steps?.length ?? 0} steps • {editDefinition.transitions?.length ?? 0} transitions
+                Draft version {editDefinition.version} • {editDefinition.steps?.length ?? 0} steps • {editDefinition.transitions?.length ?? 0} transitions
               </div>
             </div>
           )}
@@ -858,6 +914,64 @@ function WorkflowAdministrationPageInner() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={versionsDialogOpen} onOpenChange={setVersionsDialogOpen}>
+        <DialogContent className="sm:max-w-[720px]" style={{ maxWidth: 720 }}>
+          <DialogHeader>
+            <DialogTitle>Workflow Version History</DialogTitle>
+            <DialogDescription>Published versions remain immutable and running instances keep their original version.</DialogDescription>
+          </DialogHeader>
+          {versionsLoading ? (
+            <div className="py-6 text-sm text-muted-foreground">Loading version history...</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="divide-y rounded-md border">
+                {versions.map((version) => (
+                  <div key={version.id} className="flex items-center justify-between gap-4 p-3">
+                    <div>
+                      <div className="font-medium">Version {version.version}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {version.changeSummary || 'No change summary'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {version.activeInstancesCount > 0 && <Badge variant="outline">{version.activeInstancesCount} live</Badge>}
+                      <Badge variant={version.lifecycleStatus === WorkflowDefinitionLifecycleStatus.Published ? 'default' : 'secondary'}>
+                        {lifecycleLabel(version.lifecycleStatus)}
+                      </Badge>
+                      <Button size="sm" variant="outline" onClick={() => void handleRollback(version.id)}>Rollback draft</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {versionComparison && (
+                <div className="rounded-md border p-3">
+                  <div className="mb-2 text-sm font-medium">
+                    Version {versionComparison.fromVersion} to {versionComparison.toVersion}
+                  </div>
+                  {versionComparison.changes.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No structural changes detected.</div>
+                  ) : (
+                    <ul className="space-y-1 text-sm">
+                      {versionComparison.changes.map((change) => <li key={change}>• {change}</li>)}
+                    </ul>
+                  )}
+                  {versionComparison.hasPotentiallyBreakingChanges && (
+                    <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Review carefully: this comparison includes removed or materially changed workflow paths.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!simulationResult} onOpenChange={open => { if (!open) setSimulationResult(null); }}><DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Simulation result</DialogTitle></DialogHeader>
+        <div className="space-y-2">{(simulationResult?.path || []).map((step:any,index:number)=><div key={step.id} className="flex gap-3 rounded-md border px-3 py-2 text-sm"><span>{index+1}</span><span className="font-medium">{step.name}</span><span className="text-muted-foreground">{String(step.stepType)}</span></div>)}
+          {(simulationResult?.warnings || []).map((warning:string)=><div key={warning} className="text-sm text-amber-700">{warning}</div>)}</div>
+      </DialogContent></Dialog>
 
       {/* Delete Workflow Definition */}
       <ConfirmationDialog

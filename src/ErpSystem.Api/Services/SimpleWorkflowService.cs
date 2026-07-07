@@ -17,6 +17,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.Workflow;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -259,6 +260,45 @@ public class SimpleWorkflowService : IWorkflowService
         if (!canApprove && IsUserConfiguredAsApprover(stepInstance, workflowUserId, roleSet))
         {
             canApprove = true;
+        }
+
+        if (canApprove && isApprovalStep)
+        {
+            var approvalConfig = GetApprovalConfig(stepInstance);
+            var guardErrors = WorkflowApprovalGuardValidator.Validate(
+                approvalConfig,
+                instance.InitiatedById,
+                approvals.ToList(),
+                workflowUserId);
+            if (guardErrors.Count > 0)
+            {
+                canApprove = false;
+                _logger.LogDebug(
+                    "Workflow approval check denied by policy for user {UserId}, step {StepInstanceId}: {Reason}",
+                    workflowUserId,
+                    stepInstance.Id,
+                    string.Join(" ", guardErrors));
+            }
+
+            if (canApprove)
+            {
+                var crossStepErrors = await ValidateCrossStepSodAsync(
+                    approvalConfig,
+                    instance,
+                    stepInstance,
+                    entityType,
+                    entityId,
+                    workflowUserId);
+                if (crossStepErrors.Count > 0)
+                {
+                    canApprove = false;
+                    _logger.LogDebug(
+                        "Workflow approval check denied by cross-step SOD for user {UserId}, step {StepInstanceId}: {Reason}",
+                        workflowUserId,
+                        stepInstance.Id,
+                        string.Join(" ", crossStepErrors));
+                }
+            }
         }
 
         if (!canApprove)
@@ -1204,6 +1244,56 @@ public class SimpleWorkflowService : IWorkflowService
         }
 
         return false;
+    }
+
+    private static WorkflowApprovalConfigDto? GetApprovalConfig(WorkflowStepInstance stepInstance)
+    {
+        var configurationJson = stepInstance.WorkflowStep?.Configuration;
+        if (string.IsNullOrWhiteSpace(configurationJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var serializerOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            serializerOptions.Converters.Add(new JsonStringEnumConverter());
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, serializerOptions)?.ApprovalConfig;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<List<string>> ValidateCrossStepSodAsync(
+        WorkflowApprovalConfigDto? config,
+        WorkflowInstance instance,
+        WorkflowStepInstance currentStep,
+        string entityType,
+        Guid entityId,
+        Guid userId)
+    {
+        if (config?.ConflictRules?.Any(rule => rule.IsEnabled) != true)
+        {
+            return new List<string>();
+        }
+
+        var previousSteps = (await _stepInstanceRepository.GetByWorkflowInstanceAsync(instance.Id))
+            .Where(step => step.Id != currentStep.Id &&
+                (step.CompletedDate ?? step.CreatedDate) <= (currentStep.StartedDate ?? currentStep.CreatedDate))
+            .ToList();
+        var approvalsByStep = new Dictionary<Guid, IReadOnlyCollection<WorkflowApproval>>();
+        foreach (var step in previousSteps)
+        {
+            approvalsByStep[step.Id] = (await _approvalRepository.GetByStepInstanceAsync(step.Id)).ToList();
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var entityTypeRecord = await ResolveEntityTypeAsync(entityType, tenantId);
+        var context = await BuildEntityContextAsync(entityTypeRecord, entityId);
+
+        return WorkflowCrossStepSodEvaluator.Validate(config, previousSteps, approvalsByStep, context, userId);
     }
 
     private static string NormalizeEntityTypeKey(string? value)

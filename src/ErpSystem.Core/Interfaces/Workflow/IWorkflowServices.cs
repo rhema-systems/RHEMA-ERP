@@ -77,6 +77,16 @@ public interface IWorkflowDefinitionService
     /// </summary>
     Task<WorkflowDefinition> UpdateWorkflowDefinitionAsync(Guid id, UpdateWorkflowDefinitionDto updateDto);
 
+    Task<WorkflowDefinition> CloneWorkflowDefinitionDraftAsync(Guid sourceDefinitionId, string? changeSummary, Guid createdById);
+
+    Task<WorkflowDefinition> PublishWorkflowDefinitionAsync(Guid id, Guid publishedById);
+
+    Task<WorkflowDefinition> RetireWorkflowDefinitionAsync(Guid id, Guid retiredById);
+
+    Task<IReadOnlyList<WorkflowDefinition>> GetWorkflowDefinitionVersionsAsync(Guid id);
+
+    Task<WorkflowDefinitionComparisonDto> CompareWorkflowDefinitionsAsync(Guid fromDefinitionId, Guid toDefinitionId);
+
     /// <summary>
     /// Gets a workflow definition by ID
     /// </summary>

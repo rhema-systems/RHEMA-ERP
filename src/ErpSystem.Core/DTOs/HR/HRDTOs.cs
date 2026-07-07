@@ -32,6 +32,7 @@ public class EmployeeDto
     public string? OrganizationLevelName { get; set; }
     public string? OrganizationUnitName { get; set; }
     public string? LocationLevelName { get; set; }
+    public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
     public StaffStatus StaffStatus { get; set; }
     public EmploymentType EmploymentType { get; set; }
@@ -52,7 +53,6 @@ public class EmployeeDetailDto : EmployeeDto
     public Guid? OrganizationLevelId { get; set; }
     public Guid? OrganizationUnitId { get; set; }
     public Guid? LocationLevelId { get; set; }
-    public Guid? LocationId { get; set; }
     public Guid PositionId { get; set; }
     public Guid? ManagerId { get; set; }
     public Guid? CountryId { get; set; }

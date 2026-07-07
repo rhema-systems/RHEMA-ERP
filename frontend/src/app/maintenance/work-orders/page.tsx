@@ -82,6 +82,8 @@ interface Employee {
   email: string;
   department?: string;
   position?: string;
+  locationId?: string;
+  locationName?: string;
   isActive: boolean;
 }
 
@@ -1632,7 +1634,7 @@ function WorkOrdersPageContent() {
       await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes, taskTechnicianId || null);
 
       // Fixed maintenance billing does not auto-create task labour cost. Manual external labour stays on the Labour tab.
-      if (!isMaintenanceBillingWorkOrder(selectedOrder) && taskActualHours > 0 && taskHourlyRate > 0 && taskTechnicianId) {
+      if (!isMaintenanceBillingWorkOrder(selectedOrder) && taskActualHours > 0 && taskHourlyRate >= 0 && taskTechnicianId) {
         const laborData: CreateWorkOrderLaborDto = {
           workOrderId: selectedOrder.id,
           technicianId: taskTechnicianId,
@@ -1868,6 +1870,14 @@ function WorkOrdersPageContent() {
   const selectedWorkOrderTypeIsInOptions = Boolean(
     selectedWorkOrderTypeId && workOrderTypes.some((type) => type.id === selectedWorkOrderTypeId)
   );
+  const selectedOrderAsset = selectedOrder
+    ? assets.find((asset) => asset.id.toLowerCase() === selectedOrder.assetId.toLowerCase())
+    : undefined;
+  const selectedAssetLocationId = selectedOrderAsset?.currentSiteLocationId;
+  const locationScopedTechnicians = selectedAssetLocationId
+    ? technicians.filter((technician) =>
+        technician.locationId?.toLowerCase() === selectedAssetLocationId.toLowerCase())
+    : [];
 
   return (
     <div className="space-y-6">
@@ -3671,8 +3681,11 @@ function WorkOrdersPageContent() {
                         <Button
                           size="sm"
                           onClick={() => {
+                            const assignedTechnicianIsLocal = locationScopedTechnicians.some(
+                              (technician) => technician.id === selectedOrder.assignedTechnicianId
+                            );
                             setLaborForm({
-                              technicianId: selectedOrder.assignedTechnicianId || '',
+                              technicianId: assignedTechnicianIsLocal ? selectedOrder.assignedTechnicianId || '' : '',
                               hours: 0,
                               hourlyRate: 50,
                               laborType: 'Regular',
@@ -5550,7 +5563,7 @@ function WorkOrdersPageContent() {
                   rows={3}
                 />
               </div>
-              {!isMaintenanceBillingWorkOrder(selectedOrder) && taskActualHours > 0 && taskHourlyRate > 0 && taskTechnicianId && (
+              {!isMaintenanceBillingWorkOrder(selectedOrder) && taskActualHours > 0 && taskHourlyRate >= 0 && taskTechnicianId && (
                 <div className="bg-muted/50 rounded-lg p-3">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Labour Cost:</span>
@@ -5566,7 +5579,7 @@ function WorkOrdersPageContent() {
             </Button>
             <Button
               onClick={handleCompleteTaskSubmit}
-              disabled={taskActualHours <= 0 || !taskTechnicianId || (!isMaintenanceBillingWorkOrder(selectedOrder) && taskHourlyRate <= 0)}
+              disabled={taskActualHours <= 0 || !taskTechnicianId || (!isMaintenanceBillingWorkOrder(selectedOrder) && taskHourlyRate < 0)}
             >
               Complete Task
             </Button>
@@ -5591,18 +5604,25 @@ function WorkOrdersPageContent() {
               <Select
                 value={laborForm.technicianId}
                 onValueChange={(value) => setLaborForm({...laborForm, technicianId: value})}
+                disabled={!selectedAssetLocationId || locationScopedTechnicians.length === 0}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select technician" />
                 </SelectTrigger>
                 <SelectContent>
-                  {technicians.map((tech) => (
+                  {locationScopedTechnicians.map((tech) => (
                     <SelectItem key={tech.id} value={tech.id}>
                       {tech.firstName} {tech.lastName}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {!selectedAssetLocationId && (
+                <p className="text-xs text-amber-600">Assign the asset to a site location before selecting a technician.</p>
+              )}
+              {selectedAssetLocationId && locationScopedTechnicians.length === 0 && (
+                <p className="text-xs text-amber-600">No maintenance technicians are assigned to this asset location.</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -5998,12 +6018,13 @@ function WorkOrdersPageContent() {
                 <Select
                   value={scheduleForm.technicianId}
                   onValueChange={(value) => setScheduleForm({ ...scheduleForm, technicianId: value })}
+                  disabled={!selectedAssetLocationId || locationScopedTechnicians.length === 0}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select technician" />
                   </SelectTrigger>
                   <SelectContent>
-                    {technicians.map((tech) => {
+                    {locationScopedTechnicians.map((tech) => {
                       const conflict = getTechnicianScheduleConflict(tech.id);
                       return (
                         <SelectItem key={tech.id} value={tech.id} disabled={Boolean(conflict)}>
@@ -6014,6 +6035,12 @@ function WorkOrdersPageContent() {
                     })}
                   </SelectContent>
                 </Select>
+                {!selectedAssetLocationId && (
+                  <p className="text-xs text-amber-600">Assign the asset to a site location before scheduling a technician.</p>
+                )}
+                {selectedAssetLocationId && locationScopedTechnicians.length === 0 && (
+                  <p className="text-xs text-amber-600">No maintenance technicians are assigned to this asset location.</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="schedule-type">Schedule Type</Label>

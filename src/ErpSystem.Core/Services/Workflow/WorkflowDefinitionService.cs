@@ -57,8 +57,10 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
 
         // Set default values
         definition.Id = Guid.NewGuid();
+        definition.DefinitionKey = definition.DefinitionKey == Guid.Empty ? Guid.NewGuid() : definition.DefinitionKey;
         definition.CreatedAt = DateTime.UtcNow;
         definition.IsActive = false; // Start inactive until explicitly activated
+        definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Draft;
         definition.Version = 1;
 
         // Save the definition
@@ -74,6 +76,8 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
         _logger.LogInformation("Updating workflow definition: {Id}", definition.Id);
 
         var existingDefinition = await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id, cancellationToken) ?? throw new InvalidOperationException($"Workflow definition with ID {definition.Id} not found");
+
+        WorkflowDefinitionLifecyclePolicy.EnsureEditable(existingDefinition);
 
         // Check if definition is being used by active instances
         if (existingDefinition.Instances?.Any(i =>
@@ -134,7 +138,11 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
             throw new InvalidOperationException($"Cannot activate invalid workflow definition: {string.Join(", ", validationResult.ValidationErrors)}");
         }
 
+        WorkflowDefinitionLifecyclePolicy.EnsureCanPublish(definition);
+
         definition.IsActive = true;
+        definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+        definition.PublishedAt = DateTime.UtcNow;
         definition.UpdatedAt = DateTime.UtcNow;
 
         await _workflowDefinitionRepository.UpdateAsync(definition);
@@ -149,6 +157,11 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
 
         var definition = await _workflowDefinitionRepository.GetByIdAsync(definitionId) ?? throw new InvalidOperationException($"Workflow definition with ID {definitionId} not found");
         definition.IsActive = false;
+        if (definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published)
+        {
+            definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+            definition.RetiredAt = DateTime.UtcNow;
+        }
         definition.UpdatedAt = DateTime.UtcNow;
 
         await _workflowDefinitionRepository.UpdateAsync(definition);
@@ -256,6 +269,45 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
         var serializerOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         serializerOptions.Converters.Add(new JsonStringEnumConverter());
 
+        static void ValidateConfiguredChecklist(
+            WorkflowStep step,
+            WorkflowStepConfigurationDto? config,
+            List<string> errors)
+        {
+            var checklist = config?.QualityConfig?.QualityChecks ?? new List<WorkflowQualityCheckDto>();
+            var duplicateKeys = checklist
+                .Select(item => WorkflowChecklistEvidenceValidator.NormalizeKey(item.Id, item.Name))
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .GroupBy(key => key, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .ToList();
+
+            if (duplicateKeys.Count > 0)
+            {
+                errors.Add($"Step '{step.Name}' has duplicate checklist item keys: {string.Join(", ", duplicateKeys)}");
+            }
+
+            foreach (var item in checklist)
+            {
+                if (string.IsNullOrWhiteSpace(item.Name))
+                {
+                    errors.Add($"Step '{step.Name}' has a checklist item without a name");
+                    continue;
+                }
+
+                if (item.RequiresDocument && string.IsNullOrWhiteSpace(item.DocumentType))
+                {
+                    errors.Add($"Checklist item '{item.Name}' in step '{step.Name}' must define a document type");
+                }
+
+                if (item.RequiresDocument && string.IsNullOrWhiteSpace(item.DocumentName))
+                {
+                    errors.Add($"Checklist item '{item.Name}' in step '{step.Name}' must define a document name");
+                }
+            }
+        }
+
         foreach (var step in steps.Where(s => s.StepType == WorkflowStepType.Approval))
         {
             if (string.IsNullOrWhiteSpace(step.Configuration))
@@ -272,10 +324,63 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
                 {
                     errors.Add($"Approval step '{step.Name}' must have at least one approver user or role configured");
                 }
+                else
+                {
+                    var minimumApprovals = Math.Max(config?.ApprovalConfig?.MinApprovalsRequired ?? 1, 1);
+                    if (minimumApprovals > rules.Count)
+                    {
+                        errors.Add($"Approval step '{step.Name}' requires {minimumApprovals} approvals but only {rules.Count} approval slots are configured");
+                    }
+                }
+
+                var conflictRules = config?.ApprovalConfig?.ConflictRules ?? new List<WorkflowApprovalConflictRuleDto>();
+                foreach (var rule in conflictRules)
+                {
+                    if (string.IsNullOrWhiteSpace(rule.Name))
+                    {
+                        errors.Add($"Approval step '{step.Name}' has a segregation-of-duties rule without a name");
+                    }
+
+                    if (rule.ActorSource == WorkflowApprovalActorSource.SpecificStepActor)
+                    {
+                        if (string.IsNullOrWhiteSpace(rule.SourceStepName))
+                        {
+                            errors.Add($"SOD rule '{rule.Name}' in approval step '{step.Name}' must define a source step");
+                        }
+                        else if (!steps.Any(candidate => string.Equals(candidate.Name, rule.SourceStepName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            errors.Add($"SOD rule '{rule.Name}' in approval step '{step.Name}' references unknown step '{rule.SourceStepName}'");
+                        }
+                        else if (steps.First(candidate => string.Equals(candidate.Name, rule.SourceStepName, StringComparison.OrdinalIgnoreCase)).StepOrder >= step.StepOrder)
+                        {
+                            errors.Add($"SOD rule '{rule.Name}' in approval step '{step.Name}' must reference an earlier workflow step");
+                        }
+                    }
+
+                    if (rule.ActorSource == WorkflowApprovalActorSource.ContextUser && string.IsNullOrWhiteSpace(rule.ContextField))
+                    {
+                        errors.Add($"SOD rule '{rule.Name}' in approval step '{step.Name}' must define a workflow context user field");
+                    }
+                }
+
+                ValidateConfiguredChecklist(step, config, errors);
             }
             catch
             {
                 errors.Add($"Approval step '{step.Name}' has an invalid configuration payload");
+            }
+        }
+
+        foreach (var step in steps.Where(s => s.StepType == WorkflowStepType.Manual && !string.IsNullOrWhiteSpace(s.Configuration)))
+        {
+            try
+            {
+                var config = JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(step.Configuration, serializerOptions);
+                ValidateConfiguredChecklist(step, config, errors);
+            }
+            catch
+            {
+                errors.Add($"Task step '{step.Name}' has an invalid configuration payload");
             }
         }
 

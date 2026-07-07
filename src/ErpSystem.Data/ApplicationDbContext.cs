@@ -720,6 +720,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WorkflowStepInstance> WorkflowStepInstances { get; set; }
     public DbSet<WorkflowActivityLog> WorkflowActivityLogs { get; set; }
     public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
+    public DbSet<WorkflowApprovalPolicySet> WorkflowApprovalPolicySets { get; set; }
+    public DbSet<WorkflowDelegation> WorkflowDelegations { get; set; }
+    public DbSet<WorkflowWorkingCalendar> WorkflowWorkingCalendars { get; set; }
+    public DbSet<WorkflowCorrectionRequest> WorkflowCorrectionRequests { get; set; }
+    public DbSet<WorkflowEscalationExecution> WorkflowEscalationExecutions { get; set; }
+    public DbSet<WorkflowEvidencePolicy> WorkflowEvidencePolicies { get; set; }
+    public DbSet<WorkflowEvidenceDocument> WorkflowEvidenceDocuments { get; set; }
+    public DbSet<WorkflowSignatureEvidence> WorkflowSignatureEvidence { get; set; }
+    public DbSet<WorkflowIntegrationExecution> WorkflowIntegrationExecutions { get; set; }
+    public DbSet<WorkflowOfflineAction> WorkflowOfflineActions { get; set; }
     public DbSet<WorkflowEntityType> WorkflowEntityTypes { get; set; }
 
     // Finance - Common entities
@@ -807,6 +817,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
+        builder.Entity<WorkflowEscalationExecution>()
+            .HasIndex(item => new { item.ApprovalId, item.RuleIndex })
+            .IsUnique();
+        builder.Entity<WorkflowEvidenceDocument>().HasIndex(item => new { item.TenantId, item.AttachmentId }).IsUnique();
+        builder.Entity<WorkflowSignatureEvidence>().HasIndex(item => item.ApprovalId).IsUnique();
+        builder.Entity<WorkflowIntegrationExecution>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+        builder.Entity<WorkflowOfflineAction>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
 
@@ -2809,7 +2826,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wd => wd.EntityTypeId);
             entity.HasIndex(wd => wd.Name);
             entity.HasIndex(wd => wd.IsActive);
-            entity.HasIndex(wd => new { wd.TenantId, wd.Name }).IsUnique();
+            entity.HasIndex(wd => wd.LifecycleStatus);
+            entity.HasIndex(wd => new { wd.TenantId, wd.DefinitionKey, wd.Version }).IsUnique();
 
             entity.HasMany(wd => wd.Steps)
                 .WithOne(ws => ws.WorkflowDefinition)
@@ -6809,6 +6827,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         foreach (var entry in entries)
         {
+            if (entry.Entity is WorkflowActivityLog && entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Workflow audit events are immutable and cannot be changed or deleted.");
             switch (entry.State)
             {
                 case EntityState.Added:

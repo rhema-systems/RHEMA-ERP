@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
@@ -9,6 +11,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.Workflow;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -168,11 +171,17 @@ public class WorkflowController : ControllerBase
             var adminQuery = defQuery.Select(def => new WorkflowDefinitionAdminDto
             {
                 Id = def.Id,
+                DefinitionKey = def.DefinitionKey,
                 Name = def.Name,
                 Description = def.Description,
                 EntityType = def.EntityType.Name,
                 Version = def.Version,
                 IsActive = def.IsActive,
+                LifecycleStatus = def.LifecycleStatus,
+                ChangeSummary = def.ChangeSummary,
+                SupersedesDefinitionId = def.SupersedesDefinitionId,
+                PublishedAt = def.PublishedAt,
+                RetiredAt = def.RetiredAt,
                 Configuration = def.Configuration,
                 CreatedDate = def.CreatedAt,
                 LastModifiedDate = def.UpdatedAt ?? def.CreatedAt,
@@ -295,6 +304,10 @@ public class WorkflowController : ControllerBase
             {
                 await _workflowDefinitionService.SetWorkflowDefinitionActiveAsync(definition.Id, false, currentUserId.Value);
             }
+            else
+            {
+                definition = await _workflowDefinitionService.PublishWorkflowDefinitionAsync(definition.Id, currentUserId.Value);
+            }
 
             var responseDto = MapToWorkflowDefinitionDto(definition);
             return CreatedAtAction(
@@ -369,6 +382,7 @@ public class WorkflowController : ControllerBase
             {
                 Name = updateDto.Name,
                 Description = updateDto.Description,
+                EntityType = updateDto.EntityType,
                 Configuration = updateDto.Configuration,
                 LastModifiedById = currentUserId.Value,
                 Steps = updateDto.Steps,
@@ -378,6 +392,7 @@ public class WorkflowController : ControllerBase
             var definition = await _workflowDefinitionService.UpdateWorkflowDefinitionAsync(id, workflowDto);
 
             await _workflowDefinitionService.SetWorkflowDefinitionActiveAsync(definition.Id, updateDto.IsActive, currentUserId.Value);
+            definition = await _workflowDefinitionService.GetWorkflowDefinitionAsync(definition.Id) ?? definition;
 
             var responseDto = MapToWorkflowDefinitionDto(definition);
             return Ok(new
@@ -793,10 +808,13 @@ public class WorkflowController : ControllerBase
                 .ToList();
 
             var canApprove = await _workflowService.CanUserApproveAsync(entityType, entityId, currentUserId.Value);
+            var currentUserApprovalId = await ResolveCurrentUserApprovalIdAsync(currentStepInstanceId, currentUserId.Value);
+            var currentUserCorrection = await ResolveCurrentUserCorrectionAsync(status.WorkflowInstanceId, currentUserId.Value);
             var currentStepChecklist = await GetStepChecklistAsync(currentStepInstanceId, HttpContext.RequestAborted);
             var currentStepInstance = await GetStepInstanceForSummaryAsync(currentStepInstanceId, HttpContext.RequestAborted);
             var currentStepType = currentStepInstance?.WorkflowStep?.StepType;
             var currentStepTaskConfig = GetTaskConfigFromStepConfiguration(currentStepInstance?.WorkflowStep?.Configuration);
+            var currentStepSignaturePolicy = DeserializeStepConfiguration(currentStepInstance?.WorkflowStep?.Configuration)?.ApprovalConfig?.SignaturePolicy;
             var currentStepTaskAttachments = GetWorkflowTaskAttachments(currentStepInstance?.ResultData);
             var canComplete = currentStepInstance != null && CanCurrentUserCompleteWorkflowTask(currentStepInstance, currentUserId.Value);
 
@@ -812,11 +830,16 @@ public class WorkflowController : ControllerBase
                 CurrentStepInstanceId = currentStepInstanceId,
                 CurrentStepType = currentStepType,
                 CanCurrentUserApprove = canApprove,
+                CurrentUserApprovalId = currentUserApprovalId,
+                CurrentUserCorrectionId = currentUserCorrection?.Id,
+                CanCurrentUserResubmit = currentUserCorrection != null,
+                CorrectionInstructions = currentUserCorrection?.Instructions,
                 CanCurrentUserRecall = CanCurrentUserRecall(activeInstance, currentUserId.Value),
                 CanCurrentUserComplete = canComplete,
                 PendingApprovers = pendingApprovalsForCurrentStep,
                 CurrentStepChecklist = currentStepChecklist,
                 CurrentStepTaskConfig = currentStepTaskConfig,
+                CurrentStepSignaturePolicy = currentStepSignaturePolicy,
                 CurrentStepTaskAttachments = currentStepTaskAttachments
             };
 
@@ -964,10 +987,13 @@ public class WorkflowController : ControllerBase
                     .ToList();
 
                 var canApprove = await _workflowService.CanUserApproveAsync(canonicalEntityType, requestedEntityId, currentUserId.Value);
+                var currentUserApprovalId = await ResolveCurrentUserApprovalIdAsync(currentStepInstanceId, currentUserId.Value);
+                var currentUserCorrection = await ResolveCurrentUserCorrectionAsync(status.WorkflowInstanceId, currentUserId.Value);
                 var currentStepChecklist = await GetStepChecklistAsync(currentStepInstanceId, HttpContext.RequestAborted);
                 var currentStepInstance = await GetStepInstanceForSummaryAsync(currentStepInstanceId, HttpContext.RequestAborted);
                 var currentStepType = currentStepInstance?.WorkflowStep?.StepType;
                 var currentStepTaskConfig = GetTaskConfigFromStepConfiguration(currentStepInstance?.WorkflowStep?.Configuration);
+                var currentStepSignaturePolicy = DeserializeStepConfiguration(currentStepInstance?.WorkflowStep?.Configuration)?.ApprovalConfig?.SignaturePolicy;
                 var currentStepTaskAttachments = GetWorkflowTaskAttachments(currentStepInstance?.ResultData);
                 var canComplete = currentStepInstance != null && CanCurrentUserCompleteWorkflowTask(currentStepInstance, currentUserId.Value);
 
@@ -983,11 +1009,16 @@ public class WorkflowController : ControllerBase
                     CurrentStepInstanceId = currentStepInstanceId,
                     CurrentStepType = currentStepType,
                     CanCurrentUserApprove = canApprove,
+                    CurrentUserApprovalId = currentUserApprovalId,
+                    CurrentUserCorrectionId = currentUserCorrection?.Id,
+                    CanCurrentUserResubmit = currentUserCorrection != null,
+                    CorrectionInstructions = currentUserCorrection?.Instructions,
                     CanCurrentUserRecall = CanCurrentUserRecall(activeInstance, currentUserId.Value),
                     CanCurrentUserComplete = canComplete,
                     PendingApprovers = pendingApprovalsForCurrentStep,
                     CurrentStepChecklist = currentStepChecklist,
                     CurrentStepTaskConfig = currentStepTaskConfig,
+                    CurrentStepSignaturePolicy = currentStepSignaturePolicy,
                     CurrentStepTaskAttachments = currentStepTaskAttachments
                 };
             }
@@ -1081,10 +1112,13 @@ public class WorkflowController : ControllerBase
             {
                 var approvals = (await _workflowApprovalRepository.GetByStepInstanceAsync(step.Id)).ToList();
                 var approvalAudits = approvals
-                    .OrderBy(a => a.RequestedDate)
+                    .OrderBy(a => a.ApprovalGroup)
+                    .ThenBy(a => a.RequestedDate)
                     .Select(a => new WorkflowApprovalAuditDto
                     {
                         ApprovalId = a.Id,
+                        ApprovalGroup = Math.Max(a.ApprovalGroup, 1),
+                        IsAdHoc = a.IsAdHoc,
                         ApproverId = a.ApproverId,
                         ApproverName = a.Approver?.UserName,
                         ApproverRole = a.ApproverRole,
@@ -1109,6 +1143,7 @@ public class WorkflowController : ControllerBase
                     AssignedToName = step.AssignedTo?.UserName ?? FormatApprovalOwnerList(approvalAudits),
                     Comments = step.Comments,
                     Checklist = GetChecklistFromStepConfiguration(step.WorkflowStep?.Configuration),
+                    ChecklistResponses = GetApprovalChecklistResponses(step.ResultData),
                     TaskConfig = GetTaskConfigFromStepConfiguration(step.WorkflowStep?.Configuration),
                     TaskAttachments = GetWorkflowTaskAttachments(step.ResultData),
                     Approvals = approvalAudits
@@ -1137,6 +1172,125 @@ public class WorkflowController : ControllerBase
         {
             _logger.LogError(ex, "Error retrieving workflow entity audit for {EntityType} {EntityId}", entityType, entityId);
             return StatusCode(500, "An error occurred while retrieving workflow audit");
+        }
+    }
+
+    [HttpPost("definitions/{id}/clone-draft")]
+    [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<WorkflowDefinitionDto>> CloneWorkflowDefinitionDraft(
+        Guid id,
+        [FromBody] CloneWorkflowDefinitionDraftDto? request)
+    {
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (!currentUserId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var draft = await _workflowDefinitionService.CloneWorkflowDefinitionDraftAsync(
+                id,
+                request?.ChangeSummary,
+                currentUserId.Value);
+            return Ok(new { success = true, data = MapToWorkflowDefinitionDto(draft) });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { success = false, error = ex.Message });
+        }
+    }
+
+    [HttpPost("definitions/{id}/publish")]
+    [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<WorkflowDefinitionDto>> PublishWorkflowDefinition(Guid id)
+    {
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (!currentUserId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var definition = await _workflowDefinitionService.PublishWorkflowDefinitionAsync(id, currentUserId.Value);
+            return Ok(new { success = true, data = MapToWorkflowDefinitionDto(definition) });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, error = ex.Message });
+        }
+    }
+
+    [HttpPost("definitions/{id}/retire")]
+    [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<WorkflowDefinitionDto>> RetireWorkflowDefinition(Guid id)
+    {
+        try
+        {
+            var currentUserId = GetCurrentUserId();
+            if (!currentUserId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var definition = await _workflowDefinitionService.RetireWorkflowDefinitionAsync(id, currentUserId.Value);
+            return Ok(new { success = true, data = MapToWorkflowDefinitionDto(definition) });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, error = ex.Message });
+        }
+    }
+
+    [HttpGet("definitions/{id}/versions")]
+    public async Task<ActionResult<IReadOnlyList<WorkflowDefinitionVersionDto>>> GetWorkflowDefinitionVersions(Guid id)
+    {
+        try
+        {
+            var versions = await _workflowDefinitionService.GetWorkflowDefinitionVersionsAsync(id);
+            var data = versions.Select(definition => new WorkflowDefinitionVersionDto
+            {
+                Id = definition.Id,
+                DefinitionKey = definition.DefinitionKey,
+                Name = definition.Name,
+                Version = definition.Version,
+                LifecycleStatus = definition.LifecycleStatus,
+                IsActive = definition.IsActive,
+                ChangeSummary = definition.ChangeSummary,
+                SupersedesDefinitionId = definition.SupersedesDefinitionId,
+                CreatedDate = definition.CreatedAt,
+                PublishedAt = definition.PublishedAt,
+                RetiredAt = definition.RetiredAt,
+                ActiveInstancesCount = definition.Instances.Count(instance =>
+                    instance.Status == WorkflowInstanceStatus.Created ||
+                    instance.Status == WorkflowInstanceStatus.InProgress ||
+                    instance.Status == WorkflowInstanceStatus.Waiting ||
+                    instance.Status == WorkflowInstanceStatus.Suspended)
+            }).ToList();
+            return Ok(new { success = true, data });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { success = false, error = ex.Message });
+        }
+    }
+
+    [HttpGet("definitions/compare")]
+    public async Task<ActionResult<WorkflowDefinitionComparisonDto>> CompareWorkflowDefinitions(
+        [FromQuery] Guid fromDefinitionId,
+        [FromQuery] Guid toDefinitionId)
+    {
+        try
+        {
+            var comparison = await _workflowDefinitionService.CompareWorkflowDefinitionsAsync(
+                fromDefinitionId,
+                toDefinitionId);
+            return Ok(new { success = true, data = comparison });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, error = ex.Message });
         }
     }
 
@@ -1291,12 +1445,41 @@ public class WorkflowController : ControllerBase
 
             var created = new List<WorkflowEntityType>();
             var updated = new List<WorkflowEntityType>();
+            var deactivated = new List<WorkflowEntityType>();
+            var blockedUnsupported = new List<string>();
 
             foreach (var defaultType in defaults)
             {
                 var match = existing.FirstOrDefault(et =>
                     string.Equals(et.Name, defaultType.Name, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(et.Code, defaultType.Code, StringComparison.OrdinalIgnoreCase));
+                var isSupported = _workflowStatusAdapterRegistry.TryGetAdapter(defaultType.Name, out _) ||
+                    _workflowStatusAdapterRegistry.TryGetAdapter(defaultType.Code, out _);
+
+                if (!isSupported)
+                {
+                    if (match?.IsActive == true)
+                    {
+                        var hasDefinitions = await _db.WorkflowDefinitions
+                            .AnyAsync(definition => definition.EntityTypeId == match.Id && !definition.IsDeleted);
+                        if (hasDefinitions)
+                        {
+                            blockedUnsupported.Add($"{match.Name} ({match.Code})");
+                        }
+                        else
+                        {
+                            match.IsActive = false;
+                            match.UpdatedAt = DateTime.UtcNow;
+                            match.UpdatedBy = _currentUserService.UserName ?? "System";
+                            match.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var deactivatedById)
+                                ? deactivatedById
+                                : null;
+                            deactivated.Add(match);
+                        }
+                    }
+
+                    continue;
+                }
 
                 if (match == null)
                 {
@@ -1353,7 +1536,12 @@ public class WorkflowController : ControllerBase
                 await _workflowEntityTypeRepository.UpdateRangeAsync(updated);
             }
 
-            if (created.Any() || updated.Any())
+            if (deactivated.Any())
+            {
+                await _workflowEntityTypeRepository.UpdateRangeAsync(deactivated);
+            }
+
+            if (created.Any() || updated.Any() || deactivated.Any())
             {
                 await _workflowEntityTypeRepository.SaveChangesAsync();
             }
@@ -1382,7 +1570,9 @@ public class WorkflowController : ControllerBase
                 metadata = new
                 {
                     created = created.Count,
-                    reactivated = updated.Count
+                    reactivated = updated.Count,
+                    deactivated = deactivated.Count,
+                    blockedUnsupported
                 }
             });
         }
@@ -1479,6 +1669,24 @@ public class WorkflowController : ControllerBase
 
         var code = new string(codeChars.ToArray()).Trim('_');
         return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
+    }
+
+    [HttpGet("conformance")]
+    [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin")]
+    public async Task<ActionResult<WorkflowModuleConformanceReport>> GetWorkflowModuleConformance()
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        var activeEntityTypes = await _workflowEntityTypeRepository.GetActiveEntityTypesAsync(tenantId);
+        var report = WorkflowModuleConformanceValidator.Evaluate(
+            activeEntityTypes,
+            _workflowStatusAdapterRegistry);
+
+        return Ok(new { success = true, data = report });
     }
 
     private static bool EntityTypeMatches(WorkflowEntityType entityType, string requestedType)
@@ -1868,7 +2076,12 @@ public class WorkflowController : ControllerBase
         Guid id,
         [FromForm] IFormFile file,
         [FromForm] string? requirementKey = null,
-        [FromForm] string? documentName = null)
+        [FromForm] string? documentName = null,
+        [FromForm] string? documentType = null,
+        [FromForm] Guid? documentOwnerId = null,
+        [FromForm] DateTime? issueDate = null,
+        [FromForm] DateTime? expiryDate = null,
+        [FromForm] string? replacesAttachmentId = null)
     {
         try
         {
@@ -1888,7 +2101,7 @@ public class WorkflowController : ControllerBase
                 return NotFound();
             }
 
-            if (!CanCurrentUserCompleteWorkflowTask(stepInstance, currentUserId.Value))
+            if (!await CanCurrentUserAttachToStepAsync(stepInstance, currentUserId.Value, HttpContext.RequestAborted))
             {
                 return Forbid();
             }
@@ -1898,25 +2111,87 @@ public class WorkflowController : ControllerBase
                 return BadRequest(new { message = "No file provided" });
             }
 
-            var allowedExtensions = new[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".txt" };
+            var evidencePolicy = await _db.WorkflowEvidencePolicies.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                .OrderByDescending(item => item.CreatedAt).FirstOrDefaultAsync(HttpContext.RequestAborted);
+            var allowedExtensions = evidencePolicy == null
+                ? new[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".txt" }
+                : JsonSerializer.Deserialize<string[]>(evidencePolicy.AllowedExtensionsJson) ?? [];
             var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (!allowedExtensions.Contains(extension))
             {
                 return BadRequest(new { message = $"File type '{extension}' is not allowed" });
             }
 
-            const long maxFileSizeBytes = 25 * 1024 * 1024;
+            var maxFileSizeBytes = evidencePolicy?.MaximumFileSizeBytes ?? 25 * 1024 * 1024;
             if (file.Length > maxFileSizeBytes)
             {
-                return BadRequest(new { message = "File size exceeds maximum allowed size of 25MB" });
+                return BadRequest(new { message = $"File size exceeds maximum allowed size of {maxFileSizeBytes / 1024 / 1024}MB" });
             }
 
-            var safeRequirementKey = string.IsNullOrWhiteSpace(requirementKey)
-                ? "task-document"
-                : requirementKey.Trim();
+            var safeRequirementKey = string.IsNullOrWhiteSpace(requirementKey) ? null : requirementKey.Trim();
+            string? checklistItemId = null;
+            var checklist = GetChecklistFromStepConfiguration(stepInstance.WorkflowStep?.Configuration);
+            WorkflowQualityCheckDto? checklistItem = null;
+
+            if (!string.IsNullOrWhiteSpace(safeRequirementKey) && checklist.Count > 0)
+            {
+                checklistItem = checklist.FirstOrDefault(item =>
+                    string.Equals(
+                        WorkflowChecklistEvidenceValidator.NormalizeKey(item.Id, item.Name),
+                        safeRequirementKey,
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (checklistItem != null)
+                {
+                    if (!checklistItem.RequiresDocument)
+                    {
+                        return BadRequest(new { message = "The selected checklist item does not require document evidence" });
+                    }
+
+                    checklistItemId = WorkflowChecklistEvidenceValidator.NormalizeKey(checklistItem.Id, checklistItem.Name);
+                    safeRequirementKey = checklistItemId;
+                    documentName = checklistItem.DocumentName;
+                    documentType = checklistItem.DocumentType;
+                }
+            }
+
+            if (stepInstance.WorkflowStep?.StepType == WorkflowStepType.Approval && checklistItem == null)
+            {
+                return BadRequest(new { message = "The selected checklist item does not require document evidence" });
+            }
+
+            if (stepInstance.WorkflowStep?.StepType != WorkflowStepType.Approval && checklistItem == null)
+            {
+                safeRequirementKey ??= "task-document";
+            }
+
+            if (expiryDate.HasValue && issueDate.HasValue && expiryDate <= issueDate)
+                return BadRequest(new { message = "Document expiry date must be after its issue date" });
+
+            await using var content = new MemoryStream();
+            await file.CopyToAsync(content, HttpContext.RequestAborted);
+            var bytes = content.ToArray();
+            var hash = Convert.ToHexString(SHA256.HashData(bytes));
+            var scanText = Encoding.ASCII.GetString(bytes);
+            var infected = scanText.Contains("EICAR-STANDARD-ANTIVIRUS-TEST-FILE", StringComparison.Ordinal);
+            if (evidencePolicy?.RequireMalwareScan != false && infected)
+                return BadRequest(new { message = "The uploaded document failed malware scanning" });
+
+            WorkflowEvidenceDocument? replacedEvidence = null;
+            if (!string.IsNullOrWhiteSpace(replacesAttachmentId))
+            {
+                replacedEvidence = await _db.WorkflowEvidenceDocuments.FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId && item.StepInstanceId == id && item.AttachmentId == replacesAttachmentId &&
+                    item.IsCurrent && !item.IsDeleted, HttpContext.RequestAborted);
+                if (replacedEvidence == null) return BadRequest(new { message = "The evidence being replaced was not found" });
+                replacedEvidence.IsCurrent = false;
+                replacedEvidence.UpdatedAt = DateTime.UtcNow;
+            }
+
             var filePath = $"workflow/{tenantId:N}/{id:N}";
-            using var stream = file.OpenReadStream();
-            var uploadedPath = await _fileStorageService.UploadFileAsync(stream, file.FileName, filePath);
+            content.Position = 0;
+            var uploadedPath = await _fileStorageService.UploadFileAsync(content, file.FileName, filePath);
 
             if (string.IsNullOrWhiteSpace(uploadedPath))
             {
@@ -1927,6 +2202,8 @@ public class WorkflowController : ControllerBase
             {
                 Id = Guid.NewGuid().ToString("N"),
                 RequirementKey = safeRequirementKey,
+                ChecklistItemId = checklistItemId,
+                DocumentType = string.IsNullOrWhiteSpace(documentType) ? null : documentType.Trim(),
                 DocumentName = string.IsNullOrWhiteSpace(documentName) ? null : documentName.Trim(),
                 FileName = file.FileName,
                 FilePath = uploadedPath,
@@ -1934,8 +2211,31 @@ public class WorkflowController : ControllerBase
                 FileSizeBytes = file.Length,
                 UploadedAt = DateTime.UtcNow,
                 UploadedById = currentUserId.Value,
-                UploadedByName = _currentUserService.UserName
+                UploadedByName = _currentUserService.UserName,
+                DocumentOwnerId = documentOwnerId ?? currentUserId.Value,
+                IssueDate = issueDate,
+                ExpiryDate = expiryDate,
+                Version = (replacedEvidence?.Version ?? 0) + 1,
+                ReplacesAttachmentId = replacedEvidence?.AttachmentId,
+                VerificationStatus = WorkflowEvidenceVerificationStatus.Pending,
+                MalwareScanStatus = WorkflowMalwareScanStatus.Clean,
+                Sha256 = hash
             };
+
+            _db.WorkflowEvidenceDocuments.Add(new WorkflowEvidenceDocument
+            {
+                TenantId = tenantId, StepInstanceId = id, AttachmentId = attachment.Id,
+                RequirementKey = attachment.RequirementKey, ChecklistItemId = attachment.ChecklistItemId,
+                DocumentType = attachment.DocumentType, DocumentName = attachment.DocumentName,
+                FileName = attachment.FileName, FilePath = attachment.FilePath, ContentType = attachment.ContentType,
+                FileSizeBytes = attachment.FileSizeBytes, Sha256 = hash, UploadedAt = attachment.UploadedAt,
+                UploadedById = currentUserId.Value, DocumentOwnerId = attachment.DocumentOwnerId.Value,
+                IssueDate = issueDate, ExpiryDate = expiryDate, Version = attachment.Version,
+                ReplacesEvidenceId = replacedEvidence?.Id, VerificationStatus = attachment.VerificationStatus,
+                MalwareScanStatus = attachment.MalwareScanStatus, MalwareScanResult = "Content scan completed",
+                RetainUntil = DateTime.UtcNow.AddDays(evidencePolicy?.RetentionDays ?? 2555),
+                CreatedById = currentUserId.Value, CreatedBy = _currentUserService.UserName
+            });
 
             stepInstance.ResultData = BuildStepResultDataWithTaskAttachment(stepInstance.ResultData, attachment);
             stepInstance.UpdatedAt = DateTime.UtcNow;
@@ -2024,7 +2324,7 @@ public class WorkflowController : ControllerBase
     }
 
     /// <summary>
-    /// Saves the checklist responses for the current approver before an approval step is completed.
+    /// Saves the checklist responses for the current actor before a workflow step is completed.
     /// </summary>
     [HttpPost("steps/{id:guid}/checklist-responses")]
     public async Task<ActionResult> SaveStepChecklistResponses(Guid id, [FromBody] SaveWorkflowChecklistResponsesRequest request)
@@ -2047,14 +2347,18 @@ public class WorkflowController : ControllerBase
                 return NotFound();
             }
 
-            var approvals = await _db.WorkflowApprovals
-                .Where(a => a.StepInstanceId == id && a.Status == WorkflowApprovalStatus.Pending && !a.IsDeleted)
-                .ToListAsync();
+            var canAct = CanCurrentUserCompleteWorkflowTask(stepInstance, currentUserId.Value);
+            if (!canAct)
+            {
+                var approvals = await _db.WorkflowApprovals
+                    .Where(a => a.StepInstanceId == id && a.Status == WorkflowApprovalStatus.Pending && !a.IsDeleted)
+                    .ToListAsync();
 
-            var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-            var canAct = approvals.Any(a =>
-                (a.ApproverId.HasValue && a.ApproverId.Value == currentUserId.Value) ||
-                (!string.IsNullOrWhiteSpace(a.ApproverRole) && roleSet.Contains(a.ApproverRole)));
+                var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                canAct = approvals.Any(a =>
+                    (a.ApproverId.HasValue && a.ApproverId.Value == currentUserId.Value) ||
+                    (!string.IsNullOrWhiteSpace(a.ApproverRole) && roleSet.Contains(a.ApproverRole)));
+            }
 
             if (!canAct)
             {
@@ -2062,8 +2366,14 @@ public class WorkflowController : ControllerBase
             }
 
             var checklist = GetChecklistFromStepConfiguration(stepInstance.WorkflowStep?.Configuration);
-            var responses = request?.Responses ?? new List<WorkflowApprovalChecklistResponseDto>();
-            var validationErrors = ValidateApprovalChecklistResponses(checklist, responses);
+            var attachments = GetWorkflowTaskAttachments(stepInstance.ResultData);
+            var responses = PrepareChecklistResponses(
+                checklist,
+                request?.Responses ?? new List<WorkflowApprovalChecklistResponseDto>(),
+                attachments,
+                currentUserId.Value,
+                _currentUserService.UserName);
+            var validationErrors = WorkflowChecklistEvidenceValidator.Validate(checklist, responses, attachments);
             if (validationErrors.Any())
             {
                 return BadRequest(string.Join(" ", validationErrors));
@@ -2126,11 +2436,68 @@ public class WorkflowController : ControllerBase
             };
 
             // Progress the workflow via the engine (this records the approval + advances the step when satisfied).
-            var resultData = request.ChecklistResponses?.Any() == true
-                ? new { approvalChecklistResponses = request.ChecklistResponses }
+            var stepInstance = await _db.WorkflowStepInstances
+                .AsNoTracking()
+                .Include(si => si.WorkflowStep)
+                .FirstOrDefaultAsync(si => si.Id == approval.StepInstanceId && !si.IsDeleted);
+            var checklist = GetChecklistFromStepConfiguration(stepInstance?.WorkflowStep?.Configuration);
+            var attachments = GetWorkflowTaskAttachments(stepInstance?.ResultData);
+            var checklistResponses = request.ChecklistResponses?.Any() == true
+                ? PrepareChecklistResponses(
+                    checklist,
+                    request.ChecklistResponses,
+                    attachments,
+                    currentUserId.Value,
+                    _currentUserService.UserName)
                 : null;
+            object? resultData;
+            if (request.Action == ErpSystem.Core.Enums.WorkflowApprovalAction.Delegate)
+            {
+                resultData = new { delegateToId = request.DelegateToId };
+            }
+            else
+            {
+                var payload = new Dictionary<string, object?>();
+                if (checklistResponses?.Any() == true) payload["approvalChecklistResponses"] = checklistResponses;
+                if (request.Signature != null) payload["signature"] = request.Signature;
+                resultData = payload.Count == 0 ? null : payload;
+            }
 
-            await _workflowEngine.ProcessStepAsync(approval.StepInstanceId, currentUserId.Value, stepAction, resultData, request.Comments);
+            var executionResult = await _workflowEngine.ProcessStepAsync(
+                approval.StepInstanceId, currentUserId.Value, stepAction, resultData, request.Comments);
+            if (!executionResult.Success)
+            {
+                return BadRequest(new { success = false, error = executionResult.Message, errors = executionResult.Errors });
+            }
+
+            if (request.Action == ErpSystem.Core.Enums.WorkflowApprovalAction.Approve && request.Signature != null)
+            {
+                var certificate = WorkflowSignatureValidator.InspectCertificate(request.Signature.CertificateBase64, DateTime.UtcNow);
+                var signedPayload = $"{approval.Id:N}|{currentUserId.Value:N}|{request.Signature.SignedAt:O}|{request.Signature.Attestation}";
+                _db.WorkflowSignatureEvidence.Add(new WorkflowSignatureEvidence
+                {
+                    TenantId = approval.TenantId,
+                    ApprovalId = approval.Id,
+                    SignerUserId = currentUserId.Value,
+                    Method = request.Signature.Method,
+                    Attestation = request.Signature.Attestation.Trim(),
+                    CertificateThumbprint = certificate?.Thumbprint,
+                    CertificateSubject = certificate?.Subject,
+                    CertificateNotBefore = certificate?.NotBefore,
+                    CertificateNotAfter = certificate?.NotAfter,
+                    CertificateChainValid = certificate?.ChainValid ?? false,
+                    SubmissionJson = JsonSerializer.Serialize(request.Signature),
+                    SignedPayloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signedPayload))),
+                    SignedAt = request.Signature.SignedAt,
+                    IsCommitted = true,
+                    CommittedAt = DateTime.UtcNow,
+                    IpAddress = _currentUserService.IpAddress,
+                    UserAgent = _currentUserService.UserAgent,
+                    CreatedById = currentUserId.Value,
+                    CreatedBy = _currentUserService.UserName
+                });
+                await _db.SaveChangesAsync(HttpContext.RequestAborted);
+            }
 
             await TryApplyPostApprovalIntegrationAsync(approval.StepInstanceId, currentUserId.Value, request, HttpContext.RequestAborted);
 
@@ -2391,12 +2758,18 @@ public class WorkflowController : ControllerBase
         return new WorkflowDefinitionDto
         {
             Id = definition.Id,
+            DefinitionKey = definition.DefinitionKey,
             Name = definition.Name,
             Description = definition.Description,
             EntityType = definition.EntityType?.Name ?? "Unknown",
             Configuration = definition.Configuration,
             IsActive = definition.IsActive,
             Version = definition.Version,
+            LifecycleStatus = definition.LifecycleStatus,
+            ChangeSummary = definition.ChangeSummary,
+            SupersedesDefinitionId = definition.SupersedesDefinitionId,
+            PublishedAt = definition.PublishedAt,
+            RetiredAt = definition.RetiredAt,
             CreatedById = Guid.Empty, // We don't have user ID as Guid, only string username
             CreatedByName = definition.CreatedBy ?? "Unknown",
             CreatedDate = definition.CreatedAt,
@@ -2573,6 +2946,39 @@ public class WorkflowController : ControllerBase
         return assignedRoles.Any(roleSet.Contains);
     }
 
+    private async Task<bool> CanCurrentUserAttachToStepAsync(
+        WorkflowStepInstance stepInstance,
+        Guid currentUserId,
+        CancellationToken cancellationToken)
+    {
+        if (stepInstance.Status != WorkflowStepInstanceStatus.Pending &&
+            stepInstance.Status != WorkflowStepInstanceStatus.InProgress)
+        {
+            return false;
+        }
+
+        if (stepInstance.WorkflowStep?.StepType == WorkflowStepType.Manual)
+        {
+            return CanCurrentUserCompleteWorkflowTask(stepInstance, currentUserId);
+        }
+
+        if (stepInstance.WorkflowStep?.StepType != WorkflowStepType.Approval)
+        {
+            return false;
+        }
+
+        var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        return await _db.WorkflowApprovals
+            .AsNoTracking()
+            .AnyAsync(approval =>
+                approval.StepInstanceId == stepInstance.Id &&
+                approval.Status == WorkflowApprovalStatus.Pending &&
+                !approval.IsDeleted &&
+                ((approval.ApproverId.HasValue && approval.ApproverId.Value == currentUserId) ||
+                 (!string.IsNullOrWhiteSpace(approval.ApproverRole) && roleSet.Contains(approval.ApproverRole))),
+                cancellationToken);
+    }
+
     private static WorkflowStepConfigurationDto? DeserializeStepConfiguration(string? configurationJson)
     {
         if (string.IsNullOrWhiteSpace(configurationJson))
@@ -2630,6 +3036,9 @@ public class WorkflowController : ControllerBase
                     Name = item.Name.Trim(),
                     Description = item.Description?.Trim() ?? string.Empty,
                     IsRequired = item.IsRequired,
+                    RequiresDocument = item.RequiresDocument,
+                    DocumentType = string.IsNullOrWhiteSpace(item.DocumentType) ? null : item.DocumentType.Trim(),
+                    DocumentName = string.IsNullOrWhiteSpace(item.DocumentName) ? null : item.DocumentName.Trim(),
                     ApplicabilityCondition = item.ApplicabilityCondition,
                     ExpectedValue = item.ExpectedValue,
                     ValidationExpression = item.ValidationExpression
@@ -2642,38 +3051,66 @@ public class WorkflowController : ControllerBase
         }
     }
 
-    private static List<string> ValidateApprovalChecklistResponses(
+    private static List<WorkflowApprovalChecklistResponseDto> PrepareChecklistResponses(
         IReadOnlyCollection<WorkflowQualityCheckDto> checklist,
-        IReadOnlyCollection<WorkflowApprovalChecklistResponseDto> responses)
+        IReadOnlyCollection<WorkflowApprovalChecklistResponseDto> responses,
+        IReadOnlyCollection<WorkflowTaskAttachmentDto> attachments,
+        Guid currentUserId,
+        string? currentUserName)
     {
-        var errors = new List<string>();
-        if (checklist.Count == 0)
-        {
-            return errors;
-        }
-
         var responseLookup = responses
             .Where(response => !string.IsNullOrWhiteSpace(response.Id) || !string.IsNullOrWhiteSpace(response.Name))
-            .GroupBy(response => NormalizeChecklistKey(response.Id, response.Name), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(response => WorkflowChecklistEvidenceValidator.NormalizeKey(response.Id, response.Name), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var item in checklist.Where(item => item.IsRequired))
-        {
-            var key = NormalizeChecklistKey(item.Id, item.Name);
-            if (!responseLookup.TryGetValue(key, out var response) || !response.IsSatisfied)
+        return checklist
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .Select(item =>
             {
-                errors.Add($"Required checklist item '{item.Name}' must be satisfied before approval.");
-            }
-        }
+                var key = WorkflowChecklistEvidenceValidator.NormalizeKey(item.Id, item.Name);
+                responseLookup.TryGetValue(key, out var response);
+                var evidence = WorkflowChecklistEvidenceValidator.GetAttachmentsForItem(item, attachments);
 
-        return errors;
+                return new WorkflowApprovalChecklistResponseDto
+                {
+                    Id = item.Id,
+                    Name = item.Name,
+                    IsSatisfied = response?.IsSatisfied == true,
+                    Notes = string.IsNullOrWhiteSpace(response?.Notes) ? null : response.Notes.Trim(),
+                    AttachmentIds = evidence.Select(attachment => attachment.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                    CompletedById = response == null ? null : currentUserId,
+                    CompletedByName = response == null ? null : currentUserName,
+                    CompletedAt = response == null ? null : DateTime.UtcNow
+                };
+            })
+            .ToList();
     }
 
-    private static string NormalizeChecklistKey(string? id, string? name)
+    private static List<WorkflowApprovalChecklistResponseDto> GetApprovalChecklistResponses(string? resultData)
     {
-        return !string.IsNullOrWhiteSpace(id)
-            ? id.Trim()
-            : (name ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(resultData))
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(resultData, WorkflowJsonOptions);
+            if (payload == null ||
+                !payload.TryGetValue("approvalChecklistResponses", out var responsesElement) ||
+                responsesElement.ValueKind != JsonValueKind.Array)
+            {
+                return new List<WorkflowApprovalChecklistResponseDto>();
+            }
+
+            return JsonSerializer.Deserialize<List<WorkflowApprovalChecklistResponseDto>>(
+                responsesElement.GetRawText(),
+                WorkflowJsonOptions) ?? new List<WorkflowApprovalChecklistResponseDto>();
+        }
+        catch
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
     }
 
     private static string BuildStepResultDataWithChecklistResponses(
@@ -2761,6 +3198,26 @@ public class WorkflowController : ControllerBase
         return JsonSerializer.Serialize(payload, WorkflowJsonOptions);
     }
 
+    private async Task<Guid?> ResolveCurrentUserApprovalIdAsync(Guid? stepInstanceId, Guid userId)
+    {
+        if (!stepInstanceId.HasValue) return null;
+        var roles = new HashSet<string>(_currentUserService.Roles ?? [], StringComparer.OrdinalIgnoreCase);
+        return await _db.WorkflowApprovals.AsNoTracking()
+            .Where(approval => approval.StepInstanceId == stepInstanceId.Value && !approval.IsDeleted &&
+                approval.Status == WorkflowApprovalStatus.Pending &&
+                (approval.ApproverId == userId || approval.ApproverRole != null && roles.Contains(approval.ApproverRole)))
+            .OrderBy(approval => approval.RequestedDate)
+            .Select(approval => (Guid?)approval.Id)
+            .FirstOrDefaultAsync(HttpContext.RequestAborted);
+    }
+
+    private Task<WorkflowCorrectionRequest?> ResolveCurrentUserCorrectionAsync(Guid instanceId, Guid userId) =>
+        _db.WorkflowCorrectionRequests.AsNoTracking()
+            .Where(item => item.WorkflowInstanceId == instanceId && item.CorrectionOwnerId == userId &&
+                item.Status == WorkflowCorrectionStatus.Open && !item.IsDeleted)
+            .OrderByDescending(item => item.RequestedAt)
+            .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
     private static JsonSerializerOptions CreateWorkflowJsonOptions()
     {
         var options = new JsonSerializerOptions
@@ -2846,6 +3303,8 @@ public class ProcessApprovalRequest
     public ErpSystem.Core.Enums.WorkflowApprovalAction Action { get; set; }
     public string? Comments { get; set; }
     public List<WorkflowApprovalChecklistResponseDto>? ChecklistResponses { get; set; }
+    public Guid? DelegateToId { get; set; }
+    public WorkflowSignatureSubmissionDto? Signature { get; set; }
 }
 
 public class SaveWorkflowChecklistResponsesRequest

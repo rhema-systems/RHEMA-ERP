@@ -33,6 +33,7 @@ public class WorkflowEntityDisplayServiceProjectTests
             Mock.Of<IPurchaseRequisitionRepository>(),
             Mock.Of<IPurchaseOrderRepository>(),
             Mock.Of<ITenderRepository>(),
+            Mock.Of<IProcurementPlanRepository>(),
             projectRepository.Object,
             Mock.Of<IBusinessPartnerRepository>(),
             Mock.Of<IJobCardRepository>(),

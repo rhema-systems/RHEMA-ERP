@@ -22,6 +22,9 @@ public class DataRetentionPolicy : BaseEntity
 
     [Range(1, 3650)]
     public int EhcAuditEventRetentionDays { get; set; } = 365;
+
+    [Range(2555, 3650)]
+    public int WorkflowAuditRetentionDays { get; set; } = 2555;
 }
 
 [Table("DataRetentionJobRuns")]
@@ -45,4 +48,3 @@ public class DataRetentionJobRun : BaseEntity
     [StringLength(1000)]
     public string? Error { get; set; }
 }
-

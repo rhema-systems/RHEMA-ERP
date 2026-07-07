@@ -21,7 +21,10 @@ public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition
     {
         return await _dbSet
             .Include(wd => wd.EntityType)
-            .Where(wd => wd.EntityTypeId == entityTypeId && wd.IsActive && !wd.IsDeleted)
+            .Where(wd => wd.EntityTypeId == entityTypeId &&
+                         wd.IsActive &&
+                         wd.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+                         !wd.IsDeleted)
             .OrderBy(wd => wd.Name)
             .ToListAsync(cancellationToken);
     }
@@ -32,8 +35,9 @@ public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition
     public async Task<WorkflowDefinition?> GetByNameAsync(string name, Guid tenantId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .Include(wd => wd.EntityType)
             .Where(wd => wd.Name == name && wd.TenantId == tenantId && !wd.IsDeleted)
-            .OrderByDescending(wd => wd.IsActive)
+            .OrderByDescending(wd => wd.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published && wd.IsActive)
             .ThenByDescending(wd => wd.Version)
             .ThenByDescending(wd => wd.UpdatedAt ?? wd.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
@@ -54,6 +58,17 @@ public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition
             .FirstOrDefaultAsync(wd => wd.Id == id && !wd.IsDeleted, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<WorkflowDefinition>> GetVersionsAsync(
+        Guid definitionKey,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Where(wd => wd.DefinitionKey == definitionKey && wd.TenantId == tenantId && !wd.IsDeleted)
+            .OrderByDescending(wd => wd.Version)
+            .ToListAsync(cancellationToken);
+    }
+
     /// <summary>
     /// Gets all active workflow definitions
     /// </summary>
@@ -61,7 +76,10 @@ public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition
     {
         return await _dbSet
             .Include(wd => wd.EntityType)
-            .Where(wd => wd.TenantId == tenantId && wd.IsActive && !wd.IsDeleted)
+            .Where(wd => wd.TenantId == tenantId &&
+                         wd.IsActive &&
+                         wd.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+                         !wd.IsDeleted)
             .OrderBy(wd => wd.Name)
             .ToListAsync(cancellationToken);
     }

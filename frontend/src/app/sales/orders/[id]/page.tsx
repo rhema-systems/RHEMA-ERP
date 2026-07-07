@@ -11,8 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowApprovalActions, WorkflowApprovalHistoryPanel, useWorkflowRecord } from '@/components/workflow';
 import {
   ShoppingCart, ArrowLeft, CheckCircle, XCircle, Pause, Play,
   Lock, Truck, Clock, AlertTriangle, Building2, Home
@@ -81,21 +80,6 @@ export default function SalesOrderDetailPage() {
     }
   };
 
-  const handleWorkflowSubmit = async () => {
-    const updated = await salesOrderService.submitForApproval(orderId);
-    setOrder(updated);
-  };
-
-  const handleWorkflowApprove = async (comments: string) => {
-    const updated = await salesOrderService.processApproval(orderId, { isApproved: true, comments });
-    setOrder(updated);
-  };
-
-  const handleWorkflowReject = async (comments: string) => {
-    const updated = await salesOrderService.processApproval(orderId, { isApproved: false, comments });
-    setOrder(updated);
-  };
-
   const handleConfirm = () => handleAction(
     () => salesOrderService.confirmSalesOrder(orderId),
     'Order confirmed'
@@ -135,6 +119,24 @@ export default function SalesOrderDetailPage() {
     return <Badge variant={c.variant} className={c.className}>{status.replace(/([A-Z])/g, ' $1').trim()}</Badge>;
   };
 
+  const workflow = useWorkflowRecord({
+    entityType: 'SalesOrder',
+    entityId: orderId,
+    entityLabel: 'Sales Order',
+    entityNumber: order?.orderNumber,
+    status: order?.status ?? '',
+    canSubmit: order?.status === 'Draft',
+    canApproveReject: order?.status === 'PendingApproval',
+    enabled: Boolean(order),
+    commands: {
+      submit: async () => setOrder(await salesOrderService.submitForApproval(orderId)),
+      approve: async ({ comments }) => setOrder(await salesOrderService.processApproval(orderId, { isApproved: true, comments })),
+      reject: async ({ comments }) => setOrder(await salesOrderService.processApproval(orderId, { isApproved: false, comments })),
+      afterAction: loadOrder,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
   if (loading) {
     return (
       <div className="container mx-auto py-6">
@@ -160,8 +162,6 @@ export default function SalesOrderDetailPage() {
     );
   }
 
-  const canSubmit = order.status === 'Draft';
-  const canApprove = order.status === 'PendingApproval';
   const canConfirm = order.status === 'Approved';
   const canCancel = ['Draft', 'PendingApproval', 'Approved', 'Confirmed'].includes(order.status);
   const canHold = ['Confirmed', 'InProgress'].includes(order.status);
@@ -193,20 +193,8 @@ export default function SalesOrderDetailPage() {
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
           <WorkflowApprovalActions
-            entityType="SalesOrder"
-            entityId={orderId}
-            entityLabel="Sales Order"
-            entityNumber={order.orderNumber}
-            status={order.status}
+            {...workflow.actionProps}
             showStepBadge
-            loadWorkflowSummary
-            canSubmit={canSubmit}
-            canApproveReject={canApprove}
-            onSubmit={handleWorkflowSubmit}
-            onApprove={handleWorkflowApprove}
-            onReject={handleWorkflowReject}
-            onAfterAction={loadOrder}
-            onOpenWorkflows={() => router.push('/administration/workflow')}
           />
           {canConfirm && (
             <Button onClick={handleConfirm} disabled={actionLoading}>
@@ -534,18 +522,7 @@ export default function SalesOrderDetailPage() {
       </Card>
 
       <WorkflowApprovalHistoryPanel
-        entityType="SalesOrder"
-        entityId={orderId}
-        entityLabel="Sales Order"
-        entityNumber={order.orderNumber}
-        status={order.status}
-        canSubmit={canSubmit}
-        canApproveReject={canApprove}
-        onSubmit={handleWorkflowSubmit}
-        onApprove={handleWorkflowApprove}
-        onReject={handleWorkflowReject}
-        onAfterAction={loadOrder}
-        onOpenWorkflows={() => router.push('/administration/workflow')}
+        {...workflow.actionProps}
         showActions={false}
       />
 

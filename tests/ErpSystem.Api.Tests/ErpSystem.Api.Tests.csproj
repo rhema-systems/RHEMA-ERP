@@ -34,6 +34,7 @@
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />
+    <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
   </ItemGroup>
 
 </Project>

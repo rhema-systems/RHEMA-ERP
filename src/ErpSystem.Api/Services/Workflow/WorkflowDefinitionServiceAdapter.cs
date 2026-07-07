@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Repositories;
+using ErpSystem.Core.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Workflow;
@@ -66,6 +67,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         var definition = new WorkflowDefinition
         {
             Id = Guid.NewGuid(),
+            DefinitionKey = Guid.NewGuid(),
             Name = createDto.Name,
             Description = createDto.Description,
             EntityTypeId = entityType.Id,
@@ -75,6 +77,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             CreatedBy = _currentUserService.UserName ?? "System",
             CreatedById = createdById,
             IsActive = false,
+            LifecycleStatus = WorkflowDefinitionLifecycleStatus.Draft,
             Version = 1
         };
 
@@ -92,6 +95,10 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
     public async Task<WorkflowDefinition> UpdateWorkflowDefinitionAsync(Guid id, UpdateWorkflowDefinitionDto updateDto)
     {
         var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(id) ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+        EnsureCurrentTenant(definition);
+
+        WorkflowDefinitionLifecyclePolicy.EnsureEditable(definition);
+
         var hasActiveInstances = await _workflowDefinitionRepository
             .GetQueryable(d => d.Id == id && d.TenantId == definition.TenantId)
             .SelectMany(d => d.Instances)
@@ -113,6 +120,13 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             definition.Name = updateDto.Name;
         }
 
+        if (!string.IsNullOrWhiteSpace(updateDto.EntityType))
+        {
+            var entityType = await ResolveOrCreateEntityTypeAsync(updateDto.EntityType.Trim(), definition.TenantId);
+            definition.EntityTypeId = entityType.Id;
+            definition.EntityType = entityType;
+        }
+
         definition.Description = updateDto.Description;
         definition.Configuration = updateDto.Configuration;
         definition.UpdatedAt = DateTime.UtcNow;
@@ -120,11 +134,6 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         definition.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var modifiedById)
             ? modifiedById
             : null;
-
-        if (updateDto.Steps != null && updateDto.Steps.Any())
-        {
-            definition.Version = Math.Max(1, definition.Version + 1);
-        }
 
         await _workflowDefinitionRepository.UpdateAsync(definition);
         await _workflowDefinitionRepository.SaveChangesAsync();
@@ -140,7 +149,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             {
                 Name = definition.Name,
                 Description = definition.Description,
-                EntityType = definition.EntityType?.Name ?? string.Empty,
+                EntityType = definition.EntityType?.Name ?? updateDto.EntityType ?? string.Empty,
                 Configuration = definition.Configuration,
                 CreatedById = modifiedById,
                 Steps = updateDto.Steps ?? new List<CreateWorkflowStepDto>(),
@@ -149,6 +158,296 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         }
 
         return await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id) ?? definition;
+    }
+
+    public async Task<WorkflowDefinition> CloneWorkflowDefinitionDraftAsync(
+        Guid sourceDefinitionId,
+        string? changeSummary,
+        Guid createdById)
+    {
+        var source = await _workflowDefinitionRepository.GetWithDetailsAsync(sourceDefinitionId)
+                     ?? throw new InvalidOperationException($"Workflow definition with ID {sourceDefinitionId} not found");
+        EnsureCurrentTenant(source);
+
+        var definitionKey = source.DefinitionKey == Guid.Empty ? source.Id : source.DefinitionKey;
+        var versions = await _workflowDefinitionRepository.GetVersionsAsync(definitionKey, source.TenantId);
+
+        if (versions.Any(d => d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft && d.Id != source.Id))
+        {
+            throw new InvalidOperationException("This workflow already has an editable draft. Open that draft instead of creating another version.");
+        }
+
+        if (source.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft)
+        {
+            return source;
+        }
+
+        var nextVersion = Math.Max(source.Version + 1, WorkflowDefinitionLifecyclePolicy.GetNextVersion(versions));
+        var draft = new WorkflowDefinition
+        {
+            Id = Guid.NewGuid(),
+            DefinitionKey = definitionKey,
+            Name = source.Name,
+            Description = source.Description,
+            EntityTypeId = source.EntityTypeId,
+            Version = nextVersion,
+            LifecycleStatus = WorkflowDefinitionLifecycleStatus.Draft,
+            IsActive = false,
+            Configuration = source.Configuration,
+            ChangeSummary = string.IsNullOrWhiteSpace(changeSummary) ? $"Drafted from version {source.Version}" : changeSummary.Trim(),
+            SupersedesDefinitionId = source.Id,
+            TenantId = source.TenantId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            CreatedById = createdById
+        };
+
+        await _workflowDefinitionRepository.AddAsync(draft);
+
+        var sourceSteps = source.Steps
+            .OrderBy(step => step.Order)
+            .ThenBy(step => step.Id)
+            .ToList();
+
+        var clonedSteps = sourceSteps.Select(step => new WorkflowStep
+        {
+            WorkflowDefinitionId = draft.Id,
+            Name = step.Name,
+            Description = step.Description,
+            StepType = step.StepType,
+            Order = step.Order,
+            IsRequired = step.IsRequired,
+            RequiredRole = step.RequiredRole,
+            EstimatedHours = step.EstimatedHours,
+            IsStartStep = step.IsStartStep,
+            IsEndStep = step.IsEndStep,
+            Configuration = step.Configuration,
+            TenantId = draft.TenantId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = draft.CreatedBy,
+            CreatedById = createdById
+        }).ToList();
+
+        var stepIdMap = new Dictionary<Guid, Guid>();
+        if (clonedSteps.Count > 0)
+        {
+            var addedSteps = (await _workflowStepRepository.AddRangeAsync(clonedSteps)).ToList();
+            stepIdMap = sourceSteps
+                .Zip(addedSteps, (sourceStep, clonedStep) => new { SourceId = sourceStep.Id, ClonedId = clonedStep.Id })
+                .ToDictionary(item => item.SourceId, item => item.ClonedId);
+        }
+
+        var clonedTransitions = source.Transitions
+            .Where(transition => stepIdMap.ContainsKey(transition.FromStepId) && stepIdMap.ContainsKey(transition.ToStepId))
+            .Select(transition => new WorkflowTransition
+            {
+                Id = Guid.NewGuid(),
+                WorkflowDefinitionId = draft.Id,
+                FromStepId = stepIdMap[transition.FromStepId],
+                ToStepId = stepIdMap[transition.ToStepId],
+                Name = transition.Name,
+                Description = transition.Description,
+                Condition = transition.Condition,
+                IsDefault = transition.IsDefault,
+                Priority = transition.Priority,
+                TenantId = draft.TenantId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = draft.CreatedBy,
+                CreatedById = createdById
+            }).ToList();
+
+        if (clonedTransitions.Count > 0)
+        {
+            await _workflowTransitionRepository.AddRangeAsync(clonedTransitions);
+        }
+
+        await _workflowDefinitionRepository.SaveChangesAsync();
+
+        return await _workflowDefinitionRepository.GetWithDetailsAsync(draft.Id) ?? draft;
+    }
+
+    public async Task<WorkflowDefinition> PublishWorkflowDefinitionAsync(Guid id, Guid publishedById)
+    {
+        var tenantId = RequireTenantId();
+        var draft = await GetDefinitionForLifecycleValidationAsync(id, tenantId);
+        if (draft.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published && draft.IsActive)
+        {
+            return draft;
+        }
+
+        WorkflowDefinitionLifecyclePolicy.EnsureCanPublish(draft);
+
+        var (isValid, errors) = await _coreService.ValidateDefinitionAsync(draft);
+        if (!isValid)
+        {
+            throw new InvalidOperationException($"Cannot publish invalid workflow definition: {string.Join(", ", errors)}");
+        }
+
+        var now = DateTime.UtcNow;
+        var definitionKey = draft.DefinitionKey == Guid.Empty ? draft.Id : draft.DefinitionKey;
+        var family = await _workflowDefinitionRepository
+            .GetQueryable(d => d.TenantId == tenantId && d.DefinitionKey == definitionKey)
+            .ToListAsync();
+
+        foreach (var current in family.Where(d => d.Id != draft.Id &&
+                                                   d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published))
+        {
+            current.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+            current.IsActive = false;
+            current.RetiredAt = now;
+            current.RetiredById = publishedById;
+            current.UpdatedAt = now;
+            current.UpdatedBy = _currentUserService.UserName ?? "System";
+            current.LastModifiedById = publishedById;
+            await _workflowDefinitionRepository.UpdateAsync(current);
+        }
+
+        var trackedDraft = await _workflowDefinitionRepository.GetByIdAsync(id)
+                           ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+        trackedDraft.DefinitionKey = definitionKey;
+        trackedDraft.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+        trackedDraft.IsActive = true;
+        trackedDraft.PublishedAt = now;
+        trackedDraft.PublishedById = publishedById;
+        trackedDraft.RetiredAt = null;
+        trackedDraft.RetiredById = null;
+        trackedDraft.UpdatedAt = now;
+        trackedDraft.UpdatedBy = _currentUserService.UserName ?? "System";
+        trackedDraft.LastModifiedById = publishedById;
+        await _workflowDefinitionRepository.UpdateAsync(trackedDraft);
+        await _workflowDefinitionRepository.SaveChangesAsync();
+
+        return await _workflowDefinitionRepository.GetWithDetailsAsync(id) ?? trackedDraft;
+    }
+
+    public async Task<WorkflowDefinition> RetireWorkflowDefinitionAsync(Guid id, Guid retiredById)
+    {
+        var definition = await _workflowDefinitionRepository.GetByIdAsync(id)
+                         ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+        EnsureCurrentTenant(definition);
+
+        if (definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Retired)
+        {
+            return definition;
+        }
+
+        if (definition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published)
+        {
+            throw new InvalidOperationException("Only a published workflow version can be retired.");
+        }
+
+        definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+        definition.IsActive = false;
+        definition.RetiredAt = DateTime.UtcNow;
+        definition.RetiredById = retiredById;
+        definition.UpdatedAt = DateTime.UtcNow;
+        definition.UpdatedBy = _currentUserService.UserName ?? "System";
+        definition.LastModifiedById = retiredById;
+        await _workflowDefinitionRepository.UpdateAsync(definition);
+        await _workflowDefinitionRepository.SaveChangesAsync();
+        return await _workflowDefinitionRepository.GetWithDetailsAsync(id) ?? definition;
+    }
+
+    public async Task<IReadOnlyList<WorkflowDefinition>> GetWorkflowDefinitionVersionsAsync(Guid id)
+    {
+        var source = await _workflowDefinitionRepository.GetByIdAsync(id)
+                     ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+        EnsureCurrentTenant(source);
+        var definitionKey = source.DefinitionKey == Guid.Empty ? source.Id : source.DefinitionKey;
+
+        return await _workflowDefinitionRepository
+            .GetQueryable(d => d.TenantId == source.TenantId && d.DefinitionKey == definitionKey)
+            .AsNoTracking()
+            .Include(d => d.Instances)
+            .OrderByDescending(d => d.Version)
+            .ToListAsync();
+    }
+
+    public async Task<WorkflowDefinitionComparisonDto> CompareWorkflowDefinitionsAsync(
+        Guid fromDefinitionId,
+        Guid toDefinitionId)
+    {
+        var from = await _workflowDefinitionRepository.GetWithDetailsAsync(fromDefinitionId)
+                   ?? throw new InvalidOperationException($"Workflow definition with ID {fromDefinitionId} not found");
+        var to = await _workflowDefinitionRepository.GetWithDetailsAsync(toDefinitionId)
+                 ?? throw new InvalidOperationException($"Workflow definition with ID {toDefinitionId} not found");
+        EnsureCurrentTenant(from);
+        EnsureCurrentTenant(to);
+
+        var fromKey = from.DefinitionKey == Guid.Empty ? from.Id : from.DefinitionKey;
+        var toKey = to.DefinitionKey == Guid.Empty ? to.Id : to.DefinitionKey;
+        if (fromKey != toKey)
+        {
+            throw new InvalidOperationException("Workflow versions can only be compared within the same definition family.");
+        }
+
+        var changes = new List<string>();
+        var potentiallyBreaking = false;
+        AddPropertyChange(changes, "Name", from.Name, to.Name);
+        AddPropertyChange(changes, "Description", from.Description, to.Description);
+        if (!string.Equals(from.Configuration, to.Configuration, StringComparison.Ordinal))
+        {
+            changes.Add("Workflow configuration changed.");
+        }
+
+        var fromSteps = from.Steps
+            .GroupBy(step => step.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var toSteps = to.Steps
+            .GroupBy(step => step.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        foreach (var removed in fromSteps.Keys.Except(toSteps.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(name => name))
+        {
+            changes.Add($"Step removed: {removed}.");
+            potentiallyBreaking = true;
+        }
+        foreach (var added in toSteps.Keys.Except(fromSteps.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(name => name))
+        {
+            changes.Add($"Step added: {added}.");
+        }
+        foreach (var name in fromSteps.Keys.Intersect(toSteps.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(name => name))
+        {
+            var oldStep = fromSteps[name];
+            var newStep = toSteps[name];
+            if (oldStep.StepType != newStep.StepType || oldStep.Order != newStep.Order ||
+                oldStep.IsRequired != newStep.IsRequired || oldStep.RequiredRole != newStep.RequiredRole ||
+                oldStep.Configuration != newStep.Configuration)
+            {
+                changes.Add($"Step changed: {name}.");
+                potentiallyBreaking = true;
+            }
+        }
+
+        var fromStepNames = from.Steps.ToDictionary(step => step.Id, step => step.Name);
+        var toStepNames = to.Steps.ToDictionary(step => step.Id, step => step.Name);
+        var fromTransitions = from.Transitions
+            .Select(transition => TransitionSignature(transition, fromStepNames))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var toTransitions = to.Transitions
+            .Select(transition => TransitionSignature(transition, toStepNames))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removedTransitions = fromTransitions.Except(toTransitions, StringComparer.OrdinalIgnoreCase).Count();
+        var addedTransitions = toTransitions.Except(fromTransitions, StringComparer.OrdinalIgnoreCase).Count();
+        if (removedTransitions > 0)
+        {
+            changes.Add($"{removedTransitions} transition(s) removed or changed.");
+            potentiallyBreaking = true;
+        }
+        if (addedTransitions > 0)
+        {
+            changes.Add($"{addedTransitions} transition(s) added or changed.");
+        }
+
+        return new WorkflowDefinitionComparisonDto
+        {
+            DefinitionKey = fromKey,
+            FromDefinitionId = from.Id,
+            FromVersion = from.Version,
+            ToDefinitionId = to.Id,
+            ToVersion = to.Version,
+            HasPotentiallyBreakingChanges = potentiallyBreaking,
+            Changes = changes
+        };
     }
 
     public async Task<WorkflowDefinition?> GetWorkflowDefinitionAsync(Guid id)
@@ -202,34 +501,24 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
 
     public async Task SetWorkflowDefinitionActiveAsync(Guid id, bool isActive, Guid modifiedById)
     {
-        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
-        if (tenantId == Guid.Empty)
-        {
-            throw new InvalidOperationException("Tenant ID is required to update workflow definition status");
-        }
-
         if (!isActive)
         {
-            // Deactivation does not require workflow structure validation.
             var definition = await _workflowDefinitionRepository.GetByIdAsync(id)
                              ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
-            definition.IsActive = false;
-            definition.UpdatedAt = DateTime.UtcNow;
-            definition.UpdatedBy = _currentUserService.UserName ?? "System";
-            definition.LastModifiedById = modifiedById;
-            await _workflowDefinitionRepository.UpdateAsync(definition);
-            await _workflowDefinitionRepository.SaveChangesAsync();
+            EnsureCurrentTenant(definition);
+            if (definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published)
+            {
+                await RetireWorkflowDefinitionAsync(id, modifiedById);
+            }
             return;
         }
+        await PublishWorkflowDefinitionAsync(id, modifiedById);
+    }
 
-        // IMPORTANT:
-        // When a workflow definition is updated, we soft-delete and recreate steps/transitions in the same request scope.
-        // EF may keep the previous (now soft-deleted) steps in the tracked navigation collection, which then causes
-        // activation validation to falsely report duplicate step names / multiple start steps / non-sequential orders.
-        // To avoid that, validate using a no-tracking query that reflects the persisted database state.
-        var definitionForValidation = await _workflowDefinitionRepository
+    private async Task<WorkflowDefinition> GetDefinitionForLifecycleValidationAsync(Guid id, Guid tenantId)
+    {
+        return await _workflowDefinitionRepository
             .GetQueryable(d => d.Id == id && d.TenantId == tenantId)
-            // Use identity resolution to avoid duplicate step entities when including transitions.
             .AsNoTrackingWithIdentityResolution()
             .AsSplitQuery()
             .Include(wd => wd.Steps.OrderBy(s => s.Order))
@@ -239,23 +528,38 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             .Include(wd => wd.EntityType)
             .FirstOrDefaultAsync()
             ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
-
-        var (isValid, errors) = await _coreService.ValidateDefinitionAsync(definitionForValidation);
-        if (!isValid)
-        {
-            throw new InvalidOperationException(
-                $"Cannot activate invalid workflow definition: {string.Join(", ", errors)}");
-        }
-
-        var definitionToActivate = await _workflowDefinitionRepository.GetByIdAsync(id)
-                                 ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
-        definitionToActivate.IsActive = true;
-        definitionToActivate.UpdatedAt = DateTime.UtcNow;
-        definitionToActivate.UpdatedBy = _currentUserService.UserName ?? "System";
-        definitionToActivate.LastModifiedById = modifiedById;
-        await _workflowDefinitionRepository.UpdateAsync(definitionToActivate);
-        await _workflowDefinitionRepository.SaveChangesAsync();
     }
+
+    private Guid RequireTenantId()
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        return tenantId != Guid.Empty
+            ? tenantId
+            : throw new InvalidOperationException("Tenant ID is required for workflow definition lifecycle operations");
+    }
+
+    private void EnsureCurrentTenant(WorkflowDefinition definition)
+    {
+        if (definition.TenantId != RequireTenantId())
+        {
+            throw new InvalidOperationException("Workflow definition not found for the current tenant.");
+        }
+    }
+
+    private static void AddPropertyChange(List<string> changes, string property, string? from, string? to)
+    {
+        if (!string.Equals(from?.Trim(), to?.Trim(), StringComparison.Ordinal))
+        {
+            changes.Add($"{property} changed.");
+        }
+    }
+
+    private static string TransitionSignature(
+        WorkflowTransition transition,
+        IReadOnlyDictionary<Guid, string> stepNames) =>
+        $"{stepNames.GetValueOrDefault(transition.FromStepId, transition.FromStepId.ToString())}|" +
+        $"{stepNames.GetValueOrDefault(transition.ToStepId, transition.ToStepId.ToString())}|" +
+        $"{transition.Name}|{transition.Condition}|{transition.IsDefault}|{transition.Priority}";
 
     public async Task DeleteWorkflowDefinitionAsync(Guid id)
     {
@@ -273,6 +577,11 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             .Include(d => d.Instances)
             .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId)
             ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+
+        if (definition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Draft)
+        {
+            throw new InvalidOperationException("Only a draft workflow version can be deleted. Published history must be retired and retained for audit.");
+        }
 
         if (definition.Instances?.Any() == true)
         {
