@@ -768,6 +768,9 @@ export interface WorkflowEvidenceDocumentDto {
   malwareScanStatus: number;
   retainUntil: string;
   isLegalHold: boolean;
+  legalHoldReason?: string;
+  legalHoldById?: string;
+  legalHoldAt?: string;
 }
 
 // Workflow Entities (for responses)

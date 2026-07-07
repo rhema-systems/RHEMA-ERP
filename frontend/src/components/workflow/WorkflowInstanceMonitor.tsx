@@ -54,6 +54,7 @@ import { NotificationNode } from './nodes/NotificationNode';
 import { DocumentNode } from './nodes/DocumentNode';
 import { EscalationNode } from './nodes/EscalationNode';
 import { IntegrationNode } from './nodes/IntegrationNode';
+import { WorkflowReasonDialog } from './WorkflowReasonDialog';
 
 const nodeTypes: NodeTypes = {
   start: StartNode,
@@ -110,6 +111,7 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
   const [adHocReason, setAdHocReason] = useState('');
   const [adHocGroup, setAdHocGroup] = useState(1);
   const [approverSaving, setApproverSaving] = useState(false);
+  const [removeApproverTarget, setRemoveApproverTarget] = useState<WorkflowApprovalStatusDto | null>(null);
 
   const instanceStatusName = (status: WorkflowInstanceStatus | string | number | undefined) => {
     if (typeof status === 'number') {
@@ -335,11 +337,17 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     finally { setApproverSaving(false); }
   };
 
-  const removeAdHocApprover = async (approvalId: string) => {
-    const reason = window.prompt('Reason for removing this approver');
-    if (!reason?.trim()) return;
-    try { await workflowApiService.removeAdHocApprover(approvalId, reason); await loadInstances(); toast.success('Ad hoc approver removed'); }
+  const removeAdHocApprover = async (reason: string) => {
+    if (!removeApproverTarget) return;
+    try {
+      setApproverSaving(true);
+      await workflowApiService.removeAdHocApprover(removeApproverTarget.approvalId, reason);
+      setRemoveApproverTarget(null);
+      await loadInstances();
+      toast.success('Ad hoc approver removed');
+    }
     catch (error: any) { toast.error(error?.message || 'Failed to remove approver'); }
+    finally { setApproverSaving(false); }
   };
 
   useEffect(() => {
@@ -867,7 +875,7 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                     <div className="space-y-4">
                       <div className="space-y-2">{selectedInstance.pendingApprovals.map(approval => <div key={approval.approvalId} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                         <div><span className="font-medium">{approval.approverName || approval.approverRole}</span>{approval.isAdHoc && <Badge variant="outline" className="ml-2">Ad hoc</Badge>}</div>
-                        {approval.isAdHoc && <Button size="icon" variant="ghost" title="Remove approver" onClick={() => void removeAdHocApprover(approval.approvalId)}><UserMinus className="h-4 w-4" /></Button>}
+                        {approval.isAdHoc && <Button size="icon" variant="ghost" title="Remove approver" onClick={() => setRemoveApproverTarget(approval)}><UserMinus className="h-4 w-4" /></Button>}
                       </div>)}</div>
                       <div className="grid gap-3 sm:grid-cols-2"><div><Label>User</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={adHocUserId} onChange={event => setAdHocUserId(event.target.value)}><option value="">Use role instead</option>{directoryUsers.map(user => <option key={user.id} value={user.id}>{user.firstName} {user.lastName}</option>)}</select></div>
                         <div><Label>Role</Label><Input value={adHocRole} onChange={event => setAdHocRole(event.target.value)} disabled={!!adHocUserId} /></div>
@@ -876,6 +884,28 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                     </div><DialogFooter><Button variant="outline" onClick={() => setApproverDialogOpen(false)}>Close</Button><Button onClick={() => void addAdHocApprover()} disabled={approverSaving}>Add approver</Button></DialogFooter>
                   </DialogContent>
                 </Dialog>
+                <WorkflowReasonDialog
+                  open={!!removeApproverTarget}
+                  onOpenChange={open => !open && setRemoveApproverTarget(null)}
+                  title="Remove ad hoc approver"
+                  description={removeApproverTarget ? (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">This removes a pending ad hoc approver from the current workflow step.</p>
+                      <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                        <div className="font-medium text-foreground">
+                          {removeApproverTarget.approverName || removeApproverTarget.approverRole || 'Approver'}
+                        </div>
+                        <div className="text-muted-foreground">{removeApproverTarget.stepName}</div>
+                      </div>
+                    </div>
+                  ) : undefined}
+                  reasonLabel="Removal reason"
+                  reasonPlaceholder="Explain why this approver is being removed"
+                  confirmText="Remove approver"
+                  variant="destructive"
+                  isLoading={approverSaving}
+                  onConfirm={removeAdHocApprover}
+                />
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-gray-500">

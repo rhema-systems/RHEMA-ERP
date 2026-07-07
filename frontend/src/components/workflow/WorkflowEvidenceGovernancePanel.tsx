@@ -18,6 +18,7 @@ import type {
   WorkflowEvidencePolicyDto,
   WorkflowEvidenceReviewInstanceDto,
 } from '@/types/workflow';
+import { WorkflowReasonDialog } from './WorkflowReasonDialog';
 
 const defaultPolicy: WorkflowEvidencePolicyDto = {
   allowedExtensions: ['.pdf', '.png', '.jpg', '.jpeg'],
@@ -36,6 +37,13 @@ const verificationLabel = (status: number) => ['Pending', 'Verified', 'Rejected'
 const instanceStatusLabel = (status: number | string) => ['Created', 'In Progress', 'Completed', 'Cancelled', 'Failed', 'Suspended', 'Waiting'][Number(status)] || String(status);
 const stepStatusLabel = (status: number | string) => ['Pending', 'In Progress', 'Completed', 'Cancelled', 'Failed'][Number(status)] || String(status);
 
+type EvidenceAction = 'verify' | 'reject' | 'applyHold' | 'releaseHold';
+
+interface PendingEvidenceAction {
+  item: WorkflowEvidenceDocumentDto;
+  action: EvidenceAction;
+}
+
 export function WorkflowEvidenceGovernancePanel() {
   const [policy, setPolicy] = React.useState(defaultPolicy);
   const [extensions, setExtensions] = React.useState(defaultPolicy.allowedExtensions.join(', '));
@@ -48,6 +56,8 @@ export function WorkflowEvidenceGovernancePanel() {
   const [stepInstanceId, setStepInstanceId] = React.useState('');
   const [evidence, setEvidence] = React.useState<WorkflowEvidenceDocumentDto[]>([]);
   const [saving, setSaving] = React.useState(false);
+  const [pendingAction, setPendingAction] = React.useState<PendingEvidenceAction | null>(null);
+  const [savingAction, setSavingAction] = React.useState(false);
   const [loadingInstances, setLoadingInstances] = React.useState(false);
   const [loadingEvidence, setLoadingEvidence] = React.useState(false);
   const selectedInstanceIdRef = React.useRef('');
@@ -131,23 +141,77 @@ export function WorkflowEvidenceGovernancePanel() {
     setStepInstanceId(step?.stepInstanceId || '');
   };
 
-  const verify = async (item: WorkflowEvidenceDocumentDto, accepted: boolean) => {
-    const notes = window.prompt(accepted ? 'Verification notes (optional)' : 'Rejection reason');
-    if (!accepted && !notes?.trim()) return;
-    try {
-      await workflowApiService.verifyWorkflowEvidence(item.id, accepted, notes || undefined);
-      await loadEvidence(); toast.success(accepted ? 'Evidence verified' : 'Evidence rejected');
-    } catch (error: any) { toast.error(error?.message || 'Failed to verify evidence'); }
+  const openEvidenceAction = (item: WorkflowEvidenceDocumentDto, action: EvidenceAction) => {
+    setPendingAction({ item, action });
   };
 
-  const toggleHold = async (item: WorkflowEvidenceDocumentDto) => {
-    const reason = item.isLegalHold ? undefined : window.prompt('Legal hold reason');
-    if (!item.isLegalHold && !reason?.trim()) return;
+  const submitEvidenceAction = async (reason: string) => {
+    if (!pendingAction) return;
     try {
-      await workflowApiService.setWorkflowEvidenceLegalHold(item.id, !item.isLegalHold, reason || undefined);
-      await loadEvidence(); toast.success(item.isLegalHold ? 'Legal hold released' : 'Legal hold applied');
-    } catch (error: any) { toast.error(error?.message || 'Failed to update legal hold'); }
+      setSavingAction(true);
+      if (pendingAction.action === 'verify' || pendingAction.action === 'reject') {
+        const accepted = pendingAction.action === 'verify';
+        await workflowApiService.verifyWorkflowEvidence(pendingAction.item.id, accepted, reason || undefined);
+        toast.success(accepted ? 'Evidence verified' : 'Evidence rejected');
+      } else {
+        const enabled = pendingAction.action === 'applyHold';
+        await workflowApiService.setWorkflowEvidenceLegalHold(pendingAction.item.id, enabled, reason);
+        toast.success(enabled ? 'Legal hold applied' : 'Legal hold released');
+      }
+      setPendingAction(null);
+      await loadEvidence();
+    } catch (error: any) { toast.error(error?.message || 'Failed to update evidence'); }
+    finally { setSavingAction(false); }
   };
+
+  const actionDialogCopy = (action?: EvidenceAction) => {
+    switch (action) {
+      case 'verify':
+        return {
+          title: 'Verify evidence',
+          confirmText: 'Verify',
+          reasonLabel: 'Verification notes',
+          reasonPlaceholder: 'Optional notes for audit history',
+          requireReason: false,
+        };
+      case 'reject':
+        return {
+          title: 'Reject evidence',
+          confirmText: 'Reject',
+          reasonLabel: 'Rejection reason',
+          reasonPlaceholder: 'Explain why this evidence cannot satisfy the workflow requirement',
+          requireReason: true,
+          variant: 'destructive' as const,
+        };
+      case 'applyHold':
+        return {
+          title: 'Apply legal hold',
+          confirmText: 'Apply hold',
+          reasonLabel: 'Legal hold reason',
+          reasonPlaceholder: 'State the audit, legal, or investigation reason for this hold',
+          requireReason: true,
+        };
+      case 'releaseHold':
+        return {
+          title: 'Release legal hold',
+          confirmText: 'Release hold',
+          reasonLabel: 'Release reason',
+          reasonPlaceholder: 'State why this hold can be released',
+          requireReason: true,
+          variant: 'destructive' as const,
+        };
+      default:
+        return {
+          title: 'Update evidence',
+          confirmText: 'Save',
+          reasonLabel: 'Reason',
+          reasonPlaceholder: 'Enter a clear audit reason',
+          requireReason: true,
+        };
+    }
+  };
+
+  const dialogCopy = actionDialogCopy(pendingAction?.action);
 
   return <div className="space-y-8">
     <section className="max-w-4xl space-y-5">
@@ -191,10 +255,47 @@ export function WorkflowEvidenceGovernancePanel() {
           <TableCell>v{item.version}{item.isCurrent ? <Badge variant="outline" className="ml-2">Current</Badge> : null}</TableCell>
           <TableCell><div className="max-w-32 truncate font-mono text-xs" title={item.sha256}>{item.sha256}</div><div className="text-xs text-muted-foreground">Scan {item.malwareScanStatus === 1 ? 'clean' : item.malwareScanStatus === 2 ? 'failed' : 'pending'}</div></TableCell>
           <TableCell><Badge variant={item.verificationStatus === 1 ? 'default' : item.verificationStatus === 2 ? 'destructive' : 'secondary'}>{verificationLabel(item.verificationStatus)}</Badge></TableCell>
-          <TableCell><div>{new Date(item.retainUntil).toLocaleDateString()}</div>{item.isLegalHold ? <Badge variant="destructive" className="mt-1">Legal hold</Badge> : null}</TableCell>
-          <TableCell><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => void verify(item, true)}>Verify</Button><Button size="sm" variant="outline" onClick={() => void verify(item, false)}>Reject</Button>
-            <Button size="icon" variant="ghost" title={item.isLegalHold ? 'Release legal hold' : 'Apply legal hold'} onClick={() => void toggleHold(item)}>{item.isLegalHold ? <ShieldOff className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}</Button></div></TableCell>
+          <TableCell>
+            <div>{new Date(item.retainUntil).toLocaleDateString()}</div>
+            {item.isLegalHold ? (
+              <div className="mt-1 space-y-1">
+                <Badge variant="destructive" title={item.legalHoldReason || undefined}>Legal hold</Badge>
+                {item.legalHoldAt ? <div className="text-xs text-muted-foreground">{new Date(item.legalHoldAt).toLocaleString()}</div> : null}
+                {item.legalHoldReason ? <div className="max-w-40 truncate text-xs text-muted-foreground" title={item.legalHoldReason}>{item.legalHoldReason}</div> : null}
+              </div>
+            ) : null}
+          </TableCell>
+          <TableCell><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => openEvidenceAction(item, 'verify')}>Verify</Button><Button size="sm" variant="outline" onClick={() => openEvidenceAction(item, 'reject')}>Reject</Button>
+            <Button size="icon" variant="ghost" title={item.isLegalHold ? 'Release legal hold' : 'Apply legal hold'} onClick={() => openEvidenceAction(item, item.isLegalHold ? 'releaseHold' : 'applyHold')}>{item.isLegalHold ? <ShieldOff className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}</Button></div></TableCell>
         </TableRow>)}</TableBody></Table></div>
     </section>
+
+    <WorkflowReasonDialog
+      open={!!pendingAction}
+      onOpenChange={open => !open && setPendingAction(null)}
+      title={dialogCopy.title}
+      description={pendingAction ? (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            This action will be recorded against the workflow evidence history.
+          </p>
+          <div className="rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="font-medium text-foreground">
+              {pendingAction.item.documentName || pendingAction.item.fileName}
+            </div>
+            <div className="text-muted-foreground">
+              {pendingAction.item.documentType || 'Document'} / v{pendingAction.item.version}
+            </div>
+          </div>
+        </div>
+      ) : undefined}
+      reasonLabel={dialogCopy.reasonLabel}
+      reasonPlaceholder={dialogCopy.reasonPlaceholder}
+      confirmText={dialogCopy.confirmText}
+      requireReason={dialogCopy.requireReason}
+      variant={dialogCopy.variant}
+      isLoading={savingAction}
+      onConfirm={submitEvidenceAction}
+    />
   </div>;
 }

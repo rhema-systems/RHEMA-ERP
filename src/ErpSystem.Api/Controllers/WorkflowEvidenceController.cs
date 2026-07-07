@@ -71,7 +71,8 @@ public sealed class WorkflowEvidenceController : ControllerBase
             .Select(item => new { item.Id, item.AttachmentId, item.DocumentName, item.DocumentType, item.FileName,
                 item.Sha256, item.DocumentOwnerId, item.IssueDate, item.ExpiryDate, IsExpired = item.ExpiryDate < DateTime.UtcNow,
                 item.Version, item.ReplacesEvidenceId, item.IsCurrent, item.VerificationStatus, item.VerifiedById,
-                item.VerifiedAt, item.VerificationNotes, item.MalwareScanStatus, item.RetainUntil, item.IsLegalHold })
+                item.VerifiedAt, item.VerificationNotes, item.MalwareScanStatus, item.RetainUntil, item.IsLegalHold,
+                item.LegalHoldReason, item.LegalHoldById, item.LegalHoldAt })
             .ToListAsync(cancellationToken);
         return Ok(new { success = true, data = rows });
     }
@@ -179,11 +180,26 @@ public sealed class WorkflowEvidenceController : ControllerBase
     {
         var evidence = await Find(id, cancellationToken);
         if (evidence == null) return NotFound();
+        var notes = request.Notes?.Trim();
+        if (!request.Accepted && string.IsNullOrWhiteSpace(notes))
+            return BadRequest("A rejection reason is required.");
+
         evidence.VerificationStatus = request.Accepted
             ? WorkflowEvidenceVerificationStatus.Verified : WorkflowEvidenceVerificationStatus.Rejected;
         evidence.VerifiedById = UserId;
         evidence.VerifiedAt = DateTime.UtcNow;
-        evidence.VerificationNotes = request.Notes?.Trim();
+        evidence.VerificationNotes = notes;
+        evidence.UpdatedAt = DateTime.UtcNow;
+        await AddEvidenceActivityAsync(evidence, request.Accepted ? "Evidence verified" : "Evidence rejected",
+            notes, new
+            {
+                evidence.Id,
+                evidence.AttachmentId,
+                evidence.DocumentName,
+                evidence.DocumentType,
+                accepted = request.Accepted,
+                notes
+            }, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { success = true, data = evidence });
     }
@@ -195,11 +211,27 @@ public sealed class WorkflowEvidenceController : ControllerBase
     {
         var evidence = await Find(id, cancellationToken);
         if (evidence == null) return NotFound();
-        if (request.Enabled && string.IsNullOrWhiteSpace(request.Reason)) return BadRequest("A legal hold reason is required.");
+        var reason = request.Reason?.Trim();
+        if (string.IsNullOrWhiteSpace(reason)) return BadRequest(request.Enabled
+            ? "A legal hold reason is required."
+            : "A legal hold release reason is required.");
+        var previousReason = evidence.LegalHoldReason;
         evidence.IsLegalHold = request.Enabled;
-        evidence.LegalHoldReason = request.Enabled ? request.Reason!.Trim() : null;
+        evidence.LegalHoldReason = request.Enabled ? reason : null;
         evidence.LegalHoldById = request.Enabled ? UserId : null;
         evidence.LegalHoldAt = request.Enabled ? DateTime.UtcNow : null;
+        evidence.UpdatedAt = DateTime.UtcNow;
+        await AddEvidenceActivityAsync(evidence, request.Enabled ? "Legal hold applied" : "Legal hold released",
+            reason, new
+            {
+                evidence.Id,
+                evidence.AttachmentId,
+                evidence.DocumentName,
+                evidence.DocumentType,
+                legalHold = request.Enabled,
+                reason,
+                previousReason
+            }, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { success = true, data = evidence });
     }
@@ -279,6 +311,30 @@ public sealed class WorkflowEvidenceController : ControllerBase
         if (_db.Entry(signature).State == EntityState.Detached) _db.WorkflowSignatureEvidence.Add(signature);
         await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { success = true, data = new { signature.Id, signature.SignedPayloadHash } });
+    }
+
+    private async Task AddEvidenceActivityAsync(WorkflowEvidenceDocument evidence, string title, string? description,
+        object data, CancellationToken cancellationToken)
+    {
+        var step = await _db.WorkflowStepInstances.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == evidence.StepInstanceId &&
+                item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
+        if (step == null) return;
+
+        _db.WorkflowActivityLogs.Add(new WorkflowActivityLog
+        {
+            TenantId = TenantId,
+            WorkflowInstanceId = step.WorkflowInstanceId,
+            StepInstanceId = step.Id,
+            ActivityType = WorkflowActivityType.DataUpdated,
+            Title = title,
+            Description = description,
+            PerformedById = UserId,
+            ActivityDate = DateTime.UtcNow,
+            Data = JsonSerializer.Serialize(data),
+            IpAddress = _currentUser.IpAddress,
+            UserAgent = _currentUser.UserAgent
+        });
     }
 
     private Task<WorkflowEvidenceDocument?> Find(Guid id, CancellationToken cancellationToken) =>

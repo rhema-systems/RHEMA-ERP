@@ -26,6 +26,7 @@ import {
   type WorkflowWorkingCalendarDto,
 } from '@/types/workflow';
 import { WorkflowEvidenceGovernancePanel } from './WorkflowEvidenceGovernancePanel';
+import { WorkflowReasonDialog } from './WorkflowReasonDialog';
 
 const defaultDelegation = (): SaveWorkflowDelegationRequest => ({
   delegateUserId: '', kind: WorkflowDelegationKind.Authority, effectiveFrom: new Date().toISOString().slice(0, 10),
@@ -56,6 +57,7 @@ export function WorkflowGovernancePanel() {
   const [slaDays, setSlaDays] = React.useState(30);
   const [sla, setSla] = React.useState<WorkflowSlaBreachesDto | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [revokeTarget, setRevokeTarget] = React.useState<WorkflowDelegationDto | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [loadingSla, setLoadingSla] = React.useState(false);
 
@@ -158,11 +160,17 @@ export function WorkflowGovernancePanel() {
     finally { setSaving(false); }
   };
 
-  const revoke = async (id: string) => {
-    const reason = window.prompt('Reason for revoking this delegation');
-    if (!reason?.trim()) return;
-    try { await workflowApiService.revokeWorkflowDelegation(id, reason); await load(); toast.success('Delegation revoked'); }
+  const revoke = async (reason: string) => {
+    if (!revokeTarget) return;
+    try {
+      setSaving(true);
+      await workflowApiService.revokeWorkflowDelegation(revokeTarget.id, reason);
+      setRevokeTarget(null);
+      await load();
+      toast.success('Delegation revoked');
+    }
     catch (error: any) { toast.error(error?.message || 'Failed to revoke delegation'); }
+    finally { setSaving(false); }
   };
 
   const saveCalendar = async () => {
@@ -197,7 +205,7 @@ export function WorkflowGovernancePanel() {
             <TableCell>{item.maximumAmount ? `${item.currencyCode || ''} ${item.maximumAmount.toLocaleString()}` : 'No monetary cap'}</TableCell>
             <TableCell>{new Date(item.effectiveFrom).toLocaleDateString()} - {new Date(item.effectiveTo).toLocaleDateString()}</TableCell>
             <TableCell><Badge variant={item.isActive ? 'default' : 'secondary'}>{item.isActive ? 'Active' : 'Revoked'}</Badge></TableCell>
-            <TableCell>{item.isActive && <Button size="icon" variant="ghost" title="Revoke delegation" onClick={() => void revoke(item.id)}><Archive className="h-4 w-4" /></Button>}</TableCell>
+            <TableCell>{item.isActive && <Button size="icon" variant="ghost" title="Revoke delegation" onClick={() => setRevokeTarget(item)}><Archive className="h-4 w-4" /></Button>}</TableCell>
           </TableRow>)}</TableBody></Table></div>
       </TabsContent>
       <TabsContent value="calendar" className="max-w-3xl space-y-5">
@@ -265,6 +273,26 @@ export function WorkflowGovernancePanel() {
           <label className="sm:col-span-2 flex items-center gap-3 text-sm"><Switch checked={delegation.allowRedelegation} onCheckedChange={checked => setDelegation({...delegation,allowRedelegation:checked})} />Allow the delegate to re-delegate this authority</label></div>
         <DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button><Button onClick={() => void saveDelegation()} disabled={saving}>Create delegation</Button></DialogFooter>
       </DialogContent></Dialog>
+      <WorkflowReasonDialog
+        open={!!revokeTarget}
+        onOpenChange={open => !open && setRevokeTarget(null)}
+        title="Revoke delegation"
+        description={revokeTarget ? (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">Revoking this delegation immediately removes delegated approval authority for the selected scope.</p>
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <div className="font-medium text-foreground">{userName(revokeTarget.delegateUserId)}</div>
+              <div className="text-muted-foreground">{scopeLabel(revokeTarget)}</div>
+            </div>
+          </div>
+        ) : undefined}
+        reasonLabel="Revocation reason"
+        reasonPlaceholder="Explain why this delegation is being revoked"
+        confirmText="Revoke delegation"
+        variant="destructive"
+        isLoading={saving}
+        onConfirm={revoke}
+      />
     </Tabs>
   );
 }

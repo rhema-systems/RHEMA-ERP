@@ -89,3 +89,4 @@ All capabilities in this tracker are implemented. New module teams should follow
 | 2026-07-07 | Final frontend semantic check | Passed for all workflow administration, governance, evidence, analytics, template, mobile, shared component, service, and type files; repository-wide check still reports unrelated existing errors. |
 | 2026-07-07 | Final API build | Passed with zero errors and no workflow-specific warnings. |
 | 2026-07-07 | Delegation, evidence, and SLA admin refinement | Passed; backend build, delegation policy tests, targeted ESLint, and diff whitespace checks passed. Repository-wide TypeScript still fails on unrelated Finance AR/Cash pages. |
+| 2026-07-07 | Native prompt removal and evidence audit hardening | Passed; workflow UI has no `window.prompt` or `window.confirm`, evidence reject/legal-hold reasons are enforced server-side, evidence verification/hold actions write workflow activity history, API build and focused ESLint passed. |

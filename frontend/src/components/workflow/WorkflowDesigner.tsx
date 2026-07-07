@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command';
 import { workflowApiService } from '@/services/workflow-api.service';
@@ -89,6 +90,10 @@ interface WorkflowDesignerProps {
   onClose: () => void;
   onSave: (workflow: any) => void;
 }
+
+type WorkflowDeleteTarget =
+  | { type: 'node'; id: string; label: string }
+  | { type: 'transition'; id: string; label: string };
 
 // Custom node types for different workflow elements
 const nodeTypes: NodeTypes = {
@@ -294,6 +299,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkflowDeleteTarget | null>(null);
   const [workflowName, setWorkflowName] = useState('');
   const [workflowDescription, setWorkflowDescription] = useState('');
   const [entityType, setEntityType] = useState('WorkOrder');
@@ -882,24 +888,10 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     }
 
     const nodeLabel = selectedNode.data?.label || selectedNode.type || 'this node';
-    const confirmed = window.confirm(`Delete "${nodeLabel}" and all connected transitions?`);
-    if (!confirmed) return;
-
-    setNodes((currentNodes) => currentNodes.filter((node) => node.id !== selectedNode.id));
-    setEdges((currentEdges) =>
-      currentEdges.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id)
-    );
-    setSelectedNode(null);
-    setSelectedEdge(null);
-    setIsPropertiesOpen(false);
-    setApproverDialogOpen(false);
-    setChecklistDialogOpen(false);
-    toast.success('Workflow step deleted');
+    setDeleteTarget({ type: 'node', id: selectedNode.id, label: String(nodeLabel) });
   }, [
     selectedNode,
     selectedWorkflowHasLiveInstances,
-    setEdges,
-    setNodes,
     workflowLiveInstanceLockMessage,
   ]);
 
@@ -913,22 +905,44 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
     if (!selectedEdge) return;
 
-    const confirmed = window.confirm('Delete this transition?');
-    if (!confirmed) return;
-
-    setEdges((currentEdges) => currentEdges.filter((edge) => edge.id !== selectedEdge.id));
-    setSelectedEdge(null);
-    setIsPropertiesOpen(false);
-    toast.success('Workflow transition deleted');
+    setDeleteTarget({
+      type: 'transition',
+      id: selectedEdge.id,
+      label: selectedEdge.label?.toString() || 'this transition',
+    });
   }, [
     selectedEdge,
     selectedWorkflowHasLiveInstances,
-    setEdges,
     workflowLiveInstanceLockMessage,
   ]);
 
+  const confirmDeleteTarget = useCallback(() => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.type === 'node') {
+      setNodes((currentNodes) => currentNodes.filter((node) => node.id !== deleteTarget.id));
+      setEdges((currentEdges) =>
+        currentEdges.filter((edge) => edge.source !== deleteTarget.id && edge.target !== deleteTarget.id)
+      );
+      setSelectedNode((current) => current?.id === deleteTarget.id ? null : current);
+      setSelectedEdge(null);
+      setIsPropertiesOpen(false);
+      setApproverDialogOpen(false);
+      setChecklistDialogOpen(false);
+      setDeleteTarget(null);
+      toast.success('Workflow step deleted');
+      return;
+    }
+
+    setEdges((currentEdges) => currentEdges.filter((edge) => edge.id !== deleteTarget.id));
+    setSelectedEdge((current) => current?.id === deleteTarget.id ? null : current);
+    setIsPropertiesOpen(false);
+    setDeleteTarget(null);
+    toast.success('Workflow transition deleted');
+  }, [deleteTarget, setEdges, setNodes]);
+
   useEffect(() => {
-    if (!isOpen || approverDialogOpen || checklistDialogOpen) return;
+    if (!isOpen || approverDialogOpen || checklistDialogOpen || deleteTarget) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
@@ -961,6 +975,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   }, [
     approverDialogOpen,
     checklistDialogOpen,
+    deleteTarget,
     deleteSelectedEdge,
     deleteSelectedNode,
     isOpen,
@@ -3624,6 +3639,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmationDialog
+        open={!!deleteTarget}
+        onOpenChange={open => !open && setDeleteTarget(null)}
+        title={deleteTarget?.type === 'node' ? 'Delete workflow step' : 'Delete transition'}
+        description={deleteTarget?.type === 'node'
+          ? `Delete "${deleteTarget.label}" and all connected transitions?`
+          : `Delete ${deleteTarget?.label || 'this transition'}?`}
+        confirmText={deleteTarget?.type === 'node' ? 'Delete step' : 'Delete transition'}
+        variant="destructive"
+        onConfirm={confirmDeleteTarget}
+      />
     </>
   );
 }
