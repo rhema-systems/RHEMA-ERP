@@ -83,6 +83,12 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                     _context.JournalEntries.Add(journalEntry);
                 }
 
+                // Account.Balance is a read-side snapshot used by existing balance APIs; posted journals remain the accounting source of truth.
+                await ApplyAccountBalanceMovementsAsync(
+                    tenantId,
+                    journalEntry.Transactions,
+                    cancellationToken);
+
                 _context.FinancePostingEvents.Add(postingEvent);
                 await _context.SaveChangesAsync(cancellationToken);
                 await RecordPostingEventCreatedAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
@@ -496,6 +502,67 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             CreatedBy = _currentUserService.UserName,
             CreatedById = postedByUserId
         };
+    }
+
+    private async Task ApplyAccountBalanceMovementsAsync(
+        Guid tenantId,
+        IEnumerable<AccountTransaction> transactions,
+        CancellationToken cancellationToken)
+    {
+        var transactionList = transactions
+            .Where(t => !t.IsDeleted)
+            .OrderBy(t => t.LineNumber)
+            .ToList();
+
+        if (transactionList.Count == 0)
+        {
+            throw new InvalidOperationException("Posting must contain journal transaction lines.");
+        }
+
+        var accountIds = transactionList
+            .Select(t => t.AccountId)
+            .Distinct()
+            .ToList();
+
+        var accounts = await _context.Accounts
+            .Where(a => a.TenantId == tenantId && accountIds.Contains(a.Id) && !a.IsDeleted)
+            .ToDictionaryAsync(a => a.Id, cancellationToken);
+
+        if (accounts.Count != accountIds.Count)
+        {
+            throw new InvalidOperationException("One or more posting accounts were not found for this tenant.");
+        }
+
+        foreach (var transaction in transactionList)
+        {
+            ApplyAccountBalanceMovement(accounts[transaction.AccountId], transaction);
+        }
+    }
+
+    private static void ApplyAccountBalanceMovement(Account account, AccountTransaction transaction)
+    {
+        if (transaction.DebitAmount > 0)
+        {
+            if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
+            {
+                account.Balance += transaction.DebitAmount;
+            }
+            else
+            {
+                account.Balance -= transaction.DebitAmount;
+            }
+
+            return;
+        }
+
+        if (account.AccountType == AccountType.Liability || account.AccountType == AccountType.Equity || account.AccountType == AccountType.Revenue)
+        {
+            account.Balance += transaction.CreditAmount;
+        }
+        else
+        {
+            account.Balance -= transaction.CreditAmount;
+        }
     }
 
     private async Task<ValidatedPosting> ValidatePostingRequestAsync(

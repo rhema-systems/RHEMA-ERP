@@ -59,8 +59,57 @@ public sealed class FinancePostingEngineTests
         postingEvent.TenantId.Should().Be(tenantId);
         postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
 
-        cashAccount.Balance.Should().Be(0m);
-        revenueAccount.Balance.Should().Be(0m);
+        cashAccount.Balance.Should().Be(100m);
+        revenueAccount.Balance.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-4")]
+    [Trait("Category", "PostingEngine")]
+    public async Task PostAsync_ShouldApplyAccountBalanceMovementUsingNormalBalanceDirection()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var assetAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        var expenseAccount = SeedAccount(db, tenantId, "5000", AccountType.Expense);
+        var liabilityAccount = SeedAccount(db, tenantId, "2000", AccountType.Liability);
+        var equityAccount = SeedAccount(db, tenantId, "3000", AccountType.Equity);
+        var revenueAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+
+        await service.PostAsync(new FinancePostingRequestDto
+        {
+            SourceModule = "TEST",
+            SourceDocumentType = "NormalBalanceDocument",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentTenantId = tenantId,
+            PostingAction = "Post",
+            SourceDocumentReference = "NB-001",
+            Description = "Normal balance direction test",
+            PostingDate = new DateTime(2026, 7, 4),
+            JournalType = "System Generated",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = "GHS",
+            Lines = new[]
+            {
+                new FinancePostingLineDto { AccountId = assetAccount.Id, Description = "Asset debit", DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = expenseAccount.Id, Description = "Expense debit", DebitAmount = 40m },
+                new FinancePostingLineDto { AccountId = revenueAccount.Id, Description = "Revenue debit", DebitAmount = 15m },
+                new FinancePostingLineDto { AccountId = liabilityAccount.Id, Description = "Liability credit", CreditAmount = 100m },
+                new FinancePostingLineDto { AccountId = equityAccount.Id, Description = "Equity credit", CreditAmount = 25m },
+                new FinancePostingLineDto { AccountId = assetAccount.Id, Description = "Asset credit", CreditAmount = 30m }
+            }
+        });
+
+        assetAccount.Balance.Should().Be(70m);
+        expenseAccount.Balance.Should().Be(40m);
+        liabilityAccount.Balance.Should().Be(100m);
+        equityAccount.Balance.Should().Be(25m);
+        revenueAccount.Balance.Should().Be(-15m);
     }
 
     [Fact]
@@ -119,6 +168,8 @@ public sealed class FinancePostingEngineTests
         second.JournalEntryId.Should().Be(first.JournalEntryId);
         (await db.JournalEntries.CountAsync()).Should().Be(1);
         (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        debitAccount.Balance.Should().Be(100m);
+        creditAccount.Balance.Should().Be(100m);
     }
 
     [Fact]
