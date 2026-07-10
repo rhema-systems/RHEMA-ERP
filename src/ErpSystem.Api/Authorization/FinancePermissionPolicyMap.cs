@@ -184,6 +184,7 @@ public static class FinancePermissionPolicyMap
             "SubmitForApproval" => One(FinancePermissions.SubmitApInvoices),
             "Approve" => One(FinancePermissions.ApproveApInvoices),
             "Reject" => One(FinancePermissions.ApproveApInvoices),
+            "Post" => One(FinancePermissions.PostApInvoices),
             "Void" => One(FinancePermissions.VoidApInvoices),
             "TwoWayMatch" or "ThreeWayMatch" => One(FinancePermissions.ManageApInvoices),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ManageApInvoices)

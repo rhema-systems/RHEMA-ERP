@@ -1,10 +1,12 @@
 using ErpSystem.Core.DTOs.Numbering;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Numbering;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/document-sequences")]
 public class DocumentSequencesController : ControllerBase
@@ -46,10 +48,16 @@ public class DocumentSequencesController : ControllerBase
         GenerateDocumentNumberRequestDto request,
         CancellationToken cancellationToken)
     {
+        if (_currentUserService.TenantId == null)
+        {
+            return BadRequest("Tenant context is required.");
+        }
+
+        // Never trust a client-supplied tenant for sequence generation; generating a number advances tenant state.
         var documentNumber = await _documentNumberingService.GenerateAsync(
             request.Module,
             request.DocumentType,
-            request.TenantId ?? _currentUserService.TenantId,
+            _currentUserService.TenantId.Value,
             request.DocumentDate,
             request.EntityType,
             request.EntityId,
