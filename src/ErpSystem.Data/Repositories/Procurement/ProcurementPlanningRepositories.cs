@@ -61,7 +61,7 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
     {
         var today = DateTime.UtcNow;
         return await GetTenantFilteredQuery()
-            .Where(p => p.Status == "Approved" && p.PlanStartDate <= today && p.PlanEndDate >= today)
+            .Where(p => (p.Status == "Active" || p.Status == "Approved") && p.PlanStartDate <= today && p.PlanEndDate >= today)
             .Include(p => p.Department)
             .OrderBy(p => p.Department!.Name)
             .ToListAsync();
@@ -84,6 +84,8 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
             .Include(p => p.Items.Where(i => !i.IsDeleted))
                 .ThenInclude(i => i.InventoryItem)
             .Include(p => p.Items.Where(i => !i.IsDeleted))
+                .ThenInclude(i => i.MarketAnalysis)
+            .Include(p => p.Items.Where(i => !i.IsDeleted))
                 .ThenInclude(i => i.ItemSuppliers.Where(s => !s.IsDeleted))
                     .ThenInclude(s => s.BusinessPartner)
             .Include(p => p.Budgets.Where(b => !b.IsDeleted))
@@ -91,6 +93,7 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
             .Include(p => p.PreparedBy)
             .Include(p => p.ReviewedBy)
             .Include(p => p.ApprovedBy)
+            .Include(p => p.PublishedBy)
             .FirstOrDefaultAsync();
     }
 
@@ -170,6 +173,7 @@ public class ProcurementPlanItemRepository : GenericRepository<ProcurementPlanIt
         return await _dbSet
             .Where(i => i.ProcurementPlanId == planId && !i.IsDeleted)
             .Include(i => i.InventoryItem)
+            .Include(i => i.MarketAnalysis)
             .Include(i => i.ItemSuppliers.Where(s => !s.IsDeleted))
                 .ThenInclude(s => s.BusinessPartner)
             .OrderBy(i => i.Priority)
@@ -182,6 +186,7 @@ public class ProcurementPlanItemRepository : GenericRepository<ProcurementPlanIt
         return await _dbSet
             .Where(i => i.ProcurementPlanId == planId && i.Status == status && !i.IsDeleted)
             .Include(i => i.InventoryItem)
+            .Include(i => i.MarketAnalysis)
             .Include(i => i.ItemSuppliers.Where(s => !s.IsDeleted))
                 .ThenInclude(s => s.BusinessPartner)
             .OrderBy(i => i.RequiredDate)
@@ -193,6 +198,7 @@ public class ProcurementPlanItemRepository : GenericRepository<ProcurementPlanIt
         return await _dbSet
             .Where(i => i.ProcurementPlanId == planId && i.IsCritical && !i.IsDeleted)
             .Include(i => i.InventoryItem)
+            .Include(i => i.MarketAnalysis)
             .Include(i => i.ItemSuppliers.Where(s => !s.IsDeleted))
                 .ThenInclude(s => s.BusinessPartner)
             .OrderBy(i => i.RequiredDate)
@@ -604,7 +610,9 @@ public class ProcurementScheduleRepository : GenericRepository<ProcurementSchedu
         string? search = null,
         string? status = null,
         Guid? departmentId = null,
-        Guid? planId = null)
+        Guid? planId = null,
+        DateTime? startDate = null,
+        DateTime? endDate = null)
     {
         var query = GetTenantFilteredQuery();
 
@@ -626,6 +634,16 @@ public class ProcurementScheduleRepository : GenericRepository<ProcurementSchedu
         if (planId.HasValue)
         {
             query = query.Where(s => s.ProcurementPlanId == planId.Value);
+        }
+
+        if (startDate.HasValue)
+        {
+            query = query.Where(s => s.PlannedEndDate >= startDate.Value);
+        }
+
+        if (endDate.HasValue)
+        {
+            query = query.Where(s => s.PlannedStartDate <= endDate.Value);
         }
 
         var totalCount = await query.CountAsync();
@@ -1126,4 +1144,3 @@ public class EmergencySupplierRepository : GenericRepository<EmergencySupplier>,
 }
 
 #endregion
-

@@ -234,7 +234,7 @@ export default function MaintenanceSchedulesPage() {
         return;
       }
       
-      const response = await fetch('http://localhost:5000/api/maintenance/schedules?pageSize=1000', {
+      const response = await fetch('/api/maintenance/schedules?pageSize=1000', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -347,7 +347,7 @@ export default function MaintenanceSchedulesPage() {
 
       console.log('Sending create request:', createDto);
       
-      const response = await fetch('http://localhost:5000/api/maintenance/schedules', {
+      const response = await fetch('/api/maintenance/schedules', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -442,7 +442,7 @@ export default function MaintenanceSchedulesPage() {
 
       console.log('Sending update request:', updateDto);
       
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${selectedSchedule.id}`, {
+      const response = await fetch(`/api/maintenance/schedules/${selectedSchedule.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -478,7 +478,7 @@ export default function MaintenanceSchedulesPage() {
         return;
       }
       
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${id}`, {
+      const response = await fetch(`/api/maintenance/schedules/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -509,7 +509,7 @@ export default function MaintenanceSchedulesPage() {
         return;
       }
       
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${id}/toggle-status`, {
+      const response = await fetch(`/api/maintenance/schedules/${id}/toggle-status`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -537,7 +537,7 @@ export default function MaintenanceSchedulesPage() {
         return;
       }
       
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${id}/toggle-status`, {
+      const response = await fetch(`/api/maintenance/schedules/${id}/toggle-status`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,

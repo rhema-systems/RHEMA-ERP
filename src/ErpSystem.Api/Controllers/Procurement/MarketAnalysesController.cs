@@ -25,11 +25,13 @@ public class MarketAnalysesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<PagedResult<MarketAnalysisDto>>> GetAnalyses(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null, [FromQuery] string? category = null)
+        [FromQuery] string? search = null, [FromQuery] string? category = null,
+        [FromQuery] string? itemCategory = null, [FromQuery] string? status = null)
     {
         try
         {
-            var result = await _analysisService.GetAnalysesAsync(page, pageSize, search, category);
+            var effectiveCategory = itemCategory ?? category;
+            var result = await _analysisService.GetAnalysesAsync(page, pageSize, search, effectiveCategory, status);
             return Ok(result);
         }
         catch (Exception ex)
@@ -138,6 +140,22 @@ public class MarketAnalysesController : ControllerBase
         }
     }
 
+    [HttpPost("{analysisId}/survey-quotes")]
+    public async Task<ActionResult<PriceHistoryDto>> AddSurveyQuote(Guid analysisId, [FromBody] CreatePriceHistoryDto dto)
+    {
+        try
+        {
+            dto.MarketAnalysisId = analysisId;
+            dto.PriceSource = string.IsNullOrWhiteSpace(dto.PriceSource) ? "MarketSurvey" : dto.PriceSource;
+            return Ok(await _analysisService.AddPriceHistoryAsync(analysisId, dto));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding survey quote to analysis {AnalysisId}", analysisId);
+            return StatusCode(500, "An error occurred while adding survey quote");
+        }
+    }
+
     [HttpGet("{analysisId}/price-history")]
     public async Task<ActionResult<IEnumerable<PriceHistoryDto>>> GetPriceHistory(Guid analysisId)
     {
@@ -146,6 +164,18 @@ public class MarketAnalysesController : ControllerBase
         {
             _logger.LogError(ex, "Error getting price history for analysis {AnalysisId}", analysisId);
             return StatusCode(500, "An error occurred while retrieving price history");
+        }
+    }
+
+    [HttpGet("{analysisId}/survey-summary")]
+    public async Task<ActionResult<MarketSurveySummaryDto>> GetSurveySummary(Guid analysisId)
+    {
+        try { return Ok(await _analysisService.GetMarketSurveySummaryAsync(analysisId)); }
+        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting market survey summary for analysis {AnalysisId}", analysisId);
+            return StatusCode(500, "An error occurred while retrieving market survey summary");
         }
     }
 

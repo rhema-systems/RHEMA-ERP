@@ -140,6 +140,7 @@ function approvalStatusBadge(status: WorkflowApprovalStatus) {
     Delegated: { cls: 'bg-indigo-100 text-indigo-800', icon: <User className="h-3 w-3 mr-1" /> },
     Expired: { cls: 'bg-gray-100 text-gray-800', icon: <Clock className="h-3 w-3 mr-1" /> },
     'More Info Requested': { cls: 'bg-blue-100 text-blue-800', icon: <Clock className="h-3 w-3 mr-1" /> },
+    Queued: { cls: 'bg-slate-100 text-slate-700', icon: <Clock className="h-3 w-3 mr-1" /> },
   };
 
   const cfg = map[label] || { cls: 'bg-gray-100 text-gray-800', icon: <FileText className="h-3 w-3 mr-1" /> };
@@ -182,6 +183,8 @@ function AttachmentRow({
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <FileText className="h-3.5 w-3.5 shrink-0" />
         <span className="font-medium text-foreground">{attachment.fileName}</span>
+        {attachment.documentType && <span>{attachment.documentType}</span>}
+        {attachment.documentName && <span>{attachment.documentName}</span>}
         {attachment.uploadedByName && <span>by {attachment.uploadedByName}</span>}
         <span>{formatDateTime(attachment.uploadedAt)}</span>
         {attachment.fileSizeBytes ? <span>{formatFileSize(attachment.fileSizeBytes)}</span> : null}
@@ -218,6 +221,7 @@ function StepRequirementSummary({
 }) {
   const taskLabel = getTaskActionLabel(step);
   const checklist = step.checklist || [];
+  const checklistResponses = step.checklistResponses || [];
   const attachments = step.taskAttachments || [];
 
   if (!taskLabel && checklist.length === 0 && attachments.length === 0) {
@@ -244,24 +248,62 @@ function StepRequirementSummary({
       )}
 
       {checklist.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground">Step Checklist</p>
-          <div className="flex flex-wrap gap-2">
-            {checklist.map((item, index) => (
-              <Badge key={item.id || `${item.name}-${index}`} variant="secondary" className="text-xs">
-                {item.name}
-                {item.isRequired ? ' *' : ''}
-              </Badge>
-            ))}
+          <div className="space-y-1.5">
+            {checklist.map((item, index) => {
+              const itemKey = (item.id || item.name).trim().toLowerCase();
+              const response = checklistResponses.find((entry) =>
+                (entry.id || entry.name).trim().toLowerCase() === itemKey
+              );
+              const itemAttachments = attachments.filter((attachment) =>
+                (attachment.checklistItemId || attachment.requirementKey || '').trim().toLowerCase() === itemKey
+              );
+
+              return (
+                <div key={item.id || `${item.name}-${index}`} className="rounded-md border bg-background px-2.5 py-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    {response?.isSatisfied ? (
+                      <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                    ) : (
+                      <XCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                    <span className="font-medium text-foreground">{item.name}</span>
+                    {item.isRequired && <Badge variant="secondary" className="text-[10px]">Required</Badge>}
+                    {item.requiresDocument && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {item.documentType || 'Document evidence'}
+                      </Badge>
+                    )}
+                    {response?.completedByName && <span>by {response.completedByName}</span>}
+                    {response?.completedAt && <span>{formatDateTime(response.completedAt)}</span>}
+                  </div>
+                  {response?.notes && <p className="mt-1 text-xs text-muted-foreground">{response.notes}</p>}
+                  {itemAttachments.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {itemAttachments.map((attachment) => (
+                        <AttachmentRow
+                          key={attachment.id}
+                          stepInstanceId={step.stepInstanceId}
+                          attachment={attachment}
+                          downloadingAttachmentId={downloadingAttachmentId}
+                          onDownloadAttachment={onDownloadAttachment}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {attachments.length > 0 && (
+      {attachments.some((attachment) => !attachment.checklistItemId) && (
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">Uploaded Documents</p>
           <div className="space-y-1">
-            {attachments.map((attachment) => (
+            {attachments.filter((attachment) => !attachment.checklistItemId).map((attachment) => (
               <AttachmentRow
                 key={attachment.id}
                 stepInstanceId={step.stepInstanceId}
@@ -572,10 +614,11 @@ export function WorkflowApprovalHistoryPanel({
                           <div key={a.approvalId} className="flex flex-col gap-2">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-medium">
-                                  {a.approverName || a.approverRole || a.approverId || 'Approver'}
-                                </p>
-                                {approvalStatusBadge(a.status)}
+                                 <p className="text-sm font-medium">
+                                   {a.approverName || a.approverRole || a.approverId || 'Approver'}
+                                 </p>
+                                 <Badge variant="outline" className="text-xs">Group {a.approvalGroup || 1}</Badge>
+                                 {approvalStatusBadge(a.status)}
                               </div>
                               <div className="text-xs text-muted-foreground">
                                 Requested: {formatDateTime(a.requestedDate)} • Processed: {formatDateTime(a.processedDate)}

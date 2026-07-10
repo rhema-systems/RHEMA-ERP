@@ -21,6 +21,7 @@ import {
   type PagedResult,
 } from '@/services/crmService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { SalesHandoffActions } from '../components/SalesHandoffActions';
 import {
   BriefcaseBusiness,
   CalendarClock,
@@ -77,6 +78,8 @@ const resolveChainHref = (entityType: string, entityId: string) => {
       return `/crm/opportunities?opportunityId=${entityId}`;
     case 'Quote':
       return `/crm/quotes?quoteId=${entityId}`;
+    case 'SalesOrder':
+      return `/sales/orders/${entityId}`;
     case 'Contract':
       return `/procurement/contracts/${entityId}`;
     case 'Project':
@@ -915,6 +918,19 @@ export default function CrmOpportunitiesPage() {
                       View Quotes
                     </Link>
                   </Button>
+                  <SalesHandoffActions
+                    context={{
+                      businessPartnerId: selectedOpportunity.businessPartnerId,
+                      businessPartnerName: selectedOpportunity.businessPartnerName,
+                      leadId: selectedOpportunity.leadId,
+                      leadName: selectedOpportunity.leadName,
+                      opportunityId: selectedOpportunity.opportunityId,
+                      opportunityName: selectedOpportunity.name,
+                      currency: selectedOpportunity.currency,
+                      estimatedValue: selectedOpportunity.amount,
+                      contextLabel: 'Opportunity',
+                    }}
+                  />
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">

@@ -479,6 +479,7 @@ namespace ErpSystem.Data.Repositories
             return await _dbSet
                 .Include(e => e.Department)
                 .Include(e => e.Position)
+                .Include(e => e.Location)
                 .Where(e => e.IsActive &&
                            !e.IsDeleted &&
                            (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&

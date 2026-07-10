@@ -6,6 +6,8 @@ import type {
   CreateWorkflowDefinitionAdminDto,
   UpdateWorkflowDefinitionAdminDto,
   WorkflowDefinitionDto,
+  WorkflowDefinitionVersionDto,
+  WorkflowDefinitionComparisonDto,
   WorkflowDefinitionFilterDto,
   WorkflowInstanceFilterDto,
   WorkflowStatusDto,
@@ -19,12 +21,27 @@ import type {
   StartWorkflowRequest,
   ExecuteStepRequest,
   CancelWorkflowRequest,
+  RecallWorkflowRequest,
   ProcessStepRequest,
   AssignStepRequest,
   ProcessApprovalRequest,
   WorkflowInstance,
   WorkflowVariableInfo,
   WorkflowEntityTypeInfo,
+  WorkflowModuleConformanceReport,
+  WorkflowApprovalPolicySetDto,
+  SaveWorkflowApprovalPolicyRequest,
+  WorkflowDirectoryUser,
+  WorkflowDelegationDto,
+  WorkflowDelegationScopeOptionsDto,
+  SaveWorkflowDelegationRequest,
+  WorkflowWorkingCalendarDto,
+  WorkflowCorrectionRequestDto,
+  WorkflowEvidencePolicyDto,
+  WorkflowEvidenceDocumentDto,
+  WorkflowEvidenceReviewInstanceDto,
+  WorkflowSlaBreachesDto,
+  WorkflowSignatureSubmissionDto,
   WorkflowApprovalChecklistResponseDto,
   WorkflowTaskAttachmentDto
 } from '../types/workflow';
@@ -310,6 +327,312 @@ export class WorkflowApiService {
     );
   }
 
+  async getWorkflowModuleConformance(): Promise<WorkflowModuleConformanceReport> {
+    const response = await apiService.get<ApiResponse<WorkflowModuleConformanceReport>>(
+      `${this.basePath}/conformance`
+    );
+    return this.requireData(response, 'Workflow conformance response did not include data.');
+  }
+
+  async getApprovalPolicies(): Promise<WorkflowApprovalPolicySetDto[]> {
+    const response = await apiService.get<ApiResponse<WorkflowApprovalPolicySetDto[]>>(
+      `${this.basePath}/approval-policies`
+    );
+    return response.data || [];
+  }
+
+  async createApprovalPolicy(request: SaveWorkflowApprovalPolicyRequest): Promise<WorkflowApprovalPolicySetDto> {
+    const response = await apiService.post<ApiResponse<WorkflowApprovalPolicySetDto>>(
+      `${this.basePath}/approval-policies`, request
+    );
+    return this.requireData(response, 'Approval policy creation response did not include data.');
+  }
+
+  async updateApprovalPolicy(id: string, request: SaveWorkflowApprovalPolicyRequest): Promise<WorkflowApprovalPolicySetDto> {
+    const response = await apiService.put<ApiResponse<WorkflowApprovalPolicySetDto>>(
+      `${this.basePath}/approval-policies/${id}`, request
+    );
+    return this.requireData(response, 'Approval policy update response did not include data.');
+  }
+
+  async publishApprovalPolicy(id: string): Promise<WorkflowApprovalPolicySetDto> {
+    const response = await apiService.post<ApiResponse<WorkflowApprovalPolicySetDto>>(
+      `${this.basePath}/approval-policies/${id}/publish`, {}
+    );
+    return this.requireData(response, 'Approval policy publish response did not include data.');
+  }
+
+  async retireApprovalPolicy(id: string): Promise<WorkflowApprovalPolicySetDto> {
+    const response = await apiService.post<ApiResponse<WorkflowApprovalPolicySetDto>>(
+      `${this.basePath}/approval-policies/${id}/retire`, {}
+    );
+    return this.requireData(response, 'Approval policy retirement response did not include data.');
+  }
+
+  async cloneApprovalPolicyDraft(id: string): Promise<WorkflowApprovalPolicySetDto> {
+    const response = await apiService.post<ApiResponse<WorkflowApprovalPolicySetDto>>(
+      `${this.basePath}/approval-policies/${id}/clone-draft`, {}
+    );
+    return this.requireData(response, 'Approval policy clone response did not include data.');
+  }
+
+  async getWorkflowDirectoryUsers(search?: string): Promise<WorkflowDirectoryUser[]> {
+    const query = search ? `?search=${encodeURIComponent(search)}` : '';
+    const response = await apiService.get<ApiResponse<WorkflowDirectoryUser[]>>(
+      `${this.basePath}/governance/users${query}`
+    );
+    return response.data || [];
+  }
+
+  async getWorkflowDelegationScopeOptions(): Promise<WorkflowDelegationScopeOptionsDto> {
+    const response = await apiService.get<ApiResponse<WorkflowDelegationScopeOptionsDto>>(
+      `${this.basePath}/governance/delegation-scope-options`
+    );
+    return this.requireData(response, 'Delegation scope response did not include data.');
+  }
+
+  async getWorkflowDelegations(): Promise<WorkflowDelegationDto[]> {
+    const response = await apiService.get<ApiResponse<WorkflowDelegationDto[]>>(
+      `${this.basePath}/governance/delegations`
+    );
+    return response.data || [];
+  }
+
+  async createWorkflowDelegation(request: SaveWorkflowDelegationRequest): Promise<WorkflowDelegationDto> {
+    const response = await apiService.post<ApiResponse<WorkflowDelegationDto>>(
+      `${this.basePath}/governance/delegations`, request
+    );
+    return this.requireData(response, 'Delegation response did not include data.');
+  }
+
+  async revokeWorkflowDelegation(id: string, reason: string): Promise<WorkflowDelegationDto> {
+    const response = await apiService.post<ApiResponse<WorkflowDelegationDto>>(
+      `${this.basePath}/governance/delegations/${id}/revoke`, { reason }
+    );
+    return this.requireData(response, 'Delegation revocation response did not include data.');
+  }
+
+  async getWorkflowSlaBreaches(days = 30): Promise<WorkflowSlaBreachesDto> {
+    const response = await apiService.get<ApiResponse<WorkflowSlaBreachesDto>>(
+      `${this.basePath}/governance/sla-breaches?days=${encodeURIComponent(String(days))}`
+    );
+    return this.requireData(response, 'SLA breach response did not include data.');
+  }
+
+  async getWorkflowCalendar(): Promise<WorkflowWorkingCalendarDto | undefined> {
+    const response = await apiService.get<ApiResponse<any>>(`${this.basePath}/governance/calendar`);
+    const calendar = response.data;
+    if (!calendar) return undefined;
+    return { ...calendar, holidays: JSON.parse(calendar.holidaysJson || '[]') };
+  }
+
+  async saveWorkflowCalendar(request: WorkflowWorkingCalendarDto): Promise<WorkflowWorkingCalendarDto> {
+    const response = await apiService.put<ApiResponse<any>>(`${this.basePath}/governance/calendar`, request);
+    const calendar = this.requireData(response, 'Working calendar response did not include data.');
+    return { ...calendar, holidays: JSON.parse(calendar.holidaysJson || '[]') };
+  }
+
+  async delegateApproval(approvalId: string, delegateToId: string, comments: string): Promise<WorkflowApproval> {
+    return this.processApproval(approvalId, { action: 2, delegateToId, comments });
+  }
+
+  async sendApprovalBack(approvalId: string, request: {
+    correctionOwnerId?: string; targetStepInstanceId?: string; instructions: string; dueWorkingHours?: number;
+  }): Promise<WorkflowCorrectionRequestDto> {
+    const response = await apiService.post<ApiResponse<WorkflowCorrectionRequestDto>>(
+      `${this.basePath}/governance/approvals/${approvalId}/send-back`, request
+    );
+    return this.requireData(response, 'Correction request response did not include data.');
+  }
+
+  async getMyWorkflowCorrections(): Promise<WorkflowCorrectionRequestDto[]> {
+    const response = await apiService.get<ApiResponse<WorkflowCorrectionRequestDto[]>>(
+      `${this.basePath}/governance/corrections/my`
+    );
+    return response.data || [];
+  }
+
+  async resubmitWorkflowCorrection(id: string, data?: unknown, comments?: string): Promise<WorkflowCorrectionRequestDto> {
+    const response = await apiService.post<ApiResponse<WorkflowCorrectionRequestDto>>(
+      `${this.basePath}/governance/corrections/${id}/resubmit`, { data, comments }
+    );
+    return this.requireData(response, 'Correction resubmission response did not include data.');
+  }
+
+  async stageWorkflowSignature(approvalId: string, signature: WorkflowSignatureSubmissionDto): Promise<void> {
+    await apiService.post<ApiResponse<void>>(`${this.basePath}/evidence/signatures/${approvalId}/stage`, signature);
+  }
+
+  async getWorkflowEvidencePolicy(): Promise<WorkflowEvidencePolicyDto> {
+    const response = await apiService.get<ApiResponse<any>>(`${this.basePath}/evidence/policy`);
+    const policy = response.data;
+    if (!policy) {
+      return { allowedExtensions: ['.pdf', '.png', '.jpg', '.jpeg'], maximumFileSizeBytes: 10 * 1024 * 1024,
+        retentionDays: 2555, requireMalwareScan: true };
+    }
+    let allowedExtensions: string[] = [];
+    try { allowedExtensions = JSON.parse(policy.allowedExtensionsJson || '[]'); } catch { allowedExtensions = []; }
+    return { ...policy, allowedExtensions };
+  }
+
+  async saveWorkflowEvidencePolicy(request: WorkflowEvidencePolicyDto): Promise<WorkflowEvidencePolicyDto> {
+    const response = await apiService.put<ApiResponse<any>>(`${this.basePath}/evidence/policy`, request);
+    const policy = this.requireData(response, 'Evidence policy response did not include data.');
+    let allowedExtensions: string[] = [];
+    try { allowedExtensions = JSON.parse(policy.allowedExtensionsJson || '[]'); } catch { allowedExtensions = []; }
+    return { ...policy, allowedExtensions };
+  }
+
+  async getWorkflowStepEvidence(stepInstanceId: string): Promise<WorkflowEvidenceDocumentDto[]> {
+    const response = await apiService.get<ApiResponse<WorkflowEvidenceDocumentDto[]>>(
+      `${this.basePath}/evidence/step/${stepInstanceId}`
+    );
+    return response.data || [];
+  }
+
+  async getWorkflowEvidenceReviewInstances(params: {
+    search?: string;
+    entityType?: string;
+    workflowDefinitionId?: string;
+    pageSize?: number;
+  } = {}): Promise<WorkflowEvidenceReviewInstanceDto[]> {
+    const query = new URLSearchParams();
+    if (params.search) query.append('search', params.search);
+    if (params.entityType) query.append('entityType', params.entityType);
+    if (params.workflowDefinitionId) query.append('workflowDefinitionId', params.workflowDefinitionId);
+    if (params.pageSize) query.append('pageSize', String(params.pageSize));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    const response = await apiService.get<ApiResponse<WorkflowEvidenceReviewInstanceDto[]>>(
+      `${this.basePath}/evidence/review/instances${suffix}`
+    );
+    return response.data || [];
+  }
+
+  async verifyWorkflowEvidence(id: string, accepted: boolean, notes?: string): Promise<void> {
+    await apiService.post<ApiResponse<void>>(`${this.basePath}/evidence/${id}/verify`, { accepted, notes });
+  }
+
+  async setWorkflowEvidenceLegalHold(id: string, enabled: boolean, reason?: string): Promise<void> {
+    await apiService.post<ApiResponse<void>>(`${this.basePath}/evidence/${id}/legal-hold`, { enabled, reason });
+  }
+
+  async getWorkflowTemplates(): Promise<any[]> {
+    const response = await apiService.get<ApiResponse<any[]>>(`${this.basePath}/platform/templates`);
+    return response.data || [];
+  }
+
+  async exportWorkflowTemplate(id: string): Promise<any> {
+    return apiService.get<any>(`${this.basePath}/platform/templates/${id}/export`);
+  }
+
+  async importWorkflowTemplate(workflowPackage: any): Promise<any> {
+    const response = await apiService.post<ApiResponse<any>>(`${this.basePath}/platform/templates/import`, workflowPackage);
+    return this.requireData(response, 'Template import response did not include data.');
+  }
+
+  async simulateWorkflowDefinition(id: string, dataContext?: unknown): Promise<any> {
+    const response = await apiService.post<ApiResponse<any>>(`${this.basePath}/platform/definitions/${id}/simulate`, { dataContext });
+    return this.requireData(response, 'Simulation response did not include data.');
+  }
+
+  async rollbackWorkflowDefinition(id: string): Promise<any> {
+    const response = await apiService.post<ApiResponse<any>>(`${this.basePath}/platform/definitions/${id}/rollback-draft`, {});
+    return this.requireData(response, 'Rollback response did not include data.');
+  }
+
+  async getWorkflowAnalytics(days = 30): Promise<any> {
+    const response = await apiService.get<ApiResponse<any>>(`${this.basePath}/platform/analytics?days=${days}`);
+    return this.requireData(response, 'Analytics response did not include data.');
+  }
+
+  async getWorkflowIntegrationExceptions(): Promise<any[]> {
+    const response = await apiService.get<ApiResponse<any[]>>(`${this.basePath}/platform/integrations/exceptions`);
+    return response.data || [];
+  }
+
+  async retryWorkflowIntegration(id: string): Promise<void> {
+    await apiService.post<ApiResponse<void>>(`${this.basePath}/platform/integrations/${id}/retry`, {});
+  }
+
+  async getMobileWorkflowInbox(): Promise<any[]> {
+    const response = await apiService.get<ApiResponse<any[]>>(`${this.basePath}/platform/mobile/inbox`);
+    return response.data || [];
+  }
+
+  async submitOfflineWorkflowAction(request: { idempotencyKey: string; actionType: string; payload: any }): Promise<any> {
+    const response = await apiService.post<ApiResponse<any>>(`${this.basePath}/platform/mobile/actions`, request);
+    return response.data;
+  }
+
+  async subscribeWorkflowPush(subscription: PushSubscription): Promise<void> {
+    await apiService.post<any>('/pwa/subscribe', subscription.toJSON());
+  }
+
+  async addAdHocApprover(stepInstanceId: string, request: {
+    userId?: string; role?: string; approvalGroup: number; dueWorkingHours?: number; reason: string;
+  }): Promise<WorkflowApproval> {
+    const response = await apiService.post<ApiResponse<WorkflowApproval>>(
+      `${this.basePath}/governance/steps/${stepInstanceId}/ad-hoc-approvers`, request
+    );
+    return this.requireData(response, 'Ad hoc approval response did not include data.');
+  }
+
+  async removeAdHocApprover(approvalId: string, reason: string): Promise<void> {
+    await apiService.delete<ApiResponse<void>>(
+      `${this.basePath}/governance/approvals/${approvalId}/ad-hoc?reason=${encodeURIComponent(reason)}`
+    );
+  }
+
+  async cloneWorkflowDefinitionDraft(id: string, changeSummary?: string): Promise<WorkflowDefinitionDto> {
+    const response = await apiService.post<ApiResponse<WorkflowDefinitionDto>>(
+      `${this.basePath}/definitions/${id}/clone-draft`,
+      { changeSummary }
+    );
+    return this.requireData(response, 'Workflow draft clone response did not include data.');
+  }
+
+  async publishWorkflowDefinition(id: string): Promise<WorkflowDefinitionDto> {
+    const response = await apiService.post<ApiResponse<WorkflowDefinitionDto>>(
+      `${this.basePath}/definitions/${id}/publish`
+    );
+    return this.requireData(response, 'Workflow publish response did not include data.');
+  }
+
+  async retireWorkflowDefinition(id: string): Promise<WorkflowDefinitionDto> {
+    const response = await apiService.post<ApiResponse<WorkflowDefinitionDto>>(
+      `${this.basePath}/definitions/${id}/retire`
+    );
+    return this.requireData(response, 'Workflow retire response did not include data.');
+  }
+
+  async getWorkflowDefinitionVersions(id: string): Promise<WorkflowDefinitionVersionDto[]> {
+    const response = await apiService.get<ApiResponse<WorkflowDefinitionVersionDto[]>>(
+      `${this.basePath}/definitions/${id}/versions`
+    );
+    return response.data || [];
+  }
+
+  async compareWorkflowDefinitions(
+    fromDefinitionId: string,
+    toDefinitionId: string
+  ): Promise<WorkflowDefinitionComparisonDto> {
+    const params = new URLSearchParams({ fromDefinitionId, toDefinitionId });
+    const response = await apiService.get<ApiResponse<WorkflowDefinitionComparisonDto>>(
+      `${this.basePath}/definitions/compare?${params.toString()}`
+    );
+    return this.requireData(response, 'Workflow comparison response did not include data.');
+  }
+
+  /**
+   * Recalls the active workflow for an entity record back to draft.
+   */
+  async recallWorkflowEntity(entityType: string, entityId: string, request: RecallWorkflowRequest = {}): Promise<void> {
+    await apiService.post<ApiResponse<void>>(
+      `${this.basePath}/entity/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}/recall`,
+      request
+    );
+  }
+
   // Workflow Step Management
 
   /**
@@ -334,7 +657,7 @@ export class WorkflowApiService {
   }
 
   /**
-   * Saves approval checklist responses against a workflow step before the approval action is processed.
+   * Saves checklist responses against a workflow step before the current action is processed.
    */
   async saveStepChecklistResponses(stepInstanceId: string, responses: WorkflowApprovalChecklistResponseDto[]): Promise<void> {
     await apiService.post<ApiResponse<void>>(
@@ -344,7 +667,7 @@ export class WorkflowApiService {
   }
 
   /**
-   * Gets attachments uploaded against a manual workflow task step.
+   * Gets documents uploaded against a workflow task or approval checklist step.
    */
   async getStepAttachments(stepInstanceId: string): Promise<WorkflowTaskAttachmentDto[]> {
     const response = await apiService.get<ApiResponse<WorkflowTaskAttachmentDto[]>>(
@@ -364,13 +687,14 @@ export class WorkflowApiService {
   }
 
   /**
-   * Uploads a task attachment. Uses the raw API service so FormData is sent as multipart/form-data.
+   * Uploads workflow task or approval-checklist evidence using multipart/form-data.
    */
   async uploadStepAttachment(
     stepInstanceId: string,
     file: File,
     requirementKey?: string,
-    documentName?: string
+    documentName?: string,
+    documentType?: string
   ): Promise<WorkflowTaskAttachmentDto> {
     const formData = new FormData();
     formData.append('file', file);
@@ -381,6 +705,10 @@ export class WorkflowApiService {
 
     if (documentName) {
       formData.append('documentName', documentName);
+    }
+
+    if (documentType) {
+      formData.append('documentType', documentType);
     }
 
     const response = await rawApiService.request<ApiResponse<WorkflowTaskAttachmentDto>>(

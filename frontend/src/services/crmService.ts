@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(includeJson: boolean = true): HeadersInit {
   const token = typeof window !== 'undefined'
@@ -749,6 +749,9 @@ export interface CrmActivitySummaryDto {
   leadName?: string;
   opportunityId?: string;
   opportunityName?: string;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
+  relatedEntityHref?: string;
 }
 
 export interface CrmActivityListItemDto extends CrmActivitySummaryDto {

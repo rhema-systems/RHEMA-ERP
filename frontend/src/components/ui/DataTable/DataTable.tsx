@@ -213,7 +213,7 @@ export function DataTable<TData>({
   showBorder = true,
   striped = true,
   hoverable = true,
-  compact = false,
+  compact = true,
   
   // Advanced
   enableColumnVisibility = true,
@@ -640,8 +640,8 @@ export function DataTable<TData>({
                     key={row.id}
                     data-state={row.getIsSelected() && 'selected'}
                     className={`
-                      ${striped ? 'even:bg-muted/50' : ''}
-                      ${hoverable ? 'hover:bg-muted/50' : ''}
+                      ${striped ? 'even:bg-slate-50/80 odd:bg-white dark:even:bg-slate-900/35 dark:odd:bg-slate-950' : ''}
+                      ${hoverable ? 'hover:bg-blue-50/70 dark:hover:bg-slate-800/70' : ''}
                       ${onRowClick || onRowDoubleClick ? 'cursor-pointer' : ''}
                     `}
                     onClick={(event) => handleRowClick(row, event)}
@@ -649,7 +649,7 @@ export function DataTable<TData>({
                     {row.getVisibleCells().map((cell) => (
                       <TableCell
                         key={cell.id}
-                        className={compact ? 'py-2' : ''}
+                        className={compact ? 'py-1.5 text-[13px]' : ''}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>

@@ -79,7 +79,7 @@ export default function MaintenanceHistoryPage() {
     const loadMaintenanceHistory = async () => {
       setLoading(true);
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
         const token = localStorage.getItem('authToken');
         const response = await fetch(`${API_URL}/maintenance/history`, {
           headers: {

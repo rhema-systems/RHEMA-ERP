@@ -4151,7 +4151,7 @@ export default function JobCardsPage() {
                                 onClick={async () => {
                                   try {
                                     // Open certificate in new window
-                                    const baseUrl = 'http://localhost:5000';
+                                    const baseUrl = '';
                                     window.open(`${baseUrl}/api/maintenance/quality-control/certificate/${selectedQCInspection.id}`, '_blank');
                                     toast({
                                       title: "Opening Certificate",
@@ -4654,4 +4654,3 @@ export default function JobCardsPage() {
     </div>
   );
 }
-

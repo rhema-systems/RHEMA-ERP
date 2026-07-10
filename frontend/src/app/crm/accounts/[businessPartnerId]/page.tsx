@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { formatCurrencyAmount as formatMoney } from '@/lib/currency';
 import { businessPartnerService, type CreateBusinessPartnerContactDto } from '@/services/businessPartnerService';
 import { crmService, type CrmAccountContactDto, type CrmAccountDetailDto } from '@/services/crmService';
+import { SalesHandoffActions } from '../../components/SalesHandoffActions';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -127,10 +128,10 @@ const buildAccountTimeline = (account: CrmAccountDetailDto): AccountTimelineItem
   })),
   ...account.activities.map<AccountTimelineItem>((activity) => ({
     key: `activity-${activity.activityId}`,
-    entityType: 'Activity',
+    entityType: activity.relatedEntityType || 'Activity',
     title: activity.subject,
     subtitle: [activity.activityType, activity.activityStatus].filter(Boolean).join(' | '),
-    href: `/crm/activities?businessPartnerId=${account.businessPartnerId}&activityId=${activity.activityId}`,
+    href: activity.relatedEntityHref || `/crm/activities?businessPartnerId=${account.businessPartnerId}&activityId=${activity.activityId}`,
     dateLabel: activity.dueDate ? 'Due' : 'Activity date',
     dateValue: activity.dueDate || activity.activityDate,
     badgeVariant: activity.requiresFollowUp ? 'secondary' : 'outline',
@@ -543,6 +544,14 @@ export default function CrmAccountDetailPage() {
               New Opportunity
             </Link>
           </Button>
+          <SalesHandoffActions
+            context={{
+              businessPartnerId,
+              businessPartnerName: account?.partnerName,
+              currency: account?.currency || 'GHS',
+              contextLabel: 'Account',
+            }}
+          />
           <Button asChild variant="outline">
             <Link href="/crm/reports">
               <BarChart3 className="mr-2 h-4 w-4" />
@@ -1183,14 +1192,14 @@ export default function CrmAccountDetailPage() {
                               <div>
                                 <div className="font-medium">
                                   <Link
-                                    href={`/crm/activities?businessPartnerId=${businessPartnerId}&activityId=${activity.activityId}`}
+                                    href={activity.relatedEntityHref || `/crm/activities?businessPartnerId=${businessPartnerId}&activityId=${activity.activityId}`}
                                     className="hover:underline"
                                   >
                                     {activity.subject}
                                   </Link>
                                 </div>
                                 <div className="text-sm text-muted-foreground">
-                                  {activity.activityType} | {activity.activityStatus}
+                                  {activity.relatedEntityType || activity.activityType} | {activity.activityStatus}
                                 </div>
                                 {activity.opportunityName || activity.leadName ? (
                                   <div className="text-xs text-muted-foreground">

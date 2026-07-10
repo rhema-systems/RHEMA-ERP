@@ -29,6 +29,21 @@ public class WorkflowApproval : TenantEntity
     public string? ApproverRole { get; set; }
 
     /// <summary>
+    /// One-based activation group for sequential approval steps.
+    /// </summary>
+    public int ApprovalGroup { get; set; } = 1;
+
+    public Guid? OriginalApproverId { get; set; }
+    public Guid? DelegationId { get; set; }
+    public Guid? DelegatedById { get; set; }
+    public DateTime? DelegatedAt { get; set; }
+    [StringLength(1000)] public string? DelegationReason { get; set; }
+    public bool IsAdHoc { get; set; }
+    public Guid? AddedById { get; set; }
+    public DateTime? AddedAt { get; set; }
+    [StringLength(1000)] public string? AdditionReason { get; set; }
+
+    /// <summary>
     /// Current status of the approval
     /// </summary>
     [Required]

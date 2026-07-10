@@ -136,6 +136,17 @@ public class CreateCreditNoteLineDto
     public string? TaxCode { get; set; }
 }
 
+public class CreditNoteApprovalDto
+{
+    public bool IsApproved { get; set; }
+
+    [MaxLength(1000)]
+    public string? Comments { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+}
+
 // ═════════════════════════════════════════════
 //  REFUND DTOs
 // ═════════════════════════════════════════════
@@ -172,4 +183,15 @@ public class CreateRefundDto
     public decimal RefundAmount { get; set; }
     public string RefundMethod { get; set; } = "BankTransfer";
     public string? Reason { get; set; }
+}
+
+public class RefundApprovalDto
+{
+    public bool IsApproved { get; set; }
+
+    [MaxLength(1000)]
+    public string? Comments { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
 }

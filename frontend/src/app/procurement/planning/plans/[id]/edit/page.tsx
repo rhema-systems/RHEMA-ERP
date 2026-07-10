@@ -14,8 +14,74 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Search, Package, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementPlanService, commonService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto } from '@/services/procurementPlanningService';
+import { procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
+import { FiscalYearSelect } from '../../../components/FiscalYearSelect';
+import { ProcurementPlanItemDialogBody } from '@/app/procurement/planning/components/ProcurementPlanItemDialogBody';
+
+const createEmptyItemForm = (): CreateProcurementPlanItemDto => ({
+  itemDescription: '',
+  specifications: '',
+  itemCategory: '',
+  estimatedQuantity: 1,
+  unitOfMeasure: 'EA',
+  estimatedUnitPrice: 0,
+  priority: 'Medium',
+  isCritical: false,
+  requiredDate: '',
+  plannedQuarter: '',
+  justification: '',
+  procurementMethod: 'DirectPurchase',
+  notes: '',
+  itemSuppliers: [],
+});
+
+const getItemEstimatedTotal = (item: Pick<CreateProcurementPlanItemDto, 'estimatedQuantity' | 'estimatedUnitPrice'>) =>
+  (Number(item.estimatedQuantity) || 0) * (Number(item.estimatedUnitPrice) || 0);
+
+const normalizeLookup = (value?: string | null) => value?.trim().toLowerCase() || '';
+
+const isSupplierBusinessPartner = (partner: BusinessPartnerDto) => {
+  const partnerType = normalizeLookup(partner.partnerType);
+  const approvalStatus = normalizeLookup(partner.approvalStatus);
+  const status = normalizeLookup(partner.status);
+
+  return (
+    ['supplier', 'both', 'vendor'].includes(partnerType) &&
+    (!approvalStatus || approvalStatus === 'approved') &&
+    (!status || status === 'active' || status === 'approved')
+  );
+};
+
+const getUnitOfMeasureValue = (unit: UnitOfMeasureDto) => unit.code?.trim() || unit.name?.trim() || unit.id;
+
+const getUnitOfMeasureLabel = (unit: UnitOfMeasureDto) => {
+  const value = getUnitOfMeasureValue(unit);
+  const name = unit.name?.trim();
+  const symbol = unit.symbol?.trim();
+
+  if (name && name !== value) return symbol ? `${value} - ${name} (${symbol})` : `${value} - ${name}`;
+  return symbol && symbol !== value ? `${value} (${symbol})` : value;
+};
+
+const buildUnitOfMeasureOptions = (units: UnitOfMeasureDto[], currentValue?: string) => {
+  const seen = new Set<string>();
+  const options = units
+    .map((unit) => ({ value: getUnitOfMeasureValue(unit), label: getUnitOfMeasureLabel(unit) }))
+    .filter((option) => {
+      if (!option.value || seen.has(option.value)) return false;
+      seen.add(option.value);
+      return true;
+    });
+
+  const savedValue = currentValue?.trim();
+  if (savedValue && !seen.has(savedValue)) {
+    options.unshift({ value: savedValue, label: `${savedValue} (saved value)` });
+  }
+
+  return options;
+};
 
 export default function EditProcurementPlanPage() {
   const params = useParams();
@@ -32,6 +98,8 @@ export default function EditProcurementPlanPage() {
     description: '',
     departmentId: '',
     fiscalYear: new Date().getFullYear(),
+    planningCycle: 'Annual',
+    planningQuarter: '',
     planStartDate: new Date().toISOString().split('T')[0],
     planEndDate: new Date(new Date().getFullYear(), 11, 31).toISOString().split('T')[0],
     planDurationYears: 1,
@@ -48,29 +116,22 @@ export default function EditProcurementPlanPage() {
   const [inventorySearchTerm, setInventorySearchTerm] = useState('');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
   const [savingItem, setSavingItem] = useState(false);
+  const [addItemDialogOpen, setAddItemDialogOpen] = useState(false);
+  const [addingItem, setAddingItem] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
-  const [itemForm, setItemForm] = useState<CreateProcurementPlanItemDto>({
-    itemDescription: '',
-    specifications: '',
-    itemCategory: '',
-    estimatedQuantity: 1,
-    unitOfMeasure: 'EA',
-    estimatedUnitPrice: 0,
-    priority: 'Medium',
-    isCritical: false,
-    requiredDate: '',
-    plannedQuarter: '',
-    justification: '',
-    procurementMethod: 'DirectPurchase',
-    notes: '',
-    itemSuppliers: [],
-  });
+  const [itemForm, setItemForm] = useState<CreateProcurementPlanItemDto>(createEmptyItemForm);
+  const [newItemForm, setNewItemForm] = useState<CreateProcurementPlanItemDto>(createEmptyItemForm);
+  const [pendingPlanItems, setPendingPlanItems] = useState<CreateProcurementPlanItemDto[]>([]);
 
   // Supplier selection state
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [supplierSearchTerm, setSupplierSearchTerm] = useState('');
   const [selectedItemSuppliers, setSelectedItemSuppliers] = useState<CreateProcurementPlanItemSupplierDto[]>([]);
+  const [marketAnalyses, setMarketAnalyses] = useState<MarketAnalysisDto[]>([]);
+  const [loadingMarketAnalyses, setLoadingMarketAnalyses] = useState(false);
+  const [unitsOfMeasure, setUnitsOfMeasure] = useState<UnitOfMeasureDto[]>([]);
+  const [loadingUnitsOfMeasure, setLoadingUnitsOfMeasure] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -93,6 +154,8 @@ export default function EditProcurementPlanPage() {
           description: planData.description || '',
           departmentId: planData.departmentId,
           fiscalYear: planData.fiscalYear,
+          planningCycle: planData.planningCycle || 'Annual',
+          planningQuarter: planData.planningQuarter || '',
           planStartDate: planData.planStartDate?.split('T')[0] || '',
           planEndDate: planData.planEndDate?.split('T')[0] || '',
           planDurationYears: planData.planDurationYears,
@@ -163,12 +226,8 @@ export default function EditProcurementPlanPage() {
   const loadSuppliers = async () => {
     try {
       setLoadingSuppliers(true);
-      const response = await businessPartnerService.getPartners({
-        partnerType: 'Supplier',
-        approvalStatus: 'Approved',
-        pageSize: 1000
-      });
-      setSuppliers(response.items || []);
+      const partners = await businessPartnerService.getAllPartnersForDropdown();
+      setSuppliers(partners.filter(isSupplierBusinessPartner));
     } catch (error) {
       console.error('Error loading suppliers:', error);
       toast.error('Failed to load suppliers');
@@ -177,37 +236,64 @@ export default function EditProcurementPlanPage() {
     }
   };
 
+  const loadUnitsOfMeasure = async () => {
+    try {
+      setLoadingUnitsOfMeasure(true);
+      const data = await inventoryManagementService.getUnitsOfMeasure(true);
+      setUnitsOfMeasure(data);
+    } catch (error) {
+      console.error('Error loading units of measure:', error);
+      toast.error('Failed to load units of measure');
+    } finally {
+      setLoadingUnitsOfMeasure(false);
+    }
+  };
+
+  const loadMarketAnalyses = async () => {
+    try {
+      setLoadingMarketAnalyses(true);
+      const response = await marketAnalysisService.getAnalyses({ page: 1, pageSize: 100, status: 'Published' });
+      setMarketAnalyses(response.items || []);
+    } catch (error) {
+      console.error('Error loading market analyses:', error);
+      setMarketAnalyses([]);
+    } finally {
+      setLoadingMarketAnalyses(false);
+    }
+  };
+
   const handleOpenAddItemDialog = () => {
     setEditingItem(null);
-    setItemDialogOpen(true);
+    setAddItemDialogOpen(true);
     loadInventoryItems();
     loadSuppliers();
+    loadMarketAnalyses();
+    loadUnitsOfMeasure();
+    setPendingPlanItems([]);
     setSelectedInventoryItem(null);
     setSelectedItemSuppliers([]);
+    setInventorySearchTerm('');
     setSupplierSearchTerm('');
-    setItemForm({
-      itemDescription: '',
-      specifications: '',
-      itemCategory: '',
-      estimatedQuantity: 1,
-      unitOfMeasure: 'EA',
-      estimatedUnitPrice: 0,
-      priority: 'Medium',
-      isCritical: false,
-      requiredDate: '',
-      plannedQuarter: '',
-      justification: '',
-      procurementMethod: 'DirectPurchase',
-      notes: '',
-      itemSuppliers: [],
-    });
+    setNewItemForm(createEmptyItemForm());
+  };
+
+  const resetCurrentPlanItem = () => {
+    setSelectedInventoryItem(null);
+    setSelectedItemSuppliers([]);
+    setInventorySearchTerm('');
+    setSupplierSearchTerm('');
+    setNewItemForm(createEmptyItemForm());
   };
 
   const handleOpenEditItemDialog = (item: ProcurementPlanItemDto) => {
     setEditingItem(item);
     setItemDialogOpen(true);
+    loadInventoryItems();
     loadSuppliers();
+    loadMarketAnalyses();
+    loadUnitsOfMeasure();
     setSelectedInventoryItem(null);
+    setInventorySearchTerm('');
     setSupplierSearchTerm('');
     // Convert existing item suppliers to the create DTO format
     const existingSuppliers: CreateProcurementPlanItemSupplierDto[] = (item.itemSuppliers || []).map(s => ({
@@ -222,7 +308,14 @@ export default function EditProcurementPlanPage() {
     setSelectedItemSuppliers(existingSuppliers);
     setItemForm({
       inventoryItemId: item.inventoryItemId,
+      marketAnalysisId: item.marketAnalysisId,
       itemDescription: item.itemDescription,
+      procurementBudgetId: item.procurementBudgetId,
+      procurementBudgetAllocationId: item.procurementBudgetAllocationId,
+      budgetLineCode: item.budgetLineCode || '',
+      budgetCategoryName: item.budgetCategoryName || '',
+      approvedBudgetAmount: item.approvedBudgetAmount,
+      budgetNotes: item.budgetNotes || '',
       specifications: item.specifications || '',
       itemCategory: item.itemCategory || '',
       estimatedQuantity: item.estimatedQuantity,
@@ -252,7 +345,37 @@ export default function EditProcurementPlanPage() {
     };
     const updatedSuppliers = [...selectedItemSuppliers, newSupplier];
     setSelectedItemSuppliers(updatedSuppliers);
-    setItemForm({ ...itemForm, itemSuppliers: updatedSuppliers });
+    if (addItemDialogOpen && !editingItem) {
+      setNewItemForm((current) => ({ ...current, itemSuppliers: updatedSuppliers }));
+    } else {
+      setItemForm((current) => ({ ...current, itemSuppliers: updatedSuppliers }));
+    }
+  };
+
+  const handleMarketAnalysisSelect = (value: string) => {
+    const updateFromMarketAnalysis = (current: CreateProcurementPlanItemDto): CreateProcurementPlanItemDto => {
+      if (value === 'none') {
+        return { ...current, marketAnalysisId: undefined };
+      }
+
+      const analysis = marketAnalyses.find((item) => item.id === value);
+      return {
+        ...current,
+        marketAnalysisId: value,
+        itemCategory: current.itemCategory || analysis?.itemCategory || '',
+        itemDescription: current.itemDescription || analysis?.itemDescription || analysis?.title || '',
+        estimatedUnitPrice: current.estimatedUnitPrice && current.estimatedUnitPrice > 0
+          ? current.estimatedUnitPrice
+          : analysis?.currentMarketPrice || 0,
+      };
+    };
+
+    if (addItemDialogOpen && !editingItem) {
+      setNewItemForm(updateFromMarketAnalysis);
+      return;
+    }
+
+    setItemForm(updateFromMarketAnalysis);
   };
 
   const handleRemoveSupplierFromItem = (supplierId: string) => {
@@ -260,7 +383,11 @@ export default function EditProcurementPlanPage() {
       .filter(s => s.supplierId !== supplierId)
       .map((s, index) => ({ ...s, priority: index + 1 }));
     setSelectedItemSuppliers(updatedSuppliers);
-    setItemForm({ ...itemForm, itemSuppliers: updatedSuppliers });
+    if (addItemDialogOpen && !editingItem) {
+      setNewItemForm((current) => ({ ...current, itemSuppliers: updatedSuppliers }));
+    } else {
+      setItemForm((current) => ({ ...current, itemSuppliers: updatedSuppliers }));
+    }
   };
 
   const handleUpdateItemSupplier = (supplierId: string, field: keyof CreateProcurementPlanItemSupplierDto, value: unknown) => {
@@ -279,18 +406,22 @@ export default function EditProcurementPlanPage() {
       return s;
     });
     setSelectedItemSuppliers(updatedSuppliers);
-    setItemForm({ ...itemForm, itemSuppliers: updatedSuppliers });
+    if (addItemDialogOpen && !editingItem) {
+      setNewItemForm((current) => ({ ...current, itemSuppliers: updatedSuppliers }));
+    } else {
+      setItemForm((current) => ({ ...current, itemSuppliers: updatedSuppliers }));
+    }
   };
 
   const filteredSuppliers = suppliers.filter(s =>
-    s.partnerName.toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
-    s.partnerCode.toLowerCase().includes(supplierSearchTerm.toLowerCase())
+    (s.partnerName || '').toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
+    (s.partnerCode || '').toLowerCase().includes(supplierSearchTerm.toLowerCase())
   );
 
   const handleSelectInventoryItem = (item: InventoryItemDto) => {
     setSelectedInventoryItem(item);
-    setItemForm({
-      ...itemForm,
+    const applySelectedItem = (current: CreateProcurementPlanItemDto): CreateProcurementPlanItemDto => ({
+      ...current,
       inventoryItemId: item.id,
       itemDescription: item.name,
       specifications: item.description || '',
@@ -298,15 +429,99 @@ export default function EditProcurementPlanPage() {
       unitOfMeasure: item.unitOfMeasure || 'EA',
       estimatedUnitPrice: item.standardCost || item.averageCost || 0,
     });
+
+    if (itemDialogOpen && editingItem) {
+      setItemForm(applySelectedItem);
+      return;
+    }
+
+    setNewItemForm(applySelectedItem);
+  };
+
+  const validateItemForm = (item: CreateProcurementPlanItemDto) => {
+    if (!item.itemDescription.trim()) return 'Item description is required';
+    if (!item.unitOfMeasure?.trim()) return 'Unit of measure is required';
+    if (Number(item.estimatedQuantity) <= 0) return 'Quantity must be greater than 0';
+    if (Number(item.estimatedUnitPrice) < 0) return 'Unit cost cannot be negative';
+    return null;
+  };
+
+  const hasCurrentItemDraft = () =>
+    Boolean(
+      selectedInventoryItem ||
+      newItemForm.inventoryItemId ||
+      newItemForm.itemDescription.trim() ||
+      newItemForm.specifications?.trim() ||
+      newItemForm.justification?.trim() ||
+      selectedItemSuppliers.length > 0
+    );
+
+  const buildCurrentPlanItem = (): CreateProcurementPlanItemDto => ({
+    ...newItemForm,
+    estimatedQuantity: Number(newItemForm.estimatedQuantity) || 0,
+    estimatedUnitPrice: Number(newItemForm.estimatedUnitPrice) || 0,
+    approvedBudgetAmount: newItemForm.approvedBudgetAmount !== undefined ? Number(newItemForm.approvedBudgetAmount) || 0 : undefined,
+    itemSuppliers: selectedItemSuppliers,
+  });
+
+  const handleAddItem = () => {
+    const itemToQueue = buildCurrentPlanItem();
+    const validationError = validateItemForm(itemToQueue);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
+    setPendingPlanItems((items) => [...items, itemToQueue]);
+    resetCurrentPlanItem();
+    toast.success('Item added to list');
+  };
+
+  const handleRemovePendingPlanItem = (index: number) => {
+    setPendingPlanItems((items) => items.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const handleSavePendingItems = async () => {
+    const itemsToSave = [...pendingPlanItems];
+
+    if (hasCurrentItemDraft()) {
+      const currentItem = buildCurrentPlanItem();
+      const validationError = validateItemForm(currentItem);
+      if (validationError) {
+        toast.error(validationError);
+        return;
+      }
+      itemsToSave.push(currentItem);
+    }
+
+    if (itemsToSave.length === 0) {
+      toast.error('Add at least one item before saving');
+      return;
+    }
+
+    try {
+      setAddingItem(true);
+      for (const item of itemsToSave) {
+        await procurementPlanService.addItem(planId, item);
+      }
+      toast.success(`${itemsToSave.length} item${itemsToSave.length === 1 ? '' : 's'} added successfully`);
+      setPendingPlanItems([]);
+      resetCurrentPlanItem();
+      setAddItemDialogOpen(false);
+      const updatedPlan = await procurementPlanService.getPlanById(planId);
+      setPlan(updatedPlan);
+    } catch (error) {
+      console.error('Error adding items:', error);
+      toast.error('Failed to save plan items');
+    } finally {
+      setAddingItem(false);
+    }
   };
 
   const handleSaveItem = async () => {
-    if (!itemForm.itemDescription.trim()) {
-      toast.error('Item description is required');
-      return;
-    }
-    if (itemForm.estimatedQuantity <= 0) {
-      toast.error('Quantity must be greater than 0');
+    const validationError = validateItemForm(itemForm);
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
 
@@ -355,11 +570,14 @@ export default function EditProcurementPlanPage() {
     }
   };
 
-  const filteredInventoryItems = inventoryItems.filter(item =>
-    item.name?.toLowerCase().includes(inventorySearchTerm.toLowerCase()) ||
-    item.itemCode?.toLowerCase().includes(inventorySearchTerm.toLowerCase()) ||
-    item.categoryName?.toLowerCase().includes(inventorySearchTerm.toLowerCase())
-  );
+  const inventorySearchQuery = inventorySearchTerm.trim().toLowerCase();
+  const filteredInventoryItems = inventorySearchQuery.length >= 2
+    ? inventoryItems.filter(item =>
+        (item.name || '').toLowerCase().includes(inventorySearchQuery) ||
+        (item.itemCode || '').toLowerCase().includes(inventorySearchQuery) ||
+        (item.categoryName || '').toLowerCase().includes(inventorySearchQuery)
+      )
+    : [];
 
   const formatCurrency = (amount: number, currency: string = 'USD') => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
@@ -374,6 +592,12 @@ export default function EditProcurementPlanPage() {
     };
     return <Badge variant={variants[priority] || 'default'}>{priority}</Badge>;
   };
+
+  const planCurrency = formData.currency || plan?.currency || 'USD';
+  const itemBatchSaveCount = pendingPlanItems.length + (hasCurrentItemDraft() ? 1 : 0);
+  const pendingPlanItemsTotal = pendingPlanItems.reduce((total, item) => total + getItemEstimatedTotal(item), 0);
+  const unitOfMeasureOptions = buildUnitOfMeasureOptions(unitsOfMeasure, newItemForm.unitOfMeasure);
+  const editUnitOfMeasureOptions = buildUnitOfMeasureOptions(unitsOfMeasure, itemForm.unitOfMeasure);
 
   if (loading) {
     return (
@@ -470,18 +694,54 @@ export default function EditProcurementPlanPage() {
               <CardDescription>Define the planning period</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="fiscalYear">Fiscal Year *</Label>
-                  <Input
-                    id="fiscalYear"
-                    type="number"
+                  <FiscalYearSelect
                     value={formData.fiscalYear}
-                    onChange={(e) => handleInputChange('fiscalYear', parseInt(e.target.value))}
-                    min={2020}
-                    max={2050}
-                    required
+                    onValueChange={(year) => handleInputChange('fiscalYear', year)}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="planningCycle">Cycle</Label>
+                  <Select
+                    value={formData.planningCycle || 'Annual'}
+                    onValueChange={(value) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        planningCycle: value,
+                        planningQuarter: value === 'Quarterly' ? prev.planningQuarter : '',
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select cycle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Annual">Annual</SelectItem>
+                      <SelectItem value="Quarterly">Quarterly</SelectItem>
+                      <SelectItem value="MultiYear">Multi-Year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="planningQuarter">Quarter</Label>
+                  <Select
+                    value={formData.planningQuarter || 'none'}
+                    onValueChange={(value) => handleInputChange('planningQuarter', value === 'none' ? '' : value)}
+                    disabled={(formData.planningCycle || 'Annual') !== 'Quarterly'}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select quarter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not applicable</SelectItem>
+                      <SelectItem value="Q1">Q1</SelectItem>
+                      <SelectItem value="Q2">Q2</SelectItem>
+                      <SelectItem value="Q3">Q3</SelectItem>
+                      <SelectItem value="Q4">Q4</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="planStartDate">Start Date *</Label>
@@ -611,6 +871,7 @@ export default function EditProcurementPlanPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item Description</TableHead>
+                      <TableHead>Budget Line</TableHead>
                       <TableHead>Quantity</TableHead>
                       <TableHead>Unit Cost</TableHead>
                       <TableHead>Total</TableHead>
@@ -622,6 +883,14 @@ export default function EditProcurementPlanPage() {
                     {plan.items.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell className="font-medium">{item.itemDescription}</TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            <div>{item.budgetLineCode || '-'}</div>
+                            {item.budgetCategoryName && (
+                              <div className="text-xs text-gray-500">{item.budgetCategoryName}</div>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>{item.estimatedQuantity} {item.unitOfMeasure}</TableCell>
                         <TableCell>{formatCurrency(item.estimatedUnitPrice, formData.currency)}</TableCell>
                         <TableCell>{formatCurrency(item.estimatedTotalCost, formData.currency)}</TableCell>
@@ -670,7 +939,523 @@ export default function EditProcurementPlanPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Add/Edit Item Dialog */}
+      {/* Add Item Dialog */}
+      <Dialog open={addItemDialogOpen} onOpenChange={setAddItemDialogOpen}>
+        <DialogContent className="max-w-[96vw] xl:max-w-7xl max-h-[92vh] overflow-hidden flex flex-col">
+          <DialogHeader className="pb-3 border-b">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <DialogTitle>Add Items to Procurement Plan</DialogTitle>
+                <DialogDescription>
+                  Select a product, enter the required details, add it to the list, then save the batch.
+                </DialogDescription>
+              </div>
+              <Badge variant="outline" className="w-fit">
+                Costs in {planCurrency}
+              </Badge>
+            </div>
+          </DialogHeader>
+
+          <ProcurementPlanItemDialogBody
+            currency={planCurrency}
+            form={newItemForm}
+            setForm={setNewItemForm}
+            inventorySearchTerm={inventorySearchTerm}
+            onInventorySearchTermChange={setInventorySearchTerm}
+            inventoryResults={filteredInventoryItems}
+            loadingInventory={loadingInventory}
+            selectedInventoryItem={selectedInventoryItem}
+            onSelectInventoryItem={handleSelectInventoryItem}
+            unitOfMeasureOptions={unitOfMeasureOptions}
+            loadingUnitsOfMeasure={loadingUnitsOfMeasure}
+            marketAnalyses={marketAnalyses}
+            loadingMarketAnalyses={loadingMarketAnalyses}
+            onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            suppliers={suppliers}
+            supplierSearchTerm={supplierSearchTerm}
+            onSupplierSearchTermChange={setSupplierSearchTerm}
+            filteredSuppliers={filteredSuppliers}
+            loadingSuppliers={loadingSuppliers}
+            selectedItemSuppliers={selectedItemSuppliers}
+            onAddSupplier={handleAddSupplierToItem}
+            onUpdateSupplier={handleUpdateItemSupplier}
+            onRemoveSupplier={handleRemoveSupplierFromItem}
+            pendingPlanItems={pendingPlanItems}
+            pendingPlanItemsTotal={pendingPlanItemsTotal}
+            onAddCurrentItem={handleAddItem}
+            onClearCurrentItem={resetCurrentPlanItem}
+            onRemovePendingPlanItem={handleRemovePendingPlanItem}
+          />
+
+          <Tabs defaultValue="details" className="hidden">
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="details">Item Details</TabsTrigger>
+              <TabsTrigger value="suppliers">Suppliers ({selectedItemSuppliers.length})</TabsTrigger>
+            </TabsList>
+            <TabsContent value="details" className="mt-3 min-h-0">
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,0.85fr)_minmax(460px,1.2fr)_minmax(280px,0.85fr)] gap-4 overflow-y-auto pr-1">
+                <div className="space-y-3 lg:border-r lg:pr-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">Products</h4>
+                <Badge variant="secondary">{filteredInventoryItems.length}</Badge>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search inventory items..."
+                  value={inventorySearchTerm}
+                  onChange={(e) => setInventorySearchTerm(e.target.value)}
+                  className="h-9 pl-9"
+                />
+              </div>
+              <div className="h-[360px] lg:h-[56vh] overflow-y-auto border rounded-md">
+                {loadingInventory ? (
+                  <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : filteredInventoryItems.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-gray-500">
+                    No items found
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {filteredInventoryItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`p-2.5 cursor-pointer hover:bg-gray-50 ${
+                          selectedInventoryItem?.id === item.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                        }`}
+                        onClick={() => handleSelectInventoryItem(item)}
+                      >
+                        <div className="font-medium text-sm leading-tight">{item.name}</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {item.itemCode} | {item.categoryName || 'No Category'} | {item.unitOfMeasure}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Cost: {formatCurrency(item.standardCost || item.averageCost || 0, planCurrency)} | Stock: {item.availableStock}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+                </div>
+
+                <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">Item Details</h4>
+                <Badge variant="outline">
+                  Line total: {formatCurrency(getItemEstimatedTotal(newItemForm), planCurrency)}
+                </Badge>
+              </div>
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <Label htmlFor="itemDescription">Item Description *</Label>
+                  <Input
+                    id="itemDescription"
+                    className="h-9"
+                    value={newItemForm.itemDescription}
+                    onChange={(e) => setNewItemForm({ ...newItemForm, itemDescription: e.target.value })}
+                    placeholder="Enter item description"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="unitOfMeasure">Unit of Measure</Label>
+                    <Select
+                      value={newItemForm.unitOfMeasure || undefined}
+                      onValueChange={(value) => setNewItemForm({ ...newItemForm, unitOfMeasure: value })}
+                      disabled={loadingUnitsOfMeasure && unitOfMeasureOptions.length === 0}
+                    >
+                      <SelectTrigger id="unitOfMeasure" className="h-9">
+                        <SelectValue placeholder={loadingUnitsOfMeasure ? 'Loading UOMs...' : 'Select UOM'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {unitOfMeasureOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="estimatedQuantity">Quantity *</Label>
+                    <Input
+                      id="estimatedQuantity"
+                      type="number"
+                      min={1}
+                      className="h-9"
+                      value={newItemForm.estimatedQuantity}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, estimatedQuantity: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="estimatedUnitPrice">Unit Cost ({planCurrency})</Label>
+                    <Input
+                      id="estimatedUnitPrice"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="h-9"
+                      value={newItemForm.estimatedUnitPrice || 0}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, estimatedUnitPrice: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="priority">Priority</Label>
+                    <Select
+                      value={newItemForm.priority || 'Medium'}
+                      onValueChange={(value) => setNewItemForm({ ...newItemForm, priority: value })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Low">Low</SelectItem>
+                        <SelectItem value="Medium">Medium</SelectItem>
+                        <SelectItem value="High">High</SelectItem>
+                        <SelectItem value="Critical">Critical</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="requiredDate">Required By</Label>
+                    <Input
+                      id="requiredDate"
+                      type="date"
+                      className="h-9"
+                      value={newItemForm.requiredDate || ''}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, requiredDate: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="plannedQuarter">Quarter</Label>
+                    <Select
+                      value={newItemForm.plannedQuarter || ''}
+                      onValueChange={(value) => setNewItemForm({ ...newItemForm, plannedQuarter: value })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select quarter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Q1">Q1</SelectItem>
+                        <SelectItem value="Q2">Q2</SelectItem>
+                        <SelectItem value="Q3">Q3</SelectItem>
+                        <SelectItem value="Q4">Q4</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="procurementMethod">Method</Label>
+                    <Select
+                      value={newItemForm.procurementMethod || 'DirectPurchase'}
+                      onValueChange={(value) => setNewItemForm({ ...newItemForm, procurementMethod: value })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="DirectPurchase">Direct Purchase</SelectItem>
+                        <SelectItem value="RFQ">RFQ</SelectItem>
+                        <SelectItem value="Tender">Tender</SelectItem>
+                        <SelectItem value="Framework">Framework</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="budgetLineCode">Budget Line</Label>
+                    <Input
+                      id="budgetLineCode"
+                      className="h-9"
+                      value={newItemForm.budgetLineCode || ''}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, budgetLineCode: e.target.value })}
+                      placeholder="Line code"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="budgetCategoryName">Budget Category</Label>
+                    <Input
+                      id="budgetCategoryName"
+                      className="h-9"
+                      value={newItemForm.budgetCategoryName || ''}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, budgetCategoryName: e.target.value })}
+                      placeholder="Category"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="approvedBudgetAmount">Approved Budget</Label>
+                    <Input
+                      id="approvedBudgetAmount"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="h-9"
+                      value={newItemForm.approvedBudgetAmount ?? ''}
+                      onChange={(e) => setNewItemForm({
+                        ...newItemForm,
+                        approvedBudgetAmount: e.target.value ? parseFloat(e.target.value) || 0 : undefined,
+                      })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Market Analysis</Label>
+                  <Select
+                    value={newItemForm.marketAnalysisId || 'none'}
+                    onValueChange={handleMarketAnalysisSelect}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder={loadingMarketAnalyses ? 'Loading analyses...' : 'Select market analysis'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No linked analysis</SelectItem>
+                      {marketAnalyses.map((analysis) => (
+                        <SelectItem key={analysis.id} value={analysis.id}>
+                          {analysis.title} - {formatCurrency(analysis.currentMarketPrice, analysis.currency || planCurrency)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="specifications">Specifications</Label>
+                    <Textarea
+                      id="specifications"
+                      value={newItemForm.specifications || ''}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, specifications: e.target.value })}
+                      placeholder="Enter specifications"
+                      rows={2}
+                      className="min-h-[68px]"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="justification">Justification</Label>
+                    <Textarea
+                      id="justification"
+                      value={newItemForm.justification || ''}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, justification: e.target.value })}
+                      placeholder="Enter justification"
+                      rows={2}
+                      className="min-h-[68px]"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between rounded-md border bg-gray-50 px-3 py-2">
+                  <div>
+                    <p className="text-xs text-gray-500">Current item cost</p>
+                    <p className="font-semibold">{formatCurrency(getItemEstimatedTotal(newItemForm), planCurrency)}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={resetCurrentPlanItem}>
+                      Clear
+                    </Button>
+                    <Button type="button" size="sm" onClick={handleAddItem}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add to List
+                    </Button>
+                  </div>
+                </div>
+              </div>
+                </div>
+
+                <div className="space-y-3 lg:border-l lg:pl-4">
+                  <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium">Items to Save</h4>
+                  <Badge variant="secondary">{pendingPlanItems.length}</Badge>
+                </div>
+                <div className="h-[160px] overflow-y-auto rounded-md border">
+                  {pendingPlanItems.length === 0 ? (
+                    <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500">
+                      Added items will appear here before saving to the plan.
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {pendingPlanItems.map((item, index) => (
+                        <div key={`${item.itemDescription}-${index}`} className="flex items-start gap-2 p-2.5">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">{item.itemDescription}</div>
+                            <div className="text-xs text-gray-500">
+                              {item.estimatedQuantity} {item.unitOfMeasure || 'EA'} | {formatCurrency(getItemEstimatedTotal(item), planCurrency)}
+                            </div>
+                            {item.itemSuppliers?.length ? (
+                              <div className="text-xs text-gray-500">{item.itemSuppliers.length} supplier(s)</div>
+                            ) : null}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            onClick={() => handleRemovePendingPlanItem(index)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Batch total</span>
+                  <span className="font-semibold">
+                    {formatCurrency(pendingPlanItemsTotal, planCurrency)}
+                  </span>
+                </div>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="suppliers" className="mt-3 min-h-0 overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,0.85fr)_minmax(460px,1.15fr)] gap-4">
+                <div className="space-y-2 rounded-md border p-3">
+                <h4 className="font-medium flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Preferred Suppliers
+                </h4>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    placeholder="Search suppliers..."
+                    value={supplierSearchTerm}
+                    onChange={(e) => setSupplierSearchTerm(e.target.value)}
+                    className="h-9 pl-9"
+                  />
+                </div>
+                <div className="h-[110px] overflow-y-auto border rounded-md">
+                  {loadingSuppliers ? (
+                    <div className="flex items-center justify-center h-full">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                  ) : filteredSuppliers.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                      No suppliers found
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {filteredSuppliers.slice(0, 20).map((supplier) => (
+                        <div
+                          key={supplier.id}
+                          className="p-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between"
+                          onClick={() => handleAddSupplierToItem(supplier)}
+                        >
+                          <div>
+                            <div className="font-medium text-sm">{supplier.partnerName}</div>
+                            <div className="text-xs text-gray-500">{supplier.partnerCode}</div>
+                          </div>
+                          <Plus className="h-4 w-4 text-green-500" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                </div>
+
+                <div className="space-y-2 rounded-md border p-3">
+                <Label>Selected Suppliers ({selectedItemSuppliers.length})</Label>
+                <div className="h-[360px] overflow-y-auto border rounded-md">
+                  {selectedItemSuppliers.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                      No suppliers selected
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Supplier</TableHead>
+                          <TableHead className="text-xs w-[60px]">Preferred</TableHead>
+                          <TableHead className="text-xs w-[80px]">Quote</TableHead>
+                          <TableHead className="text-xs w-[40px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedItemSuppliers.map((itemSupplier) => {
+                          const supplier = suppliers.find(s => s.id === itemSupplier.supplierId);
+                          return (
+                            <TableRow key={itemSupplier.supplierId}>
+                              <TableCell className="py-1">
+                                <div className="text-xs font-medium">{supplier?.partnerName || 'Unknown'}</div>
+                                <div className="text-xs text-gray-500">{supplier?.partnerCode}</div>
+                              </TableCell>
+                              <TableCell className="py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={itemSupplier.isPreferred || false}
+                                  onChange={(e) => handleUpdateItemSupplier(itemSupplier.supplierId, 'isPreferred', e.target.checked)}
+                                  className="h-4 w-4"
+                                />
+                              </TableCell>
+                              <TableCell className="py-1">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  value={itemSupplier.quotedUnitPrice || ''}
+                                  onChange={(e) => handleUpdateItemSupplier(itemSupplier.supplierId, 'quotedUnitPrice', parseFloat(e.target.value) || undefined)}
+                                  className="h-7 text-xs w-[70px]"
+                                  placeholder="0.00"
+                                />
+                              </TableCell>
+                              <TableCell className="py-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => handleRemoveSupplierFromItem(itemSupplier.supplierId)}
+                                >
+                                  <Trash2 className="h-3 w-3 text-red-500" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="pt-3 border-t gap-2 sm:justify-between">
+            <div className="text-xs text-gray-500 text-left">
+              Item unit costs are saved using the plan currency: {planCurrency}.
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setAddItemDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSavePendingItems} disabled={addingItem || itemBatchSaveCount === 0}>
+                {addingItem ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Save {itemBatchSaveCount} Item{itemBatchSaveCount === 1 ? '' : 's'}
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Item Dialog */}
       <Dialog open={itemDialogOpen} onOpenChange={setItemDialogOpen}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -680,6 +1465,33 @@ export default function EditProcurementPlanPage() {
             </DialogDescription>
           </DialogHeader>
 
+          <ProcurementPlanItemDialogBody
+            currency={planCurrency}
+            form={itemForm}
+            setForm={setItemForm}
+            inventorySearchTerm={inventorySearchTerm}
+            onInventorySearchTermChange={setInventorySearchTerm}
+            inventoryResults={filteredInventoryItems}
+            loadingInventory={loadingInventory}
+            selectedInventoryItem={selectedInventoryItem}
+            onSelectInventoryItem={handleSelectInventoryItem}
+            unitOfMeasureOptions={editUnitOfMeasureOptions}
+            loadingUnitsOfMeasure={loadingUnitsOfMeasure}
+            marketAnalyses={marketAnalyses}
+            loadingMarketAnalyses={loadingMarketAnalyses}
+            onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            suppliers={suppliers}
+            supplierSearchTerm={supplierSearchTerm}
+            onSupplierSearchTermChange={setSupplierSearchTerm}
+            filteredSuppliers={filteredSuppliers}
+            loadingSuppliers={loadingSuppliers}
+            selectedItemSuppliers={selectedItemSuppliers}
+            onAddSupplier={handleAddSupplierToItem}
+            onUpdateSupplier={handleUpdateItemSupplier}
+            onRemoveSupplier={handleRemoveSupplierFromItem}
+          />
+
+          <div className="hidden">
           <div className={editingItem ? '' : 'grid grid-cols-2 gap-6'}>
             {/* Left: Inventory Selection (only for add mode) */}
             {!editingItem && (
@@ -744,12 +1556,22 @@ export default function EditProcurementPlanPage() {
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <Label htmlFor="unitOfMeasure">Unit of Measure</Label>
-                    <Input
-                      id="unitOfMeasure"
-                      value={itemForm.unitOfMeasure || 'EA'}
-                      onChange={(e) => setItemForm({ ...itemForm, unitOfMeasure: e.target.value })}
-                      placeholder="EA"
-                    />
+                    <Select
+                      value={itemForm.unitOfMeasure || undefined}
+                      onValueChange={(value) => setItemForm({ ...itemForm, unitOfMeasure: value })}
+                      disabled={loadingUnitsOfMeasure && editUnitOfMeasureOptions.length === 0}
+                    >
+                      <SelectTrigger id="unitOfMeasure">
+                        <SelectValue placeholder={loadingUnitsOfMeasure ? 'Loading UOMs...' : 'Select UOM'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {editUnitOfMeasureOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="estimatedQuantity">Quantity *</Label>
@@ -800,6 +1622,60 @@ export default function EditProcurementPlanPage() {
                       onChange={(e) => setItemForm({ ...itemForm, requiredDate: e.target.value })}
                     />
                   </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="budgetLineCode">Budget Line</Label>
+                    <Input
+                      id="budgetLineCode"
+                      value={itemForm.budgetLineCode || ''}
+                      onChange={(e) => setItemForm({ ...itemForm, budgetLineCode: e.target.value })}
+                      placeholder="Line code"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="budgetCategoryName">Budget Category</Label>
+                    <Input
+                      id="budgetCategoryName"
+                      value={itemForm.budgetCategoryName || ''}
+                      onChange={(e) => setItemForm({ ...itemForm, budgetCategoryName: e.target.value })}
+                      placeholder="Category"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="approvedBudgetAmount">Approved Budget</Label>
+                    <Input
+                      id="approvedBudgetAmount"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={itemForm.approvedBudgetAmount ?? ''}
+                      onChange={(e) => setItemForm({
+                        ...itemForm,
+                        approvedBudgetAmount: e.target.value ? parseFloat(e.target.value) || 0 : undefined,
+                      })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Market Analysis</Label>
+                  <Select
+                    value={itemForm.marketAnalysisId || 'none'}
+                    onValueChange={handleMarketAnalysisSelect}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingMarketAnalyses ? 'Loading analyses...' : 'Select market analysis'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No linked analysis</SelectItem>
+                      {marketAnalyses.map((analysis) => (
+                        <SelectItem key={analysis.id} value={analysis.id}>
+                          {analysis.title} - {new Intl.NumberFormat('en-US', { style: 'currency', currency: analysis.currency || formData.currency || 'USD', maximumFractionDigits: 0 }).format(analysis.currentMarketPrice || 0)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -943,6 +1819,7 @@ export default function EditProcurementPlanPage() {
                 </div>
               </div>
             </div>
+          </div>
           </div>
 
           <DialogFooter className="mt-4">

@@ -13,9 +13,10 @@ import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
+import { WorkflowApprovalActions, WorkflowApprovalHistoryPanel, useWorkflowRecord } from '@/components/workflow';
 import {
-  FileText, ArrowLeft, CheckCircle, XCircle, Send, Pause, Play,
-  RefreshCw, Ban, AlertTriangle, Clock, Calendar, Building2, Home
+  FileText, ArrowLeft, Pause, Play,
+  RefreshCw, Ban, AlertTriangle, Calendar, Building2, Home
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -52,8 +53,6 @@ export default function SalesAgreementDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
 
   // Dialog states
-  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
-  const [approvalComments, setApprovalComments] = useState('');
   const [terminateDialogOpen, setTerminateDialogOpen] = useState(false);
   const [terminateReason, setTerminateReason] = useState('');
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
@@ -90,9 +89,6 @@ export default function SalesAgreementDetailPage() {
     }
   };
 
-  const handleSubmit = () => handleAction(() => salesAgreementService.submitForApproval(agreementId), 'Submitted for approval');
-  const handleApprove = () => handleAction(() => salesAgreementService.processApproval(agreementId, { isApproved: true, comments: approvalComments }), 'Agreement approved').then(() => setApprovalDialogOpen(false));
-  const handleReject = () => handleAction(() => salesAgreementService.processApproval(agreementId, { isApproved: false, comments: approvalComments }), 'Agreement rejected').then(() => setApprovalDialogOpen(false));
   const handleSuspend = () => handleAction(() => salesAgreementService.suspend(agreementId, suspendReason), 'Agreement suspended').then(() => setSuspendDialogOpen(false));
   const handleResume = () => handleAction(() => salesAgreementService.resume(agreementId), 'Agreement resumed');
   const handleTerminate = () => handleAction(() => salesAgreementService.terminate(agreementId, terminateReason), 'Agreement terminated').then(() => setTerminateDialogOpen(false));
@@ -120,11 +116,27 @@ export default function SalesAgreementDetailPage() {
     return <Badge variant={c.variant} className={c.className}>{s.replace(/([A-Z])/g, ' $1').trim()}</Badge>;
   };
 
+  const workflow = useWorkflowRecord({
+    entityType: 'SalesAgreement',
+    entityId: agreementId,
+    entityLabel: 'Sales Agreement',
+    entityNumber: agreement?.documentNumber,
+    status: agreement?.agreementStatus ?? '',
+    canSubmit: agreement?.agreementStatus === 'Draft',
+    canApproveReject: agreement?.agreementStatus === 'PendingApproval',
+    enabled: Boolean(agreement),
+    commands: {
+      submit: async () => setAgreement(await salesAgreementService.submitForApproval(agreementId)),
+      approve: async ({ comments }) => setAgreement(await salesAgreementService.processApproval(agreementId, { isApproved: true, comments })),
+      reject: async ({ comments }) => setAgreement(await salesAgreementService.processApproval(agreementId, { isApproved: false, comments })),
+      afterAction: loadAgreement,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
   if (loading) return <div className="container mx-auto py-6 text-center py-16"><FileText className="h-12 w-12 animate-pulse mx-auto mb-4 text-purple-500" /><p className="text-gray-500">Loading...</p></div>;
   if (!agreement) return <div className="container mx-auto py-6 text-center py-16"><AlertTriangle className="h-12 w-12 mx-auto mb-4 text-yellow-500" /><p className="text-gray-500">Agreement not found</p><Button variant="outline" className="mt-4" onClick={() => router.push('/sales/agreements')}><ArrowLeft className="h-4 w-4 mr-2" />Back</Button></div>;
 
-  const canSubmit = agreement.agreementStatus === 'Draft';
-  const canApprove = agreement.agreementStatus === 'PendingApproval';
   const canSuspend = agreement.agreementStatus === 'Active';
   const canResume = agreement.agreementStatus === 'Suspended';
   const canTerminate = !['Terminated', 'Expired'].includes(agreement.agreementStatus);
@@ -147,20 +159,10 @@ export default function SalesAgreementDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {canSubmit && <Button onClick={handleSubmit} disabled={actionLoading}><Send className="h-4 w-4 mr-2" />Submit</Button>}
-          {canApprove && (
-            <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
-              <DialogTrigger asChild><Button><CheckCircle className="h-4 w-4 mr-2" />Review</Button></DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>Review Agreement</DialogTitle></DialogHeader>
-                <Textarea placeholder="Comments..." value={approvalComments} onChange={(e) => setApprovalComments(e.target.value)} />
-                <DialogFooter>
-                  <Button variant="destructive" onClick={handleReject} disabled={actionLoading}><XCircle className="h-4 w-4 mr-2" />Reject</Button>
-                  <Button onClick={handleApprove} disabled={actionLoading}><CheckCircle className="h-4 w-4 mr-2" />Approve</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+          <WorkflowApprovalActions
+            {...workflow.actionProps}
+            showStepBadge
+          />
           {canRenew && (
             <Dialog open={renewDialogOpen} onOpenChange={setRenewDialogOpen}>
               <DialogTrigger asChild><Button variant="outline"><RefreshCw className="h-4 w-4 mr-2" />Renew</Button></DialogTrigger>
@@ -314,6 +316,11 @@ export default function SalesAgreementDetailPage() {
           )}
         </div>
       </div>
+
+      <WorkflowApprovalHistoryPanel
+        {...workflow.actionProps}
+        showActions={false}
+      />
 
       {/* Milestones */}
       {agreement.milestones.length > 0 && (

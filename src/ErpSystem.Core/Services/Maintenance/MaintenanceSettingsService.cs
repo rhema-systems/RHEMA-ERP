@@ -55,6 +55,10 @@ public class MaintenanceSettingsService : IMaintenanceSettingsService
             settings.FleetComplianceDueSoonDays = dto.FleetComplianceDueSoonDays;
             settings.BlockFleetDispatchWhenComplianceDueSoon = dto.BlockFleetDispatchWhenComplianceDueSoon;
             settings.RequirePredefinedFleetTripDestinationOnDispatch = dto.RequirePredefinedFleetTripDestinationOnDispatch;
+            settings.DefaultFleetDefectWorkOrderTypeId = NormalizeGuid(dto.DefaultFleetDefectWorkOrderTypeId);
+            settings.DefaultFleetDefectMaintenanceTypeId = NormalizeGuid(dto.DefaultFleetDefectMaintenanceTypeId);
+            settings.DefaultFleetDefectPriorityLevelId = NormalizeGuid(dto.DefaultFleetDefectPriorityLevelId);
+            settings.DefaultFleetDefectBillingType = NormalizeBillingType(dto.DefaultFleetDefectBillingType);
             settings.UpdatedAt = DateTime.UtcNow;
 
             await _settingsRepository.UpdateAsync(settings);
@@ -77,6 +81,11 @@ public class MaintenanceSettingsService : IMaintenanceSettingsService
         }
     }
 
+    private static Guid? NormalizeGuid(Guid? value) => value.HasValue && value.Value != Guid.Empty ? value : null;
+
+    private static string NormalizeBillingType(string? value) =>
+        string.Equals(value?.Trim(), "Maintenance", StringComparison.OrdinalIgnoreCase) ? "Maintenance" : "Repairs";
+
     private static MaintenanceSettingsDto MapToDto(MaintenanceSettings settings)
     {
         return new MaintenanceSettingsDto
@@ -86,6 +95,10 @@ public class MaintenanceSettingsService : IMaintenanceSettingsService
             FleetComplianceDueSoonDays = settings.FleetComplianceDueSoonDays,
             BlockFleetDispatchWhenComplianceDueSoon = settings.BlockFleetDispatchWhenComplianceDueSoon,
             RequirePredefinedFleetTripDestinationOnDispatch = settings.RequirePredefinedFleetTripDestinationOnDispatch,
+            DefaultFleetDefectWorkOrderTypeId = settings.DefaultFleetDefectWorkOrderTypeId,
+            DefaultFleetDefectMaintenanceTypeId = settings.DefaultFleetDefectMaintenanceTypeId,
+            DefaultFleetDefectPriorityLevelId = settings.DefaultFleetDefectPriorityLevelId,
+            DefaultFleetDefectBillingType = NormalizeBillingType(settings.DefaultFleetDefectBillingType),
             CreatedAt = settings.CreatedAt,
             CreatedById = settings.CreatedById,
             UpdatedAt = settings.UpdatedAt

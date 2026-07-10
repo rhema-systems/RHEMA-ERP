@@ -83,7 +83,7 @@ export default function HelpdeskDashboardPage() {
   const dateStamp = new Date().toISOString().slice(0, 10);
 
   const downloadReport = async (relativePath: string, fileName: string) => {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
 
     const res = await fetch(`${baseUrl}${relativePath}`, {

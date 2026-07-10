@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Search, Eye, Edit, Plus, Download, RefreshCw, Filter, Trash2, Calendar, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementScheduleService, type ProcurementScheduleDto } from '@/services/procurementPlanningService';
+import { commonService, procurementScheduleService, type DepartmentDto, type ProcurementScheduleDto } from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -22,11 +22,21 @@ export default function ProcurementSchedulesPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; id: string | null; deleting: boolean }>({ open: false, id: null, deleting: false });
 
-  useEffect(() => { loadSchedules(); }, [page, statusFilter]);
+  useEffect(() => {
+    commonService.getDepartments()
+      .then((data) => setDepartments(data.filter((department) => department.isActive !== false)))
+      .catch(() => setDepartments([]));
+  }, []);
+
+  useEffect(() => { loadSchedules(); }, [page, statusFilter, departmentFilter, startDateFilter, endDateFilter]);
 
   const loadSchedules = async () => {
     try {
@@ -35,6 +45,9 @@ export default function ProcurementSchedulesPage() {
         page, pageSize: 25,
         search: searchTerm || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
+        departmentId: departmentFilter !== 'all' ? departmentFilter : undefined,
+        startDate: startDateFilter || undefined,
+        endDate: endDateFilter || undefined,
       });
       setSchedules(result.items);
       setTotalPages(result.totalPages);
@@ -45,6 +58,14 @@ export default function ProcurementSchedulesPage() {
   };
 
   const handleSearch = () => { setPage(1); loadSchedules(); };
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setDepartmentFilter('all');
+    setStartDateFilter('');
+    setEndDateFilter('');
+    setPage(1);
+  };
   const handleViewDetails = (id: string) => router.push(`/procurement/planning/schedules/${id}`);
   const handleEdit = (id: string) => router.push(`/procurement/planning/schedules/${id}/edit`);
   const handleCreateNew = () => router.push('/procurement/planning/schedules/new');
@@ -110,12 +131,12 @@ export default function ProcurementSchedulesPage() {
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Filter className="h-5 w-5" />Filters</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="flex gap-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <div className="flex gap-2 xl:col-span-2">
               <Input placeholder="Search schedules..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()} className="flex-1" />
               <Button onClick={handleSearch} size="icon" variant="secondary"><Search className="h-4 w-4" /></Button>
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPage(1); }}>
               <SelectTrigger><SelectValue placeholder="All Statuses" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
@@ -126,9 +147,23 @@ export default function ProcurementSchedulesPage() {
                 <SelectItem value="Cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
-            <div className="flex gap-2">
-              <Button onClick={loadSchedules} variant="outline" className="gap-2 flex-1"><RefreshCw className="h-4 w-4" />Refresh</Button>
-              <Button onClick={handleExportToExcel} variant="outline" className="gap-2 flex-1"><Download className="h-4 w-4" />Export</Button>
+            <Select value={departmentFilter} onValueChange={(value) => { setDepartmentFilter(value); setPage(1); }}>
+              <SelectTrigger><SelectValue placeholder="All Departments" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {departments.map((department) => (
+                  <SelectItem key={department.id} value={department.id}>
+                    {department.code ? `${department.code} - ${department.name}` : department.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input type="date" value={startDateFilter} onChange={(e) => { setStartDateFilter(e.target.value); setPage(1); }} />
+            <Input type="date" value={endDateFilter} onChange={(e) => { setEndDateFilter(e.target.value); setPage(1); }} />
+            <div className="flex gap-2 xl:col-span-6">
+              <Button onClick={loadSchedules} variant="outline" className="gap-2"><RefreshCw className="h-4 w-4" />Refresh</Button>
+              <Button onClick={clearFilters} variant="outline">Clear</Button>
+              <Button onClick={handleExportToExcel} variant="outline" className="gap-2"><Download className="h-4 w-4" />Export</Button>
             </div>
           </div>
         </CardContent>
@@ -184,4 +219,3 @@ export default function ProcurementSchedulesPage() {
     </div>
   );
 }
-

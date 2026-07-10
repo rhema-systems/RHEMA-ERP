@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,34 +22,63 @@ import {
   ClipboardList,
   Users,
   Clock,
-  AlertCircle,
   AlertTriangle,
   Eye,
   Copy,
+  QrCode,
+  Printer,
   ChevronUp,
   ChevronDown,
   X
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { QRCodeSVG } from 'qrcode.react';
 import { 
   InspectionTemplate,
   CreateInspectionTemplateDto,
   UpdateInspectionTemplateDto,
+  InspectionTemplateQrPackage,
   inspectionTemplateService
 } from '@/services/inspectionTemplateService';
+import {
+  maintenanceDataService,
+  Asset,
+  AssetCategory,
+  WorkOrderType,
+  MaintenanceType,
+  PriorityLevel,
+} from '@/services/maintenanceDataService';
+import { printQrLabel } from '@/lib/print-qr-label';
 
 
 export default function InspectionTemplatesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [sheetTypeFilter, setSheetTypeFilter] = useState('all');
+  const [scopeFilter, setScopeFilter] = useState('all');
   const [frequencyFilter, setFrequencyFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isQrDialogOpen, setIsQrDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<InspectionTemplate | null>(null);
+  const [qrTemplate, setQrTemplate] = useState<InspectionTemplate | null>(null);
+  const [qrPackage, setQrPackage] = useState<InspectionTemplateQrPackage | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const qrLabelRef = useRef<HTMLDivElement>(null);
+  const [qrForm, setQrForm] = useState({
+    inspectionKind: 'PreTrip',
+    assetCategoryId: 'none',
+    assetId: 'none',
+  });
   const [templatesData, setTemplatesData] = useState<InspectionTemplate[]>([]);
   const [filteredData, setFilteredData] = useState<InspectionTemplate[]>([]);
+  const [assetCategories, setAssetCategories] = useState<AssetCategory[]>([]);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [workOrderTypes, setWorkOrderTypes] = useState<WorkOrderType[]>([]);
+  const [maintenanceTypes, setMaintenanceTypes] = useState<MaintenanceType[]>([]);
+  const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -61,6 +90,19 @@ export default function InspectionTemplatesPage() {
     code: '',
     description: '',
     category: 'Safety',
+    sheetType: 'InspectionSheet',
+    templateScope: 'General',
+    fleetInspectionKind: 'Any',
+    assignedAssetCategoryId: null,
+    assignedAssetId: null,
+    isQrEnabled: false,
+    mobileOfflineEnabled: false,
+    qrPayloadVersion: 1,
+    autoCreateWorkOrderOnFailure: true,
+    failureWorkOrderTypeId: null,
+    failureMaintenanceTypeId: null,
+    failurePriorityLevelId: null,
+    failureBillingType: 'Default',
     frequency: 'Monthly',
     estimatedDuration: 60,
     isActive: true,
@@ -78,6 +120,11 @@ export default function InspectionTemplatesPage() {
     Code: 'code',
     Description: 'description',
     Category: 'category',
+    SheetType: 'sheetType',
+    TemplateScope: 'templateScope',
+    FleetInspectionKind: 'fleetInspectionKind',
+    AssignedAssetCategoryId: 'assignedAssetCategoryId',
+    AssignedAssetId: 'assignedAssetId',
     Frequency: 'frequency',
     EstimatedDuration: 'estimatedDuration',
     Priority: 'priority',
@@ -125,6 +172,7 @@ export default function InspectionTemplatesPage() {
     const frequency = (data.frequency || '').trim();
     const priority = (data.priority || '').trim();
     const estimatedDuration = Number(data.estimatedDuration);
+    const qrPayloadVersion = Number(data.qrPayloadVersion || 1);
 
     if (!name) nextErrors.name = 'Template name is required.';
     if (!code) nextErrors.code = 'Template code is required.';
@@ -134,6 +182,10 @@ export default function InspectionTemplatesPage() {
 
     if (!Number.isFinite(estimatedDuration) || estimatedDuration < 1 || estimatedDuration > 1440) {
       nextErrors.estimatedDuration = 'Estimated duration must be between 1 and 1440 minutes.';
+    }
+
+    if (!Number.isFinite(qrPayloadVersion) || qrPayloadVersion < 1 || qrPayloadVersion > 99) {
+      nextErrors.qrPayloadVersion = 'QR payload version must be between 1 and 99.';
     }
 
     const isValid = Object.keys(nextErrors).length === 0;
@@ -193,9 +245,35 @@ export default function InspectionTemplatesPage() {
       setLoading(false);
     }
   };
+
+  const fetchAssignmentLookups = async () => {
+    try {
+      const [categories, assetList, workOrderTypeList, maintenanceTypeList, priorityLevelList] = await Promise.all([
+        maintenanceDataService.getAssetCategories(),
+        maintenanceDataService.getAssets(),
+        maintenanceDataService.getWorkOrderTypes(),
+        maintenanceDataService.getMaintenanceTypes(),
+        maintenanceDataService.getPriorityLevels(),
+      ]);
+
+      setAssetCategories((categories || []).filter((c) => c.isActive !== false));
+      setAssets((assetList || []).filter((a) => a.isActive !== false));
+      setWorkOrderTypes((workOrderTypeList || []).filter((item) => item.isActive !== false));
+      setMaintenanceTypes((maintenanceTypeList || []).filter((item) => item.isActive !== false));
+      setPriorityLevels((priorityLevelList || []).filter((item) => item.isActive !== false));
+    } catch (err) {
+      console.error('Error fetching inspection template assignment lookups:', err);
+      setAssetCategories([]);
+      setAssets([]);
+      setWorkOrderTypes([]);
+      setMaintenanceTypes([]);
+      setPriorityLevels([]);
+    }
+  };
   
   useEffect(() => {
     fetchTemplates();
+    fetchAssignmentLookups();
   }, []);
 
   useEffect(() => {
@@ -220,12 +298,20 @@ export default function InspectionTemplatesPage() {
       filtered = filtered.filter(item => item.category === categoryFilter);
     }
 
+    if (sheetTypeFilter !== 'all') {
+      filtered = filtered.filter(item => (item.sheetType || 'InspectionSheet') === sheetTypeFilter);
+    }
+
+    if (scopeFilter !== 'all') {
+      filtered = filtered.filter(item => (item.templateScope || 'General') === scopeFilter);
+    }
+
     if (frequencyFilter !== 'all') {
       filtered = filtered.filter(item => item.frequency === frequencyFilter);
     }
 
     setFilteredData(filtered);
-  }, [searchTerm, statusFilter, categoryFilter, frequencyFilter, templatesData]);
+  }, [searchTerm, statusFilter, categoryFilter, sheetTypeFilter, scopeFilter, frequencyFilter, templatesData]);
 
   const handleCreate = async () => {
     if (isSubmitting) return;
@@ -264,6 +350,19 @@ export default function InspectionTemplatesPage() {
       code: template.code ?? '',
       description: template.description ?? '',
       category: template.category || 'Safety',
+      sheetType: template.sheetType || 'InspectionSheet',
+      templateScope: template.templateScope || 'General',
+      fleetInspectionKind: template.fleetInspectionKind || 'Any',
+      assignedAssetCategoryId: template.assignedAssetCategoryId || null,
+      assignedAssetId: template.assignedAssetId || null,
+      isQrEnabled: !!template.isQrEnabled,
+      mobileOfflineEnabled: !!template.mobileOfflineEnabled,
+      qrPayloadVersion: template.qrPayloadVersion || 1,
+      autoCreateWorkOrderOnFailure: template.autoCreateWorkOrderOnFailure !== false,
+      failureWorkOrderTypeId: template.failureWorkOrderTypeId || null,
+      failureMaintenanceTypeId: template.failureMaintenanceTypeId || null,
+      failurePriorityLevelId: template.failurePriorityLevelId || null,
+      failureBillingType: template.failureBillingType || 'Default',
       frequency: template.frequency || 'Monthly',
       estimatedDuration: template.estimatedDuration && template.estimatedDuration > 0 ? template.estimatedDuration : 60,
       isActive: !!template.isActive,
@@ -358,6 +457,19 @@ export default function InspectionTemplatesPage() {
       code: '',
       description: '',
       category: 'Safety',
+      sheetType: 'InspectionSheet',
+      templateScope: 'General',
+      fleetInspectionKind: 'Any',
+      assignedAssetCategoryId: null,
+      assignedAssetId: null,
+      isQrEnabled: false,
+      mobileOfflineEnabled: false,
+      qrPayloadVersion: 1,
+      autoCreateWorkOrderOnFailure: true,
+      failureWorkOrderTypeId: null,
+      failureMaintenanceTypeId: null,
+      failurePriorityLevelId: null,
+      failureBillingType: 'Default',
       frequency: 'Monthly',
       estimatedDuration: 60,
       isActive: true,
@@ -389,6 +501,340 @@ export default function InspectionTemplatesPage() {
       default: return 'bg-gray-100 text-gray-800';
     }
   };
+
+  const generateQrPackage = async (
+    template: InspectionTemplate,
+    nextForm = qrForm
+  ) => {
+    try {
+      setQrLoading(true);
+      setQrError(null);
+      const result = await inspectionTemplateService.getQrPackage(template.id, {
+        inspectionKind: nextForm.inspectionKind,
+        assetCategoryId: nextForm.assetCategoryId === 'none' ? null : nextForm.assetCategoryId,
+        assetId: nextForm.assetId === 'none' ? null : nextForm.assetId,
+        includeEmbeddedPayload: false,
+      });
+      setQrPackage(result);
+    } catch (err) {
+      console.error('Error generating inspection QR package:', err);
+      setQrPackage(null);
+      setQrError(getFriendlyErrorMessage(err));
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const handleQrLabel = async (template: InspectionTemplate) => {
+    const nextForm = {
+      inspectionKind: template.templateScope === 'Fleet'
+        ? (template.fleetInspectionKind && template.fleetInspectionKind !== 'Any' ? template.fleetInspectionKind : 'PreTrip')
+        : template.sheetType === 'ServiceSheet'
+          ? 'Service'
+          : template.sheetType === 'WeeklyChecklist'
+            ? 'Weekly'
+            : template.sheetType === 'PreventiveMaintenanceForm'
+              ? 'PreventiveMaintenance'
+              : 'Inspection',
+      assetCategoryId: template.assignedAssetCategoryId || 'none',
+      assetId: template.assignedAssetId || 'none',
+    };
+    setQrTemplate(template);
+    setQrForm(nextForm);
+    setQrPackage(null);
+    setQrError(null);
+    setIsQrDialogOpen(true);
+    await generateQrPackage(template, nextForm);
+  };
+
+  const handlePrintQrLabel = () => {
+    const printed = printQrLabel(qrLabelRef.current, qrPackage?.templateName || 'Inspection QR Label');
+    if (!printed) {
+      setQrError('The print window was blocked. Allow pop-ups for this site and try again.');
+    }
+  };
+
+  const vehicleOnlyAssets = assets.filter((asset) => {
+    const assetType = (asset.assetType || asset.category || '').toLowerCase();
+    return assetType.includes('vehicle') || assetType.includes('fleet');
+  });
+  const fleetAssets = vehicleOnlyAssets.length > 0 ? vehicleOnlyAssets : assets;
+  const assignmentAssets = formData.templateScope === 'Fleet' ? fleetAssets : assets;
+  const scopedFleetAssets = formData.assignedAssetCategoryId
+    ? assignmentAssets.filter((asset) => asset.categoryId === formData.assignedAssetCategoryId)
+    : assignmentAssets;
+  const qrAssignmentAssets = qrTemplate?.templateScope === 'Fleet' ? fleetAssets : assets;
+  const qrScopedFleetAssets = qrForm.assetCategoryId !== 'none'
+    ? qrAssignmentAssets.filter((asset) => asset.categoryId === qrForm.assetCategoryId)
+    : qrAssignmentAssets;
+
+  const getAssetCategoryName = (id?: string | null) =>
+    assetCategories.find((category) => category.id === id)?.name || 'Any asset category';
+
+  const getAssetName = (id?: string | null) => {
+    const asset = assets.find((item) => item.id === id);
+    return asset ? `${asset.assetName} (${asset.assetCode})` : 'Any asset';
+  };
+
+  const getChecklistTypeLabel = (type?: string | null) => {
+    switch ((type || '').toLowerCase()) {
+      case 'checklist':
+        return 'Pass / Fail';
+      case 'yesno':
+        return 'Yes / No';
+      case 'text':
+        return 'Text';
+      case 'number':
+        return 'Number';
+      case 'measurement':
+        return 'Measurement';
+      default:
+        return type || 'Checklist';
+    }
+  };
+
+  const updateTemplateScope = (value: string) => {
+    const isFleet = value === 'Fleet';
+    setFormData({
+      ...formData,
+      templateScope: value,
+      category: isFleet ? 'Fleet' : formData.category,
+      fleetInspectionKind: isFleet ? (formData.fleetInspectionKind || 'Any') : 'Any',
+      assignedAssetCategoryId: formData.assignedAssetCategoryId,
+      assignedAssetId: formData.assignedAssetId,
+      isQrEnabled: formData.isQrEnabled,
+      mobileOfflineEnabled: formData.mobileOfflineEnabled,
+      qrPayloadVersion: formData.qrPayloadVersion || 1,
+      autoCreateWorkOrderOnFailure: formData.autoCreateWorkOrderOnFailure,
+      failureWorkOrderTypeId: formData.failureWorkOrderTypeId,
+      failureMaintenanceTypeId: formData.failureMaintenanceTypeId,
+      failurePriorityLevelId: formData.failurePriorityLevelId,
+      failureBillingType: formData.failureBillingType,
+    });
+  };
+
+  const renderFleetAssignmentFields = (prefix: string) => (
+    <div className="rounded-md border bg-muted/20 p-3 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <Label className="text-sm font-medium">Source and Mobile Assignment</Label>
+          <p className="text-xs text-muted-foreground">
+            Categorize sheets, assign them to asset types or individual assets, and enable QR/mobile execution where applicable.
+          </p>
+        </div>
+        {formData.templateScope === 'Fleet' ? (
+          <Badge className="bg-blue-100 text-blue-800">Fleet checklist source</Badge>
+        ) : (
+          <Badge variant="outline">General template</Badge>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="space-y-2">
+          <Label htmlFor={`${prefix}-sheet-type`}>Sheet Type</Label>
+          <Select value={formData.sheetType || 'InspectionSheet'} onValueChange={(value) => setFormData({ ...formData, sheetType: value })}>
+            <SelectTrigger id={`${prefix}-sheet-type`}><SelectValue placeholder="Select sheet type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="InspectionSheet">Inspection sheet</SelectItem>
+              <SelectItem value="ServiceSheet">Service sheet</SelectItem>
+              <SelectItem value="WeeklyChecklist">Weekly checklist</SelectItem>
+              <SelectItem value="PreventiveMaintenanceForm">Preventive maintenance form</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor={`${prefix}-scope`}>Template Scope</Label>
+          <Select value={formData.templateScope || 'General'} onValueChange={updateTemplateScope}>
+            <SelectTrigger id={`${prefix}-scope`} className={formFieldErrors.templateScope ? 'border-red-500' : undefined}>
+              <SelectValue placeholder="Select scope" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="General">General</SelectItem>
+              <SelectItem value="Fleet">Fleet</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor={`${prefix}-inspection-kind`}>Fleet Inspection</Label>
+          <Select
+            value={formData.fleetInspectionKind || 'Any'}
+            onValueChange={(value) => setFormData({ ...formData, fleetInspectionKind: value })}
+            disabled={formData.templateScope !== 'Fleet'}
+          >
+            <SelectTrigger id={`${prefix}-inspection-kind`}>
+              <SelectValue placeholder="Select inspection type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Any">Any trip inspection</SelectItem>
+              <SelectItem value="PreTrip">Pre-trip only</SelectItem>
+              <SelectItem value="PostTrip">Post-trip only</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor={`${prefix}-qr-version`}>QR Payload Version</Label>
+          <Input
+            id={`${prefix}-qr-version`}
+            type="number"
+            min={1}
+            max={99}
+            value={formData.qrPayloadVersion || 1}
+            onChange={(e) => setFormData({ ...formData, qrPayloadVersion: parseInt(e.target.value) || 1 })}
+            disabled={formData.templateScope !== 'Fleet'}
+            className={formFieldErrors.qrPayloadVersion ? 'border-red-500' : undefined}
+          />
+          {formFieldErrors.qrPayloadVersion && (
+            <p className="text-sm text-red-600">{formFieldErrors.qrPayloadVersion}</p>
+          )}
+        </div>
+      </div>
+
+      {(
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor={`${prefix}-asset-category`}>Asset Category Rule</Label>
+              <Select
+                value={formData.assignedAssetCategoryId || 'none'}
+                onValueChange={(value) => setFormData({
+                  ...formData,
+                  assignedAssetCategoryId: value === 'none' ? null : value,
+                  assignedAssetId: null,
+                })}
+              >
+                <SelectTrigger id={`${prefix}-asset-category`}>
+                  <SelectValue placeholder="Any fleet asset category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Any asset category</SelectItem>
+                  {assetCategories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.name}{category.code ? ` (${category.code})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`${prefix}-asset`}>Specific Asset Rule</Label>
+              <Select
+                value={formData.assignedAssetId || 'none'}
+                onValueChange={(value) => setFormData({ ...formData, assignedAssetId: value === 'none' ? null : value })}
+              >
+                <SelectTrigger id={`${prefix}-asset`}>
+                  <SelectValue placeholder="Any fleet asset" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Any asset</SelectItem>
+                  {scopedFleetAssets.map((asset) => (
+                    <SelectItem key={asset.id} value={asset.id}>
+                      {asset.assetName}{asset.assetCode ? ` (${asset.assetCode})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Specific asset rules take priority over category rules during inspection, service, trip, and mobile lookup.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center space-x-2">
+              <Switch
+                id={`${prefix}-qr-enabled`}
+                checked={!!formData.isQrEnabled}
+                onCheckedChange={(checked) => setFormData({ ...formData, isQrEnabled: checked })}
+              />
+              <Label htmlFor={`${prefix}-qr-enabled`}>QR enabled</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id={`${prefix}-mobile-offline`}
+                checked={!!formData.mobileOfflineEnabled}
+                onCheckedChange={(checked) => setFormData({ ...formData, mobileOfflineEnabled: checked })}
+              />
+              <Label htmlFor={`${prefix}-mobile-offline`}>Offline mobile enabled</Label>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t pt-3">
+            <div className="flex items-center space-x-2">
+              <Switch
+                id={`${prefix}-auto-work-order`}
+                checked={formData.autoCreateWorkOrderOnFailure !== false}
+                onCheckedChange={(checked) => setFormData({ ...formData, autoCreateWorkOrderOnFailure: checked })}
+              />
+              <Label htmlFor={`${prefix}-auto-work-order`}>Automatically create a work order for failed or flagged checks</Label>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Default Work Order Type</Label>
+                <Select
+                  value={formData.failureWorkOrderTypeId || 'auto'}
+                  onValueChange={(value) => setFormData({ ...formData, failureWorkOrderTypeId: value === 'auto' ? null : value })}
+                  disabled={formData.autoCreateWorkOrderOnFailure === false}
+                >
+                  <SelectTrigger><SelectValue placeholder="Use active fallback" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Use active fallback</SelectItem>
+                    {workOrderTypes.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Default Maintenance Type</Label>
+                <Select
+                  value={formData.failureMaintenanceTypeId || 'auto'}
+                  onValueChange={(value) => setFormData({ ...formData, failureMaintenanceTypeId: value === 'auto' ? null : value })}
+                  disabled={formData.autoCreateWorkOrderOnFailure === false}
+                >
+                  <SelectTrigger><SelectValue placeholder="Use active fallback" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Use active fallback</SelectItem>
+                    {maintenanceTypes.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Default Priority</Label>
+                <Select
+                  value={formData.failurePriorityLevelId || 'auto'}
+                  onValueChange={(value) => setFormData({ ...formData, failurePriorityLevelId: value === 'auto' ? null : value })}
+                  disabled={formData.autoCreateWorkOrderOnFailure === false}
+                >
+                  <SelectTrigger><SelectValue placeholder="Use result severity" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Use result severity</SelectItem>
+                    {priorityLevels.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Default Billing Type</Label>
+                <Select
+                  value={formData.failureBillingType || 'Default'}
+                  onValueChange={(value) => setFormData({ ...formData, failureBillingType: value })}
+                  disabled={formData.autoCreateWorkOrderOnFailure === false}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select billing type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Default">Use Fleet setting</SelectItem>
+                    <SelectItem value="Repairs">Repairs</SelectItem>
+                    <SelectItem value="Maintenance">Maintenance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -530,6 +976,8 @@ export default function InspectionTemplatesPage() {
                   placeholder="1.0"
                 />
               </div>
+
+              {renderFleetAssignmentFields('create')}
               
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2">
@@ -546,7 +994,7 @@ export default function InspectionTemplatesPage() {
                     checked={formData.allowPhotos}
                     onCheckedChange={(checked) => setFormData({...formData, allowPhotos: checked})}
                   />
-                  <Label htmlFor="photos">Allow Photos</Label>
+                  <Label htmlFor="photos">Allow checklist item photos</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Switch
@@ -593,7 +1041,8 @@ export default function InspectionTemplatesPage() {
                                   <SelectValue placeholder="Type" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="checklist">Checklist</SelectItem>
+                                  <SelectItem value="checklist">Pass / Fail</SelectItem>
+                                  <SelectItem value="yesno">Yes / No</SelectItem>
                                   <SelectItem value="text">Text</SelectItem>
                                   <SelectItem value="number">Number</SelectItem>
                                   <SelectItem value="measurement">Measurement</SelectItem>
@@ -734,7 +1183,7 @@ export default function InspectionTemplatesPage() {
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -770,6 +1219,28 @@ export default function InspectionTemplatesPage() {
                 <SelectItem value="Operations">Operations</SelectItem>
                 <SelectItem value="Quality">Quality</SelectItem>
                 <SelectItem value="Environmental">Environmental</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={sheetTypeFilter} onValueChange={setSheetTypeFilter}>
+              <SelectTrigger><SelectValue placeholder="Sheet type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sheet Types</SelectItem>
+                <SelectItem value="InspectionSheet">Inspection sheets</SelectItem>
+                <SelectItem value="ServiceSheet">Service sheets</SelectItem>
+                <SelectItem value="WeeklyChecklist">Weekly checklists</SelectItem>
+                <SelectItem value="PreventiveMaintenanceForm">Preventive maintenance forms</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={scopeFilter} onValueChange={setScopeFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Scope" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Scopes</SelectItem>
+                <SelectItem value="General">General</SelectItem>
+                <SelectItem value="Fleet">Fleet</SelectItem>
               </SelectContent>
             </Select>
 
@@ -821,6 +1292,18 @@ export default function InspectionTemplatesPage() {
                       <Badge className={template.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                         {template.isActive ? 'Active' : 'Inactive'}
                       </Badge>
+                      <Badge variant="outline">{(template.sheetType || 'InspectionSheet').replace(/([a-z])([A-Z])/g, '$1 $2')}</Badge>
+                      {template.templateScope === 'Fleet' && (
+                        <Badge className="bg-blue-100 text-blue-800">
+                          Fleet {template.fleetInspectionKind && template.fleetInspectionKind !== 'Any' ? `- ${template.fleetInspectionKind}` : ''}
+                        </Badge>
+                      )}
+                      {template.isQrEnabled && (
+                        <Badge className="bg-cyan-100 text-cyan-800">QR</Badge>
+                      )}
+                      {template.mobileOfflineEnabled && (
+                        <Badge className="bg-emerald-100 text-emerald-800">Offline mobile</Badge>
+                      )}
                       {template.requiresSignature && (
                         <Badge className="bg-blue-100 text-blue-800">Signature Required</Badge>
                       )}
@@ -834,6 +1317,9 @@ export default function InspectionTemplatesPage() {
                         <span className="font-medium">Category:</span> {template.category}
                       </div>
                       <div>
+                        <span className="font-medium">Sheet type:</span> {(template.sheetType || 'InspectionSheet').replace(/([a-z])([A-Z])/g, '$1 $2')}
+                      </div>
+                      <div>
                         <span className="font-medium">Frequency:</span> {template.frequency}
                       </div>
                       <div>
@@ -844,6 +1330,12 @@ export default function InspectionTemplatesPage() {
                       </div>
                       <div>
                         <span className="font-medium">Version:</span> {template.version}
+                      </div>
+                      <div>
+                        <span className="font-medium">Source:</span> {template.templateScope || 'General'}
+                      </div>
+                      <div>
+                        <span className="font-medium">Asset rule:</span> {template.assignedAssetId ? getAssetName(template.assignedAssetId) : getAssetCategoryName(template.assignedAssetCategoryId)}
                       </div>
                       <div>
                         <span className="font-medium">Updated:</span> {template.lastUpdated}
@@ -869,6 +1361,11 @@ export default function InspectionTemplatesPage() {
                     <Button size="sm" variant="outline" onClick={() => handleDuplicate(template)}>
                       <Copy className="h-4 w-4" />
                     </Button>
+                    {template.isQrEnabled && (
+                      <Button size="sm" variant="outline" onClick={() => handleQrLabel(template)}>
+                        <QrCode className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button 
                       size="sm" 
                       variant="outline" 
@@ -917,6 +1414,32 @@ export default function InspectionTemplatesPage() {
                   <Label>Duration</Label>
                   <p className="text-sm text-muted-foreground">{formatDuration(selectedTemplate.estimatedDuration)}</p>
                 </div>
+                <div>
+                  <Label>Template Scope</Label>
+                  <p className="text-sm text-muted-foreground">{selectedTemplate.templateScope || 'General'}</p>
+                </div>
+                <div>
+                  <Label>Fleet Inspection</Label>
+                  <p className="text-sm text-muted-foreground">{selectedTemplate.fleetInspectionKind || 'Any'}</p>
+                </div>
+                <div>
+                  <Label>Asset Category Rule</Label>
+                  <p className="text-sm text-muted-foreground">{getAssetCategoryName(selectedTemplate.assignedAssetCategoryId)}</p>
+                </div>
+                <div>
+                  <Label>Specific Asset Rule</Label>
+                  <p className="text-sm text-muted-foreground">{getAssetName(selectedTemplate.assignedAssetId)}</p>
+                </div>
+                <div>
+                  <Label>QR / Mobile</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {selectedTemplate.isQrEnabled ? 'QR enabled' : 'QR disabled'} - {selectedTemplate.mobileOfflineEnabled ? 'Offline enabled' : 'Offline disabled'}
+                  </p>
+                </div>
+                <div>
+                  <Label>QR Payload Version</Label>
+                  <p className="text-sm text-muted-foreground">{selectedTemplate.qrPayloadVersion || 1}</p>
+                </div>
               </div>
               
               <div>
@@ -932,7 +1455,7 @@ export default function InspectionTemplatesPage() {
                       <span className="text-sm font-medium">{index + 1}.</span>
                       <span className="text-sm flex-1">{item.item}</span>
                       <Badge variant="outline" className="text-xs">
-                        {item.type}
+                        {getChecklistTypeLabel(item.type)}
                       </Badge>
                       {item.required && (
                         <Badge className="bg-red-100 text-red-800 text-xs">Required</Badge>
@@ -951,16 +1474,204 @@ export default function InspectionTemplatesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* QR Label Dialog */}
+      <Dialog open={isQrDialogOpen} onOpenChange={setIsQrDialogOpen}>
+        <DialogContent className="sm:max-w-[760px]">
+          <DialogHeader>
+            <DialogTitle>Inspection and Service Sheet QR Label</DialogTitle>
+            <DialogDescription>
+              Generate a mobile checklist QR package for {qrTemplate?.name || 'this template'}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 md:grid-cols-[1fr_260px]">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Transaction</Label>
+                  <Select
+                    value={qrForm.inspectionKind}
+                    onValueChange={(value) => {
+                      const next = { ...qrForm, inspectionKind: value };
+                      setQrForm(next);
+                      setQrPackage(null);
+                    }}
+                    disabled={qrTemplate?.templateScope !== 'Fleet' || (!!qrTemplate?.fleetInspectionKind && qrTemplate.fleetInspectionKind !== 'Any')}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Inspection type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {qrTemplate?.templateScope === 'Fleet' ? (
+                        <>
+                          <SelectItem value="PreTrip">Pre-trip</SelectItem>
+                          <SelectItem value="PostTrip">Post-trip</SelectItem>
+                        </>
+                      ) : (
+                        <SelectItem value={qrForm.inspectionKind}>{qrForm.inspectionKind.replace(/([a-z])([A-Z])/g, '$1 $2')}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Asset Category</Label>
+                  <Select
+                    value={qrForm.assetCategoryId}
+                    onValueChange={(value) => {
+                      const next = { ...qrForm, assetCategoryId: value, assetId: 'none' };
+                      setQrForm(next);
+                      setQrPackage(null);
+                    }}
+                    disabled={!!qrTemplate?.assignedAssetCategoryId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Any category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Any fleet category</SelectItem>
+                      {assetCategories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}{category.code ? ` (${category.code})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Asset</Label>
+                  <Select
+                    value={qrForm.assetId}
+                    onValueChange={(value) => {
+                      const next = { ...qrForm, assetId: value };
+                      setQrForm(next);
+                      setQrPackage(null);
+                    }}
+                    disabled={!!qrTemplate?.assignedAssetId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Any asset" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Any fleet asset</SelectItem>
+                      {qrScopedFleetAssets.map((asset) => (
+                        <SelectItem key={asset.id} value={asset.id}>
+                          {asset.assetName}{asset.assetCode ? ` (${asset.assetCode})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() => qrTemplate && generateQrPackage(qrTemplate)}
+                  disabled={!qrTemplate || qrLoading}
+                >
+                  <QrCode className="mr-2 h-4 w-4" />
+                  {qrLoading ? 'Generating...' : 'Generate QR Package'}
+                </Button>
+                <Button type="button" variant="outline" onClick={handlePrintQrLabel} disabled={!qrPackage}>
+                  <Printer className="mr-2 h-4 w-4" />
+                  Print Label
+                </Button>
+              </div>
+
+              {qrError && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  {qrError}
+                </div>
+              )}
+
+              {qrPackage && (
+                <div className="space-y-3 text-sm">
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <div>
+                      <span className="font-medium">Package:</span> {qrPackage.packageId}
+                    </div>
+                    <div>
+                      <span className="font-medium">Mode:</span> {qrPackage.qrPayloadMode}
+                    </div>
+                    <div>
+                      <span className="font-medium">Asset:</span> {qrPackage.assetName || 'Any fleet asset'}
+                    </div>
+                    <div>
+                      <span className="font-medium">Category:</span> {qrPackage.assetCategoryName || 'Any fleet category'}
+                    </div>
+                    <div>
+                      <span className="font-medium">Checklist items:</span> {qrPackage.checklistItems.length}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-blue-900">
+                    The label contains a compact signed reference. Mobile devices download Fleet checklists during sync and use the local copy when offline.
+                  </div>
+
+                  {!qrPackage.isQrEnabled && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                      QR is not enabled on this template. Enable it before printing production labels.
+                    </div>
+                  )}
+
+                  <div>
+                    <Label>Mobile URL</Label>
+                    <Input readOnly value={qrPackage.mobileUrl} className="mt-1 text-xs" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-md border bg-white p-4 text-center">
+              {qrPackage ? (
+                <div ref={qrLabelRef} className="space-y-3">
+                  <div className="label-kicker text-xs font-semibold uppercase text-muted-foreground">Fleet Inspection</div>
+                  <QRCodeSVG value={qrPackage.mobileUrl} size={210} level="M" includeMargin className="mx-auto" />
+                  <div>
+                    <div className="label-title font-semibold">
+                      {qrPackage.assetName || qrPackage.assetCategoryName || 'Fleet asset'}
+                    </div>
+                    {qrPackage.assetNumber && (
+                      <div className="label-description text-xs text-muted-foreground">Asset No: {qrPackage.assetNumber}</div>
+                    )}
+                    {qrPackage.assetCategoryName && (
+                      <div className="label-description text-xs text-muted-foreground">Asset Type: {qrPackage.assetCategoryName}</div>
+                    )}
+                    <div className="label-description text-xs text-muted-foreground">Checklist: {qrPackage.templateName}</div>
+                    <div className="label-description text-xs text-muted-foreground">{qrPackage.templateCode} v{qrPackage.templateVersion}</div>
+                  </div>
+                  <div className="label-description text-xs text-muted-foreground">
+                    Inspection: {qrPackage.inspectionKind}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full min-h-[260px] items-center justify-center text-sm text-muted-foreground">
+                  Generate a package to preview the QR label.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsQrDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[700px]">
+        <DialogContent className="flex max-h-[92vh] w-[96vw] max-w-6xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>Edit Template</DialogTitle>
             <DialogDescription>
               Update the inspection template information.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid flex-1 gap-5 overflow-y-auto py-4 pr-1">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-name">Template Name</Label>
@@ -1076,6 +1787,8 @@ export default function InspectionTemplatesPage() {
                 placeholder="1.0"
               />
             </div>
+
+            {renderFleetAssignmentFields('edit')}
             
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
@@ -1092,7 +1805,7 @@ export default function InspectionTemplatesPage() {
                   checked={formData.allowPhotos}
                   onCheckedChange={(checked) => setFormData({...formData, allowPhotos: checked})}
                 />
-                <Label htmlFor="edit-photos">Allow Photos</Label>
+                <Label htmlFor="edit-photos">Allow checklist item photos</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <Switch
@@ -1139,7 +1852,8 @@ export default function InspectionTemplatesPage() {
                                 <SelectValue placeholder="Type" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="checklist">Checklist</SelectItem>
+                                <SelectItem value="checklist">Pass / Fail</SelectItem>
+                                <SelectItem value="yesno">Yes / No</SelectItem>
                                 <SelectItem value="text">Text</SelectItem>
                                 <SelectItem value="number">Number</SelectItem>
                                 <SelectItem value="measurement">Measurement</SelectItem>

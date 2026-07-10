@@ -116,6 +116,10 @@ public class FleetTripsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error submitting fleet trip {TripId} for approval", id);
@@ -184,6 +188,10 @@ public class FleetTripsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error dispatching fleet trip {TripId}", id);
@@ -203,6 +211,10 @@ public class FleetTripsController : ControllerBase
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
             return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ex.Message);
         }
         catch (Exception ex)
         {

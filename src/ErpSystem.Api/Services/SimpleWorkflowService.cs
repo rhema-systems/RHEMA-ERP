@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -18,6 +19,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.Workflow;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -42,6 +44,7 @@ public class SimpleWorkflowService : IWorkflowService
     private readonly ITenderRepository _tenderRepository;
     private readonly IProjectRepository _projectRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
+    private readonly IProcurementPlanRepository _procurementPlanRepository;
     private readonly ICurrentUserService _currentUserService;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IUnitOfWork _unitOfWork;
@@ -64,6 +67,7 @@ public class SimpleWorkflowService : IWorkflowService
         ITenderRepository tenderRepository,
         IProjectRepository projectRepository,
         IBusinessPartnerRepository businessPartnerRepository,
+        IProcurementPlanRepository procurementPlanRepository,
         ICurrentUserService currentUserService,
         UserManager<ApplicationUser> userManager,
         IUnitOfWork unitOfWork,
@@ -85,6 +89,7 @@ public class SimpleWorkflowService : IWorkflowService
         _tenderRepository = tenderRepository;
         _projectRepository = projectRepository;
         _businessPartnerRepository = businessPartnerRepository;
+        _procurementPlanRepository = procurementPlanRepository;
         _currentUserService = currentUserService;
         _userManager = userManager;
         _unitOfWork = unitOfWork;
@@ -308,6 +313,45 @@ public class SimpleWorkflowService : IWorkflowService
         if (!canApprove && IsUserConfiguredAsApprover(stepInstance, workflowUserId, roleSet))
         {
             canApprove = true;
+        }
+
+        if (canApprove && isApprovalStep)
+        {
+            var approvalConfig = GetApprovalConfig(stepInstance);
+            var guardErrors = WorkflowApprovalGuardValidator.Validate(
+                approvalConfig,
+                instance.InitiatedById,
+                approvals.ToList(),
+                workflowUserId);
+            if (guardErrors.Count > 0)
+            {
+                canApprove = false;
+                _logger.LogDebug(
+                    "Workflow approval check denied by policy for user {UserId}, step {StepInstanceId}: {Reason}",
+                    workflowUserId,
+                    stepInstance.Id,
+                    string.Join(" ", guardErrors));
+            }
+
+            if (canApprove)
+            {
+                var crossStepErrors = await ValidateCrossStepSodAsync(
+                    approvalConfig,
+                    instance,
+                    stepInstance,
+                    entityType,
+                    entityId,
+                    workflowUserId);
+                if (crossStepErrors.Count > 0)
+                {
+                    canApprove = false;
+                    _logger.LogDebug(
+                        "Workflow approval check denied by cross-step SOD for user {UserId}, step {StepInstanceId}: {Reason}",
+                        workflowUserId,
+                        stepInstance.Id,
+                        string.Join(" ", crossStepErrors));
+                }
+            }
         }
 
         if (!canApprove)
@@ -573,6 +617,56 @@ public class SimpleWorkflowService : IWorkflowService
             Status = WorkflowInstanceStatus.Cancelled,
             WorkflowInstanceId = instance.Id,
             Message = "Workflow cancelled"
+        };
+    }
+
+    public async Task<WorkflowExecutionResult> RecallWorkflowAsync(string entityType, Guid entityId, Guid userId, string? reason = null)
+    {
+        var (workflowUserId, user) = await ResolveWorkflowUserAsync(userId, "workflow recall");
+        if (user == null)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Failed,
+                Message = "Requester user not found"
+            };
+        }
+
+        var instance = await ResolveActiveWorkflowInstanceAsync(entityType, entityId);
+        if (instance == null)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Failed,
+                Message = "No active workflow found"
+            };
+        }
+
+        if (instance.InitiatedById != workflowUserId && instance.StartedById != workflowUserId)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                Message = "Only the requester can recall this workflow"
+            };
+        }
+
+        var recallReason = string.IsNullOrWhiteSpace(reason)
+            ? "Recalled by requester"
+            : reason.Trim();
+
+        await _workflowEngine.CancelWorkflowAsync(instance.Id, workflowUserId, recallReason);
+
+        return new WorkflowExecutionResult
+        {
+            Success = true,
+            Status = WorkflowInstanceStatus.Cancelled,
+            WorkflowInstanceId = instance.Id,
+            Message = "Workflow recalled"
         };
     }
 
@@ -900,6 +994,27 @@ public class SimpleWorkflowService : IWorkflowService
             context["endOperatingHours"] = trip.EndOperatingHours;
         }
 
+        if (IsEntityType(entityTypeRecord, "FLEET_TRIP_INSPECTION", "FleetTripInspection", "Fleet Trip Inspection"))
+        {
+            var inspection = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTripInspection>()
+                .FirstOrDefaultAsync(x => x.Id == entityId, x => x.VehicleAsset!, x => x.InspectionTemplate!)
+                ?? throw new InvalidOperationException("Fleet inspection not found");
+
+            context["status"] = inspection.Status;
+            context["inspectionKind"] = inspection.InspectionKind;
+            context["overallResult"] = inspection.OverallResult ?? string.Empty;
+            context["vehicleAssetId"] = inspection.VehicleAssetId;
+            context["vehicleName"] = inspection.VehicleAsset?.Name ?? string.Empty;
+            context["vehicleAssetNumber"] = inspection.VehicleAsset?.AssetNumber ?? string.Empty;
+            context["inspectionTemplateId"] = inspection.InspectionTemplateId;
+            context["inspectionTemplateName"] = inspection.InspectionTemplate?.Name ?? string.Empty;
+            context["sheetType"] = inspection.InspectionTemplate?.SheetType ?? "InspectionSheet";
+            context["fleetTripId"] = inspection.FleetTripId;
+            context["inspectorEmployeeId"] = inspection.InspectorEmployeeId;
+            context["startedAtUtc"] = inspection.StartedAtUtc;
+            context["completedAtUtc"] = inspection.CompletedAtUtc;
+        }
+
         if (IsEntityType(entityTypeRecord, "INVENTORY_TRANSFER", "InventoryTransfer", "Inventory Transfer", "Transfer"))
         {
             var transfer = await _inventoryTransferRepository.GetByIdAsync(entityId) ?? throw new InvalidOperationException("Inventory transfer not found");
@@ -1078,6 +1193,44 @@ public class SimpleWorkflowService : IWorkflowService
             context["cancelledItems"] = items.Count(i => string.Equals(i.Status, "Cancelled", StringComparison.OrdinalIgnoreCase));
         }
 
+        if (IsEntityType(entityTypeRecord, "PROCUREMENT_PLAN", "ProcurementPlan", "Procurement Plan"))
+        {
+            var plan = await _procurementPlanRepository.GetWithFullDetailsAsync(entityId)
+                       ?? throw new InvalidOperationException("Procurement plan not found");
+
+            var items = plan.Items?.Where(i => !i.IsDeleted).ToList() ?? new List<ProcurementPlanItem>();
+            context["planNumber"] = plan.PlanNumber;
+            context["title"] = plan.Title;
+            context["description"] = plan.Description ?? string.Empty;
+            context["departmentId"] = plan.DepartmentId;
+            context["departmentName"] = plan.Department?.Name ?? string.Empty;
+            context["fiscalYear"] = plan.FiscalYear;
+            context["planningCycle"] = plan.PlanningCycle;
+            context["planningQuarter"] = plan.PlanningQuarter ?? string.Empty;
+            context["planStartDate"] = plan.PlanStartDate;
+            context["planEndDate"] = plan.PlanEndDate;
+            context["planDurationYears"] = plan.PlanDurationYears;
+            context["status"] = plan.Status;
+            context["totalEstimatedBudget"] = plan.TotalEstimatedBudget;
+            context["approvedBudget"] = plan.ApprovedBudget;
+            context["currency"] = plan.Currency;
+            context["preparedById"] = plan.PreparedById;
+            context["preparedDate"] = plan.PreparedDate;
+            context["reviewedById"] = plan.ReviewedById;
+            context["approvedById"] = plan.ApprovedById;
+            context["publishedById"] = plan.PublishedById;
+            context["publishedDate"] = plan.PublishedDate;
+            context["revisionNumber"] = plan.RevisionNumber;
+            context["previousVersionId"] = plan.PreviousVersionId;
+            context["itemCount"] = items.Count;
+            context["criticalItemCount"] = items.Count(i => i.IsCritical);
+            context["highPriorityItemCount"] = items.Count(i => string.Equals(i.Priority, "High", StringComparison.OrdinalIgnoreCase) || string.Equals(i.Priority, "Critical", StringComparison.OrdinalIgnoreCase));
+            context["totalItemQuantity"] = items.Sum(i => i.EstimatedQuantity);
+            context["totalItemEstimatedCost"] = items.Sum(i => i.EstimatedTotalCost);
+            context["budgetLineCount"] = items.Select(i => i.BudgetLineCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().Count();
+            context["categoryCount"] = items.Select(i => i.ItemCategory).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().Count();
+        }
+
         if (IsEntityType(entityTypeRecord, "TENDER", "Tender", "ProcurementTender"))
         {
             var tender = await _tenderRepository.GetByIdAsync(entityId) ?? throw new InvalidOperationException("Tender not found");
@@ -1224,6 +1377,56 @@ public class SimpleWorkflowService : IWorkflowService
         return false;
     }
 
+    private static WorkflowApprovalConfigDto? GetApprovalConfig(WorkflowStepInstance stepInstance)
+    {
+        var configurationJson = stepInstance.WorkflowStep?.Configuration;
+        if (string.IsNullOrWhiteSpace(configurationJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var serializerOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            serializerOptions.Converters.Add(new JsonStringEnumConverter());
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, serializerOptions)?.ApprovalConfig;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<List<string>> ValidateCrossStepSodAsync(
+        WorkflowApprovalConfigDto? config,
+        WorkflowInstance instance,
+        WorkflowStepInstance currentStep,
+        string entityType,
+        Guid entityId,
+        Guid userId)
+    {
+        if (config?.ConflictRules?.Any(rule => rule.IsEnabled) != true)
+        {
+            return new List<string>();
+        }
+
+        var previousSteps = (await _stepInstanceRepository.GetByWorkflowInstanceAsync(instance.Id))
+            .Where(step => step.Id != currentStep.Id &&
+                (step.CompletedDate ?? step.CreatedDate) <= (currentStep.StartedDate ?? currentStep.CreatedDate))
+            .ToList();
+        var approvalsByStep = new Dictionary<Guid, IReadOnlyCollection<WorkflowApproval>>();
+        foreach (var step in previousSteps)
+        {
+            approvalsByStep[step.Id] = (await _approvalRepository.GetByStepInstanceAsync(step.Id)).ToList();
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var entityTypeRecord = await ResolveEntityTypeAsync(entityType, tenantId);
+        var context = await BuildEntityContextAsync(entityTypeRecord, entityId);
+
+        return WorkflowCrossStepSodEvaluator.Validate(config, previousSteps, approvalsByStep, context, userId);
+    }
+
     private static string NormalizeEntityTypeKey(string? value)
         => new((value ?? string.Empty)
             .Where(char.IsLetterOrDigit)
@@ -1277,6 +1480,26 @@ public class SimpleWorkflowService : IWorkflowService
                 item.EntityTitle = jobCard.Title;
                 item.EntityDescription = jobCard.ProblemDescription ?? jobCard.Description ?? string.Empty;
                 return;
+            }
+        }
+
+        if (IsEntityType(entityTypeRecord, "PROCUREMENT_PLAN", "ProcurementPlan", "Procurement Plan"))
+        {
+            try
+            {
+                var plan = await _procurementPlanRepository.GetWithFullDetailsAsync(entityId);
+                if (plan != null)
+                {
+                    item.EntityTitle = $"{plan.PlanNumber} - {plan.Title}";
+                    item.EntityDescription = string.IsNullOrWhiteSpace(plan.Department?.Name)
+                        ? $"{plan.FiscalYear} {plan.PlanningCycle} plan"
+                        : $"{plan.Department.Name} / {plan.FiscalYear} {plan.PlanningCycle} plan";
+                    return;
+                }
+            }
+            catch
+            {
+                // ignore and fall through
             }
         }
 

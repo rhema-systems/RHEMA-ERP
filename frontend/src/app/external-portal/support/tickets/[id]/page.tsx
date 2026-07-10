@@ -88,7 +88,7 @@ const sourceLabel = (s: EhcTicketSource) => {
 };
 
 const toDisplayUrl = (attachment: EhcTicketAttachment) => {
-  const backendBaseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace('/api', '');
+  const backendBaseUrl = (process.env.NEXT_PUBLIC_API_URL || '/api').replace('/api', '');
   const raw = attachment.publicUrl || attachment.filePath;
   if (!raw) return null;
   if (raw.startsWith('/uploads')) return `${backendBaseUrl}${raw}`;

@@ -32,7 +32,7 @@ export default function AssignEvaluatorsDialog({ tenderId, onClose, onAssign }: 
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
       const token = localStorage.getItem('authToken') || localStorage.getItem('token');
 
       if (!token) {
@@ -183,4 +183,3 @@ export default function AssignEvaluatorsDialog({ tenderId, onClose, onAssign }: 
     </Dialog>
   );
 }
-

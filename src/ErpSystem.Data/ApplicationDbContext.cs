@@ -20,6 +20,7 @@ using ErpSystem.Data.Configuration.Maintenance;
 using ErpSystem.Data.Configuration.Pricing;
 using ErpSystem.Data.Configuration.Procurement;
 using ErpSystem.Data.Configuration.Projects;
+using ErpSystem.Data.Configuration.Sales;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -158,6 +159,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<SalesAgreementMilestone> SalesAgreementMilestones { get; set; }
     public DbSet<SalesAgreementRenewal> SalesAgreementRenewals { get; set; }
     public DbSet<SalesAgreementDocument> SalesAgreementDocuments { get; set; }
+    public DbSet<SalesSaleableSource> SalesSaleableSources { get; set; }
+    public DbSet<SalesAllocation> SalesAllocations { get; set; }
+    public DbSet<SalesAllocationHistory> SalesAllocationHistories { get; set; }
 
     // CRM entities
     public DbSet<Lead> Leads { get; set; }
@@ -235,6 +239,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     // Maintenance Management entities
     public DbSet<MaintenanceAsset> MaintenanceAssets { get; set; }
+    public DbSet<MaintenanceAssetMovement> MaintenanceAssetMovements { get; set; }
     public DbSet<MaintenanceAssetCategory> MaintenanceAssetCategories { get; set; }
     public DbSet<AssetType> AssetTypes { get; set; }
     public DbSet<AssetTypeField> AssetTypeFields { get; set; }
@@ -738,6 +743,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WorkflowStepInstance> WorkflowStepInstances { get; set; }
     public DbSet<WorkflowActivityLog> WorkflowActivityLogs { get; set; }
     public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
+    public DbSet<WorkflowApprovalPolicySet> WorkflowApprovalPolicySets { get; set; }
+    public DbSet<WorkflowDelegation> WorkflowDelegations { get; set; }
+    public DbSet<WorkflowWorkingCalendar> WorkflowWorkingCalendars { get; set; }
+    public DbSet<WorkflowCorrectionRequest> WorkflowCorrectionRequests { get; set; }
+    public DbSet<WorkflowEscalationExecution> WorkflowEscalationExecutions { get; set; }
+    public DbSet<WorkflowEvidencePolicy> WorkflowEvidencePolicies { get; set; }
+    public DbSet<WorkflowEvidenceDocument> WorkflowEvidenceDocuments { get; set; }
+    public DbSet<WorkflowSignatureEvidence> WorkflowSignatureEvidence { get; set; }
+    public DbSet<WorkflowIntegrationExecution> WorkflowIntegrationExecutions { get; set; }
+    public DbSet<WorkflowOfflineAction> WorkflowOfflineActions { get; set; }
     public DbSet<WorkflowEntityType> WorkflowEntityTypes { get; set; }
 
     // Finance - Common entities
@@ -825,6 +840,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
+        builder.Entity<WorkflowEscalationExecution>()
+            .HasIndex(item => new { item.ApprovalId, item.RuleIndex })
+            .IsUnique();
+        builder.Entity<WorkflowEvidenceDocument>().HasIndex(item => new { item.TenantId, item.AttachmentId }).IsUnique();
+        builder.Entity<WorkflowSignatureEvidence>().HasIndex(item => item.ApprovalId).IsUnique();
+        builder.Entity<WorkflowIntegrationExecution>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+        builder.Entity<WorkflowOfflineAction>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
 
@@ -2833,6 +2855,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectCommentConfiguration());
         builder.ApplyConfiguration(new ProjectClosureConfiguration());
 
+        // Sales setup
+        builder.ApplyConfiguration(new SalesSaleableSourceConfiguration());
+        builder.ApplyConfiguration(new SalesAllocationConfiguration());
+        builder.ApplyConfiguration(new SalesAllocationHistoryConfiguration());
+
         // Price List configurations
         builder.ApplyConfiguration(new PriceListConfiguration());
         builder.ApplyConfiguration(new PriceListLineConfiguration());
@@ -3325,6 +3352,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         // Configure decimal precision globally
         ConfigureDecimalPrecision(builder);
+        ConfigureSalesAllocationPrecision(builder);
 
         // Configure all tenant relationships to avoid cascade conflicts
         ConfigureGlobalTenantRelationships(builder);
@@ -3930,7 +3958,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wd => wd.EntityTypeId);
             entity.HasIndex(wd => wd.Name);
             entity.HasIndex(wd => wd.IsActive);
-            entity.HasIndex(wd => new { wd.TenantId, wd.Name }).IsUnique();
+            entity.HasIndex(wd => wd.LifecycleStatus);
+            entity.HasIndex(wd => new { wd.TenantId, wd.DefinitionKey, wd.Version }).IsUnique();
 
             entity.HasMany(wd => wd.Steps)
                 .WithOne(ws => ws.WorkflowDefinition)
@@ -4084,6 +4113,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(a => a.Criticality);
             entity.HasIndex(a => a.ParentAssetId);
             entity.HasIndex(a => a.SerialNumber);
+            entity.HasIndex(a => a.CurrentProjectId);
+            entity.HasIndex(a => a.CurrentSiteLocationId);
 
             entity.HasOne(a => a.AssetCategory)
                 .WithMany(c => c.Assets)
@@ -4094,6 +4125,29 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(pa => pa.ChildAssets)
                 .HasForeignKey(a => a.ParentAssetId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(a => a.CurrentProject)
+                .WithMany()
+                .HasForeignKey(a => a.CurrentProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(a => a.CurrentSiteLocation)
+                .WithMany()
+                .HasForeignKey(a => a.CurrentSiteLocationId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<MaintenanceAssetMovement>(entity =>
+        {
+            entity.HasIndex(m => m.AssetId);
+            entity.HasIndex(m => m.EffectiveDate);
+            entity.HasIndex(m => m.ToProjectId);
+            entity.HasIndex(m => m.ToSiteLocationId);
+
+            entity.HasOne(m => m.Asset)
+                .WithMany(a => a.Movements)
+                .HasForeignKey(m => m.AssetId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configure MaintenanceAssetCategory entity
@@ -4335,9 +4389,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure InspectionTemplate entity
         builder.Entity<InspectionTemplate>(entity =>
         {
+            entity.Property(it => it.TemplateScope).HasMaxLength(50).HasDefaultValue("General");
+            entity.Property(it => it.FleetInspectionKind).HasMaxLength(30).HasDefaultValue("Any");
+            entity.Property(it => it.QrPayloadVersion).HasDefaultValue(1);
+            entity.Property(it => it.AutoCreateWorkOrderOnFailure).HasDefaultValue(true);
+
             entity.HasIndex(it => it.Category);
             entity.HasIndex(it => it.InspectionType);
             entity.HasIndex(it => it.IsActive);
+            entity.HasIndex(it => it.TenantId);
+            entity.HasIndex(it => new { it.TenantId, it.TemplateScope, it.IsActive, it.IsDeleted });
+            entity.HasIndex(it => new { it.TenantId, it.TemplateScope, it.FleetInspectionKind, it.IsActive, it.IsDeleted });
+            entity.HasIndex(it => new { it.TenantId, it.AssignedAssetCategoryId, it.IsDeleted });
+            entity.HasIndex(it => new { it.TenantId, it.AssignedAssetId, it.IsDeleted });
         });
 
         // Configure AssetInspection entity
@@ -4366,6 +4430,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(ai => ai.InspectorId)
                 .OnDelete(DeleteBehavior.NoAction);
+
         });
 
         // Configure InspectionDocument entity
@@ -7592,10 +7657,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         var employeeRoleId = Guid.Parse("00000000-0000-0000-0000-000000000004");
 
         builder.Entity<ApplicationRole>().HasData(
-            new ApplicationRole { Id = superAdminRoleId, Name = Shared.Constants.Roles.SuperAdmin, NormalizedName = Shared.Constants.Roles.SuperAdmin.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
-            new ApplicationRole { Id = tenantAdminRoleId, Name = Shared.Constants.Roles.TenantAdmin, NormalizedName = Shared.Constants.Roles.TenantAdmin.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
-            new ApplicationRole { Id = managerRoleId, Name = Shared.Constants.Roles.Manager, NormalizedName = Shared.Constants.Roles.Manager.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
-            new ApplicationRole { Id = employeeRoleId, Name = Shared.Constants.Roles.Employee, NormalizedName = Shared.Constants.Roles.Employee.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" }
+            new ApplicationRole { Id = superAdminRoleId, Name = Shared.Constants.Roles.SuperAdmin, NormalizedName = Shared.Constants.Roles.SuperAdmin.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = tenantAdminRoleId, Name = Shared.Constants.Roles.TenantAdmin, NormalizedName = Shared.Constants.Roles.TenantAdmin.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = managerRoleId, Name = Shared.Constants.Roles.Manager, NormalizedName = Shared.Constants.Roles.Manager.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = employeeRoleId, Name = Shared.Constants.Roles.Employee, NormalizedName = Shared.Constants.Roles.Employee.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" }
         );
 
         // Seed default modules for default tenant (use stable IDs to avoid migration churn)
@@ -7894,6 +7959,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         foreach (var entry in entries)
         {
+            if (entry.Entity is WorkflowActivityLog && entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Workflow audit events are immutable and cannot be changed or deleted.");
             switch (entry.State)
             {
                 case EntityState.Added:
@@ -7947,6 +8014,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         }
     }
 
+    private static void ConfigureSalesAllocationPrecision(ModelBuilder builder)
+    {
+        builder.Entity<SalesAllocation>(entity =>
+        {
+            entity.Property(e => e.EstimatedValue).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.AgreedValue).HasColumnType("decimal(18,2)");
+        });
+    }
+
     private static void ConfigureGlobalTenantRelationships(ModelBuilder builder)
     {
         // Configure all TenantEntity relationships to use Restrict instead of Cascade
@@ -7991,7 +8067,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(p => p.PlanNumber).IsUnique();
             entity.HasIndex(p => p.DepartmentId);
             entity.HasIndex(p => p.FiscalYear);
+            entity.HasIndex(p => p.PlanningCycle);
+            entity.HasIndex(p => p.PlanningQuarter);
             entity.HasIndex(p => p.Status);
+            entity.HasIndex(p => p.PublishedDate);
 
             entity.HasOne(p => p.Department)
                 .WithMany()
@@ -8008,6 +8087,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<ProcurementPlanItem>(entity =>
         {
             entity.HasIndex(i => i.ProcurementPlanId);
+            entity.HasIndex(i => i.ProcurementBudgetId);
+            entity.HasIndex(i => i.ProcurementBudgetAllocationId);
+            entity.HasIndex(i => i.MarketAnalysisId);
+            entity.HasIndex(i => i.BudgetLineCode);
             entity.HasIndex(i => i.ItemCategory);
             entity.HasIndex(i => i.IsCritical);
 
@@ -8015,6 +8098,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithOne(s => s.ProcurementPlanItem)
                 .HasForeignKey(s => s.ProcurementPlanItemId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(i => i.ProcurementBudget)
+                .WithMany()
+                .HasForeignKey(i => i.ProcurementBudgetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(i => i.ProcurementBudgetAllocation)
+                .WithMany()
+                .HasForeignKey(i => i.ProcurementBudgetAllocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(i => i.MarketAnalysis)
+                .WithMany()
+                .HasForeignKey(i => i.MarketAnalysisId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ProcurementPlanItemSupplier entity
@@ -8094,6 +8192,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(m => m.ItemCategory);
             entity.HasIndex(m => m.ItemDescription);
             entity.HasIndex(m => m.AnalysisPeriodStart);
+            entity.Property(m => m.HistoricalAveragePrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.PreviousPrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.CurrentMarketPrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.ForecastedPrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.PriceChangePercent).HasColumnType("decimal(8,2)");
+            entity.Property(m => m.PriceVariancePercent).HasColumnType("decimal(8,2)");
+            entity.Property(m => m.InflationImpactPercent).HasColumnType("decimal(8,2)");
+            entity.Property(m => m.RecommendedBudgetAdjustmentPercent).HasColumnType("decimal(8,2)");
 
             entity.HasMany(m => m.PriceHistories)
                 .WithOne(p => p.MarketAnalysis)
@@ -9182,7 +9288,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     private static void SeedMaintenanceData(ModelBuilder builder, Guid tenantId)
     {
-        var now = DateTime.UtcNow;
         var baseDate = new DateTime(2025, 10, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Seed Employees (Maintenance Team)

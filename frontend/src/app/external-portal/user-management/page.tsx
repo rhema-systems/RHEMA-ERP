@@ -84,7 +84,7 @@ export default function UserManagementPage() {
 
         // If no business partner user link, fetch the business partner directly (for main user)
         // We need to import and use the business partner service
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/procurement/business-partners/user/${currentUser.id}`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api'}/procurement/business-partners/user/${currentUser.id}`, {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('token') || localStorage.getItem('authToken')}`,
@@ -126,7 +126,7 @@ export default function UserManagementPage() {
       const subUsers = await businessPartnerUserService.getUsersByBusinessPartnerId(bpId);
 
       // Fetch the main business partner to get the main account owner
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/procurement/business-partners/${bpId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api'}/procurement/business-partners/${bpId}`, {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token') || localStorage.getItem('authToken')}`,
@@ -792,4 +792,3 @@ export default function UserManagementPage() {
     </div>
   );
 }
-

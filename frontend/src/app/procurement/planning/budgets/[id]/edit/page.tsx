@@ -14,6 +14,7 @@ import { ArrowLeft, Save, Plus, Trash2, Loader2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { procurementBudgetService, commonService, type ProcurementBudgetDetailDto, type CreateProcurementBudgetDto, type CreateProcurementBudgetAllocationDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import { FiscalYearSelect } from '../../../components/FiscalYearSelect';
 
 export default function EditProcurementBudgetPage() {
   const router = useRouter();
@@ -177,7 +178,13 @@ export default function EditProcurementBudgetPage() {
               <CardHeader><CardTitle>Budget Details</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="space-y-2"><Label>Fiscal Year *</Label><Input type="number" value={formData.fiscalYear} onChange={(e) => handleInputChange('fiscalYear', parseInt(e.target.value))} min={2020} max={2050} /></div>
+                  <div className="space-y-2">
+                    <Label>Fiscal Year *</Label>
+                    <FiscalYearSelect
+                      value={formData.fiscalYear}
+                      onValueChange={(year) => handleInputChange('fiscalYear', year)}
+                    />
+                  </div>
                   <div className="space-y-2"><Label>Allocated Amount *</Label><Input type="number" value={formData.allocatedAmount} onChange={(e) => handleInputChange('allocatedAmount', parseFloat(e.target.value))} min={0} step={0.01} /></div>
                   <div className="space-y-2">
                     <Label>Currency</Label>

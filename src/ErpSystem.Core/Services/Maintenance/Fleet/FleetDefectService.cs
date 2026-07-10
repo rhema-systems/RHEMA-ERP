@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
 
@@ -128,9 +129,7 @@ public sealed class FleetDefectService : IFleetDefectService
         var vehicle = await _unitOfWork.Repository<MaintenanceAsset>()
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == dto.VehicleAssetId && !a.IsDeleted, a => a.AssetCategory);
 
-        if (vehicle == null) throw new ArgumentException("Vehicle not found.");
-        if (!string.Equals(vehicle.AssetCategory?.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Selected asset is not a vehicle.");
+        if (vehicle == null) throw new ArgumentException("Maintenance asset not found.");
 
         var entity = new FleetDefect
         {
@@ -195,6 +194,8 @@ public sealed class FleetDefectService : IFleetDefectService
         var defectRepo = _unitOfWork.Repository<FleetDefect>();
         var defect = await defectRepo.GetQueryable(d => d.TenantId == tenantId && d.Id == dto.DefectId && !d.IsDeleted)
             .Include(d => d.VehicleAsset)
+            .Include(d => d.FleetTripInspection)
+                .ThenInclude(i => i!.InspectionTemplate)
             .FirstOrDefaultAsync()
             ?? throw new ArgumentException("Defect not found.");
 
@@ -208,18 +209,42 @@ public sealed class FleetDefectService : IFleetDefectService
         }
         billingType = string.Equals(billingType, "Maintenance", StringComparison.OrdinalIgnoreCase) ? "Maintenance" : "Repairs";
 
+        var workOrderType = await _unitOfWork.Repository<WorkOrderType>()
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == dto.WorkOrderTypeId && x.IsActive && !x.IsDeleted)
+            ?? throw new ArgumentException("The selected work order type is not active or does not exist.");
+        var maintenanceType = await _unitOfWork.Repository<MaintenanceType>()
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == dto.MaintenanceTypeId && x.IsActive && !x.IsDeleted)
+            ?? throw new ArgumentException("The selected maintenance type is not active or does not exist.");
+        var priority = await _unitOfWork.Repository<PriorityLevel>()
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == dto.PriorityLevelId && x.IsActive && !x.IsDeleted)
+            ?? throw new ArgumentException("The selected priority is not active or does not exist.");
+        var inspection = defect.FleetTripInspection;
+        var findings = ExtractActionableFindings(inspection?.InspectionTemplate?.ChecklistItems, inspection?.InspectionData);
+        var description = BuildWorkOrderDescription(defect, inspection, findings, dto.DescriptionOverride);
+        var completionDays = Math.Max(1, maintenanceType?.LeadTimeDays ?? 1);
+
         var create = new CreateWorkOrderDto
         {
             Title = string.IsNullOrWhiteSpace(dto.TitleOverride) ? defect.Title : dto.TitleOverride.Trim(),
-            Description = string.IsNullOrWhiteSpace(dto.DescriptionOverride) ? defect.Description : dto.DescriptionOverride.Trim(),
+            Description = description,
             AssetId = defect.VehicleAssetId,
             WorkOrderTypeId = dto.WorkOrderTypeId,
             MaintenanceTypeId = dto.MaintenanceTypeId,
             PriorityLevelId = dto.PriorityLevelId,
-            MaintenanceLocation = "Internal",
+            MaintenanceLocation = string.IsNullOrWhiteSpace(maintenanceType?.Location) ? "Internal" : maintenanceType.Location,
             BillingType = billingType,
             RequestedStartDate = DateTime.UtcNow,
-            RequestedCompletionDate = DateTime.UtcNow.AddDays(1)
+            RequestedCompletionDate = DateTime.UtcNow.AddDays(completionDays),
+            EstimatedHours = maintenanceType?.EstimatedHours ?? 0,
+            EstimatedCost = maintenanceType?.EstimatedCost ?? 0,
+            SafetyRequirements = maintenanceType?.SafetyRequirements,
+            RequiresPermit = maintenanceType?.RequiresSafetyPermit ?? false,
+            RequiresLockout = maintenanceType?.RequiresShutdown ?? false,
+            FixedAmount = string.Equals(billingType, "Maintenance", StringComparison.OrdinalIgnoreCase)
+                ? maintenanceType?.FixedAmount ?? 0
+                : 0,
+            CustomFieldValues = BuildSourceContext(defect, inspection, findings),
+            GenerateDefaultTasks = findings.Count == 0
         };
 
         WorkOrderDto created;
@@ -233,6 +258,31 @@ public sealed class FleetDefectService : IFleetDefectService
             throw;
         }
 
+        if (findings.Count > 0)
+        {
+            var taskRepository = _unitOfWork.Repository<WorkOrderTask>();
+            var findingHours = Math.Max(0.5, create.EstimatedHours > 0 ? create.EstimatedHours / findings.Count : 0.5);
+            for (var index = 0; index < findings.Count; index++)
+            {
+                var finding = findings[index];
+                await taskRepository.AddAsync(new WorkOrderTask
+                {
+                    Id = Guid.NewGuid(),
+                    WorkOrderId = created.Id,
+                    TaskName = Truncate(finding.Item, 200),
+                    Description = Truncate($"Resolve the checklist response '{finding.Response}'. Source inspection: {inspection?.Id}.", 1000),
+                    Sequence = index + 1,
+                    EstimatedHours = findingHours,
+                    IsRequired = true,
+                    Status = "Pending",
+                    TenantId = tenantId,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+        }
+
         defect.WorkOrderId = created.Id;
         defect.Status = "InProgress";
         defect.UpdatedAt = DateTime.UtcNow;
@@ -242,4 +292,104 @@ public sealed class FleetDefectService : IFleetDefectService
 
         return created.Id;
     }
+
+    private static Dictionary<string, object> BuildSourceContext(
+        FleetDefect defect,
+        FleetTripInspection? inspection,
+        IReadOnlyCollection<InspectionFinding> findings)
+    {
+        var context = new Dictionary<string, object>
+        {
+            ["workOrderSource"] = "FleetPreStartInspection",
+            ["fleetDefectId"] = defect.Id,
+            ["findingCount"] = findings.Count
+        };
+
+        if (defect.FleetTripId.HasValue) context["fleetTripId"] = defect.FleetTripId.Value;
+        if (inspection == null) return context;
+
+        context["fleetTripInspectionId"] = inspection.Id;
+        context["inspectionTemplateId"] = inspection.InspectionTemplateId;
+        context["inspectionKind"] = inspection.InspectionKind;
+        context["inspectionResult"] = inspection.OverallResult ?? string.Empty;
+        context["capturedOfflineAtUtc"] = inspection.CapturedOfflineAtUtc?.ToString("O") ?? string.Empty;
+        return context;
+    }
+
+    private static string BuildWorkOrderDescription(
+        FleetDefect defect,
+        FleetTripInspection? inspection,
+        IReadOnlyCollection<InspectionFinding> findings,
+        string? overrideDescription)
+    {
+        if (!string.IsNullOrWhiteSpace(overrideDescription)) return Truncate(overrideDescription.Trim(), 2000);
+
+        var parts = new List<string>
+        {
+            $"Automatically generated from fleet defect {defect.Id}."
+        };
+
+        if (inspection != null)
+        {
+            parts.Add($"Source pre-start inspection {inspection.Id} result: {inspection.OverallResult ?? "Unknown"}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(defect.Description)) parts.Add(defect.Description.Trim());
+        if (findings.Count > 0)
+        {
+            parts.Add("Actionable findings: " + string.Join("; ", findings.Select(f => $"{f.Item} ({f.Response})")) + ".");
+        }
+
+        return Truncate(string.Join(" ", parts), 2000);
+    }
+
+    private static List<InspectionFinding> ExtractActionableFindings(string? checklistJson, string? inspectionDataJson)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(checklistJson) || string.IsNullOrWhiteSpace(inspectionDataJson)) return new();
+
+            using var checklistDocument = JsonDocument.Parse(checklistJson);
+            using var responseDocument = JsonDocument.Parse(inspectionDataJson);
+            if (!responseDocument.RootElement.TryGetProperty("checklist", out var responses) || responses.ValueKind != JsonValueKind.Array)
+                return new();
+
+            var itemNames = new Dictionary<Guid, string>();
+            foreach (var item in checklistDocument.RootElement.EnumerateArray())
+            {
+                if (!item.TryGetProperty("id", out var idProperty) || !Guid.TryParse(idProperty.GetString(), out var id)) continue;
+                var name = item.TryGetProperty("item", out var itemProperty) ? itemProperty.GetString() : null;
+                itemNames[id] = string.IsNullOrWhiteSpace(name) ? "Checklist item" : name.Trim();
+            }
+
+            var findings = new List<InspectionFinding>();
+            foreach (var response in responses.EnumerateArray())
+            {
+                if (!response.TryGetProperty("id", out var idProperty) || !Guid.TryParse(idProperty.GetString(), out var id)) continue;
+                var value = response.TryGetProperty("value", out var valueProperty) ? valueProperty.ToString() : string.Empty;
+                if (!IsActionableResponse(value)) continue;
+                findings.Add(new InspectionFinding(itemNames.GetValueOrDefault(id, "Checklist item"), value.Trim()));
+            }
+
+            return findings;
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static bool IsActionableResponse(string? value) =>
+        string.Equals(value?.Trim(), "Fail", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "Failed", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "No", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "Flag", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "Flagged", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "Attention", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "ConditionalPass", StringComparison.OrdinalIgnoreCase);
+
+    private static string Truncate(string value, int maximumLength) =>
+        value.Length <= maximumLength ? value : value[..maximumLength];
+
+    private sealed record InspectionFinding(string Item, string Response);
 }

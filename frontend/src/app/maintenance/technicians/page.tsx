@@ -26,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
 
 interface Technician {
   id: string;
@@ -40,9 +41,18 @@ interface Technician {
   rating: number;
   totalWorkOrders: number;
   completedThisMonth: number;
+  locationId?: string | null;
+  locationName?: string | null;
   location: string;
   shiftStart: string;
   shiftEnd: string;
+}
+
+interface LocationLookup {
+  id: string;
+  name: string;
+  code?: string | null;
+  isActive?: boolean;
 }
 
 interface Assignment {
@@ -186,7 +196,9 @@ const normalizeTechnician = (raw: any, assignments: Assignment[], workOrders: Wo
     rating: Number(raw.rating ?? raw.averageRating ?? raw.performanceRating ?? 0),
     totalWorkOrders: metrics.totalWorkOrders,
     completedThisMonth: metrics.completedThisMonth,
-    location: raw.location || raw.departmentName || raw.department || 'Maintenance',
+    locationId: raw.locationId || raw.LocationId || null,
+    locationName: raw.locationName || raw.LocationName || raw.location?.name || null,
+    location: raw.locationName || raw.LocationName || raw.location?.name || raw.location || 'Unassigned site',
     shiftStart: raw.shiftStart || 'N/A',
     shiftEnd: raw.shiftEnd || 'N/A',
   };
@@ -214,9 +226,13 @@ const mapScheduleToAssignment = (schedule: any): Assignment => {
 
 
 export default function TechniciansPage() {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+  const { toast } = useToast();
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [filteredTechnicians, setFilteredTechnicians] = useState<Technician[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [locations, setLocations] = useState<LocationLookup[]>([]);
+  const [locationLookupError, setLocationLookupError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [specializationFilter, setSpecializationFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -224,6 +240,8 @@ export default function TechniciansPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [technicianDialogTab, setTechnicianDialogTab] = useState('details');
   const [isLoading, setIsLoading] = useState(false);
+  const [locationSelection, setLocationSelection] = useState('none');
+  const [assigningLocation, setAssigningLocation] = useState(false);
   const specializationOptions = Array.from(new Set(technicians.map((tech) => tech.specialization).filter(Boolean))).sort();
   const assignedOrBusyCount = technicians.filter((tech) => tech.status === 'Assigned' || tech.status === 'Busy').length;
   const averageRating = technicians.length
@@ -235,7 +253,6 @@ export default function TechniciansPage() {
     const fetchTechniciansFromHR = async () => {
       setIsLoading(true);
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
         const token = localStorage.getItem('authToken');
         const rangeStart = new Date();
         rangeStart.setDate(rangeStart.getDate() - 30);
@@ -268,14 +285,20 @@ export default function TechniciansPage() {
           return allWorkOrders;
         };
 
-        const [techniciansResponse, assignmentsResponse, workOrderList] = await Promise.all([
-          fetch(`${API_URL}/employees/maintenance-available`, {
+        const [techniciansResponse, assignmentsResponse, locationsResponse, workOrderList] = await Promise.all([
+          fetch(`${API_URL}/maintenance/technicians?page=1&pageSize=100`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
           fetch(`${API_URL}/maintenance/staff-schedules/by-date-range?startDate=${encodeURIComponent(rangeStart.toISOString())}&endDate=${encodeURIComponent(rangeEnd.toISOString())}`, {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          }),
+          fetch(`${API_URL}/Location/summary`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
@@ -299,17 +322,35 @@ export default function TechniciansPage() {
           const technicianItems = techniciansData.data || techniciansData.items || techniciansData || [];
           setTechnicians(technicianItems.map((tech: any) => normalizeTechnician(tech, assignmentList, workOrderList)));
         }
+
+        if (locationsResponse.ok) {
+          const locationsData = await locationsResponse.json();
+          const locationItems: LocationLookup[] = Array.isArray(locationsData)
+            ? locationsData
+            : Array.isArray(locationsData?.items)
+              ? locationsData.items
+              : Array.isArray(locationsData?.data)
+                ? locationsData.data
+                : [];
+          setLocations(locationItems.filter((item) => item.isActive !== false));
+          setLocationLookupError(null);
+        } else {
+          setLocations([]);
+          setLocationLookupError(`Site lookup returned HTTP ${locationsResponse.status}`);
+        }
       } catch (error) {
         console.error('Failed to fetch technicians from HR module:', error);
         setTechnicians([]);
         setAssignments([]);
+        setLocations([]);
+        setLocationLookupError(error instanceof Error ? error.message : 'Sites could not be loaded.');
       } finally {
         setIsLoading(false);
       }
     };
     
     fetchTechniciansFromHR();
-  }, []);
+  }, [API_URL]);
 
   useEffect(() => {
     let filtered = technicians;
@@ -394,7 +435,50 @@ export default function TechniciansPage() {
   const openTechnicianDialog = (technician: Technician, tab: string) => {
     setSelectedTechnician(technician);
     setTechnicianDialogTab(tab);
+    setLocationSelection(technician.locationId || 'none');
     setIsViewDialogOpen(true);
+  };
+
+  const assignTechnicianLocation = async (technician: Technician, locationId: string) => {
+    setAssigningLocation(true);
+    try {
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/maintenance/technicians/${technician.id}/location`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ locationId: locationId === 'none' ? null : locationId })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const updated = normalizeTechnician(await response.json(), assignments, []);
+      const merged: Technician = {
+        ...technician,
+        ...updated,
+        status: technician.status,
+        currentAssignment: technician.currentAssignment,
+        totalWorkOrders: technician.totalWorkOrders,
+        completedThisMonth: technician.completedThisMonth,
+        rating: technician.rating
+      };
+      setTechnicians((current) => current.map((item) => item.id === technician.id ? merged : item));
+      setSelectedTechnician((current) => current?.id === technician.id ? { ...current, ...merged } : current);
+      setLocationSelection(merged.locationId || 'none');
+      toast({ title: 'Technician site updated', description: `${merged.name} is now assigned to ${merged.location || 'no site'}.` });
+    } catch (error) {
+      toast({
+        title: 'Site assignment failed',
+        description: error instanceof Error ? error.message : 'The technician could not be assigned to the selected site.',
+        variant: 'destructive'
+      });
+    } finally {
+      setAssigningLocation(false);
+    }
   };
 
   const renderStarRating = (rating: number) => {
@@ -650,6 +734,14 @@ export default function TechniciansPage() {
                       >
                         <Calendar className="h-4 w-4" />
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openTechnicianDialog(technician, 'details')}
+                        title="Assign technician to site"
+                      >
+                        <UserCheck className="h-4 w-4" />
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -721,6 +813,36 @@ export default function TechniciansPage() {
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Location</Label>
                       <p className="text-sm">{selectedTechnician.location}</p>
+                    </div>
+                    <div className="space-y-2 rounded-md border p-3">
+                      <Label className="text-sm font-medium">Assign / Move to Site</Label>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Select value={locationSelection} onValueChange={setLocationSelection}>
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Select HR location" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Unassigned</SelectItem>
+                            {locations.map((location) => (
+                              <SelectItem key={location.id} value={location.id}>
+                                {location.code ? `${location.code} · ` : ''}{location.name}
+                              </SelectItem>
+                            ))}
+                            {locations.length === 0 && (
+                              <SelectItem value="no-sites" disabled>No active HR locations configured</SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          onClick={() => assignTechnicianLocation(selectedTechnician, locationSelection)}
+                          disabled={assigningLocation || locationSelection === (selectedTechnician.locationId || 'none') || locationSelection === 'no-sites'}
+                        >
+                          {assigningLocation ? 'Saving...' : 'Save Site'}
+                        </Button>
+                      </div>
+                      {locationLookupError && (
+                        <p className="text-xs text-destructive">{locationLookupError}</p>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -80,7 +80,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
                 MaintenanceTypeId = createDto.MaintenanceTypeId,
                 Frequency = createDto.Frequency,
                 FrequencyValue = createDto.FrequencyValue,
-                FrequencyUnit = createDto.FrequencyUnit,
+                FrequencyUnit = ResolveFrequencyUnit(createDto.FrequencyUnit, createDto.Frequency),
                 NextDueDate = createDto.NextDueDate,
                 Priority = createDto.Priority,
                 EstimatedHours = createDto.EstimatedHours,
@@ -137,7 +137,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             schedule.MaintenanceTypeId = updateDto.MaintenanceTypeId;
             schedule.Frequency = updateDto.Frequency;
             schedule.FrequencyValue = updateDto.FrequencyValue;
-            schedule.FrequencyUnit = updateDto.FrequencyUnit;
+            schedule.FrequencyUnit = ResolveFrequencyUnit(updateDto.FrequencyUnit, updateDto.Frequency);
             schedule.NextDueDate = updateDto.NextDueDate;
             schedule.Priority = updateDto.Priority;
             schedule.EstimatedHours = updateDto.EstimatedHours;
@@ -175,6 +175,22 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             _logger.LogError(ex, "Error updating maintenance schedule: {ScheduleId}", id);
             throw;
         }
+    }
+
+    private static string ResolveFrequencyUnit(string? frequencyUnit, string? frequency)
+    {
+        if (!string.IsNullOrWhiteSpace(frequencyUnit))
+        {
+            return frequencyUnit.Trim();
+        }
+
+        return frequency?.Trim().ToLowerInvariant() switch
+        {
+            "hourly" => "Hours",
+            "weekly" => "Weeks",
+            "monthly" or "quarterly" or "semi-annual" or "semiannual" or "annual" or "yearly" => "Months",
+            _ => "Days"
+        };
     }
 
     public async Task DeleteScheduleAsync(Guid id)

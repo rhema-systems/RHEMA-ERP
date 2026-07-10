@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Sales;
@@ -260,6 +261,13 @@ public class SalesOrderApprovalDto
 {
     [Required]
     public bool Approved { get; set; }
+
+    [JsonPropertyName("isApproved")]
+    public bool IsApproved
+    {
+        get => Approved;
+        set => Approved = value;
+    }
 
     public string? Comments { get; set; }
     public string? RejectionReason { get; set; }

@@ -20,7 +20,10 @@ public enum AttachmentEntityType
     Asset = 1,
     Inspection = 2,
     FleetCompliance = 3,
-    FleetIncident = 4
+    FleetIncident = 4,
+    FleetTrip = 5,
+    FleetFuelTransaction = 6,
+    FleetCostEntry = 7
 }
 
 /// <summary>

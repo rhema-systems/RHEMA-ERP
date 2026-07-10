@@ -3,7 +3,7 @@
  * API service for Procurement Planning module
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
 const getAuthHeaders = () => {
@@ -60,6 +60,8 @@ export interface ProcurementPlanDto {
   departmentId: string;
   departmentName?: string;
   fiscalYear: number;
+  planningCycle: string;
+  planningQuarter?: string;
   planStartDate: string;
   planEndDate: string;
   planDurationYears: number;
@@ -71,6 +73,9 @@ export interface ProcurementPlanDto {
   preparedDate?: string;
   approvedByName?: string;
   approvedDate?: string;
+  publishedByName?: string;
+  publishedDate?: string;
+  isPublished: boolean;
   revisionNumber: number;
   itemCount: number;
   createdAt: string;
@@ -84,6 +89,8 @@ export interface ProcurementPlanDetailDto extends ProcurementPlanDto {
   reviewComments?: string;
   approvedById?: string;
   approvalComments?: string;
+  publishedById?: string;
+  publishComments?: string;
   previousVersionId?: string;
   notes?: string;
   items: ProcurementPlanItemDto[];
@@ -96,6 +103,8 @@ export interface CreateProcurementPlanDto {
   description?: string;
   departmentId: string;
   fiscalYear: number;
+  planningCycle?: string;
+  planningQuarter?: string;
   planStartDate: string;
   planEndDate: string;
   planDurationYears?: number;
@@ -110,6 +119,8 @@ export interface UpdateProcurementPlanDto {
   description?: string;
   departmentId: string;
   fiscalYear: number;
+  planningCycle?: string;
+  planningQuarter?: string;
   planStartDate: string;
   planEndDate: string;
   planDurationYears?: number;
@@ -132,6 +143,175 @@ export interface ApproveProcurementPlanDto {
   budgetId?: string;
   /** If true, automatically links to matching budget on approval */
   autoLinkBudget?: boolean;
+}
+
+export interface PublishProcurementPlanDto {
+  comments?: string;
+}
+
+export interface CreateProcurementPlanAmendmentDto {
+  reason: string;
+  title?: string;
+  description?: string;
+}
+
+export interface ProcurementPlanConsolidationItemDto {
+  planId: string;
+  planNumber: string;
+  planItemId: string;
+  departmentId: string;
+  departmentName?: string;
+  itemDescription: string;
+  quantity: number;
+  estimatedTotalCost: number;
+  plannedQuarter?: string;
+  requiredDate?: string;
+  preferredSupplierName?: string;
+}
+
+export interface ProcurementPlanConsolidationOpportunityDto {
+  opportunityKey: string;
+  itemCategory: string;
+  itemDescription: string;
+  specifications?: string;
+  unitOfMeasure: string;
+  currency: string;
+  planCount: number;
+  departmentCount: number;
+  itemCount: number;
+  totalQuantity: number;
+  estimatedTotalCost: number;
+  averageUnitPrice: number;
+  potentialSavings: number;
+  opportunityLevel: string;
+  recommendedStrategy: string;
+  preferredSupplierName?: string;
+  items: ProcurementPlanConsolidationItemDto[];
+}
+
+export interface ProcurementPlanningDepartmentSummaryDto {
+  departmentId: string;
+  departmentName: string;
+  planCount: number;
+  itemCount: number;
+  estimatedBudget: number;
+  approvedBudget: number;
+}
+
+export interface ProcurementPlanningCategorySummaryDto {
+  categoryName: string;
+  itemCount: number;
+  estimatedCost: number;
+  approvedBudget: number;
+}
+
+export interface ProcurementPlanningQuarterSummaryDto {
+  quarter: string;
+  itemCount: number;
+  estimatedCost: number;
+}
+
+export interface ProcurementPlanningDashboardDto {
+  fiscalYear: number;
+  planningQuarter?: string;
+  totalPlans: number;
+  draftPlans: number;
+  submittedPlans: number;
+  approvedPlans: number;
+  activePlans: number;
+  completedPlans: number;
+  totalItems: number;
+  criticalItems: number;
+  estimatedBudget: number;
+  approvedBudget: number;
+  budgetUtilizationPercent: number;
+  consolidationPotentialSavings: number;
+  currency: string;
+  departmentSummaries: ProcurementPlanningDepartmentSummaryDto[];
+  categorySummaries: ProcurementPlanningCategorySummaryDto[];
+  quarterSummaries: ProcurementPlanningQuarterSummaryDto[];
+  strategicAnalytics: ProcurementPlanningStrategicAnalyticsDto;
+}
+
+export interface ProcurementPlanningStrategicAnalyticsDto {
+  market: ProcurementPlanningMarketAnalyticsDto;
+  supplier: ProcurementPlanningSupplierAnalyticsDto;
+}
+
+export interface ProcurementPlanningMarketAnalyticsDto {
+  averageMarketPrice: number;
+  averagePriceIncreasePercent: number;
+  highInflationCategoryCount: number;
+  highRiskCategoryCount: number;
+  longLeadTimeItemCount: number;
+  marketRiskIndex: number;
+  inflationImpactPercent: number;
+  highRiskCategories: ProcurementPlanningMarketCategoryRiskDto[];
+}
+
+export interface ProcurementPlanningMarketCategoryRiskDto {
+  categoryName: string;
+  analysisCount: number;
+  averagePriceIncreasePercent: number;
+  longLeadTimeCount: number;
+  highestRiskLevel: string;
+}
+
+export interface ProcurementPlanningSupplierAnalyticsDto {
+  activeSuppliers: number;
+  preferredSuppliers: number;
+  consolidationOpportunities: number;
+  supplierRiskScore: number;
+  totalSupplierSpend: number;
+  concentrationRisk: string;
+  spendBySupplier: ProcurementPlanningSupplierSpendSummaryDto[];
+  highRiskSuppliers: ProcurementPlanningSupplierRiskSummaryDto[];
+}
+
+export interface ProcurementPlanningSupplierSpendSummaryDto {
+  supplierId: string;
+  supplierName: string;
+  totalSpend: number;
+  percentageOfTotalSpend: number;
+  isPreferred: boolean;
+  riskLevel?: string;
+}
+
+export interface ProcurementPlanningSupplierRiskSummaryDto {
+  supplierId: string;
+  supplierName: string;
+  riskLevel: string;
+  totalSpend: number;
+  percentageOfTotalSpend: number;
+  riskFactors: string[];
+}
+
+export interface ProcurementPlanningReportRowDto {
+  planNumber: string;
+  planTitle: string;
+  departmentName?: string;
+  fiscalYear: number;
+  planningCycle?: string;
+  planningQuarter?: string;
+  status: string;
+  itemCategory?: string;
+  itemDescription?: string;
+  quantity: number;
+  estimatedCost: number;
+  approvedBudget: number;
+  variance: number;
+  publishedByName?: string;
+  publishedDate?: string;
+}
+
+export interface ProcurementPlanningReportDto {
+  reportType: string;
+  title: string;
+  fiscalYear?: number;
+  planningQuarter?: string;
+  generatedAt: string;
+  currency: string;
+  rows: ProcurementPlanningReportRowDto[];
 }
 
 // ============================================================================
@@ -199,6 +379,14 @@ export interface ProcurementPlanItemDto {
   id: string;
   procurementPlanId: string;
   inventoryItemId?: string;
+  procurementBudgetId?: string;
+  procurementBudgetAllocationId?: string;
+  marketAnalysisId?: string;
+  marketAnalysisTitle?: string;
+  budgetLineCode?: string;
+  budgetCategoryName?: string;
+  approvedBudgetAmount?: number;
+  budgetNotes?: string;
   inventoryItemCode?: string;
   inventoryItemName?: string;
   itemDescription: string;
@@ -252,6 +440,13 @@ export interface CreateProcurementPlanItemSupplierDto {
 
 export interface CreateProcurementPlanItemDto {
   inventoryItemId?: string;
+  procurementBudgetId?: string;
+  procurementBudgetAllocationId?: string;
+  marketAnalysisId?: string;
+  budgetLineCode?: string;
+  budgetCategoryName?: string;
+  approvedBudgetAmount?: number;
+  budgetNotes?: string;
   itemDescription: string;
   specifications?: string;
   itemCategory?: string;
@@ -446,6 +641,7 @@ export interface MarketAnalysisDto {
   analysisPeriodStart: string;
   analysisPeriodEnd: string;
   historicalAveragePrice: number;
+  previousPrice?: number;
   averagePrice?: number;
   currentMarketPrice: number;
   minimumPrice?: number;
@@ -453,7 +649,13 @@ export interface MarketAnalysisDto {
   forecastedPrice: number;
   priceTrend: string;
   priceChangePercent: number;
+  priceVariancePercent?: number;
   currency: string;
+  leadTimeDays?: number;
+  marketAvailability: string;
+  supplyRiskLevel: string;
+  inflationImpactPercent: number;
+  recommendedBudgetAdjustmentPercent: number;
   marketRiskLevel: string;
   riskFactors?: string;
   opportunities?: string;
@@ -482,11 +684,18 @@ export interface CreateMarketAnalysisDto {
   analysisPeriodStart: string;
   analysisPeriodEnd: string;
   historicalAveragePrice?: number;
+  previousPrice?: number;
   currentMarketPrice?: number;
   forecastedPrice?: number;
   priceTrend?: string;
   priceChangePercent?: number;
+  priceVariancePercent?: number;
   currency?: string;
+  leadTimeDays?: number;
+  marketAvailability?: string;
+  supplyRiskLevel?: string;
+  inflationImpactPercent?: number;
+  recommendedBudgetAdjustmentPercent?: number;
   marketRiskLevel?: string;
   riskFactors?: string;
   opportunities?: string;
@@ -530,6 +739,37 @@ export interface CreatePriceHistoryDto {
   notes?: string;
 }
 
+export interface PriceTrendDto {
+  marketAnalysisId: string;
+  itemCategory?: string;
+  itemDescription?: string;
+  trend: string;
+  changePercent: number;
+  averagePrice: number;
+  minPrice: number;
+  maxPrice: number;
+  currentPrice: number;
+  forecastedPrice: number;
+  currency: string;
+  analysisPeriodMonths: number;
+  analysisDate: string;
+  priceHistory: PriceHistoryDto[];
+}
+
+export interface MarketSurveySummaryDto {
+  marketAnalysisId: string;
+  quoteCount: number;
+  averageMarketPrice: number;
+  lowestPrice: number;
+  highestPrice: number;
+  recommendedPlanningEstimate: number;
+  currency: string;
+  lowestPriceSupplierId?: string;
+  lowestPriceSupplierName?: string;
+  latestQuoteDate?: string;
+  quotes: PriceHistoryDto[];
+}
+
 // ============================================================================
 // SUPPLIER CONSOLIDATION INTERFACES
 // ============================================================================
@@ -558,6 +798,8 @@ export interface SupplierConsolidationDto {
   preparedByName?: string;
   preparedDate?: string;
   status: string;
+  implementationDate?: string;
+  actualSavings: number;
   createdAt: string;
 }
 
@@ -788,7 +1030,10 @@ export const procurementPlanService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to submit procurement plan');
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit procurement plan');
+    }
     return response.json();
   },
 
@@ -798,7 +1043,95 @@ export const procurementPlanService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to approve/reject procurement plan');
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve/reject procurement plan');
+    }
+    return response.json();
+  },
+
+  async publishPlan(id: string, data: PublishProcurementPlanDto): Promise<ProcurementPlanDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/${id}/publish`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to publish procurement plan');
+    }
+    return response.json();
+  },
+
+  async getVersionHistory(id: string): Promise<ProcurementPlanDto[]> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/${id}/versions`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch procurement plan versions');
+    return response.json();
+  },
+
+  async createAmendment(id: string, data: CreateProcurementPlanAmendmentDto): Promise<ProcurementPlanDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/${id}/amendments`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create procurement plan amendment');
+    }
+    return response.json();
+  },
+
+  async getConsolidationOpportunities(params?: {
+    fiscalYear?: number;
+    planningQuarter?: string;
+    departmentId?: string;
+  }): Promise<ProcurementPlanConsolidationOpportunityDto[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.fiscalYear) queryParams.append('fiscalYear', params.fiscalYear.toString());
+    if (params?.planningQuarter) queryParams.append('planningQuarter', params.planningQuarter);
+    if (params?.departmentId) queryParams.append('departmentId', params.departmentId);
+
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/consolidation-opportunities?${queryParams}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch consolidation opportunities');
+    return response.json();
+  },
+
+  async getDashboard(params?: {
+    fiscalYear?: number;
+    planningQuarter?: string;
+    departmentId?: string;
+  }): Promise<ProcurementPlanningDashboardDto> {
+    const queryParams = new URLSearchParams();
+    if (params?.fiscalYear) queryParams.append('fiscalYear', params.fiscalYear.toString());
+    if (params?.planningQuarter) queryParams.append('planningQuarter', params.planningQuarter);
+    if (params?.departmentId) queryParams.append('departmentId', params.departmentId);
+
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/dashboard?${queryParams}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch procurement planning dashboard');
+    return response.json();
+  },
+
+  async getReport(reportType: string, params?: {
+    fiscalYear?: number;
+    planningQuarter?: string;
+    departmentId?: string;
+  }): Promise<ProcurementPlanningReportDto> {
+    const queryParams = new URLSearchParams();
+    if (params?.fiscalYear) queryParams.append('fiscalYear', params.fiscalYear.toString());
+    if (params?.planningQuarter) queryParams.append('planningQuarter', params.planningQuarter);
+    if (params?.departmentId) queryParams.append('departmentId', params.departmentId);
+
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/reports/${encodeURIComponent(reportType)}?${queryParams}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch procurement planning report');
     return response.json();
   },
 
@@ -1000,6 +1333,8 @@ export const procurementScheduleService = {
     status?: string;
     departmentId?: string;
     procurementPlanId?: string;
+    startDate?: string;
+    endDate?: string;
   }): Promise<PagedResult<ProcurementScheduleDto>> {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', params.page.toString());
@@ -1007,7 +1342,9 @@ export const procurementScheduleService = {
     if (params?.search) queryParams.append('search', params.search);
     if (params?.status) queryParams.append('status', params.status);
     if (params?.departmentId) queryParams.append('departmentId', params.departmentId);
-    if (params?.procurementPlanId) queryParams.append('procurementPlanId', params.procurementPlanId);
+    if (params?.procurementPlanId) queryParams.append('planId', params.procurementPlanId);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
 
     const response = await fetch(`${API_BASE_URL}/procurement/procurementschedules?${queryParams}`, {
       headers: getAuthHeaders(),
@@ -1142,6 +1479,40 @@ export const marketAnalysisService = {
     if (!response.ok) throw new Error('Failed to add price history');
     return response.json();
   },
+
+  async addSurveyQuote(analysisId: string, data: CreatePriceHistoryDto): Promise<PriceHistoryDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${analysisId}/survey-quotes`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to add survey quote');
+    return response.json();
+  },
+
+  async getPriceHistory(analysisId: string): Promise<PriceHistoryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${analysisId}/price-history`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch price history');
+    return response.json();
+  },
+
+  async getPriceTrend(analysisId: string, months = 12): Promise<PriceTrendDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${analysisId}/price-trend?months=${months}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch price trend');
+    return response.json();
+  },
+
+  async getSurveySummary(analysisId: string): Promise<MarketSurveySummaryDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${analysisId}/survey-summary`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch market survey summary');
+    return response.json();
+  },
 };
 
 // ============================================================================
@@ -1213,6 +1584,23 @@ export const supplierConsolidationService = {
     });
     if (!response.ok) throw new Error('Failed to approve consolidation');
     return response.json();
+  },
+
+  async implementConsolidation(id: string): Promise<SupplierConsolidationDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/supplierconsolidations/${id}/implement`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to implement consolidation');
+    return response.json();
+  },
+
+  async recordActualSavings(id: string, actualSavings: number): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/supplierconsolidations/${id}/record-savings?actualSavings=${actualSavings}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to record actual savings');
   },
 };
 
@@ -1298,6 +1686,15 @@ export const emergencyProcurementPlanService = {
     return response.json();
   },
 
+  async triggerPlan(id: string): Promise<EmergencyProcurementPlanDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/${id}/trigger`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to trigger emergency procurement plan');
+    return response.json();
+  },
+
   async addCriticalItem(planId: string, data: CreateEmergencyProcurementItemDto): Promise<EmergencyProcurementItemDto> {
     const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/${planId}/items`, {
       method: 'POST',
@@ -1308,12 +1705,22 @@ export const emergencyProcurementPlanService = {
     return response.json();
   },
 
-  async removeCriticalItem(planId: string, itemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/${planId}/items/${itemId}`, {
+  async removeCriticalItem(_planId: string, itemId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/items/${itemId}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error('Failed to remove critical item');
+  },
+
+  async updateCriticalItem(itemId: string, data: CreateEmergencyProcurementItemDto): Promise<EmergencyProcurementItemDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/items/${itemId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to update critical item');
+    return response.json();
   },
 
   async addEmergencySupplier(planId: string, data: CreateEmergencySupplierDto): Promise<EmergencySupplierDto> {
@@ -1326,12 +1733,22 @@ export const emergencyProcurementPlanService = {
     return response.json();
   },
 
-  async removeEmergencySupplier(planId: string, supplierId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/${planId}/suppliers/${supplierId}`, {
+  async removeEmergencySupplier(_planId: string, supplierId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/suppliers/${supplierId}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error('Failed to remove emergency supplier');
+  },
+
+  async updateEmergencySupplier(supplierId: string, data: CreateEmergencySupplierDto): Promise<EmergencySupplierDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/suppliers/${supplierId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to update emergency supplier');
+    return response.json();
   },
 };
 

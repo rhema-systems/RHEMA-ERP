@@ -68,6 +68,7 @@
     <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />
+    <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
   </ItemGroup>
 
 </Project>

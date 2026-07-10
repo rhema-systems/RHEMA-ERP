@@ -100,8 +100,8 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
 
         if (employee == null) throw new ArgumentException("Employee not found.");
 
-        // Block assignment if driver's license record exists and is expired.
-        // Missing license records are allowed at assignment time (dispatch is still blocked by FleetTripService).
+        // Vehicle assignment is operational authority to drive. Require a verified, current licence here
+        // rather than waiting until dispatch to discover that the assigned driver is not eligible.
         var license = await _unitOfWork.Repository<EmployeeIdentificationCard>()
             .GetQueryable(c =>
                 c.TenantId == tenantId &&
@@ -111,12 +111,31 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
             .OrderByDescending(c => c.ExpiryDate)
             .FirstOrDefaultAsync();
 
-        if (license?.ExpiryDate != null)
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        if (license == null)
         {
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-            if (license.ExpiryDate.Value < today)
-                throw new InvalidOperationException($"Cannot assign driver: driver's license for '{employee.FirstName} {employee.LastName}' expired on {license.ExpiryDate.Value:yyyy-MM-dd}.");
+            throw new InvalidOperationException($"Cannot assign driver: '{employee.FirstName} {employee.LastName}' does not have a driver's license on file.");
         }
+        if (!license.IsVerified)
+            throw new InvalidOperationException($"Cannot assign driver: driver's license for '{employee.FirstName} {employee.LastName}' has not been verified by HR.");
+        if (!license.ExpiryDate.HasValue)
+            throw new InvalidOperationException($"Cannot assign driver: driver's license for '{employee.FirstName} {employee.LastName}' has no expiry date.");
+        if (license.IssueDate.HasValue && license.IssueDate.Value > today)
+            throw new InvalidOperationException($"Cannot assign driver: driver's license for '{employee.FirstName} {employee.LastName}' is not valid until {license.IssueDate.Value:yyyy-MM-dd}.");
+        if (license.ExpiryDate.Value < today)
+            throw new InvalidOperationException($"Cannot assign driver: driver's license for '{employee.FirstName} {employee.LastName}' expired on {license.ExpiryDate.Value:yyyy-MM-dd}.");
+
+        var engagedTrip = await _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t =>
+                t.TenantId == tenantId &&
+                !t.IsDeleted &&
+                t.Status == FleetTripStatuses.Dispatched &&
+                t.DriverEmployeeId == employee.Id)
+            .Include(t => t.VehicleAsset)
+            .OrderByDescending(t => t.DispatchedAt)
+            .FirstOrDefaultAsync();
+        if (engagedTrip != null)
+            throw new InvalidOperationException($"Cannot assign driver: '{employee.FirstName} {employee.LastName}' is engaged on a dispatched trip with {engagedTrip.VehicleAsset.Name} ({engagedTrip.VehicleAsset.AssetNumber}).");
 
         var repo = _unitOfWork.Repository<FleetVehicleAssignment>();
 

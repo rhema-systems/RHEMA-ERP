@@ -347,7 +347,7 @@ class ReportsService {
 
   async exportReport(reportId: string, exportReportDto: ExportReportDto): Promise<{ fileName: string; blob: Blob }> {
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
       const url = `${baseUrl}/reports/${reportId}/export`;
       
       // Get auth token for headers

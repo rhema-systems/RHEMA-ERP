@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { procurementBudgetService, commonService, type CreateProcurementBudgetDto, type CreateProcurementBudgetAllocationDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import { FiscalYearSelect } from '../../components/FiscalYearSelect';
 
 export default function NewProcurementBudgetPage() {
   const router = useRouter();
@@ -143,7 +144,11 @@ export default function NewProcurementBudgetPage() {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="fiscalYear">Fiscal Year *</Label>
-                  <Input id="fiscalYear" type="number" value={formData.fiscalYear} onChange={(e) => handleInputChange('fiscalYear', parseInt(e.target.value))} min={2020} max={2050} required />
+                  <FiscalYearSelect
+                    value={formData.fiscalYear}
+                    onValueChange={(year) => handleInputChange('fiscalYear', year)}
+                    autoSelectFirstAvailable
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="allocatedAmount">Allocated Amount *</Label>
@@ -250,4 +255,3 @@ export default function NewProcurementBudgetPage() {
     </div>
   );
 }
-

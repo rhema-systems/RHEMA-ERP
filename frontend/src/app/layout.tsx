@@ -14,13 +14,14 @@ import { NotificationToast } from "../components/notifications/NotificationToast
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "ERP System - Enterprise Resource Planning",
-  description: "Modern enterprise resource planning system",
+  applicationName: "Rhema ERP",
+  title: "Rhema ERP - Enterprise Resource Planning",
+  description: "Enterprise resource planning with mobile fleet and maintenance inspections",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "ERP System"
+    title: "Rhema Mobile"
   },
   icons: {
     icon: "/favicon.ico",
@@ -33,7 +34,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#000000",
+  themeColor: "#f8fafc",
 };
 
 // Force dynamic rendering for all pages — this ERP app requires authentication

@@ -1,8 +1,10 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -16,6 +18,7 @@ public class MaintenanceDashboardController : ControllerBase
     private readonly IMaintenanceAssetService _assetService;
     private readonly IAssetDowntimeService _downtimeService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<MaintenanceDashboardController> _logger;
 
     public MaintenanceDashboardController(
@@ -24,6 +27,7 @@ public class MaintenanceDashboardController : ControllerBase
         IMaintenanceAssetService assetService,
         IAssetDowntimeService downtimeService,
         ICurrentUserService currentUserService,
+        IUnitOfWork unitOfWork,
         ILogger<MaintenanceDashboardController> logger)
     {
         _analyticsService = analyticsService;
@@ -31,6 +35,7 @@ public class MaintenanceDashboardController : ControllerBase
         _assetService = assetService;
         _downtimeService = downtimeService;
         _currentUserService = currentUserService;
+        _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
@@ -292,6 +297,40 @@ public class MaintenanceDashboardController : ControllerBase
     }
 
     /// <summary>
+    /// Gets mobile/offline inspection operational KPIs.
+    /// </summary>
+    [HttpGet("fleet-inspections")]
+    public async Task<ActionResult<FleetInspectionOperationsDashboardDto>> GetFleetInspectionOperations(
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null)
+    {
+        try
+        {
+            var start = (startDate ?? DateTime.UtcNow.AddDays(-30)).ToUniversalTime();
+            var end = (endDate ?? DateTime.UtcNow).ToUniversalTime();
+
+            if (start > end)
+            {
+                return BadRequest("Start date cannot be after end date");
+            }
+
+            var tenantId = _currentUserService.TenantId;
+            if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+            {
+                return BadRequest("Tenant context is required");
+            }
+
+            var dashboard = await GetFleetInspectionOperationsAsync(tenantId.Value, start, end);
+            return Ok(dashboard);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fleet inspection operations dashboard");
+            return StatusCode(500, "An error occurred while retrieving fleet inspection operations");
+        }
+    }
+
+    /// <summary>
     /// Refreshes dashboard cache and returns updated data
     /// </summary>
     [HttpPost("refresh")]
@@ -314,6 +353,156 @@ public class MaintenanceDashboardController : ControllerBase
 
     #region Helper Methods
 
+    private async Task<FleetInspectionOperationsDashboardDto> GetFleetInspectionOperationsAsync(Guid tenantId, DateTime start, DateTime end)
+    {
+        var inspectionRows = await _unitOfWork.Repository<FleetTripInspection>()
+            .GetQueryable(i =>
+                i.TenantId == tenantId &&
+                !i.IsDeleted &&
+                i.CompletedAtUtc.HasValue &&
+                i.CompletedAtUtc.Value >= start &&
+                i.CompletedAtUtc.Value <= end)
+            .Select(i => new
+            {
+                i.Id,
+                i.OverallResult,
+                i.CapturedOfflineAtUtc,
+                i.SyncedAtUtc,
+                CompletedAtUtc = i.CompletedAtUtc!.Value,
+                AssetName = i.VehicleAsset.Name,
+                AssetNumber = i.VehicleAsset.AssetNumber,
+                TemplateName = i.InspectionTemplate.Name,
+                SheetType = i.InspectionTemplate.SheetType
+            })
+            .ToListAsync();
+
+        var inspectionIds = inspectionRows.Select(i => i.Id).ToList();
+        var inspectionById = inspectionRows.ToDictionary(i => i.Id);
+
+        var defectRows = inspectionIds.Count == 0
+            ? new List<FleetInspectionDashboardDefectRow>()
+            : await _unitOfWork.Repository<FleetDefect>()
+                .GetQueryable(d =>
+                    d.TenantId == tenantId &&
+                    !d.IsDeleted &&
+                    d.FleetTripInspectionId.HasValue &&
+                    inspectionIds.Contains(d.FleetTripInspectionId.Value))
+                .Select(d => new FleetInspectionDashboardDefectRow
+                {
+                    Id = d.Id,
+                    InspectionId = d.FleetTripInspectionId!.Value,
+                    WorkOrderId = d.WorkOrderId,
+                    Severity = d.Severity,
+                    Status = d.Status,
+                    ReportedAtUtc = d.ReportedAtUtc,
+                    WorkOrderStatus = d.WorkOrder != null ? d.WorkOrder.Status : null
+                })
+                .ToListAsync();
+
+        var qrTemplates = _unitOfWork.Repository<InspectionTemplate>()
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive && t.IsQrEnabled && t.MobileOfflineEnabled);
+        var qrTemplateCount = await qrTemplates.CountAsync();
+        var staleQrTemplateCount = await qrTemplates.CountAsync(t => t.UpdatedAt < DateTime.UtcNow.AddDays(-180));
+
+        var total = inspectionRows.Count;
+        var failed = inspectionRows.Count(i => string.Equals(i.OverallResult, "Fail", StringComparison.OrdinalIgnoreCase));
+        var flagged = inspectionRows.Count(i => string.Equals(i.OverallResult, "ConditionalPass", StringComparison.OrdinalIgnoreCase));
+        var passed = inspectionRows.Count(i => string.Equals(i.OverallResult, "Pass", StringComparison.OrdinalIgnoreCase));
+        var synced = inspectionRows.Count(i => i.SyncedAtUtc.HasValue);
+        var offlineCaptured = inspectionRows.Count(i => i.CapturedOfflineAtUtc.HasValue);
+        var workOrderIds = defectRows
+            .Where(d => d.WorkOrderId != null)
+            .Select(d => d.WorkOrderId!.Value)
+            .Distinct()
+            .ToList();
+        var defectCount = defectRows.Count;
+
+        var sheetBreakdown = inspectionRows
+            .GroupBy(i => string.IsNullOrWhiteSpace(i.SheetType) ? "InspectionSheet" : i.SheetType)
+            .Select(group => new FleetInspectionSheetBreakdownDto
+            {
+                SheetType = group.Key,
+                Total = group.Count(),
+                Failed = group.Count(i => string.Equals(i.OverallResult, "Fail", StringComparison.OrdinalIgnoreCase)),
+                Flagged = group.Count(i => string.Equals(i.OverallResult, "ConditionalPass", StringComparison.OrdinalIgnoreCase)),
+                OfflineCaptured = group.Count(i => i.CapturedOfflineAtUtc.HasValue)
+            })
+            .OrderByDescending(x => x.Total)
+            .ToList();
+
+        var recentIssues = defectRows
+            .OrderByDescending(d => d.ReportedAtUtc)
+            .Take(6)
+            .Select(d =>
+            {
+                var inspection = inspectionById.TryGetValue(d.InspectionId, out var row) ? row : null;
+                return new FleetInspectionRecentIssueDto
+                {
+                    InspectionId = d.InspectionId,
+                    DefectId = d.Id,
+                    WorkOrderId = d.WorkOrderId,
+                    AssetName = inspection?.AssetName ?? "Asset",
+                    AssetNumber = inspection?.AssetNumber ?? string.Empty,
+                    TemplateName = inspection?.TemplateName ?? "Inspection",
+                    SheetType = inspection?.SheetType ?? "InspectionSheet",
+                    OverallResult = inspection?.OverallResult ?? string.Empty,
+                    Severity = d.Severity ?? string.Empty,
+                    DefectStatus = d.Status ?? string.Empty,
+                    WorkOrderStatus = d.WorkOrderStatus,
+                    ReportedAtUtc = d.ReportedAtUtc
+                };
+            })
+            .ToList();
+
+        var openFollowUps = defectRows.Count(d => d.WorkOrderId != null && !IsTerminalWorkOrderStatus(d.WorkOrderStatus));
+
+        return new FleetInspectionOperationsDashboardDto
+        {
+            StartDateUtc = start,
+            EndDateUtc = end,
+            LastUpdatedUtc = DateTime.UtcNow,
+            TotalInspections = total,
+            SyncedInspections = synced,
+            OfflineCapturedInspections = offlineCaptured,
+            PassedInspections = passed,
+            FailedInspections = failed,
+            FlaggedInspections = flagged,
+            DefectsCreated = defectCount,
+            WorkOrdersCreated = workOrderIds.Count,
+            OpenFollowUpWorkOrders = openFollowUps,
+            QrEnabledTemplates = qrTemplateCount,
+            StaleQrTemplates = staleQrTemplateCount,
+            SyncRate = CalculatePercent(synced, total),
+            FailureRate = CalculatePercent(failed + flagged, total),
+            WorkOrderFollowUpRate = CalculatePercent(workOrderIds.Count, defectCount),
+            SheetBreakdown = sheetBreakdown,
+            RecentIssues = recentIssues
+        };
+    }
+
+    private static decimal CalculatePercent(int value, int total)
+    {
+        return total <= 0 ? 0 : Math.Round((decimal)value / total * 100, 2);
+    }
+
+    private static bool IsTerminalWorkOrderStatus(string? status)
+    {
+        return string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(status, "Closed", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class FleetInspectionDashboardDefectRow
+    {
+        public Guid Id { get; set; }
+        public Guid InspectionId { get; set; }
+        public Guid? WorkOrderId { get; set; }
+        public string? Severity { get; set; }
+        public string? Status { get; set; }
+        public DateTime ReportedAtUtc { get; set; }
+        public string? WorkOrderStatus { get; set; }
+    }
+
     private async Task<MaintenanceAlertsDto> GetMaintenanceAlertsAsync()
     {
         var overdueWorkOrders = await _workOrderService.GetOverdueWorkOrdersAsync();
@@ -328,7 +517,8 @@ public class MaintenanceDashboardController : ControllerBase
         // Process overdue work orders
         foreach (var workOrder in overdueWorkOrders.Take(10))
         {
-            var daysOverdue = (DateTime.Now - workOrder.ScheduledEndDate!.Value).Days;
+            var dueDate = workOrder.ScheduledEndDate ?? workOrder.RequestedCompletionDate ?? workOrder.DueDate ?? workOrder.CreatedAt;
+            var daysOverdue = Math.Max((DateTime.UtcNow - dueDate).Days, 0);
             var severity = daysOverdue > 7 ? "Critical" : daysOverdue > 3 ? "Warning" : "Info";
 
             var alert = new MaintenanceAlertDto
@@ -433,35 +623,14 @@ public class MaintenanceDashboardController : ControllerBase
 
     private async Task<AssetHealthSummaryDto> GetAssetHealthSummaryAsync()
     {
-        var assets = await _assetService.GetAssetsWithActiveWorkOrdersAsync();
+        var assetMetrics = await _assetService.GetAssetMetricsAsync();
         var activeDowntime = await _downtimeService.GetActiveDowntimeAsync();
 
-        var healthyAssets = 0;
-        var warningAssets = 0;
-        var criticalAssets = 0;
+        var totalAssets = assetMetrics.TotalAssets;
         var offlineAssets = activeDowntime.Count();
-
-        // Simplified health calculation
-        foreach (var asset in assets)
-        {
-            var hasEmergencyWork = asset.Status == "Emergency";
-            var hasOverdueWork = asset.Status == "Overdue";
-
-            if (hasEmergencyWork)
-            {
-                criticalAssets++;
-            }
-            else if (hasOverdueWork)
-            {
-                warningAssets++;
-            }
-            else
-            {
-                healthyAssets++;
-            }
-        }
-
-        var totalAssets = healthyAssets + warningAssets + criticalAssets + offlineAssets;
+        var criticalAssets = Math.Min(assetMetrics.CriticalAssets, totalAssets);
+        var warningAssets = Math.Max(assetMetrics.AssetsRequiringMaintenance - criticalAssets, 0);
+        var healthyAssets = Math.Max(totalAssets - criticalAssets - warningAssets - offlineAssets, 0);
 
         return new AssetHealthSummaryDto
         {
@@ -479,21 +648,42 @@ public class MaintenanceDashboardController : ControllerBase
 
     private async Task<MaintenanceEfficiencyDto> GetMaintenanceEfficiencyAsync(DateTime startDate, DateTime endDate)
     {
-        // Parse UserId string to Guid for the placeholder call
-        var userIdString = _currentUserService.UserId;
-        var userId = !string.IsNullOrEmpty(userIdString) && Guid.TryParse(userIdString, out var parsedUserId) ? parsedUserId : Guid.Empty;
-        var workOrders = await _workOrderService.GetWorkOrdersByTechnicianAsync(userId); // Placeholder
+        var workOrderResult = await _workOrderService.GetWorkOrdersPagedAsync(new WorkOrderFilterDto
+        {
+            StartDate = startDate,
+            EndDate = endDate,
+            Page = 1,
+            PageSize = int.MaxValue
+        });
+        var workOrders = workOrderResult.Items.ToList();
+        var completedWorkOrders = workOrders
+            .Where(wo => string.Equals(wo.Status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(wo.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+            .ToList();
         var preventiveReport = await _analyticsService.GetPreventiveMaintenanceReportAsync(startDate, endDate);
+        var averageRepairTime = completedWorkOrders
+            .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
+            .Select(wo => (wo.ActualEndDate!.Value - wo.ActualStartDate!.Value).TotalHours)
+            .Where(hours => hours >= 0)
+            .DefaultIfEmpty(0)
+            .Average();
+        var completedOnFirstPass = completedWorkOrders.Count(wo =>
+            !wo.Title.Contains("rework", StringComparison.OrdinalIgnoreCase) &&
+            !(wo.Description?.Contains("rework", StringComparison.OrdinalIgnoreCase) ?? false));
 
         return new MaintenanceEfficiencyDto
         {
             PlannedWorkPercentage = preventiveReport.ComplianceRate,
             ScheduleAdherence = preventiveReport.ComplianceRate,
-            FirstTimeFixRate = 85.0, // Would need more detailed tracking
-            AverageRepairTime = 4.5, // Hours
-            ResourceUtilization = 75.0, // Percentage
-            InventoryTurnover = 12.0, // Times per year
-            EfficiencyTrend = "Improving" // Could be "Improving", "Stable", "Declining"
+            FirstTimeFixRate = completedWorkOrders.Any()
+                ? (double)completedOnFirstPass / completedWorkOrders.Count * 100
+                : 0,
+            AverageRepairTime = averageRepairTime,
+            ResourceUtilization = workOrders.Any()
+                ? (double)completedWorkOrders.Count / workOrders.Count * 100
+                : 0,
+            InventoryTurnover = 0,
+            EfficiencyTrend = "Current"
         };
     }
 
@@ -520,27 +710,44 @@ public class MaintenanceDashboardController : ControllerBase
 
     private async Task<MaintenanceBacklogDto> GetMaintenanceBacklogAsync()
     {
-        var allWorkOrders = await _workOrderService.GetWorkOrdersByStatusAsync("Scheduled");
-        var overdueWorkOrders = await _workOrderService.GetOverdueWorkOrdersAsync();
+        var allWorkOrdersResult = await _workOrderService.GetWorkOrdersPagedAsync(new WorkOrderFilterDto
+        {
+            Page = 1,
+            PageSize = int.MaxValue
+        });
+        var allOpenWorkOrders = allWorkOrdersResult.Items
+            .Where(wo => IsActiveWorkOrderStatus(wo.Status))
+            .ToList();
+        var overdueWorkOrders = allOpenWorkOrders.Where(wo => wo.IsOverdue).ToList();
 
-        var backlogHours = allWorkOrders.Where(wo => wo.EstimatedHours > 0).Sum(wo => wo.EstimatedHours);
-        var backlogCost = allWorkOrders.Where(wo => wo.EstimatedCost > 0).Sum(wo => wo.EstimatedCost);
+        var backlogHours = allOpenWorkOrders.Where(wo => wo.EstimatedHours > 0).Sum(wo => wo.EstimatedHours);
+        var backlogCost = allOpenWorkOrders.Where(wo => wo.EstimatedCost > 0).Sum(wo => wo.EstimatedCost);
+        var averageAge = allOpenWorkOrders.Any()
+            ? allOpenWorkOrders.Average(wo => Math.Max((DateTime.UtcNow - wo.CreatedAt).TotalDays, 0))
+            : 0;
 
         return new MaintenanceBacklogDto
         {
-            TotalWorkOrders = allWorkOrders.Count(),
+            TotalWorkOrders = allOpenWorkOrders.Count,
             OverdueWorkOrders = overdueWorkOrders.Count(),
             EstimatedHours = backlogHours,
             EstimatedCost = backlogCost,
-            AverageAge = 15.0, // Days - would need to calculate from creation dates
-            PriorityBreakdown = new List<BacklogPriorityDto>
-            {
-                new() { Priority = "Emergency", Count = allWorkOrders.Count(wo => wo.Priority == "Emergency") },
-                new() { Priority = "High", Count = allWorkOrders.Count(wo => wo.Priority == "High") },
-                new() { Priority = "Normal", Count = allWorkOrders.Count(wo => wo.Priority == "Normal") },
-                new() { Priority = "Low", Count = allWorkOrders.Count(wo => wo.Priority == "Low") }
-            }
+            AverageAge = averageAge,
+            PriorityBreakdown = allOpenWorkOrders
+                .GroupBy(wo => string.IsNullOrWhiteSpace(wo.PriorityName) ? wo.Priority : wo.PriorityName)
+                .Where(g => !string.IsNullOrWhiteSpace(g.Key))
+                .Select(g => new BacklogPriorityDto { Priority = g.Key, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .ToList()
         };
+    }
+
+    private static bool IsActiveWorkOrderStatus(string? status)
+    {
+        return !string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Closed", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Canceled", StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion

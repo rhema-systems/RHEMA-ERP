@@ -91,4 +91,9 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Remove="wwwroot\uploads\**" />
+    <None Remove="wwwroot\uploads\**" />
+  </ItemGroup>
+
 </Project>

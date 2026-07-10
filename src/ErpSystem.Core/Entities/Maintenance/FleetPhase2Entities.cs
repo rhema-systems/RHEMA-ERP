@@ -33,8 +33,10 @@ public class FleetVehicleAssignment : TenantEntity
 
 public class FleetTripInspection : TenantEntity
 {
+    public Guid? FleetTripId { get; set; }
+
     [Required]
-    public Guid FleetTripId { get; set; }
+    public Guid VehicleAssetId { get; set; }
 
     [Required]
     public Guid InspectionTemplateId { get; set; }
@@ -59,8 +61,17 @@ public class FleetTripInspection : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    [MaxLength(100)]
+    public string? ClientSubmissionId { get; set; }
+
+    public DateTime? CapturedOfflineAtUtc { get; set; }
+    public DateTime? SyncedAtUtc { get; set; }
+
     [ForeignKey(nameof(FleetTripId))]
-    public virtual FleetTrip FleetTrip { get; set; } = null!;
+    public virtual FleetTrip? FleetTrip { get; set; }
+
+    [ForeignKey(nameof(VehicleAssetId))]
+    public virtual MaintenanceAsset VehicleAsset { get; set; } = null!;
 
     [ForeignKey(nameof(InspectionTemplateId))]
     public virtual InspectionTemplate InspectionTemplate { get; set; } = null!;

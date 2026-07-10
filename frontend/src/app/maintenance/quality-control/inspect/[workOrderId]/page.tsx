@@ -15,7 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
 import maintenanceApiService from '@/services/maintenanceApiService';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 interface ChecklistItem {
   item: string;

@@ -11,10 +11,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { Swords, Search, RefreshCw, Plus, Trophy, XCircle, Clock } from 'lucide-react';
+import { BarChart3, Swords, Search, RefreshCw, Plus, Trophy, Clock } from 'lucide-react';
 import { toast } from 'sonner';
-import { competitorService, type CompetitorSummary, type CreateCompetitor } from '@/services/competitorService';
-import { format } from 'date-fns';
+import { competitorService, type CompetitorAnalytics, type CompetitorSummary, type CreateCompetitor } from '@/services/competitorService';
 
 const THREAT_CONFIG: Record<string, { className: string }> = {
   Low: { className: 'bg-green-100 text-green-800' },
@@ -27,9 +26,15 @@ const EMPTY_COMPETITOR: CreateCompetitor = {
   name: '', estimatedMarketShare: 0, threatLevel: 'Medium',
 };
 
+const formatAmount = (amount?: number) => {
+  if (amount === undefined || amount === null) return '$0.00';
+  return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 export default function CompetitorsPage() {
   const router = useRouter();
   const [competitors, setCompetitors] = useState<CompetitorSummary[]>([]);
+  const [analytics, setAnalytics] = useState<CompetitorAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [threatFilter, setThreatFilter] = useState('');
@@ -41,6 +46,16 @@ export default function CompetitorsPage() {
   const [form, setForm] = useState<CreateCompetitor>({ ...EMPTY_COMPETITOR });
 
   useEffect(() => { loadCompetitors(); }, [page, threatFilter]);
+  useEffect(() => { loadAnalytics(); }, []);
+
+  const loadAnalytics = async () => {
+    try {
+      const result = await competitorService.getAnalytics();
+      setAnalytics(result.data);
+    } catch {
+      setAnalytics(null);
+    }
+  };
 
   const loadCompetitors = async () => {
     try {
@@ -67,14 +82,15 @@ export default function CompetitorsPage() {
       setShowCreate(false);
       setForm({ ...EMPTY_COMPETITOR });
       loadCompetitors();
+      loadAnalytics();
     } catch (error: any) { toast.error(error.message || 'Failed to add competitor'); }
     finally { setCreating(false); }
   };
 
   const totalPages = Math.ceil(totalCount / pageSize);
-  const totalDeals = competitors.reduce((s, c) => s + c.dealCount, 0);
-  const totalWins = competitors.reduce((s, c) => s + c.wonDeals, 0);
-  const totalLosses = competitors.reduce((s, c) => s + c.lostDeals, 0);
+  const totalDeals = analytics?.openCompetitiveDeals ?? competitors.reduce((s, c) => s + c.openDeals, 0);
+  const totalWins = analytics?.wonDeals ?? competitors.reduce((s, c) => s + c.wonDeals, 0);
+  const totalLosses = analytics?.lostDeals ?? competitors.reduce((s, c) => s + c.lostDeals, 0);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -90,13 +106,49 @@ export default function CompetitorsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Competitors</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold">{totalCount}</p></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Tracked Deals</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold">{analytics?.totalCompetitors ?? totalCount}</p></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Open Deals</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-blue-600"><Clock className="h-5 w-5 inline" />{totalDeals}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Deals Won (vs them)</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-green-600"><Trophy className="h-5 w-5 inline" />{totalWins}</p></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Deals Lost</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold text-red-600"><XCircle className="h-5 w-5 inline" />{totalLosses}</p></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Open Exposure</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold text-red-600">{formatAmount(analytics?.openCompetitiveDealValue ?? competitors.reduce((s, c) => s + c.openDealValue, 0))}</p></CardContent></Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Win Rate</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-emerald-600">{analytics?.winRate ?? 0}%</p>
+            <p className="text-xs text-gray-500">{totalWins} won / {totalLosses} lost</p>
+          </CardContent>
+        </Card>
+        <Card className="lg:col-span-1">
+          <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-sm font-medium text-gray-500"><BarChart3 className="h-4 w-4" />Threat Exposure</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {(analytics?.threatBreakdown ?? []).length === 0 ? (
+              <p className="text-sm text-gray-500">No threat data yet.</p>
+            ) : (analytics?.threatBreakdown ?? []).map((item) => (
+              <div key={item.threatLevel} className="flex items-center justify-between text-sm">
+                <span>{item.threatLevel}</span>
+                <span className="font-medium">{item.competitorCount} competitors | {formatAmount(item.openDealValue)}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="lg:col-span-1">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-gray-500">Top Industries</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {(analytics?.industryBreakdown ?? []).length === 0 ? (
+              <p className="text-sm text-gray-500">No industry data yet.</p>
+            ) : (analytics?.industryBreakdown ?? []).slice(0, 4).map((item) => (
+              <div key={item.industry} className="flex items-center justify-between text-sm">
+                <span>{item.industry}</span>
+                <span className="font-medium">{item.competitorCount} | {item.averageMarketShare}% avg share</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -132,7 +184,7 @@ export default function CompetitorsPage() {
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>Name</TableHead><TableHead>Industry</TableHead><TableHead>Threat Level</TableHead>
-                  <TableHead>Market Share</TableHead><TableHead>Deals</TableHead><TableHead>Won</TableHead><TableHead>Lost</TableHead><TableHead>Status</TableHead>
+                  <TableHead>Market Share</TableHead><TableHead>Open Deals</TableHead><TableHead>Open Value</TableHead><TableHead>Win Rate</TableHead><TableHead>Status</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {competitors.map((c) => (
@@ -141,9 +193,9 @@ export default function CompetitorsPage() {
                       <TableCell>{c.industry || '-'}</TableCell>
                       <TableCell><Badge className={THREAT_CONFIG[c.threatLevel]?.className || ''}>{c.threatLevel}</Badge></TableCell>
                       <TableCell>{c.estimatedMarketShare}%</TableCell>
-                      <TableCell className="font-semibold">{c.dealCount}</TableCell>
-                      <TableCell className="text-green-600 font-semibold">{c.wonDeals}</TableCell>
-                      <TableCell className="text-red-600 font-semibold">{c.lostDeals}</TableCell>
+                      <TableCell className="font-semibold">{c.openDeals}</TableCell>
+                      <TableCell className="font-semibold">{formatAmount(c.openDealValue)}</TableCell>
+                      <TableCell className="font-semibold text-green-700">{c.winRate}%</TableCell>
                       <TableCell><Badge variant={c.isActive ? 'default' : 'secondary'}>{c.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
                     </TableRow>
                   ))}

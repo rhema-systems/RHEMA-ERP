@@ -32,6 +32,8 @@ public interface IReturnOrderService
         int page = 1, int pageSize = 20,
         string? search = null, CreditNoteStatus? status = null,
         Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null);
+    Task<CreditNoteDetailDto> SubmitCreditNoteForApprovalAsync(Guid id);
+    Task<CreditNoteDetailDto> ProcessCreditNoteApprovalAsync(Guid id, CreditNoteApprovalDto dto);
     Task<CreditNoteDetailDto> ApproveCreditNoteAsync(Guid id);
     Task<CreditNoteDetailDto> PostCreditNoteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CreditNoteDetailDto> ApplyCreditNoteAsync(Guid id, Guid? invoiceId = null);
@@ -44,6 +46,8 @@ public interface IReturnOrderService
         int page = 1, int pageSize = 20,
         string? search = null, RefundStatus? status = null,
         Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null);
+    Task<RefundDetailDto> SubmitRefundForApprovalAsync(Guid id);
+    Task<RefundDetailDto> ProcessRefundApprovalAsync(Guid id, RefundApprovalDto dto);
     Task<RefundDetailDto> ApproveRefundAsync(Guid id);
     Task<RefundDetailDto> ProcessRefundAsync(Guid id, string? paymentReference = null);
     Task<RefundDetailDto> RejectRefundAsync(Guid id, string? reason = null);

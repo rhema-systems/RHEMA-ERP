@@ -20,11 +20,20 @@ This documentation provides comprehensive details about your **Production-Ready 
 - **[Storage Abstraction Guide](STORAGE_ABSTRACTION.md)** - File storage configuration
 - **[Database Guide](database-switching-guide.md)** - Database provider switching
 - **[Deployment Guide](modular-monolith-deployment-guide.md)** - Production deployment
+- **[VPS Deployment Runbook](VPS_DEPLOYMENT_RUNBOOK.md)** - Live VPS deployment gotchas and smoke tests
 - **[CI/CD Guide](ci-cd-guide.md)** - Automated deployment pipeline
+
+## Active Implementation Trackers
+
+- **[TDC Procurement and Inventory Gap Tracker](tdc-procurement-inventory-gap-implementation-tracker.md)** - Full requirements coverage, statutory control decisions, implementation phases, and acceptance scenarios
+- **[Enterprise Workflow Platform Tracker](enterprise-workflow-platform-tracker.md)** - Completed shared workflow capability ledger and verification evidence
+- **[Procurement Planning Tracker](procurement-planning-tasklist.md)** - Delivered procurement planning slices and verification history
+- **[Offline Fleet Inspection Tracker](offline-fleet-inspection-mobile-tasklist.md)** - Offline-first fleet inspection delivery ledger
 
 ## 🛠️ **Development Guides**
 
 - **[Architecture Summary](Updated\ -\ architecture-summary.md)** - System architecture overview
+- **[Enterprise Workflow Module Integration Guide](enterprise-workflow-module-integration-guide.md)** - Required backend and frontend integration pattern for module teams
 - **[Database Best Practices](database-agnostic-best-practices.md)** - Database optimization
 - **[Security Guidelines](../README.md#security-features)** - Security implementation
 

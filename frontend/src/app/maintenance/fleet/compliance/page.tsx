@@ -359,9 +359,9 @@ export default function FleetCompliancePage() {
                           ) : dueStatus === 'Overdue' ? (
                             <Badge variant="destructive">Overdue</Badge>
                           ) : dueStatus === 'DueSoon' ? (
-                            <Badge variant="secondary">Due soon</Badge>
+                            <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">Due soon</Badge>
                           ) : (
-                            <Badge variant="outline">OK</Badge>
+                            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">OK</Badge>
                           )}
                         </TableCell>
                         <TableCell>

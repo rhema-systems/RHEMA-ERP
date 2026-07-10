@@ -11,6 +11,11 @@ namespace ErpSystem.Core.Entities.Workflow;
 public class WorkflowDefinition : TenantEntity
 {
     /// <summary>
+    /// Stable identifier shared by every version in the same workflow family.
+    /// </summary>
+    public Guid DefinitionKey { get; set; } = Guid.NewGuid();
+
+    /// <summary>
     /// Name of the workflow definition
     /// </summary>
     [Required]
@@ -35,9 +40,27 @@ public class WorkflowDefinition : TenantEntity
     public int Version { get; set; } = 1;
 
     /// <summary>
+    /// Draft versions are editable. Published and retired versions are immutable.
+    /// </summary>
+    public WorkflowDefinitionLifecycleStatus LifecycleStatus { get; set; } = WorkflowDefinitionLifecycleStatus.Draft;
+
+    /// <summary>
     /// Whether this workflow definition is active and can be used
     /// </summary>
     public bool IsActive { get; set; } = true;
+
+    [StringLength(500)]
+    public string? ChangeSummary { get; set; }
+
+    public Guid? SupersedesDefinitionId { get; set; }
+
+    public DateTime? PublishedAt { get; set; }
+
+    public Guid? PublishedById { get; set; }
+
+    public DateTime? RetiredAt { get; set; }
+
+    public Guid? RetiredById { get; set; }
 
     /// <summary>
     /// JSON configuration for the workflow (conditions, rules, etc.)

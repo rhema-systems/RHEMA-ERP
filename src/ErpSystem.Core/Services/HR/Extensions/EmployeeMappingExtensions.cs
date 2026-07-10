@@ -38,6 +38,7 @@ public static class EmployeeMappingExtensions
             OrganizationLevelName = e.OrganizationLevel?.Name,
             OrganizationUnitName = e.OrganizationUnit?.Name,
             LocationLevelName = e.LocationLevel?.Name,
+            LocationId = e.LocationId,
             LocationName = e.Location?.Name,
 
             StaffStatus = e.StaffStatus,

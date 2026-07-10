@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('token') || localStorage.getItem('authToken');
@@ -30,8 +30,68 @@ export interface FleetVehicleListDto {
   model?: string | null;
   mileage?: number | null;
   operatingHours?: number | null;
+  location?: string | null;
+  currentProjectId?: string | null;
+  currentProjectName?: string | null;
+  currentSiteLocationId?: string | null;
+  currentSiteLocationName?: string | null;
+  lastUsedAtUtc?: string | null;
+  lastServiceDate?: string | null;
+  nextServiceDue?: string | null;
+  nextMaintenanceDate?: string | null;
+  nextMaintenanceScheduleDueAt?: string | null;
   currentDriverEmployeeId?: string | null;
   currentDriverEmployeeName?: string | null;
+}
+
+export interface FleetDriverDto {
+  employeeId: string;
+  employeeNumber: string;
+  fullName: string;
+  emailAddress: string;
+  phoneNumber?: string | null;
+  positionTitle: string;
+  departmentName: string;
+  staffStatus: string;
+  isActive: boolean;
+  driverLicenseId?: string | null;
+  driverLicenseNumber?: string | null;
+  licenseIssueDate?: string | null;
+  licenseExpiryDate?: string | null;
+  licenseIssuingAuthority?: string | null;
+  isLicenseVerified: boolean;
+  licenseVerifiedDate?: string | null;
+  licenseStatus: 'Missing' | 'Missing Expiry' | 'Expired' | 'Expiring' | 'Valid' | string;
+  daysUntilLicenseExpiry?: number | null;
+  currentAssignmentId?: string | null;
+  currentVehicleAssetId?: string | null;
+  currentVehicleName?: string | null;
+  currentVehicleAssetNumber?: string | null;
+  assignedFromUtc?: string | null;
+  isAssigned: boolean;
+  totalTripCount: number;
+  activeTripCount: number;
+  availabilityStatus: 'Available' | 'Engaged' | string;
+  activeTripId?: string | null;
+  activeTripVehicleName?: string | null;
+  activeTripVehicleAssetNumber?: string | null;
+  activeTripStartedAtUtc?: string | null;
+  lastTripAtUtc?: string | null;
+}
+
+export interface FleetDriverSummaryDto {
+  totalDrivers: number;
+  validLicenses: number;
+  expiringLicenses: number;
+  expiredLicenses: number;
+  missingLicenses: number;
+  unverifiedLicenses: number;
+  assignedDrivers: number;
+  engagedDrivers: number;
+}
+
+export interface FleetDriverDirectoryDto extends PagedResult<FleetDriverDto> {
+  summary: FleetDriverSummaryDto;
 }
 
 export interface CreateFleetVehicleDto {
@@ -266,9 +326,13 @@ export interface EndFleetDriverAssignmentDto {
 
 export interface FleetTripInspectionDto {
   id: string;
-  fleetTripId: string;
+  fleetTripId?: string | null;
+  vehicleAssetId: string;
+  vehicleAssetName: string;
+  vehicleAssetNumber: string;
   inspectionTemplateId: string;
   inspectionTemplateName: string;
+  sheetType: string;
   inspectorEmployeeId?: string | null;
   inspectorEmployeeName?: string | null;
   inspectionKind: string;
@@ -278,6 +342,11 @@ export interface FleetTripInspectionDto {
   overallResult?: string | null;
   inspectionData: string;
   notes?: string | null;
+  clientSubmissionId?: string | null;
+  capturedOfflineAtUtc?: string | null;
+  syncedAtUtc?: string | null;
+  defectId?: string | null;
+  workOrderId?: string | null;
 }
 
 export interface StartFleetTripInspectionDto {
@@ -333,6 +402,19 @@ export interface CreateWorkOrderFromFleetDefectDto {
   billingType?: 'Maintenance' | 'Repairs';
   titleOverride?: string | null;
   descriptionOverride?: string | null;
+}
+
+export interface SubmitFleetAssetInspectionDto {
+  inspectionTemplateId: string;
+  inspectorEmployeeId?: string | null;
+  clientSubmissionId: string;
+  startedAtUtc?: string | null;
+  completedAtUtc?: string | null;
+  capturedOfflineAtUtc?: string | null;
+  inspectionKind?: string | null;
+  overallResult: string;
+  inspectionData: string;
+  notes?: string | null;
 }
 
 export interface FleetIncidentDto {
@@ -671,6 +753,27 @@ export const fleetService = {
     return response.json();
   },
 
+  async getDrivers(params?: {
+    page?: number;
+    pageSize?: number;
+    searchTerm?: string;
+    licenseStatus?: string;
+    assigned?: boolean;
+  }): Promise<FleetDriverDirectoryDto> {
+    const usp = new URLSearchParams();
+    usp.set('page', String(params?.page ?? 1));
+    usp.set('pageSize', String(params?.pageSize ?? 25));
+    if (params?.searchTerm) usp.set('searchTerm', params.searchTerm);
+    if (params?.licenseStatus && params.licenseStatus !== 'All') usp.set('licenseStatus', params.licenseStatus);
+    if (params?.assigned !== undefined) usp.set('assigned', String(params.assigned));
+
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/drivers?${usp.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
   async getTripDestinations(params?: { activeOnly?: boolean }): Promise<FleetTripDestinationDto[]> {
     const usp = new URLSearchParams();
     if (params?.activeOnly) usp.set('activeOnly', 'true');
@@ -950,6 +1053,53 @@ export const fleetService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readError(response));
+  },
+
+  async submitInspectionApproval(inspectionId: string): Promise<FleetTripInspectionDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/inspections/${inspectionId}/submit-approval`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async approveInspection(inspectionId: string, comments?: string): Promise<FleetTripInspectionDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/inspections/${inspectionId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments: comments || null }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async rejectInspection(inspectionId: string, comments?: string): Promise<FleetTripInspectionDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/inspections/${inspectionId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments: comments || null }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getAssetInspections(assetId: string, take = 50): Promise<FleetTripInspectionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/inspections/assets/${assetId}?take=${take}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async submitAssetInspection(assetId: string, dto: SubmitFleetAssetInspectionDto): Promise<FleetTripInspectionDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/inspections/assets/${assetId}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
   },
 
   async getComplianceTemplates(includeInactive = false): Promise<FleetComplianceTemplateDto[]> {

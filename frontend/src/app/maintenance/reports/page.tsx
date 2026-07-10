@@ -1,537 +1,309 @@
 'use client';
 
-import { redirect } from 'next/navigation';
-import type { DateRange } from 'react-day-picker';
-
-export default function MaintenanceReportsPage() {
-  // Temporarily hide this page and redirect back to Maintenance home
-  redirect('/maintenance');
-}
-
-// Original implementation preserved below for future re-enable
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { format } from 'date-fns';
+import { BarChart3, Download, Loader2, Package, RefreshCw, Search, Wrench } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
-  AreaChart,
-  Area
-} from 'recharts';
-import {
-  BarChart3,
-  Download,
-  Calendar as CalendarIcon,
-  Filter,
-  FileText,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  Users,
-  Package,
-  Wrench,
-  Eye,
-  Plus
-} from 'lucide-react';
-import { format } from 'date-fns';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useToast } from '@/hooks/use-toast';
 import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
+import maintenanceReportsService, {
+  type AssetCostReportRow,
+  type AssetMovementReportRow,
+  type InspectionServiceReportRow,
+  type MaintenanceOperationalReports,
+  type PartIssuedReportRow,
+  type WorkOrderCostReportRow,
+  type WorkOrderStatusReportRow,
+} from '@/services/maintenanceReportsService';
 
-interface ReportsData {
-  workOrdersByMonth: Array<{ month: string; preventive: number; corrective: number; emergency: number }>;
-  maintenanceCostTrend: Array<{ month: string; cost: number }>;
-  workOrdersByType: Array<{ name: string; value: number; color: string }>;
-  assetReliability: Array<{ asset: string; uptime: number; downtime: number }>;
-  technicianPerformance: Array<{ technician: string; completed: number; avgTime: number; rating: number }>;
-  reportTemplates: Array<{
-    id: number;
-    name: string;
-    description: string;
-    category: string;
-    frequency: string;
-  }>;
-}
+type ReportTab = 'movements' | 'inspection-service' | 'work-orders' | 'parts' | 'costs';
 
-function MaintenanceReportsPageOriginal() {
+const dateInput = (value: Date) => format(value, 'yyyy-MM-dd');
+
+const displayDateTime = (value?: string | null) => {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '-' : format(parsed, 'MMM dd, yyyy HH:mm');
+};
+
+const csvValue = (value: unknown) => {
+  const text = value == null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const reportStatusClassName = (value?: string | null, isOverdue = false) => {
+  const normalized = (value || '').trim().toLowerCase();
+  if (isOverdue || ['fail', 'failed', 'rejected', 'cancelled', 'canceled', 'overdue'].includes(normalized)) {
+    return 'border-red-200 bg-red-100 text-red-800 hover:bg-red-100';
+  }
+  if (['pass', 'passed', 'completed', 'complete', 'closed', 'approved', 'successful', 'success', 'resolved'].includes(normalized)) {
+    return 'border-green-200 bg-green-100 text-green-800 hover:bg-green-100';
+  }
+  return '';
+};
+
+export default function MaintenanceReportsPage() {
+  const { toast } = useToast();
   const { formatMoney } = useMaintenanceCurrency();
-  const [loading, setLoading] = useState(true);
-  const [reportsData, setReportsData] = useState<ReportsData>({
-    workOrdersByMonth: [],
-    maintenanceCostTrend: [],
-    workOrdersByType: [],
-    assetReliability: [],
-    technicianPerformance: [],
-    reportTemplates: []
+  const [fromDate, setFromDate] = useState(() => {
+    const from = new Date();
+    from.setFullYear(from.getFullYear() - 1);
+    return dateInput(from);
   });
-  const [dateRange, setDateRange] = useState<DateRange | undefined>();
-  const [selectedReportType, setSelectedReportType] = useState('summary');
-  const [selectedAsset, setSelectedAsset] = useState('all');
+  const [toDate, setToDate] = useState(() => dateInput(new Date()));
+  const [search, setSearch] = useState('');
+  const [assetFilter, setAssetFilter] = useState('all');
+  const [columnFilter, setColumnFilter] = useState('all');
+  const [activeTab, setActiveTab] = useState<ReportTab>('movements');
+  const [data, setData] = useState<MaintenanceOperationalReports | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load reports data from API
+  const loadReports = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await maintenanceReportsService.getOperationalReports({
+        fromUtc: new Date(`${fromDate}T00:00:00`).toISOString(),
+        toUtc: new Date(`${toDate}T23:59:59.999`).toISOString(),
+      });
+      setData(result);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'Maintenance reports could not be loaded.';
+      setError(message);
+      toast({ title: 'Reports unavailable', description: message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }, [fromDate, toDate, toast]);
+
   useEffect(() => {
-    const loadReportsData = async () => {
-      setLoading(true);
-      try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-        const token = localStorage.getItem('authToken');
-        const response = await fetch(`${API_URL}/maintenance/reports/data`, {
-          headers: {
-            'Authorization': token ? `Bearer ${token}` : '',
-            'Content-Type': 'application/json'
-          }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setReportsData(data.data || data || {
-            workOrdersByMonth: [],
-            maintenanceCostTrend: [],
-            workOrdersByType: [],
-            assetReliability: [],
-            technicianPerformance: [],
-            reportTemplates: []
-          });
-        }
-      } catch (error) {
-        console.error('Failed to load reports data:', error);
-      } finally {
-        setLoading(false);
-      }
+    void loadReports();
+  }, [loadReports]);
+
+  const matches = useCallback((...values: unknown[]) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return values.some((value) => String(value ?? '').toLowerCase().includes(needle));
+  }, [search]);
+
+  const passesFilters = useCallback((assetId: string, ...columnValues: unknown[]) => {
+    const matchesAsset = assetFilter === 'all' || assetId === assetFilter;
+    const matchesColumn = columnFilter === 'all' || columnValues.some((value) => String(value ?? '') === columnFilter);
+    return matchesAsset && matchesColumn;
+  }, [assetFilter, columnFilter]);
+
+  const movements = useMemo(() => (data?.assetMovements ?? []).filter((row) => passesFilters(row.assetId, row.movementType) && matches(
+    row.assetNumber, row.assetName, row.fromProject, row.fromSite, row.toProject, row.toSite, row.reason,
+  )), [data, matches, passesFilters]);
+
+  const inspectionService = useMemo(() => (data?.inspectionServiceHistory ?? []).filter((row) => passesFilters(row.assetId, row.recordType, row.sheetType, row.status, row.result) && matches(
+    row.assetNumber, row.assetName, row.recordType, row.sheetType, row.templateName, row.status, row.result, row.inspectorName,
+  )), [data, matches, passesFilters]);
+
+  const workOrders = useMemo(() => (data?.workOrderStatus ?? []).filter((row) => passesFilters(row.assetId, row.status, row.priority, row.workOrderType, row.maintenanceType) && matches(
+    row.workOrderNumber, row.assetNumber, row.assetName, row.title, row.status, row.workOrderType, row.maintenanceType,
+  )), [data, matches, passesFilters]);
+
+  const parts = useMemo(() => (data?.partsIssued ?? []).filter((row) => passesFilters(row.assetId, row.status, row.itemCode, row.itemName) && matches(
+    row.workOrderNumber, row.assetNumber, row.assetName, row.itemCode, row.itemName, row.status,
+  )), [data, matches, passesFilters]);
+
+  const workOrderCosts = useMemo(() => (data?.costsByWorkOrder ?? []).filter((row) => passesFilters(row.assetId, row.status) && matches(
+    row.workOrderNumber, row.assetNumber, row.assetName, row.title, row.status,
+  )), [data, matches, passesFilters]);
+
+  const assetCosts = useMemo(() => Array.from(workOrderCosts.reduce((groups, row) => {
+    const existing = groups.get(row.assetId) ?? {
+      assetId: row.assetId,
+      assetNumber: row.assetNumber,
+      assetName: row.assetName,
+      workOrderCount: 0,
+      partsCost: 0,
+      laborCost: 0,
+      otherCost: 0,
+      totalCost: 0,
     };
+    existing.workOrderCount += 1;
+    existing.partsCost += row.partsCost;
+    existing.laborCost += row.laborCost;
+    existing.otherCost += row.otherCost;
+    existing.totalCost += row.totalCost;
+    groups.set(row.assetId, existing);
+    return groups;
+  }, new Map<string, AssetCostReportRow>()).values()).sort((a, b) => b.totalCost - a.totalCost), [workOrderCosts]);
 
-    loadReportsData();
-  }, []);
+  const assetOptions = useMemo(() => {
+    const rows = [
+      ...(data?.assetMovements ?? []),
+      ...(data?.inspectionServiceHistory ?? []),
+      ...(data?.workOrderStatus ?? []),
+      ...(data?.partsIssued ?? []),
+      ...(data?.costsByWorkOrder ?? []),
+    ];
+    return Array.from(new Map(rows.map((row) => [row.assetId, { id: row.assetId, label: `${row.assetNumber} · ${row.assetName}` }])).values())
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [data]);
 
-  const renderCustomizedLabel = (props: any) => {
-    const {
-      cx = 0,
-      cy = 0,
-      midAngle = 0,
-      innerRadius = 0,
-      outerRadius = 0,
-      percent = 0,
-    } = props;
-    const RADIAN = Math.PI / 180;
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  const columnOptions = useMemo(() => {
+    let values: Array<string | null | undefined> = [];
+    if (activeTab === 'movements') values = (data?.assetMovements ?? []).map((row) => row.movementType);
+    if (activeTab === 'inspection-service') values = (data?.inspectionServiceHistory ?? []).flatMap((row) => [row.recordType, row.sheetType, row.status, row.result]);
+    if (activeTab === 'work-orders') values = (data?.workOrderStatus ?? []).flatMap((row) => [row.status, row.priority, row.workOrderType, row.maintenanceType]);
+    if (activeTab === 'parts') values = (data?.partsIssued ?? []).flatMap((row) => [row.status, row.itemCode]);
+    if (activeTab === 'costs') values = (data?.costsByWorkOrder ?? []).map((row) => row.status);
+    return Array.from(new Set(values.filter((value): value is string => !!value))).sort();
+  }, [activeTab, data]);
 
-    return (
-      <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central">
-        {`${(percent * 100).toFixed(0)}%`}
-      </text>
-    );
+  const totalCost = (data?.costsByAsset ?? []).reduce((sum, row) => sum + row.totalCost, 0);
+
+  const exportCsv = () => {
+    let rows: Array<Record<string, unknown>> = [];
+    let name: string = activeTab;
+
+    if (activeTab === 'movements') rows = movements as unknown as Array<Record<string, unknown>>;
+    if (activeTab === 'inspection-service') rows = inspectionService as unknown as Array<Record<string, unknown>>;
+    if (activeTab === 'work-orders') rows = workOrders as unknown as Array<Record<string, unknown>>;
+    if (activeTab === 'parts') rows = parts as unknown as Array<Record<string, unknown>>;
+    if (activeTab === 'costs') {
+      rows = workOrderCosts as unknown as Array<Record<string, unknown>>;
+      name = 'cost-per-work-order';
+    }
+
+    if (rows.length === 0) {
+      toast({ title: 'Nothing to export', description: 'The selected report has no rows for these filters.' });
+      return;
+    }
+
+    const headers = Object.keys(rows[0]);
+    const csv = [
+      headers.map(csvValue).join(','),
+      ...rows.map((row) => headers.map((header) => csvValue(row[header])).join(',')),
+    ].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `maintenance-${name}-${fromDate}-to-${toDate}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Maintenance Reports</h1>
-          <p className="text-muted-foreground">
-            Analytics, insights, and performance metrics for maintenance operations
-          </p>
-        </div>
-        <div className="flex space-x-2">
-          <Button variant="outline">
-            <Filter className="mr-2 h-4 w-4" />
-            Filters
-          </Button>
-          <Button>
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </Button>
-        </div>
-      </div>
-
-      {/* Breadcrumbs */}
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbLink href="/maintenance">Maintenance</BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>Reports</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-2xl font-bold">189</p>
-                <p className="text-sm text-muted-foreground">Total Work Orders</p>
-                <p className="text-xs text-green-600 flex items-center mt-1">
-                  <TrendingUp className="h-3 w-3 mr-1" />
-                  +12% from last month
-                </p>
+        <div className="space-y-6 p-6">
+          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+            <div>
+              <div className="flex items-center gap-2">
+                <Wrench className="h-7 w-7 text-primary" />
+                <h1 className="text-3xl font-bold tracking-tight">Maintenance Reports</h1>
               </div>
-              <Wrench className="h-8 w-8 text-blue-500" />
+              <p className="mt-1 text-muted-foreground">Live asset, inspection, work-order, parts and cost reporting.</p>
             </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-2xl font-bold">{formatMoney(71400, 0)}</p>
-                <p className="text-sm text-muted-foreground">Total Costs</p>
-                <p className="text-xs text-red-600 flex items-center mt-1">
-                  <TrendingDown className="h-3 w-3 mr-1" />
-                  -8% from last month
-                </p>
-              </div>
-              <DollarSign className="h-8 w-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-2xl font-bold">98.2%</p>
-                <p className="text-sm text-muted-foreground">Avg Uptime</p>
-                <p className="text-xs text-green-600 flex items-center mt-1">
-                  <TrendingUp className="h-3 w-3 mr-1" />
-                  +0.3% from last month
-                </p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-2xl font-bold">2.8h</p>
-                <p className="text-sm text-muted-foreground">Avg Resolution</p>
-                <p className="text-xs text-green-600 flex items-center mt-1">
-                  <TrendingDown className="h-3 w-3 mr-1" />
-                  -15min from last month
-                </p>
-              </div>
-              <Clock className="h-8 w-8 text-orange-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="analytics" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          <TabsTrigger value="templates">Report Templates</TabsTrigger>
-          <TabsTrigger value="scheduled">Scheduled Reports</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="analytics" className="space-y-4">
-          {/* Filters */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Report Filters</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Select value={selectedReportType} onValueChange={setSelectedReportType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Report Type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="summary">Summary</SelectItem>
-                    <SelectItem value="asset">Asset Performance</SelectItem>
-                    <SelectItem value="cost">Cost Analysis</SelectItem>
-                    <SelectItem value="technician">Technician Performance</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={selectedAsset} onValueChange={setSelectedAsset}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Asset Filter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Assets</SelectItem>
-                    <SelectItem value="hvac">HVAC Systems</SelectItem>
-                    <SelectItem value="electrical">Electrical</SelectItem>
-                    <SelectItem value="plumbing">Plumbing</SelectItem>
-                    <SelectItem value="elevator">Elevators</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="justify-start text-left font-normal">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {dateRange?.from ? (
-                        dateRange.to ? (
-                          <>
-                            {format(dateRange.from, "LLL dd, y")} -{" "}
-                            {format(dateRange.to, "LLL dd, y")}
-                          </>
-                        ) : (
-                          format(dateRange.from, "LLL dd, y")
-                        )
-                      ) : (
-                        <span>Pick date range</span>
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      initialFocus
-                      mode="range"
-                      defaultMonth={dateRange?.from}
-                      selected={dateRange}
-                      onSelect={setDateRange}
-                      numberOfMonths={2}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Work Orders by Month */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Work Orders Trend</CardTitle>
-                <CardDescription>Monthly breakdown by maintenance type</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={reportsData.workOrdersByMonth}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="preventive" stackId="1" stroke="#3b82f6" fill="#3b82f6" />
-                    <Area type="monotone" dataKey="corrective" stackId="1" stroke="#f59e0b" fill="#f59e0b" />
-                    <Area type="monotone" dataKey="emergency" stackId="1" stroke="#ef4444" fill="#ef4444" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            {/* Work Orders by Type */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Work Orders by Type</CardTitle>
-                <CardDescription>Distribution of maintenance types</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={reportsData.workOrdersByType}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={renderCustomizedLabel}
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {reportsData.workOrdersByType.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex flex-wrap justify-center gap-4 mt-4">
-                  {reportsData.workOrdersByType.map((item) => (
-                    <div key={item.name} className="flex items-center space-x-2">
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: item.color }}
-                      />
-                      <span className="text-sm">{item.name} ({item.value})</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Maintenance Cost Trend */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Maintenance Costs</CardTitle>
-                <CardDescription>Monthly cost trends</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={reportsData.maintenanceCostTrend}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip formatter={(value) => [formatMoney(Number(value ?? 0), 0), 'Cost']} />
-                    <Line type="monotone" dataKey="cost" stroke="#10b981" strokeWidth={3} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            {/* Asset Reliability */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Asset Reliability</CardTitle>
-                <CardDescription>Uptime percentage by asset category</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={reportsData.assetReliability} layout="horizontal">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" domain={[90, 100]} />
-                    <YAxis dataKey="asset" type="category" width={80} />
-                    <Tooltip formatter={(value) => [`${value}%`, 'Uptime']} />
-                    <Bar dataKey="uptime" fill="#10b981" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+            <Button onClick={exportCsv} disabled={loading || !data}><Download className="mr-2 h-4 w-4" />Export Current Report</Button>
           </div>
 
-          {/* Technician Performance Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Technician Performance</CardTitle>
-              <CardDescription>Performance metrics by technician</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2">Technician</th>
-                      <th className="text-right py-2">Completed</th>
-                      <th className="text-right py-2">Avg Time (hrs)</th>
-                      <th className="text-right py-2">Rating</th>
-                      <th className="text-right py-2">Performance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportsData.technicianPerformance.map((tech, index) => (
-                      <tr key={index} className="border-b">
-                        <td className="py-3">{tech.technician}</td>
-                        <td className="text-right py-3">{tech.completed}</td>
-                        <td className="text-right py-3">{tech.avgTime}</td>
-                        <td className="text-right py-3">{tech.rating}/5</td>
-                        <td className="text-right py-3">
-                          <div className="inline-flex items-center space-x-1">
-                            <div className="w-16 h-2 bg-gray-200 rounded-full">
-                              <div 
-                                className="h-2 bg-green-500 rounded-full" 
-                                style={{ width: `${(tech.rating / 5) * 100}%` }}
-                              />
-                            </div>
-                            <span className="text-sm text-green-600">
-                              {((tech.rating / 5) * 100).toFixed(0)}%
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <ReportCountCard title="Asset movements" value={data?.assetMovements.length ?? 0} />
+            <ReportCountCard title="Inspections / service" value={data?.inspectionServiceHistory.length ?? 0} />
+            <ReportCountCard title="Work orders" value={data?.workOrderStatus.length ?? 0} />
+            <ReportCountCard title="Parts issued" value={data?.partsIssued.length ?? 0} />
+            <Card><CardHeader className="pb-2"><CardDescription>Maintenance cost</CardDescription><CardTitle>{formatMoney(totalCost)}</CardTitle></CardHeader></Card>
+          </div>
 
-        <TabsContent value="templates" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Report Templates</CardTitle>
-              <CardDescription>Pre-configured report templates for quick generation</CardDescription>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Report Filters</CardTitle>
+              <CardDescription>Date range is applied at the server; asset, status/type, and search filters apply to the selected report.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {reportsData.reportTemplates.map((template) => (
-                  <Card key={template.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                    <CardContent className="pt-6">
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <FileText className="h-8 w-8 text-blue-500" />
-                          <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
-                            {template.category}
-                          </span>
-                        </div>
-                        <div>
-                          <h3 className="font-semibold mb-2">{template.name}</h3>
-                          <p className="text-sm text-muted-foreground mb-2">
-                            {template.description}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Frequency: {template.frequency}
-                          </p>
-                        </div>
-                        <div className="flex space-x-2">
-                          <Button size="sm" variant="outline">
-                            <Eye className="mr-2 h-4 w-4" />
-                            Preview
-                          </Button>
-                          <Button size="sm">
-                            Generate
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[160px_160px_minmax(220px,1fr)_220px_minmax(260px,1fr)_auto] xl:items-end">
+                <div className="space-y-1"><Label htmlFor="report-from">From date</Label><Input id="report-from" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></div>
+                <div className="space-y-1"><Label htmlFor="report-to">To date</Label><Input id="report-to" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
+                <div className="space-y-1">
+                  <Label>Asset</Label>
+                  <Select value={assetFilter} onValueChange={setAssetFilter}>
+                    <SelectTrigger><SelectValue placeholder="All assets" /></SelectTrigger>
+                    <SelectContent><SelectItem value="all">All assets</SelectItem>{assetOptions.map((asset) => <SelectItem key={asset.id} value={asset.id}>{asset.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Status / type</Label>
+                  <Select value={columnFilter} onValueChange={setColumnFilter}>
+                    <SelectTrigger><SelectValue placeholder="All values" /></SelectTrigger>
+                    <SelectContent><SelectItem value="all">All values</SelectItem>{columnOptions.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="report-search">Search</Label>
+                  <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="report-search" className="pl-9" placeholder="Asset, work order, part, technician..." value={search} onChange={(event) => setSearch(event.target.value)} /></div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => void loadReports()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Apply</Button>
+                  <Button variant="ghost" onClick={() => { setSearch(''); setAssetFilter('all'); setColumnFilter('all'); }}>Clear</Button>
+                </div>
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="scheduled" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Scheduled Reports</CardTitle>
-              <CardDescription>Automatically generated reports sent via email</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-12 text-muted-foreground">
-                <BarChart3 className="h-12 w-12 mx-auto mb-4" />
-                <p>No scheduled reports configured</p>
-                <Button className="mt-4">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Schedule Report
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
+          {error ? (
+            <Card className="border-destructive/40"><CardContent className="py-10 text-center"><p className="font-medium text-destructive">{error}</p><Button className="mt-4" variant="outline" onClick={() => void loadReports()}>Try again</Button></CardContent></Card>
+          ) : loading && !data ? (
+            <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading maintenance reports...</div>
+          ) : (
+            <Tabs value={activeTab} onValueChange={(value) => { setActiveTab(value as ReportTab); setColumnFilter('all'); }}>
+              <TabsList className="h-auto flex-wrap justify-start">
+                <TabsTrigger value="movements">Asset Movement</TabsTrigger>
+                <TabsTrigger value="inspection-service">Inspection / Service</TabsTrigger>
+                <TabsTrigger value="work-orders">Work Order Status</TabsTrigger>
+                <TabsTrigger value="parts">Parts Issued</TabsTrigger>
+                <TabsTrigger value="costs">Cost Analysis</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="movements"><MovementTable rows={movements} /></TabsContent>
+              <TabsContent value="inspection-service"><InspectionServiceTable rows={inspectionService} /></TabsContent>
+              <TabsContent value="work-orders"><WorkOrderTable rows={workOrders} /></TabsContent>
+              <TabsContent value="parts"><PartsTable rows={parts} formatMoney={formatMoney} /></TabsContent>
+              <TabsContent value="costs"><CostsReport assetRows={assetCosts} workOrderRows={workOrderCosts} formatMoney={formatMoney} /></TabsContent>
+            </Tabs>
+          )}
+        </div>
   );
+}
+
+function ReportCountCard({ title, value }: { title: string; value: number }) {
+  return <Card><CardHeader className="pb-2"><CardDescription>{title}</CardDescription><CardTitle>{value.toLocaleString()}</CardTitle></CardHeader></Card>;
+}
+
+function EmptyRow({ columns }: { columns: number }) {
+  return <TableRow><TableCell colSpan={columns} className="h-28 text-center text-muted-foreground">No records match the selected period and search.</TableCell></TableRow>;
+}
+
+function ReportTable({ children }: { children: ReactNode }) {
+  return <Card><CardContent className="overflow-x-auto p-0"><Table>{children}</Table></CardContent></Card>;
+}
+
+function MovementTable({ rows }: { rows: AssetMovementReportRow[] }) {
+  return <ReportTable><TableHeader><TableRow><TableHead>Date / Time</TableHead><TableHead>Asset</TableHead><TableHead>From</TableHead><TableHead>To</TableHead><TableHead>Reason</TableHead></TableRow></TableHeader><TableBody>{rows.length ? rows.map((row) => <TableRow key={row.movementId}><TableCell className="whitespace-nowrap">{displayDateTime(row.effectiveAtUtc)}</TableCell><TableCell><strong>{row.assetNumber}</strong><div className="text-xs text-muted-foreground">{row.assetName}</div></TableCell><TableCell>{row.fromProject || 'Unassigned'}<div className="text-xs text-muted-foreground">{row.fromSite || 'Unassigned'}</div></TableCell><TableCell>{row.toProject || 'Unassigned'}<div className="text-xs text-muted-foreground">{row.toSite || 'Unassigned'}</div></TableCell><TableCell>{row.reason}<div className="text-xs text-muted-foreground">{row.notes}</div></TableCell></TableRow>) : <EmptyRow columns={5} />}</TableBody></ReportTable>;
+}
+
+function InspectionServiceTable({ rows }: { rows: InspectionServiceReportRow[] }) {
+  return <ReportTable><TableHeader><TableRow><TableHead>Date / Time</TableHead><TableHead>Asset</TableHead><TableHead>Record</TableHead><TableHead>Checklist</TableHead><TableHead>Status / Result</TableHead><TableHead>Inspector</TableHead></TableRow></TableHeader><TableBody>{rows.length ? rows.map((row) => <TableRow key={`${row.source}-${row.recordId}`}><TableCell className="whitespace-nowrap">{displayDateTime(row.performedAtUtc)}</TableCell><TableCell><strong>{row.assetNumber}</strong><div className="text-xs text-muted-foreground">{row.assetName}</div></TableCell><TableCell><Badge variant="outline">{row.recordType}</Badge><div className="mt-1 text-xs text-muted-foreground">{row.source}</div></TableCell><TableCell>{row.templateName}<div className="text-xs text-muted-foreground">{row.sheetType} · {row.inspectionKind}</div></TableCell><TableCell><Badge variant="outline" className={reportStatusClassName(row.result || row.status)}>{row.result || row.status}</Badge><div className="mt-1 text-xs text-muted-foreground">{row.status}</div></TableCell><TableCell>{row.inspectorName || 'Not recorded'}</TableCell></TableRow>) : <EmptyRow columns={6} />}</TableBody></ReportTable>;
+}
+
+function WorkOrderTable({ rows }: { rows: WorkOrderStatusReportRow[] }) {
+  return <ReportTable><TableHeader><TableRow><TableHead>Work Order</TableHead><TableHead>Asset</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Technician</TableHead><TableHead>Created</TableHead><TableHead>Due / Completed</TableHead></TableRow></TableHeader><TableBody>{rows.length ? rows.map((row) => <TableRow key={row.workOrderId}><TableCell><strong>{row.workOrderNumber}</strong><div className="max-w-64 truncate text-xs text-muted-foreground">{row.title}</div></TableCell><TableCell>{row.assetNumber}<div className="text-xs text-muted-foreground">{row.assetName}</div></TableCell><TableCell>{row.workOrderType}<div className="text-xs text-muted-foreground">{row.maintenanceType} · {row.priority}</div></TableCell><TableCell><Badge variant="outline" className={reportStatusClassName(row.status, row.isOverdue)}>{row.isOverdue ? 'Overdue' : row.status}</Badge></TableCell><TableCell>{row.assignedTechnician || 'Unassigned'}</TableCell><TableCell className="whitespace-nowrap">{displayDateTime(row.createdAtUtc)}</TableCell><TableCell className="whitespace-nowrap">{displayDateTime(row.completedAtUtc || row.requestedCompletionAtUtc)}</TableCell></TableRow>) : <EmptyRow columns={7} />}</TableBody></ReportTable>;
+}
+
+function PartsTable({ rows, formatMoney }: { rows: PartIssuedReportRow[]; formatMoney: (value: number) => string }) {
+  return <ReportTable><TableHeader><TableRow><TableHead>Issued</TableHead><TableHead>Work Order</TableHead><TableHead>Asset</TableHead><TableHead>Part</TableHead><TableHead>Issued / Used / Returned</TableHead><TableHead>Unit Cost</TableHead><TableHead>Total</TableHead></TableRow></TableHeader><TableBody>{rows.length ? rows.map((row) => <TableRow key={row.workOrderPartId}><TableCell className="whitespace-nowrap">{displayDateTime(row.issuedAtUtc)}</TableCell><TableCell>{row.workOrderNumber}</TableCell><TableCell>{row.assetNumber}<div className="text-xs text-muted-foreground">{row.assetName}</div></TableCell><TableCell><strong>{row.itemCode}</strong><div className="text-xs text-muted-foreground">{row.itemName}</div></TableCell><TableCell>{row.quantityIssued} / {row.quantityUsed} / {row.quantityReturned}</TableCell><TableCell>{formatMoney(row.unitCost)}</TableCell><TableCell className="font-medium">{formatMoney(row.totalCost)}</TableCell></TableRow>) : <EmptyRow columns={7} />}</TableBody></ReportTable>;
+}
+
+function CostsReport({ assetRows, workOrderRows, formatMoney }: { assetRows: AssetCostReportRow[]; workOrderRows: WorkOrderCostReportRow[]; formatMoney: (value: number) => string }) {
+  return <div className="space-y-4"><Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><BarChart3 className="h-5 w-5" />Cost per Asset</CardTitle></CardHeader><CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Asset</TableHead><TableHead className="text-right">Work Orders</TableHead><TableHead className="text-right">Parts</TableHead><TableHead className="text-right">Labor</TableHead><TableHead className="text-right">Other</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader><TableBody>{assetRows.length ? assetRows.map((row) => <TableRow key={row.assetId}><TableCell><strong>{row.assetNumber}</strong><div className="text-xs text-muted-foreground">{row.assetName}</div></TableCell><TableCell className="text-right">{row.workOrderCount}</TableCell><TableCell className="text-right">{formatMoney(row.partsCost)}</TableCell><TableCell className="text-right">{formatMoney(row.laborCost)}</TableCell><TableCell className="text-right">{formatMoney(row.otherCost)}</TableCell><TableCell className="text-right font-semibold">{formatMoney(row.totalCost)}</TableCell></TableRow>) : <EmptyRow columns={6} />}</TableBody></Table></CardContent></Card><Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><Package className="h-5 w-5" />Cost per Work Order</CardTitle></CardHeader><CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Work Order</TableHead><TableHead>Asset</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Parts</TableHead><TableHead className="text-right">Labor</TableHead><TableHead className="text-right">Other</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader><TableBody>{workOrderRows.length ? workOrderRows.map((row) => <TableRow key={row.workOrderId}><TableCell><strong>{row.workOrderNumber}</strong><div className="max-w-64 truncate text-xs text-muted-foreground">{row.title}</div></TableCell><TableCell>{row.assetNumber}<div className="text-xs text-muted-foreground">{row.assetName}</div></TableCell><TableCell><Badge variant="outline" className={reportStatusClassName(row.status)}>{row.status}</Badge></TableCell><TableCell className="text-right">{formatMoney(row.partsCost)}</TableCell><TableCell className="text-right">{formatMoney(row.laborCost)}</TableCell><TableCell className="text-right">{formatMoney(row.otherCost)}</TableCell><TableCell className="text-right font-semibold">{formatMoney(row.totalCost)}</TableCell></TableRow>) : <EmptyRow columns={7} />}</TableBody></Table></CardContent></Card></div>;
 }

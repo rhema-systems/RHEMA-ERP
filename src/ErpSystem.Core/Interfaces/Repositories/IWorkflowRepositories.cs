@@ -24,6 +24,8 @@ public interface IWorkflowDefinitionRepository : IGenericRepository<WorkflowDefi
     /// </summary>
     Task<WorkflowDefinition?> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<WorkflowDefinition>> GetVersionsAsync(Guid definitionKey, Guid tenantId, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Gets all active workflow definitions
     /// </summary>
@@ -200,4 +202,13 @@ public interface IWorkflowEntityTypeRepository : IGenericRepository<WorkflowEnti
     /// Gets all active entity types
     /// </summary>
     Task<IEnumerable<WorkflowEntityType>> GetActiveEntityTypesAsync(Guid tenantId, CancellationToken cancellationToken = default);
+}
+
+public interface IWorkflowApprovalPolicySetRepository : IGenericRepository<WorkflowApprovalPolicySet>
+{
+    Task<IReadOnlyList<WorkflowApprovalPolicySet>> GetEffectiveCandidatesAsync(
+        Guid tenantId,
+        string entityType,
+        DateTime effectiveAt,
+        CancellationToken cancellationToken = default);
 }
