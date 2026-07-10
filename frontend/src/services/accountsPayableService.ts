@@ -137,23 +137,23 @@ class AccountsPayableService {
         if (query.sortBy) params.append('SortBy', query.sortBy);
         if (query.sortDescending !== undefined) params.append('SortDescending', query.sortDescending.toString());
 
-        return apiService.get<PagedResult<VendorPayment>>(`${this.baseUrl}/vendor-payments?${params.toString()}`);
+        return apiService.get<PagedResult<VendorPayment>>(`${this.baseUrl}/payments?${params.toString()}`);
     }
 
     public async getPayment(id: string): Promise<VendorPayment> {
-        return apiService.get<VendorPayment>(`${this.baseUrl}/vendor-payments/${id}`);
+        return apiService.get<VendorPayment>(`${this.baseUrl}/payments/${id}`);
     }
 
     public async createPayment(data: VendorPaymentCreateRequest): Promise<VendorPayment> {
-        return apiService.post<VendorPayment>(`${this.baseUrl}/vendor-payments`, data);
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments`, data);
     }
 
     public async allocatePayment(paymentId: string, data: VendorPaymentAllocationCreateRequest): Promise<any> {
-        return apiService.post<any>(`${this.baseUrl}/vendor-payments/${paymentId}/allocate`, data);
+        return apiService.post<any>(`${this.baseUrl}/payments/${paymentId}/allocate`, [data]);
     }
 
     public async getOutstandingInvoices(supplierId: string): Promise<OutstandingVendorInvoice[]> {
-        return apiService.get<OutstandingVendorInvoice[]>(`${this.baseUrl}/vendor-payments/supplier/${supplierId}/outstanding-invoices`);
+        return apiService.get<OutstandingVendorInvoice[]>(`${this.baseUrl}/payments/supplier/${supplierId}/outstanding-invoices`);
     }
 
     // --- Payment Batches ---

@@ -31,6 +31,23 @@ namespace ErpSystem.Core.Entities.Finance
         public string BaseCurrency { get; set; } = "GHS";
 
         /// <summary>
+        /// Indicates the tenant functional currency is locked because accounting activity exists.
+        /// Functional currency changes after this point require a controlled migration process.
+        /// </summary>
+        public bool FunctionalCurrencyLocked { get; set; } = false;
+
+        /// <summary>
+        /// Timestamp when the functional currency was locked.
+        /// </summary>
+        public DateTime? FunctionalCurrencyLockedAt { get; set; }
+
+        /// <summary>
+        /// Operational reason why the functional currency was locked.
+        /// </summary>
+        [MaxLength(500)]
+        public string? FunctionalCurrencyLockedReason { get; set; }
+
+        /// <summary>
         /// Character used to separate segments in the account number (e.g. "-", ".", "/")
         /// </summary>
         public string AccountSeparator { get; set; } = "-";
@@ -44,6 +61,16 @@ namespace ErpSystem.Core.Entities.Finance
         /// Default Unrealized Gain/Loss account for currency revaluation
         /// </summary>
         public Guid? UnrealizedGainLossAccountId { get; set; }
+
+        /// <summary>
+        /// Default Unrealized FX Gain account for period-end revaluation postings.
+        /// </summary>
+        public Guid? UnrealizedFxGainAccountId { get; set; }
+
+        /// <summary>
+        /// Default Unrealized FX Loss account for period-end revaluation postings.
+        /// </summary>
+        public Guid? UnrealizedFxLossAccountId { get; set; }
         
         /// <summary>
         /// Account for realized FX gain/loss postings.
@@ -82,6 +109,8 @@ namespace ErpSystem.Core.Entities.Finance
         // Navigation properties
         public virtual Account? RetainedEarningsAccount { get; set; }
         public virtual Account? UnrealizedGainLossAccount { get; set; }
+        public virtual Account? UnrealizedFxGainAccount { get; set; }
+        public virtual Account? UnrealizedFxLossAccount { get; set; }
         public virtual Account? RealizedFxGainAccount { get; set; }
         public virtual Account? RealizedFxLossAccount { get; set; }
         public virtual Account? SuspenseAccount { get; set; }

@@ -17,6 +17,7 @@ namespace ErpSystem.Core.Interfaces
         #endregion
 
         #region Transaction Processing
+        [Obsolete("Legacy direct GL posting is disabled. Use IJournalEntryService for manual journals or IFinancePostingEngine through the owning Finance module.")]
         Task<JournalEntry> PostJournalEntryAsync(CreateJournalEntryDto entryDto);
         Task<decimal> GetAccountBalanceAsync(Guid accountId, string? currencyCode);
         Task<string> GenerateJournalEntryNumberAsync(CancellationToken cancellationToken = default);
@@ -32,6 +33,7 @@ namespace ErpSystem.Core.Interfaces
         Task<IncomeStatementDto> GenerateIncomeStatementAsync(IncomeStatementRequestDto request);
         Task<TrialBalanceDto> GenerateTrialBalanceAsync(TrialBalanceRequestDto request);
         Task<DetailedLedgerReportDto> GenerateDetailedLedgerAsync(DetailedLedgerRequestDto request);
+        Task<CashBankLedgerReportDto> GenerateCashBankLedgerAsync(CashBankLedgerRequestDto request);
         Task<CashFlowStatementDto> GenerateCashFlowStatementAsync(CashFlowStatementRequestDto request);
         Task<MultiCurrencyDetailReportDto> GenerateMultiCurrencyDetailReportAsync(MultiCurrencyDetailRequestDto request);
         #endregion

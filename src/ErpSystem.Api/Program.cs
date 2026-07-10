@@ -187,6 +187,7 @@ if (args.Length > 0 && args[0] == "repair-finance-po-schema")
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await RepairFinanceSettingsSchemaAsync(db);
         await RepairAccountingBooksSchemaAsync(db);
+        await RepairCustomerPaymentSchemaAsync(db);
         await RepairFinancePurchaseOrderSchemaAsync(db);
     }
 
@@ -196,85 +197,14 @@ if (args.Length > 0 && args[0] == "repair-finance-po-schema")
 
 if (args.Length > 0 && args[0] == "post-finance-grv")
 {
-    var tempBuilder = CreateSeedBuilder(args);
-
-    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
-    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
-    var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-    tempBuilder.Services.AddSingleton(new MaintenanceCurrentUserContext(tenantId));
-    tempBuilder.Services.AddSingleton<ErpSystem.Core.Interfaces.ICurrentUserService>(sp =>
-        sp.GetRequiredService<MaintenanceCurrentUserContext>());
-    tempBuilder.Services.AddSingleton<ErpSystem.Core.Interfaces.ICurrentUserProvider>(sp =>
-        sp.GetRequiredService<MaintenanceCurrentUserContext>());
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ITenantSettingsService, ErpSystem.Api.Services.TenantSettingsService>();
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Numbering.IDocumentNumberingService, ErpSystem.Data.Services.DocumentNumberingService>();
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService>(_ =>
-        NoopServiceProxy.Create<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService>());
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookService, ErpSystem.Api.Services.Finance.Settings.AccountingBookService>();
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.IGeneralLedgerService, ErpSystem.Api.Services.Finance.GL.GeneralLedgerService>();
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISubledgerPostingService, ErpSystem.Api.Services.Finance.GL.SubledgerPostingService>();
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Services.IAuditLogService>(_ =>
-        NoopServiceProxy.Create<ErpSystem.Core.Services.IAuditLogService>());
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.INotificationService>(_ =>
-        NoopServiceProxy.Create<ErpSystem.Core.Interfaces.INotificationService>());
-
-    var tempApp = tempBuilder.Build();
-    var selector = args.Length > 1 ? args[1] : "all-unposted";
-
-    using (var scope = tempApp.Services.CreateScope())
-    {
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await RepairFinanceSettingsSchemaAsync(db);
-        await RepairAccountingBooksSchemaAsync(db);
-        await RepairFinancePurchaseOrderSchemaAsync(db);
-
-        var receiptQuery = db.FinancePurchaseOrderReceipts
-            .Where(r => r.TenantId == tenantId && !r.IsDeleted);
-
-        if (string.Equals(selector, "all-unposted", StringComparison.OrdinalIgnoreCase))
-        {
-            receiptQuery = receiptQuery.Where(r => !db.JournalEntries.Any(j =>
-                j.SourceDocumentId == r.Id &&
-                j.SourceDocumentType == "FinancePurchaseOrderReceipt" &&
-                !j.IsDeleted));
-        }
-        else if (Guid.TryParse(selector, out var receiptId))
-        {
-            receiptQuery = receiptQuery.Where(r => r.Id == receiptId);
-        }
-        else
-        {
-            receiptQuery = receiptQuery.Where(r => r.ReceiptNumber == selector);
-        }
-
-        var receipts = await receiptQuery
-            .OrderBy(r => r.ReceiptDate)
-            .ThenBy(r => r.ReceiptNumber)
-            .Select(r => new { r.Id, r.ReceiptNumber })
-            .ToListAsync();
-
-        if (receipts.Count == 0)
-        {
-            Console.WriteLine($"No finance GRVs matched '{selector}'.");
-            return;
-        }
-
-        var postingService = scope.ServiceProvider.GetRequiredService<ErpSystem.Core.Interfaces.Finance.ISubledgerPostingService>();
-        foreach (var receipt in receipts)
-        {
-            var journal = await postingService.PostFinancePurchaseOrderReceiptAsync(receipt.Id);
-            Console.WriteLine($"{receipt.ReceiptNumber} posted as {journal.JournalNumber} ({journal.Status}).");
-        }
-    }
-
+    Console.Error.WriteLine("The legacy post-finance-grv maintenance command is disabled. Finance GRV posting now runs through the receipt workflow and IFinancePostingEngine.");
     return;
 }
 
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, rebuild-db, repair-finance-po-schema, post-finance-grv.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -588,6 +518,7 @@ async Task InitializeDatabaseAsync(
         await context.Database.MigrateAsync(migrationCts.Token);
         await RepairFinanceSettingsSchemaAsync(context, migrationCts.Token);
         await RepairAccountingBooksSchemaAsync(context, migrationCts.Token);
+        await RepairCustomerPaymentSchemaAsync(context, migrationCts.Token);
         await RepairFinancePurchaseOrderSchemaAsync(context, migrationCts.Token);
     }
     catch (OperationCanceledException ex)
@@ -721,6 +652,47 @@ static async Task<bool> TableExistsAsync(
             await connection.CloseAsync();
         }
     }
+}
+
+static async Task RepairCustomerPaymentSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
+{
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[CustomerPayment]', N'U') IS NOT NULL
+   AND OBJECT_ID(N'[dbo].[BusinessPartners]', N'U') IS NOT NULL
+BEGIN
+    DECLARE @legacyCustomerFk sysname;
+
+    SELECT TOP (1) @legacyCustomerFk = fk.[name]
+    FROM sys.foreign_keys fk
+    INNER JOIN sys.foreign_key_columns fkc
+        ON fkc.constraint_object_id = fk.[object_id]
+    INNER JOIN sys.columns pc
+        ON pc.[object_id] = fkc.parent_object_id
+       AND pc.column_id = fkc.parent_column_id
+    WHERE fk.parent_object_id = OBJECT_ID(N'[dbo].[CustomerPayment]')
+      AND fk.referenced_object_id = OBJECT_ID(N'[dbo].[Customers]')
+      AND pc.[name] = N'CustomerId';
+
+    IF @legacyCustomerFk IS NOT NULL
+    BEGIN
+        DECLARE @dropSql nvarchar(max) =
+            N'ALTER TABLE [dbo].[CustomerPayment] DROP CONSTRAINT [' + REPLACE(@legacyCustomerFk, N']', N']]') + N']';
+        EXEC sp_executesql @dropSql;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE [name] = N'FK_CustomerPayment_BusinessPartners_CustomerId'
+          AND [parent_object_id] = OBJECT_ID(N'[dbo].[CustomerPayment]')
+    )
+    BEGIN
+        ALTER TABLE [dbo].[CustomerPayment] WITH NOCHECK
+            ADD CONSTRAINT [FK_CustomerPayment_BusinessPartners_CustomerId]
+            FOREIGN KEY ([CustomerId]) REFERENCES [dbo].[BusinessPartners] ([Id]);
+    END;
+END
+""", cancellationToken);
 }
 
 static async Task RepairFinanceSettingsSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)

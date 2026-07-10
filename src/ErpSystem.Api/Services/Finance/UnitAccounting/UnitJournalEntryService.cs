@@ -11,6 +11,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -40,7 +41,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             _workflowService = workflowService;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
         private Guid UserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
 
@@ -133,7 +134,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (dto.FiscalPeriodId.HasValue)
             {
                 var period = await _unitOfWork.Repository<FiscalPeriod>()
-                    .FirstOrDefaultAsync(p => p.Id == dto.FiscalPeriodId.Value && !p.IsDeleted);
+                    .FirstOrDefaultAsync(p => p.TenantId == TenantId && p.Id == dto.FiscalPeriodId.Value && !p.IsDeleted);
                 if (period == null)
                     throw new ArgumentException($"Fiscal period with ID '{dto.FiscalPeriodId}' not found.");
                 fiscalPeriodId = period.Id;
@@ -164,6 +165,13 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 CreatedAt = now,
                 CreatedBy = UserName
             };
+
+            var unitAccountIds = dto.Lines.Select(line => line.UnitAccountId).Distinct().ToList();
+            var validUnitAccountCount = await _unitOfWork.Repository<UnitAccount>()
+                .GetQueryable(a => a.TenantId == TenantId && unitAccountIds.Contains(a.Id) && !a.IsDeleted)
+                .CountAsync(cancellationToken);
+            if (validUnitAccountCount != unitAccountIds.Count)
+                throw new ArgumentException("One or more unit journal line accounts were not found for the current tenant.");
 
             await _unitOfWork.Repository<UnitJournalEntry>().AddAsync(entry);
 
@@ -390,7 +398,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             foreach (var line in entry.Lines.Where(l => !l.IsDeleted))
             {
                 var account = await _unitOfWork.Repository<UnitAccount>()
-                    .FirstOrDefaultAsync(a => a.Id == line.UnitAccountId && !a.IsDeleted);
+                    .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == line.UnitAccountId && !a.IsDeleted);
 
                 if (account != null)
                 {
@@ -476,7 +484,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
                 // Update account balance
                 var account = await _unitOfWork.Repository<UnitAccount>()
-                    .FirstOrDefaultAsync(a => a.Id == origLine.UnitAccountId && !a.IsDeleted);
+                    .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == origLine.UnitAccountId && !a.IsDeleted);
 
                 if (account != null)
                 {

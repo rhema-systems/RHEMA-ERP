@@ -5,7 +5,10 @@ using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.Settings
 {
@@ -14,21 +17,23 @@ namespace ErpSystem.Api.Services.Finance.Settings
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUserService;
         private readonly ITenantSettingsService _tenantSettingsService;
+        private readonly IFinanceAuditService? _financeAuditService;
 
         public FinanceSettingsService(
             ApplicationDbContext context,
             ICurrentUserService currentUserService,
-            ITenantSettingsService tenantSettingsService)
+            ITenantSettingsService tenantSettingsService,
+            IFinanceAuditService? financeAuditService = null)
         {
             _context = context;
             _currentUserService = currentUserService;
             _tenantSettingsService = tenantSettingsService;
+            _financeAuditService = financeAuditService;
         }
 
         public async Task<FinanceSettingsDto> GetSettingsAsync()
         {
-            var tenantId = _currentUserService.TenantId 
-                ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
 
             var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
 
@@ -51,13 +56,13 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 await _context.SaveChangesAsync();
             }
 
-            return MapToDto(settings, baseCurrency);
+            var transactionsExist = await HasAccountingActivityAsync(tenantId);
+            return MapToDto(settings, baseCurrency, transactionsExist);
         }
 
         public async Task<FinanceSettingsDto> UpdateSettingsAsync(UpdateFinanceSettingsDto dto)
         {
-            var tenantId = _currentUserService.TenantId 
-                ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
 
             var settings = await _context.FinanceSettings
                 .FirstOrDefaultAsync(s => s.TenantId == tenantId);
@@ -72,6 +77,14 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 };
                 _context.FinanceSettings.Add(settings);
             }
+
+            var beforeFxMappings = new
+            {
+                settings.UnrealizedFxGainAccountId,
+                settings.UnrealizedFxLossAccountId,
+                settings.RealizedFxGainAccountId,
+                settings.RealizedFxLossAccountId
+            };
 
             // Check if COA type can be changed
             if (dto.CoaType != null && dto.CoaType != settings.CoaType)
@@ -105,6 +118,37 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.BaseCurrency != null)
             {
                 var requestedBaseCurrency = dto.BaseCurrency.Trim().ToUpperInvariant();
+                var existingBaseCurrency = NormalizeCurrencyCode(settings.BaseCurrency);
+                var hasAccountingActivity = await HasAccountingActivityAsync(tenantId);
+                if (!string.Equals(existingBaseCurrency, requestedBaseCurrency, StringComparison.OrdinalIgnoreCase)
+                    && hasAccountingActivity)
+                {
+                    settings.FunctionalCurrencyLocked = true;
+                    settings.FunctionalCurrencyLockedAt ??= DateTime.UtcNow;
+                    settings.FunctionalCurrencyLockedReason ??= "Functional currency locked because accounting activity exists.";
+                    await _context.SaveChangesAsync();
+
+                    await RecordFinanceSettingsAuditAsync(
+                        FinanceAuditEvents.FunctionalCurrencyChangeRejected,
+                        tenantId,
+                        settings,
+                        beforeValues: new
+                        {
+                            settings.BaseCurrency,
+                            settings.FunctionalCurrencyLocked,
+                            settings.FunctionalCurrencyLockedAt
+                        },
+                        afterValues: new
+                        {
+                            RequestedBaseCurrency = requestedBaseCurrency,
+                            AccountingActivityExists = true
+                        },
+                        reason: "Functional currency cannot be changed after accounting activity exists.");
+
+                    throw new InvalidOperationException(
+                        "Cannot change functional currency after accounting activity exists. Use a controlled functional-currency migration process.");
+                }
+
                 var targetCurrency = await _context.Currencies
                     .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.CurrencyCode == requestedBaseCurrency && !c.IsDeleted);
 
@@ -117,16 +161,38 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     .Where(c => c.TenantId == tenantId && c.IsBaseCurrency && c.Id != targetCurrency.Id && !c.IsDeleted)
                     .ToListAsync();
 
-                foreach (var existingBaseCurrency in existingBaseCurrencies)
+                foreach (var baseCurrencyToClear in existingBaseCurrencies)
                 {
-                    existingBaseCurrency.IsBaseCurrency = false;
+                    baseCurrencyToClear.IsBaseCurrency = false;
                 }
 
                 targetCurrency.IsBaseCurrency = true;
                 targetCurrency.IsActive = true;
                 settings.BaseCurrency = targetCurrency.CurrencyCode;
+                settings.FunctionalCurrencyLocked = hasAccountingActivity;
+                if (hasAccountingActivity)
+                {
+                    settings.FunctionalCurrencyLockedAt ??= DateTime.UtcNow;
+                    settings.FunctionalCurrencyLockedReason ??= "Functional currency locked because accounting activity exists.";
+                }
 
                 await SyncTenantCurrencySettingsAsync(tenantId, targetCurrency);
+
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.FunctionalCurrencyConfigured,
+                    tenantId,
+                    settings,
+                    beforeValues: new
+                    {
+                        BaseCurrency = existingBaseCurrency
+                    },
+                    afterValues: new
+                    {
+                        BaseCurrency = targetCurrency.CurrencyCode,
+                        targetCurrency.CurrencyName,
+                        targetCurrency.CurrencySymbol,
+                        settings.FunctionalCurrencyLocked
+                    });
             }
 
             if (dto.AccountSeparator != null)
@@ -138,8 +204,20 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.UnrealizedGainLossAccountId.HasValue)
                 settings.UnrealizedGainLossAccountId = dto.UnrealizedGainLossAccountId;
 
+            if (dto.UnrealizedFxGainAccountId.HasValue)
+                settings.UnrealizedFxGainAccountId = dto.UnrealizedFxGainAccountId;
+
+            if (dto.UnrealizedFxLossAccountId.HasValue)
+                settings.UnrealizedFxLossAccountId = dto.UnrealizedFxLossAccountId;
+
             if (dto.RealizedGainLossAccountId.HasValue)
                 settings.RealizedGainLossAccountId = dto.RealizedGainLossAccountId;
+
+            if (dto.RealizedFxGainAccountId.HasValue)
+                settings.RealizedFxGainAccountId = dto.RealizedFxGainAccountId;
+
+            if (dto.RealizedFxLossAccountId.HasValue)
+                settings.RealizedFxLossAccountId = dto.RealizedFxLossAccountId;
 
             if (dto.SuspenseAccountId.HasValue)
                 settings.SuspenseAccountId = dto.SuspenseAccountId;
@@ -157,14 +235,34 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             await _context.SaveChangesAsync();
 
+            var afterFxMappings = new
+            {
+                settings.UnrealizedFxGainAccountId,
+                settings.UnrealizedFxLossAccountId,
+                settings.RealizedFxGainAccountId,
+                settings.RealizedFxLossAccountId
+            };
+
+            if (!Equals(beforeFxMappings.UnrealizedFxGainAccountId, afterFxMappings.UnrealizedFxGainAccountId)
+                || !Equals(beforeFxMappings.UnrealizedFxLossAccountId, afterFxMappings.UnrealizedFxLossAccountId)
+                || !Equals(beforeFxMappings.RealizedFxGainAccountId, afterFxMappings.RealizedFxGainAccountId)
+                || !Equals(beforeFxMappings.RealizedFxLossAccountId, afterFxMappings.RealizedFxLossAccountId))
+            {
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.FxAccountMappingChanged,
+                    tenantId,
+                    settings,
+                    beforeValues: beforeFxMappings,
+                    afterValues: afterFxMappings);
+            }
+
             var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
-            return MapToDto(settings, baseCurrency);
+            return MapToDto(settings, baseCurrency, await HasAccountingActivityAsync(tenantId));
         }
 
         public async Task<bool> CanChangeCOATypeAsync()
         {
-            var tenantId = _currentUserService.TenantId 
-                ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
 
             var settings = await _context.FinanceSettings
                 .FirstOrDefaultAsync(s => s.TenantId == tenantId);
@@ -192,7 +290,49 @@ namespace ErpSystem.Api.Services.Finance.Settings
             tenant.CurrencyDecimalPlaces = currency.DecimalPlaces;
         }
 
-        private static FinanceSettingsDto MapToDto(FinanceSettings settings, BaseCurrencyReferenceDto baseCurrency)
+        private async Task<bool> HasAccountingActivityAsync(Guid tenantId)
+        {
+            return await _context.FinancePostingEvents.AnyAsync(e => e.TenantId == tenantId && !e.IsDeleted)
+                || await _context.JournalEntries.AnyAsync(j => j.TenantId == tenantId && !j.IsDeleted)
+                || await _context.AccountTransactions.AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted);
+        }
+
+        private async Task RecordFinanceSettingsAuditAsync(
+            string eventType,
+            Guid tenantId,
+            FinanceSettings settings,
+            object? beforeValues = null,
+            object? afterValues = null,
+            string? reason = null)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = tenantId,
+                SourceModule = "FX",
+                SourceDocumentType = "FinanceSettings",
+                SourceDocumentId = settings.Id,
+                BeforeValues = beforeValues,
+                AfterValues = afterValues,
+                Reason = reason,
+                Resource = "Finance.Settings",
+                ResourceId = settings.Id.ToString()
+            });
+        }
+
+        private static string NormalizeCurrencyCode(string? currencyCode)
+        {
+            return string.IsNullOrWhiteSpace(currencyCode)
+                ? string.Empty
+                : currencyCode.Trim().ToUpperInvariant();
+        }
+
+        private static FinanceSettingsDto MapToDto(FinanceSettings settings, BaseCurrencyReferenceDto baseCurrency, bool transactionsExist)
         {
             return new FinanceSettingsDto
             {
@@ -204,10 +344,17 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 BaseCurrencyName = baseCurrency.CurrencyName,
                 BaseCurrencySymbol = baseCurrency.CurrencySymbol,
                 BaseCurrencyDecimalPlaces = baseCurrency.DecimalPlaces,
+                FunctionalCurrencyLocked = settings.FunctionalCurrencyLocked || transactionsExist,
+                FunctionalCurrencyLockedAt = settings.FunctionalCurrencyLockedAt,
+                FunctionalCurrencyLockedReason = settings.FunctionalCurrencyLockedReason,
                 AccountSeparator = settings.AccountSeparator,
                 RetainedEarningsAccountId = settings.RetainedEarningsAccountId,
                 UnrealizedGainLossAccountId = settings.UnrealizedGainLossAccountId,
+                UnrealizedFxGainAccountId = settings.UnrealizedFxGainAccountId,
+                UnrealizedFxLossAccountId = settings.UnrealizedFxLossAccountId,
                 RealizedGainLossAccountId = settings.RealizedGainLossAccountId,
+                RealizedFxGainAccountId = settings.RealizedFxGainAccountId,
+                RealizedFxLossAccountId = settings.RealizedFxLossAccountId,
                 SuspenseAccountId = settings.SuspenseAccountId,
                 ControlAccountArId = settings.ControlAccountArId,
                 ControlAccountApId = settings.ControlAccountApId,
@@ -218,7 +365,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 DiscountAllowedAccountId = settings.DiscountAllowedAccountId,
                 DiscountReceivedAccountId = settings.DiscountReceivedAccountId,
                 MigrationClearingAccountId = settings.MigrationClearingAccountId,
-                OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled
+                OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled,
+                TransactionsExist = transactionsExist
             };
         }
     }

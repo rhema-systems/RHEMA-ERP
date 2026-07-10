@@ -81,10 +81,19 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? BankAccountName { get; set; }
         public string? CheckNumber { get; set; }
         public string? TransactionReference { get; set; }
+        public Guid? WithholdingTaxId { get; set; }
+        public Guid? WithholdingTaxAccountId { get; set; }
+        public decimal WithholdingTaxAmount { get; set; }
+        public Guid? VatWithholdingTaxId { get; set; }
+        public Guid? VatWithholdingAccountId { get; set; }
+        public decimal VatWithholdingAmount { get; set; }
+        public string? WithholdingCertificateNumber { get; set; }
+        public DateTime? WithholdingCertificateDate { get; set; }
         public string? Notes { get; set; }
         public string Status { get; set; } = string.Empty;
         public DateTime? ClearedDate { get; set; }
         public bool IsCreditNote { get; set; }
+        public Guid? JournalEntryId { get; set; }
         public List<PaymentAllocationDto> Allocations { get; set; } = new();
         public DateTime CreatedAt { get; set; }
     }

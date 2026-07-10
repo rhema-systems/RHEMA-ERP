@@ -115,6 +115,9 @@ public class CreditNote : DocumentEntity
     public DateTime? AppliedDate { get; set; }
     public Guid? AppliedToInvoiceId { get; set; }
 
+    // GL Posting
+    public Guid? JournalEntryId { get; set; }
+
     // Multi-tenant
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.AR;
 
@@ -16,8 +17,17 @@ public class PaymentCreateDto
     public Guid? BankAccountId { get; set; }
     public string? CheckNumber { get; set; }
     public string? TransactionReference { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public decimal WithholdingTaxAmount { get; set; }
+    public Guid? VatWithholdingTaxId { get; set; }
+    public Guid? VatWithholdingAccountId { get; set; }
+    public decimal VatWithholdingAmount { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
     public string? Notes { get; set; }
     public bool IsCreditNote { get; set; }
+    public List<InvoiceAllocationDto>? Allocations { get; set; }
 }
 
 public class PaymentUpdateDto
@@ -29,6 +39,14 @@ public class PaymentUpdateDto
     public Guid? BankAccountId { get; set; }
     public string? CheckNumber { get; set; }
     public string? TransactionReference { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public decimal WithholdingTaxAmount { get; set; }
+    public Guid? VatWithholdingTaxId { get; set; }
+    public Guid? VatWithholdingAccountId { get; set; }
+    public decimal VatWithholdingAmount { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -90,6 +108,7 @@ public class InvoiceLineItemCreateDto
     public decimal UnitPrice { get; set; }
     public string? TaxCode { get; set; }
     public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
     public string? Unit { get; set; }
     public decimal DiscountPercentage { get; set; }
 }
@@ -120,6 +139,7 @@ public class InvoiceLineItemUpdateDto
     public decimal UnitPrice { get; set; }
     public string? TaxCode { get; set; }
     public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
     public string? Unit { get; set; }
     public decimal DiscountPercentage { get; set; }
 }
@@ -170,4 +190,8 @@ public class OutstandingInvoiceDto
     public decimal BalanceAmount { get; set; }
     public int DaysOverdue { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
+    public decimal? EarlyPaymentDiscountPercentage { get; set; }
+    public DateTime? EarlyPaymentDiscountDueDate { get; set; }
+    public bool IsDiscountAvailable { get; set; }
+    public decimal? DiscountAmount { get; set; }
 }

@@ -33,6 +33,7 @@ public interface IReturnOrderService
         string? search = null, CreditNoteStatus? status = null,
         Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null);
     Task<CreditNoteDetailDto> ApproveCreditNoteAsync(Guid id);
+    Task<CreditNoteDetailDto> PostCreditNoteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CreditNoteDetailDto> ApplyCreditNoteAsync(Guid id, Guid? invoiceId = null);
     Task<CreditNoteDetailDto> VoidCreditNoteAsync(Guid id, string? reason = null);
 

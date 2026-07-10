@@ -1604,10 +1604,10 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 AccountCode = "7100",
                 AccountNumber = "7100",
-                AccountName = "Unrealized Exchange Gain/Loss",
+                AccountName = "Unrealized Exchange Gain",
                 AccountType = AccountType.Revenue,
                 AccountCategory = "Other Income",
-                Description = "Unrealized foreign exchange gains and losses from multi-currency revaluation",
+                Description = "Unrealized foreign exchange gains from multi-currency revaluation",
                 CurrencyCode = "GHS",
                 IsMultiCurrency = false,
                 IsSegmented = false,
@@ -1624,14 +1624,38 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-7110-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "7110",
+                AccountNumber = "7110",
+                AccountName = "Unrealized Exchange Loss",
+                AccountType = AccountType.Expense,
+                AccountCategory = "Other Expenses",
+                Description = "Unrealized foreign exchange losses from multi-currency revaluation",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-7200-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "7200",
                 AccountNumber = "7200",
-                AccountName = "Realized Exchange Gain/Loss",
+                AccountName = "Realized Exchange Gain",
                 AccountType = AccountType.Revenue,
                 AccountCategory = "Other Income",
-                Description = "Realized foreign exchange gains and losses from settled transactions",
+                Description = "Realized foreign exchange gains from settled transactions",
                 CurrencyCode = "GHS",
                 IsMultiCurrency = false,
                 IsSegmented = false,
@@ -1643,6 +1667,30 @@ public class FinanceDataSeeder
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
                 Balance = 8200m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-7210-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "7210",
+                AccountNumber = "7210",
+                AccountName = "Realized Exchange Loss",
+                AccountType = AccountType.Expense,
+                AccountCategory = "Other Expenses",
+                Description = "Realized foreign exchange losses from settled transactions",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2061,7 +2109,11 @@ public class FinanceDataSeeder
             AccountSeparator = "-",
             RetainedEarningsAccountId = Guid.Parse("00000005-3100-0000-0000-000000000001"),
             UnrealizedGainLossAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001"),
+            UnrealizedFxGainAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001"),
+            UnrealizedFxLossAccountId = Guid.Parse("00000005-7110-0000-0000-000000000001"),
             RealizedGainLossAccountId = Guid.Parse("00000005-7200-0000-0000-000000000001"),
+            RealizedFxGainAccountId = Guid.Parse("00000005-7200-0000-0000-000000000001"),
+            RealizedFxLossAccountId = Guid.Parse("00000005-7210-0000-0000-000000000001"),
             SuspenseAccountId = Guid.Parse("00000005-9999-0000-0000-000000000001"),
             ControlAccountArId = Guid.Parse("00000005-1100-0000-0000-000000000001"),
             ControlAccountApId = Guid.Parse("00000005-2000-0000-0000-000000000001"),
@@ -2136,6 +2188,30 @@ public class FinanceDataSeeder
             if (!settings.MigrationClearingAccountId.HasValue)
             {
                 settings.MigrationClearingAccountId = Guid.Parse("00000005-1990-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.UnrealizedFxGainAccountId.HasValue)
+            {
+                settings.UnrealizedFxGainAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.UnrealizedFxLossAccountId.HasValue)
+            {
+                settings.UnrealizedFxLossAccountId = Guid.Parse("00000005-7110-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.RealizedFxGainAccountId.HasValue)
+            {
+                settings.RealizedFxGainAccountId = Guid.Parse("00000005-7200-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.RealizedFxLossAccountId.HasValue)
+            {
+                settings.RealizedFxLossAccountId = Guid.Parse("00000005-7210-0000-0000-000000000001");
                 updated = true;
             }
 

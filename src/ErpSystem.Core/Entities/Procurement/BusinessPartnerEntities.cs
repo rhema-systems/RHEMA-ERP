@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
@@ -36,6 +37,10 @@ public class BusinessPartner : TenantEntity
 
     [MaxLength(100)]
     public string? VATNumber { get; set; }
+
+    public bool IsVatWithholdingAgent { get; set; }
+
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
     public DateTime? RegistrationDate { get; set; }
     public DateTime? IncorporationDate { get; set; }

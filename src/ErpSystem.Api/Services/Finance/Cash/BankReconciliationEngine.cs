@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Api.Services.Finance.Cash;
 
@@ -51,11 +52,16 @@ public class BankReconciliationEngine
 
     private int CalculateMatchConfidence(CashTransaction transaction, BankStatementLine line)
     {
+        if (!IsDirectionCompatible(transaction, line))
+        {
+            return 0;
+        }
+
         int confidence = 0;
 
         // 1. Amount match (40 points)
         var transactionAmount = transaction.Amount;
-        var lineAmount = line.CreditAmount > 0 ? line.CreditAmount : line.DebitAmount;
+        var lineAmount = GetExpectedStatementAmount(transaction, line);
 
         if (transactionAmount == lineAmount)
         {
@@ -113,6 +119,34 @@ public class BankReconciliationEngine
         }
 
         return confidence;
+    }
+
+    public static bool IsDirectionCompatible(CashTransaction transaction, BankStatementLine line)
+    {
+        return transaction.TransactionType switch
+        {
+            CashTransactionType.Receipt => line.CreditAmount > 0m && line.DebitAmount == 0m,
+            CashTransactionType.Payment => line.DebitAmount > 0m && line.CreditAmount == 0m,
+            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase)
+                => line.DebitAmount > 0m && line.CreditAmount == 0m,
+            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase)
+                => line.CreditAmount > 0m && line.DebitAmount == 0m,
+            _ => false
+        };
+    }
+
+    public static decimal GetExpectedStatementAmount(CashTransaction transaction, BankStatementLine line)
+    {
+        return transaction.TransactionType switch
+        {
+            CashTransactionType.Receipt => line.CreditAmount,
+            CashTransactionType.Payment => line.DebitAmount,
+            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase)
+                => line.DebitAmount,
+            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase)
+                => line.CreditAmount,
+            _ => 0m
+        };
     }
 
     private double CalculateStringSimilarity(string str1, string str2)

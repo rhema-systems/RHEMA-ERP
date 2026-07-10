@@ -97,6 +97,10 @@ public class ReturnOrderController : ControllerBase
     [HttpPost("~/api/sales/credit-notes/{id:guid}/approve")]
     public async Task<IActionResult> ApproveCreditNote(Guid id) => Ok(await _service.ApproveCreditNoteAsync(id));
 
+    [HttpPost("~/api/sales/credit-notes/{id:guid}/post")]
+    public async Task<IActionResult> PostCreditNote(Guid id, CancellationToken cancellationToken)
+        => Ok(await _service.PostCreditNoteAsync(id, cancellationToken));
+
     [HttpPost("~/api/sales/credit-notes/{id:guid}/apply")]
     public async Task<IActionResult> ApplyCreditNote(Guid id, [FromQuery] Guid? invoiceId = null)
         => Ok(await _service.ApplyCreditNoteAsync(id, invoiceId));

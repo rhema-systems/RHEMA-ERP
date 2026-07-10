@@ -378,11 +378,17 @@ namespace ErpSystem.Web.Services
                     "Bank reconciliation approval for month-end bank sign-off."),
                 new("Cheque", "Cheque", typeof(Cheque).FullName, "Cheque Approval",
                     "Cheque approval before issue, clearing, cancellation, or voiding."),
+                new("OpeningBalanceBatch", "Opening Balance Batch", typeof(OpeningBalanceBatch).FullName, "Opening Balance Approval",
+                    "Controlled migration opening-balance approval before posting to GL through the Finance posting engine."),
+
+                // FX
+                new("ExchangeRate", "Exchange Rate", typeof(ExchangeRate).FullName, "Exchange Rate Approval",
+                    "Exchange-rate approval before rates can be used by posting, settlement, or revaluation."),
 
                 // Fixed assets
                 new("FixedAsset", "Fixed Asset", typeof(FixedAsset).FullName, "Fixed Asset Approval",
                     "Fixed asset registration approval before activation, depreciation, transfer, or disposal."),
-                new("AssetDepreciationSchedule", "Asset Depreciation", typeof(AssetDepreciationSchedule).FullName, "Asset Depreciation Approval",
+                new("FixedAssetDepreciationRun", "Asset Depreciation Run", typeof(FixedAssetDepreciationRun).FullName, "Asset Depreciation Run Approval",
                     "Depreciation run approval before GL posting."),
                 new("AssetValuation", "Asset Valuation", typeof(AssetValuation).FullName, "Asset Valuation Approval",
                     "Asset valuation, impairment, or revaluation approval before GL posting."),
@@ -6775,7 +6781,17 @@ namespace ErpSystem.Web.Services
                     Description = "Lock approved budget scenarios",
                     Category = "Finance - Budgeting"
                 }
-            };
+            }
+            .Concat(FinancePermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
+            .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToArray();
 
             foreach (var permissionInfo in permissionSeeds)
             {
@@ -6814,6 +6830,8 @@ namespace ErpSystem.Web.Services
 
             var rolePermissionMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
+                [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames,
+                [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames,
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -6850,12 +6868,18 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write",
+                    "Finance.ChartOfAccounts.Manage",
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
+                    "Finance.AP.Invoices.Manage",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
+                    "Finance.AR.Invoices.Manage",
+                    "Finance.AR.Payments.Receive",
+                    "Finance.BankAccounts.Manage",
+                    "Finance.CashBank.Transactions.Record",
                     "Finance.Budgeting.Read"
                 },
                 ["Accounts Officer"] = new[]
@@ -6869,11 +6893,16 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
+                    "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
+                    "Finance.AR.Invoices.Manage",
                     "Finance.AR.Invoices.Send",
+                    "Finance.AR.Payments.Receive",
+                    "Finance.CashBank.Transactions.Record",
+                    "Finance.Workflow.Submit",
                     "Finance.Budgeting.Read",
                     "Finance.BudgetReturns.Submit"
                 },
@@ -6884,7 +6913,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
+                    "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Payments.Process",
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write"
@@ -6896,7 +6927,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
+                    "Finance.AR.Invoices.Manage",
                     "Finance.AR.Invoices.Send",
+                    "Finance.AR.Payments.Receive",
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write"
@@ -6912,11 +6945,20 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
+                    "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Payments.Process",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
+                    "Finance.AR.Invoices.Manage",
                     "Finance.AR.Invoices.Send",
+                    "Finance.AR.Payments.Receive",
+                    "Finance.BankAccounts.Manage",
+                    "Finance.CashBank.Transactions.Record",
+                    "Finance.BankReconciliation.Perform",
+                    "Finance.Reports.Run",
+                    "Finance.Workflow.Submit",
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
@@ -6928,32 +6970,22 @@ namespace ErpSystem.Web.Services
                     "Finance.Write",
                     "Finance.JournalEntries.Approve",
                     "Finance.AP.Invoices.Approve",
+                    "Finance.AP.Payments.Approve",
+                    "Finance.AR.Invoices.ApprovePost",
                     "Finance.AR.Invoices.Void",
+                    "Finance.BankReconciliation.Approve",
+                    "Finance.Reports.Run",
+                    "Finance.Reports.Export",
+                    "Finance.Workflow.Approve",
+                    "Finance.Workflow.Reject",
+                    "Finance.Workflow.RequestChanges",
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Approve",
                     "Finance.Budgeting.Lock"
                 },
-                ["Financial Controller"] = new[]
-                {
-                    "Finance.Read",
-                    "Finance.Write",
-                    "Finance.Admin",
-                    "Finance.PeriodClose",
-                    "Finance.PeriodReopen",
-                    "Finance.JournalEntries.Approve",
-                    "Finance.JournalEntries.Post",
-                    "Finance.JournalEntries.Reverse",
-                    "Finance.AP.Invoices.Approve",
-                    "Finance.AP.Invoices.Void",
-                    "Finance.AR.Invoices.Void",
-                    "Finance.Budgeting.Read",
-                    "Finance.Budgeting.Write",
-                    "Finance.BudgetReturns.Assign",
-                    "Finance.BudgetReturns.Approve",
-                    "Finance.Budgeting.Lock"
-                },
+                ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]
                 {
                     "Finance.Read",

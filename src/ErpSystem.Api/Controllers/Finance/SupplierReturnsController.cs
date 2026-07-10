@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
+using ErpSystem.Api.Services.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,26 +17,24 @@ namespace ErpSystem.Api.Controllers.Finance;
 [Route("api/ap/supplier-returns")]
 public class SupplierReturnsController : ControllerBase
 {
-    private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-
     private readonly ApplicationDbContext _dbContext;
     private readonly ICurrentUserService _currentUserService;
     private readonly IDocumentNumberingService _documentNumberingService;
-    private readonly ISubledgerPostingService _subledgerPostingService;
+    private readonly IFinancePostingEngine _financePostingEngine;
 
     public SupplierReturnsController(
         ApplicationDbContext dbContext,
         ICurrentUserService currentUserService,
         IDocumentNumberingService documentNumberingService,
-        ISubledgerPostingService subledgerPostingService)
+        IFinancePostingEngine financePostingEngine)
     {
         _dbContext = dbContext;
         _currentUserService = currentUserService;
         _documentNumberingService = documentNumberingService;
-        _subledgerPostingService = subledgerPostingService;
+        _financePostingEngine = financePostingEngine;
     }
 
-    private Guid TenantId => _currentUserService.TenantId ?? DefaultTenantId;
+    private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<SupplierReturnDto>>> GetAll(CancellationToken cancellationToken)
@@ -277,7 +276,7 @@ public class SupplierReturnsController : ControllerBase
         _dbContext.SupplierDebitNotes.Add(debitNote);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        await _subledgerPostingService.PostSupplierDebitNoteAsync(debitNote.Id, cancellationToken);
+        await PostSupplierDebitNoteThroughFinancePostingEngineAsync(debitNote.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         var refreshed = await BaseQuery(tenantId)
@@ -295,11 +294,222 @@ public class SupplierReturnsController : ControllerBase
             .Include(r => r.Vendor)
             .Where(r => r.TenantId == tenantId && !r.IsDeleted);
 
+    private async Task PostSupplierDebitNoteThroughFinancePostingEngineAsync(Guid debitNoteId, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId;
+        var debitNote = await _dbContext.SupplierDebitNotes
+            .Include(d => d.Vendor)
+            .Include(d => d.LineItems.Where(l => !l.IsDeleted))
+            .Include(d => d.SupplierReturn)
+                .ThenInclude(r => r!.LineItems.Where(l => !l.IsDeleted))
+            .Include(d => d.OriginalVendorInvoice)
+                .ThenInclude(i => i!.LineItems)
+            .FirstOrDefaultAsync(d => d.TenantId == tenantId && d.Id == debitNoteId && !d.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Supplier debit note was not found for this tenant.");
+
+        if (debitNote.Status == SupplierDebitNoteStatus.Posted && debitNote.JournalEntryId.HasValue)
+        {
+            return;
+        }
+
+        var supplierReturn = debitNote.SupplierReturn
+            ?? throw new InvalidOperationException($"Supplier debit note {debitNote.DebitNoteNumber} is not linked to a supplier return.");
+
+        var settings = await _dbContext.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Finance settings not configured for this tenant.");
+
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+        var currencyCode = NormalizeCurrency(debitNote.CurrencyCode, functionalCurrency);
+        var exchangeRate = NormalizeExchangeRate(debitNote.ExchangeRate);
+        var invoiceLinked = debitNote.OriginalVendorInvoiceId.HasValue;
+        var grvLinked = supplierReturn.OriginalFinancePurchaseOrderReceiptId.HasValue && !invoiceLinked;
+        if (!invoiceLinked && !grvLinked)
+        {
+            throw new InvalidOperationException($"Supplier return {supplierReturn.ReturnNumber} must reference either a vendor invoice or a finance GRV.");
+        }
+
+        var controlAccountId = invoiceLinked
+            ? debitNote.Vendor.DefaultApAccountId ?? settings.ControlAccountApId
+            : settings.ControlAccountGRVAccrualId;
+        if (!controlAccountId.HasValue)
+        {
+            throw new InvalidOperationException(invoiceLinked
+                ? "AP Control Account not configured."
+                : "GRV Accrual Control Account is not configured in Finance Settings.");
+        }
+
+        var returnLinesByIndex = supplierReturn.LineItems.Where(l => !l.IsDeleted).OrderBy(l => l.CreatedAt).ToList();
+        var debitLinesByIndex = debitNote.LineItems.Where(l => !l.IsDeleted).OrderBy(l => l.CreatedAt).ToList();
+        var creditLines = new List<FinancePostingLineDto>();
+        var lineNumber = 2;
+
+        Dictionary<Guid, VendorInvoiceLineItem>? vendorInvoiceLineById = null;
+        if (invoiceLinked)
+        {
+            vendorInvoiceLineById = debitNote.OriginalVendorInvoice?.LineItems?
+                .Where(l => !l.IsDeleted)
+                .ToDictionary(l => l.Id, l => l)
+                ?? new Dictionary<Guid, VendorInvoiceLineItem>();
+        }
+
+        Dictionary<Guid, FinancePurchaseOrderItem>? financePoLineById = null;
+        if (grvLinked)
+        {
+            var financePoLineIds = returnLinesByIndex
+                .Where(r => r.OriginalFinancePurchaseOrderItemId.HasValue)
+                .Select(r => r.OriginalFinancePurchaseOrderItemId!.Value)
+                .ToList();
+
+            financePoLineById = await _dbContext.FinancePurchaseOrderItems
+                .Where(l => l.TenantId == tenantId && financePoLineIds.Contains(l.Id) && !l.IsDeleted)
+                .ToDictionaryAsync(l => l.Id, cancellationToken);
+        }
+
+        for (var index = 0; index < debitLinesByIndex.Count; index++)
+        {
+            var debitLine = debitLinesByIndex[index];
+            var returnLine = index < returnLinesByIndex.Count ? returnLinesByIndex[index] : null;
+            var lineSourceAmount = decimal.Round(debitLine.LineTotal - debitLine.TaxAmount, 2, MidpointRounding.AwayFromZero);
+            if (lineSourceAmount <= 0m)
+            {
+                continue;
+            }
+
+            Guid creditAccountId;
+            if (invoiceLinked)
+            {
+                VendorInvoiceLineItem? sourceLine = null;
+                if (returnLine?.OriginalVendorInvoiceLineItemId.HasValue == true && vendorInvoiceLineById != null)
+                {
+                    vendorInvoiceLineById.TryGetValue(returnLine.OriginalVendorInvoiceLineItemId.Value, out sourceLine);
+                }
+
+                if (string.Equals(sourceLine?.LineItemType, "Inventory", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(sourceLine?.LineItemType, "Product", StringComparison.OrdinalIgnoreCase))
+                {
+                    creditAccountId = settings.ControlAccountInventoryId
+                        ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.");
+                }
+                else
+                {
+                    creditAccountId = sourceLine?.GLAccountId
+                        ?? debitNote.Vendor.DefaultExpenseAccountId
+                        ?? throw new InvalidOperationException($"No expense account could be resolved for supplier return line '{debitLine.Description}'.");
+                }
+            }
+            else
+            {
+                FinancePurchaseOrderItem? sourceLine = null;
+                if (returnLine?.OriginalFinancePurchaseOrderItemId.HasValue == true && financePoLineById != null)
+                {
+                    financePoLineById.TryGetValue(returnLine.OriginalFinancePurchaseOrderItemId.Value, out sourceLine);
+                }
+
+                if (sourceLine == null)
+                {
+                    throw new InvalidOperationException($"No finance PO line could be resolved for supplier return line '{debitLine.Description}'.");
+                }
+
+                creditAccountId = sourceLine.LineType == 1
+                    ? settings.ControlAccountInventoryId
+                        ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.")
+                    : sourceLine.GlAccountId
+                        ?? throw new InvalidOperationException($"No GL account specified for finance PO return line '{sourceLine.Description}'.");
+            }
+
+            creditLines.Add(BuildPostingLine(
+                creditAccountId,
+                $"Supplier return {debitNote.DebitNoteNumber} - {debitLine.Description}",
+                0m,
+                ToFunctionalAmount(lineSourceAmount, currencyCode, functionalCurrency, exchangeRate),
+                lineSourceAmount,
+                currencyCode,
+                functionalCurrency,
+                exchangeRate,
+                debitNote.DebitNoteDate,
+                debitNote.DebitNoteNumber,
+                lineNumber++,
+                "AP-SupplierReturn-Line"));
+        }
+
+        if (invoiceLinked && debitNote.TaxAmount > 0m)
+        {
+            var taxAccountId = settings.ControlAccountTaxId
+                ?? throw new InvalidOperationException("Tax Control Account not configured.");
+
+            creditLines.Add(BuildPostingLine(
+                taxAccountId,
+                $"Reverse input tax - {debitNote.DebitNoteNumber}",
+                0m,
+                ToFunctionalAmount(debitNote.TaxAmount, currencyCode, functionalCurrency, exchangeRate),
+                debitNote.TaxAmount,
+                currencyCode,
+                functionalCurrency,
+                exchangeRate,
+                debitNote.DebitNoteDate,
+                debitNote.DebitNoteNumber,
+                lineNumber++,
+                "AP-SupplierReturn-Tax"));
+        }
+
+        var creditFunctionalTotal = decimal.Round(creditLines.Sum(l => l.CreditAmount), 2, MidpointRounding.AwayFromZero);
+        if (creditFunctionalTotal <= 0m)
+        {
+            throw new InvalidOperationException($"Supplier debit note {debitNote.DebitNoteNumber} has no positive-value lines to post.");
+        }
+
+        var controlSourceAmount = invoiceLinked ? debitNote.TotalAmount : debitNote.SubTotal;
+        var lines = new List<FinancePostingLineDto>
+        {
+            BuildPostingLine(
+                controlAccountId.Value,
+                invoiceLinked
+                    ? $"Supplier debit note {debitNote.DebitNoteNumber}"
+                    : $"Reverse GRV accrual - {debitNote.DebitNoteNumber}",
+                creditFunctionalTotal,
+                0m,
+                controlSourceAmount,
+                currencyCode,
+                functionalCurrency,
+                exchangeRate,
+                debitNote.DebitNoteDate,
+                debitNote.DebitNoteNumber,
+                1,
+                invoiceLinked ? "AP-SupplierDebitNote-Control" : "AP-GRV-Return-Control")
+        };
+        lines.AddRange(creditLines);
+
+        var result = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+        {
+            SourceModule = "AP",
+            SourceDocumentType = "SupplierDebitNote",
+            SourceDocumentId = debitNote.Id,
+            SourceDocumentTenantId = tenantId,
+            PostingAction = "PostSupplierDebitNote",
+            SourceDocumentReference = debitNote.DebitNoteNumber,
+            Description = $"Supplier Debit Note {debitNote.DebitNoteNumber} - {debitNote.Vendor.PartnerName}",
+            PostingDate = debitNote.DebitNoteDate,
+            JournalType = "System Generated",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = functionalCurrency,
+            IdempotencyKey = $"SupplierDebitNote:{tenantId:N}:{debitNote.Id:N}:Post",
+            Lines = lines
+        }, cancellationToken);
+
+        debitNote.JournalEntryId = result.JournalEntryId;
+        debitNote.Status = SupplierDebitNoteStatus.Posted;
+        debitNote.UpdatedAt = DateTime.UtcNow;
+        debitNote.UpdatedBy = _currentUserService.UserName ?? "system";
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private SupplierReturnDto MapToDto(SupplierReturn supplierReturn)
     {
         var debitNote = _dbContext.SupplierDebitNotes
             .AsNoTracking()
-            .Where(d => d.SupplierReturnId == supplierReturn.Id && !d.IsDeleted)
+            .Where(d => d.TenantId == supplierReturn.TenantId && d.SupplierReturnId == supplierReturn.Id && !d.IsDeleted)
             .OrderByDescending(d => d.CreatedAt)
             .Select(d => new SupplierDebitNoteDto
             {
@@ -396,4 +606,45 @@ public class SupplierReturnsController : ControllerBase
 
     private static string NormalizeCurrency(string? currencyCode)
         => string.IsNullOrWhiteSpace(currencyCode) ? "GHS" : currencyCode.Trim().ToUpperInvariant();
+
+    private static string NormalizeCurrency(string? currencyCode, string fallback)
+        => string.IsNullOrWhiteSpace(currencyCode) ? fallback.Trim().ToUpperInvariant() : currencyCode.Trim().ToUpperInvariant();
+
+    private static decimal ToFunctionalAmount(decimal sourceAmount, string transactionCurrency, string functionalCurrency, decimal exchangeRate)
+        => string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+            ? decimal.Round(sourceAmount, 2, MidpointRounding.AwayFromZero)
+            : decimal.Round(sourceAmount * exchangeRate, 2, MidpointRounding.AwayFromZero);
+
+    private static FinancePostingLineDto BuildPostingLine(
+        Guid accountId,
+        string description,
+        decimal debitAmount,
+        decimal creditAmount,
+        decimal sourceAmount,
+        string transactionCurrency,
+        string functionalCurrency,
+        decimal exchangeRate,
+        DateTime rateDate,
+        string reference,
+        int lineNumber,
+        string tag)
+    {
+        var sameCurrency = string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
+        return new FinancePostingLineDto
+        {
+            AccountId = accountId,
+            Description = description,
+            DebitAmount = decimal.Round(debitAmount, 2, MidpointRounding.AwayFromZero),
+            CreditAmount = decimal.Round(creditAmount, 2, MidpointRounding.AwayFromZero),
+            TransactionCurrency = transactionCurrency,
+            TransactionDebitAmount = debitAmount > 0m ? decimal.Round(sourceAmount, 2, MidpointRounding.AwayFromZero) : 0m,
+            TransactionCreditAmount = creditAmount > 0m ? decimal.Round(sourceAmount, 2, MidpointRounding.AwayFromZero) : 0m,
+            ForeignCurrencyAmount = sameCurrency ? null : decimal.Round(sourceAmount, 2, MidpointRounding.AwayFromZero),
+            ExchangeRate = sameCurrency ? null : exchangeRate,
+            ExchangeRateDate = sameCurrency ? null : rateDate.Date,
+            SourceReferenceNumber = reference,
+            LineNumber = lineNumber,
+            TransactionTag = tag
+        };
+    }
 }

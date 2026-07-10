@@ -86,6 +86,30 @@ export interface FixedAsset {
   createdBy?: string;
   updatedAt?: string;
   updatedBy?: string;
+  bookValues: FixedAssetBookValue[];
+}
+
+export interface FixedAssetBookValue {
+  id: string;
+  fixedAssetId: string;
+  accountingBookId: string;
+  bookClassification: string;
+  accountingBookName?: string;
+  acquisitionCost: number;
+  accumulatedDepreciation: number;
+  netBookValue: number;
+  residualValue: number;
+  usefulLifeMonths: number;
+  remainingUsefulLifeMonths?: number;
+  depreciationMethod: DepreciationMethod;
+  depreciationConvention: DepreciationConvention;
+  placedInServiceDate?: string;
+  openingAsOfDate?: string;
+  openingYtdDepreciation: number;
+  lastDepreciationDate?: string;
+  openingPostedToGl: boolean;
+  openingPostedDate?: string;
+  openingSource: string;
 }
 
 export interface CreateFixedAssetDto {
@@ -118,11 +142,14 @@ export interface RunDepreciationDto {
   fixedAssetId?: string;
   postToGl: boolean;
   postingDate?: string;
+  bookClassification?: string;
 }
 
 export interface AssetDepreciationSchedule {
   id: string;
   fixedAssetId: string;
+  accountingBookId?: string;
+  bookClassification: string;
   fiscalPeriodId: string;
   depreciationAmount: number;
   accumulatedDepreciation: number;

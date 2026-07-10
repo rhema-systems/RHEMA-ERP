@@ -7,6 +7,8 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -22,27 +24,33 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
-        private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly ILogger<PaymentService> _logger;
         private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IFinancePostingEngine? _financePostingEngine;
+        private readonly IFinanceAuditService? _financeAuditService;
+        private readonly IFxAccountingService? _fxAccountingService;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ITenantSettingsService tenantSettingsService,
-            ISubledgerPostingService subledgerPostingService,
             ILogger<PaymentService> logger,
-            IDocumentNumberingService documentNumberingService)
+            IDocumentNumberingService documentNumberingService,
+            IFinancePostingEngine? financePostingEngine = null,
+            IFinanceAuditService? financeAuditService = null,
+            IFxAccountingService? fxAccountingService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
-            _subledgerPostingService = subledgerPostingService;
             _logger = logger;
             _documentNumberingService = documentNumberingService;
+            _financePostingEngine = financePostingEngine;
+            _financeAuditService = financeAuditService;
+            _fxAccountingService = fxAccountingService;
         }
 
-        private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
 
         public async Task<CustomerPaymentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -53,7 +61,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                     .ThenInclude(a => a.Invoice)
                 .FirstOrDefaultAsync(cancellationToken);
 
-            return payment == null ? null : MapToDto(payment);
+            var customer = payment == null
+                ? null
+                : await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken);
+
+            return payment == null ? null : MapToDto(payment, customer);
         }
 
         public async Task<CustomerPaymentDto?> GetByPaymentNumberAsync(string paymentNumber, CancellationToken cancellationToken = default)
@@ -63,7 +75,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Include(p => p.Allocations)
                 .FirstOrDefaultAsync(cancellationToken);
 
-            return payment == null ? null : MapToDto(payment);
+            var customer = payment == null
+                ? null
+                : await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken);
+
+            return payment == null ? null : MapToDto(payment, customer);
         }
 
         public async Task<PagedResult<CustomerPaymentDto>> GetAllAsync(PaymentQueryDto query, CancellationToken cancellationToken = default)
@@ -117,10 +133,20 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Skip((query.PageNumber - 1) * query.PageSize)
                 .Take(query.PageSize)
                 .ToListAsync(cancellationToken);
+            var customerIds = payments.Select(p => p.CustomerId).Distinct().ToList();
+            var customerMap = customerIds.Count == 0
+                ? new Dictionary<Guid, BusinessPartner>()
+                : await _unitOfWork.Repository<BusinessPartner>()
+                    .GetQueryable(p => p.TenantId == TenantId && !p.IsDeleted && customerIds.Contains(p.Id))
+                    .ToDictionaryAsync(p => p.Id, cancellationToken);
 
             return new PagedResult<CustomerPaymentDto>
             {
-                Items = payments.Select(MapToDto).ToList(),
+                Items = payments
+                    .Select(payment => MapToDto(
+                        payment,
+                        customerMap.TryGetValue(payment.CustomerId, out var customer) ? customer : null))
+                    .ToList(),
                 TotalCount = totalCount,
                 PageNumber = query.PageNumber,
                 PageSize = query.PageSize
@@ -158,6 +184,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                 BankAccountId = dto.BankAccountId,
                 CheckNumber = dto.CheckNumber,
                 TransactionReference = dto.TransactionReference,
+                WithholdingTaxId = dto.WithholdingTaxId,
+                WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+                WithholdingTaxAmount = dto.WithholdingTaxAmount,
+                VatWithholdingTaxId = dto.VatWithholdingTaxId,
+                VatWithholdingAccountId = dto.VatWithholdingAccountId,
+                VatWithholdingAmount = dto.VatWithholdingAmount,
+                WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
+                WithholdingCertificateDate = dto.WithholdingCertificateDate,
                 Notes = dto.Notes,
                 Status = "Pending",
                 IsCreditNote = dto.IsCreditNote,
@@ -173,13 +207,28 @@ namespace ErpSystem.Api.Services.Finance.AR
             await _unitOfWork.Repository<CustomerPayment>().AddAsync(payment);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            // Post to GL
-            await _subledgerPostingService.PostArPaymentAsync(payment.Id, cancellationToken);
+            if (dto.Allocations?.Any() == true && !dto.IsCreditNote)
+            {
+                await AllocatePaymentCoreAsync(
+                    payment.Id,
+                    dto.Allocations,
+                    postDiscountAdjustmentsForPostedPayment: false,
+                    cancellationToken);
+            }
+
+            if (dto.IsCreditNote)
+            {
+                await PostCustomerCreditNoteAsync(payment.Id, cancellationToken);
+            }
+            else
+            {
+                await PostAsync(payment.Id, cancellationToken);
+            }
 
             _logger.LogInformation("Created payment {PaymentNumber} for customer {CustomerId}, Amount: {Amount}",
                 paymentNumber, customer.Id, dto.TotalAmount);
 
-            return MapToDto(payment);
+            return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment, customer);
         }
 
         public async Task<CustomerPaymentDto> UpdateAsync(PaymentUpdateDto dto, CancellationToken cancellationToken = default)
@@ -189,6 +238,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{dto.Id}' not found.");
+
+            if (payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted customer payments cannot be updated. Use a reversal, void, or adjustment workflow.");
 
             // Only allow updates if status is Pending
             if (payment.Status != "Pending")
@@ -201,6 +253,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             payment.BankAccountId = dto.BankAccountId;
             payment.CheckNumber = dto.CheckNumber;
             payment.TransactionReference = dto.TransactionReference;
+            payment.WithholdingTaxId = dto.WithholdingTaxId;
+            payment.WithholdingTaxAccountId = dto.WithholdingTaxAccountId;
+            payment.WithholdingTaxAmount = dto.WithholdingTaxAmount;
+            payment.VatWithholdingTaxId = dto.VatWithholdingTaxId;
+            payment.VatWithholdingAccountId = dto.VatWithholdingAccountId;
+            payment.VatWithholdingAmount = dto.VatWithholdingAmount;
+            payment.WithholdingCertificateNumber = dto.WithholdingCertificateNumber;
+            payment.WithholdingCertificateDate = dto.WithholdingCertificateDate;
             payment.Notes = dto.Notes;
             payment.UpdatedAt = now;
             payment.UpdatedBy = UserName;
@@ -213,15 +273,206 @@ namespace ErpSystem.Api.Services.Finance.AR
             return MapToDto(payment);
         }
 
+        public async Task<CustomerPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AR receipt posting.");
+
+            var payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+            var wasAlreadyLinked = payment.JournalEntryId.HasValue;
+
+            try
+            {
+                var postingRequest = await BuildArReceiptPostingRequestAsync(payment, cancellationToken);
+                var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+
+                if (payment.JournalEntryId.HasValue && payment.JournalEntryId.Value != postingResult.JournalEntryId)
+                    throw new InvalidOperationException("Customer payment is linked to a different journal entry than the posting engine result.");
+
+                if (!payment.JournalEntryId.HasValue)
+                {
+                    payment.JournalEntryId = postingResult.JournalEntryId;
+                    payment.Status = "Posted";
+                    payment.UpdatedAt = DateTime.UtcNow;
+                    payment.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                if (postingResult.WasDuplicate || wasAlreadyLinked)
+                {
+                    await RecordArReceiptAuditAsync(
+                        FinanceAuditEvents.ArReceiptDuplicatePostingAttempt,
+                        payment,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            postingResult.PostingEventId,
+                            postingResult.JournalEntryId,
+                            postingResult.PostingAction,
+                            postingResult.WasDuplicate
+                        },
+                        comment: "Duplicate AR receipt posting request returned the existing posting.",
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    await RecordArReceiptAuditAsync(
+                        FinanceAuditEvents.ArReceiptPosted,
+                        payment,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            postingResult.PostingEventId,
+                            postingResult.JournalEntryId,
+                            postingResult.JournalEntryNumber,
+                            postingResult.TotalDebitAmount,
+                            postingResult.TotalCreditAmount,
+                            postingResult.FunctionalCurrencyCode,
+                            postingResult.PostingDate
+                        },
+                        comment: "AR receipt posted through the central finance posting engine.",
+                        cancellationToken: cancellationToken);
+                }
+
+                _logger.LogInformation(
+                    "Posted AR receipt {PaymentNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
+                    payment.PaymentNumber,
+                    postingResult.JournalEntryId,
+                    postingResult.WasDuplicate);
+
+                await PostRealizedFxIfRequiredAsync(payment, cancellationToken);
+
+                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+            }
+            catch (Exception ex)
+            {
+                await RecordArReceiptAuditAsync(
+                    FinanceAuditEvents.ArReceiptPostingFailed,
+                    payment,
+                    afterValues: new
+                    {
+                        payment.JournalEntryId,
+                        error = ex.Message
+                    },
+                    reason: ex.Message,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogError(ex, "Failed to post AR receipt {PaymentNumber}", payment.PaymentNumber);
+                throw;
+            }
+        }
+
+        private async Task<CustomerPaymentDto> PostCustomerCreditNoteAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AR credit note posting.");
+
+            var payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+            if (!payment.IsCreditNote)
+                throw new InvalidOperationException("Customer payment is not an AR credit note.");
+
+            var wasAlreadyLinked = payment.JournalEntryId.HasValue;
+
+            try
+            {
+                var postingRequest = await BuildCustomerCreditNotePostingRequestAsync(payment, cancellationToken);
+                var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+
+                if (payment.JournalEntryId.HasValue && payment.JournalEntryId.Value != postingResult.JournalEntryId)
+                    throw new InvalidOperationException("Customer credit note is linked to a different journal entry than the posting engine result.");
+
+                if (!payment.JournalEntryId.HasValue)
+                {
+                    payment.JournalEntryId = postingResult.JournalEntryId;
+                    payment.Status = "Posted";
+                    payment.UpdatedAt = DateTime.UtcNow;
+                    payment.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                if (postingResult.WasDuplicate || wasAlreadyLinked)
+                {
+                    await RecordArCreditNoteAuditAsync(
+                        FinanceAuditEvents.ArCreditNoteDuplicatePostingAttempt,
+                        payment,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            postingResult.PostingEventId,
+                            postingResult.JournalEntryId,
+                            postingResult.PostingAction,
+                            postingResult.WasDuplicate
+                        },
+                        comment: "Duplicate AR credit note posting request returned the existing posting.",
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    await RecordArCreditNoteAuditAsync(
+                        FinanceAuditEvents.ArCreditNotePosted,
+                        payment,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            postingResult.PostingEventId,
+                            postingResult.JournalEntryId,
+                            postingResult.JournalEntryNumber,
+                            postingResult.TotalDebitAmount,
+                            postingResult.TotalCreditAmount,
+                            postingResult.FunctionalCurrencyCode,
+                            postingResult.PostingDate
+                        },
+                        comment: "AR credit note posted through the central finance posting engine.",
+                        cancellationToken: cancellationToken);
+                }
+
+                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+            }
+            catch (Exception ex)
+            {
+                await RecordArCreditNoteAuditAsync(
+                    FinanceAuditEvents.ArCreditNotePostingFailed,
+                    payment,
+                    afterValues: new { payment.JournalEntryId, error = ex.Message },
+                    reason: ex.Message,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogError(ex, "Failed to post AR credit note {PaymentNumber}", payment.PaymentNumber);
+                throw;
+            }
+        }
+
         public async Task<PaymentAllocationResultDto> AllocatePaymentAsync(PaymentAllocation_CreateDto dto, CancellationToken cancellationToken = default)
         {
+            return await AllocatePaymentCoreAsync(
+                dto.CustomerPaymentId,
+                dto.Allocations,
+                postDiscountAdjustmentsForPostedPayment: true,
+                cancellationToken);
+        }
+
+        private async Task<PaymentAllocationResultDto> AllocatePaymentCoreAsync(
+            Guid paymentId,
+            List<InvoiceAllocationDto> allocations,
+            bool postDiscountAdjustmentsForPostedPayment,
+            CancellationToken cancellationToken)
+        {
             var payment = await _unitOfWork.Repository<CustomerPayment>()
-                .GetQueryable(p => p.TenantId == TenantId && p.Id == dto.CustomerPaymentId)
+                .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId)
                 .Include(p => p.Allocations)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
-                throw new KeyNotFoundException($"Payment with Id '{dto.CustomerPaymentId}' not found.");
+                throw new KeyNotFoundException($"Payment with Id '{paymentId}' not found.");
+
+            if (payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted customer payments cannot be allocated. Use a reversal, void, or adjustment workflow.");
 
             var result = new PaymentAllocationResultDto
             {
@@ -238,7 +489,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             // Calculate total cash allocation requested.
-            var totalAllocationRequested = dto.Allocations.Sum(a => a.AllocatedAmount);
+            var totalAllocationRequested = allocations.Sum(a => Math.Max(a.AllocatedAmount, 0m));
 
             if (totalAllocationRequested > availableAmount)
             {
@@ -248,8 +499,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             var now = DateTime.UtcNow;
             var allocatedInvoices = new List<Invoice>();
+            var createdAllocations = new List<PaymentAllocation>();
 
-            foreach (var allocationDto in dto.Allocations)
+            foreach (var allocationDto in allocations)
             {
                 var invoice = await _unitOfWork.Repository<Invoice>()
                     .FirstOrDefaultAsync(i => i.TenantId == TenantId && i.Id == allocationDto.InvoiceId);
@@ -273,6 +525,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                     continue;
                 }
 
+                var cashAmount = Math.Max(allocationDto.AllocatedAmount, 0m);
+                var requestedDiscountAmount = Math.Max(allocationDto.DiscountAmount, 0m);
+
+                if (cashAmount <= 0 && requestedDiscountAmount <= 0)
+                {
+                    continue;
+                }
+
                 // Create allocation
                 var allocation = new PaymentAllocation
                 {
@@ -280,8 +540,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     TenantId = TenantId,
                     CustomerPaymentId = payment.Id,
                     InvoiceId = invoice.Id,
-                    AllocatedAmount = allocationDto.AllocatedAmount,
-                    DiscountAmount = allocationDto.DiscountAmount,
+                    AllocatedAmount = cashAmount,
+                    DiscountAmount = requestedDiscountAmount,
                     AllocationDate = now,
                     Notes = allocationDto.Notes,
                     IsReversal = false,
@@ -290,7 +550,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 };
 
                 // Cap at outstanding balance to prevent over-allocation
-                var totalApplied = allocationDto.AllocatedAmount + allocationDto.DiscountAmount;
+                var totalApplied = cashAmount + requestedDiscountAmount;
                 var outstandingBalance = invoice.TotalAmount - invoice.PaidAmount;
                 if (totalApplied > outstandingBalance)
                 {
@@ -300,13 +560,14 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                     // Proportionally reduce both amounts so their sum equals outstandingBalance
                     var ratio = totalApplied > 0 ? outstandingBalance / totalApplied : 0m;
-                    allocation.AllocatedAmount = Math.Round(allocationDto.AllocatedAmount * ratio, 2);
+                    allocation.AllocatedAmount = Math.Round(cashAmount * ratio, 2);
                     allocation.DiscountAmount = outstandingBalance - allocation.AllocatedAmount;
                     if (allocation.DiscountAmount < 0) allocation.DiscountAmount = 0;
                     totalApplied = outstandingBalance;
                 }
 
                 payment.Allocations.Add(allocation);
+                createdAllocations.Add(allocation);
 
                 // Update invoice balances
                 invoice.PaidAmount += totalApplied;
@@ -385,6 +646,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (allocation.IsReversal)
                 throw new InvalidOperationException("This allocation has already been reversed.");
 
+            if (allocation.CustomerPayment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted customer payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
+
             var now = DateTime.UtcNow;
 
             // Reverse invoice balances
@@ -441,6 +705,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{id}' not found.");
 
+            if (payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted customer payments cannot be cleared by mutation until bank reconciliation integration is migrated to the posting engine.");
+
             payment.Status = "Cleared";
             payment.ClearedDate = clearedDate;
             payment.UpdatedAt = DateTime.UtcNow;
@@ -464,6 +731,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{id}' not found.");
+
+            if (payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted customer payments cannot be bounced by mutation until AR receipt reversal posting is implemented.");
 
             var now = DateTime.UtcNow;
 
@@ -550,19 +820,33 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             var now = DateTime.UtcNow;
 
-            return invoices.Select(i => new OutstandingInvoiceDto
+            return invoices.Select(i =>
             {
-                Id = i.Id,
-                InvoiceNumber = i.InvoiceNumber,
-                InvoiceDate = i.InvoiceDate,
-                DueDate = i.DueDate,
-                TotalAmount = i.TotalAmount,
-                PaidAmount = i.PaidAmount,
-                BalanceAmount = i.BalanceAmount,
-                DaysOverdue = i.DueDate.HasValue && i.DueDate.Value < now
-                    ? (now - i.DueDate.Value).Days
-                    : 0,
-                CurrencyCode = i.CurrencyCode
+                var discountAvailable = i.EarlyPaymentDiscountPercentage > 0
+                    && i.EarlyPaymentDiscountDueDate.HasValue
+                    && i.EarlyPaymentDiscountDueDate.Value.Date >= now.Date;
+                var discountAmount = discountAvailable
+                    ? Math.Round(i.BalanceAmount * (i.EarlyPaymentDiscountPercentage / 100m), 2, MidpointRounding.AwayFromZero)
+                    : 0m;
+
+                return new OutstandingInvoiceDto
+                {
+                    Id = i.Id,
+                    InvoiceNumber = i.InvoiceNumber,
+                    InvoiceDate = i.InvoiceDate,
+                    DueDate = i.DueDate,
+                    TotalAmount = i.TotalAmount,
+                    PaidAmount = i.PaidAmount,
+                    BalanceAmount = i.BalanceAmount,
+                    DaysOverdue = i.DueDate.HasValue && i.DueDate.Value < now
+                        ? (now - i.DueDate.Value).Days
+                        : 0,
+                    CurrencyCode = i.CurrencyCode,
+                    EarlyPaymentDiscountPercentage = i.EarlyPaymentDiscountPercentage,
+                    EarlyPaymentDiscountDueDate = i.EarlyPaymentDiscountDueDate,
+                    IsDiscountAvailable = discountAvailable,
+                    DiscountAmount = discountAmount
+                };
             }).ToList();
         }
 
@@ -605,6 +889,617 @@ namespace ErpSystem.Api.Services.Finance.AR
                 cancellationToken: cancellationToken);
         }
 
+        private async Task<CustomerPayment> LoadPaymentForPostingAsync(Guid id, CancellationToken cancellationToken)
+        {
+            var payment = await _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
+                .Include(p => p.BankAccount)
+                .Include(p => p.Allocations)
+                    .ThenInclude(a => a.Invoice)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (payment == null)
+                throw new KeyNotFoundException($"Payment with Id '{id}' not found.");
+
+            return payment;
+        }
+
+        private async Task<FinancePostingRequestDto> BuildArReceiptPostingRequestAsync(
+            CustomerPayment payment,
+            CancellationToken cancellationToken)
+        {
+            var tenantId = TenantId;
+            if (payment.TenantId != tenantId)
+                throw new InvalidOperationException("Customer payment belongs to another tenant.");
+
+            if (payment.IsCreditNote)
+                throw new InvalidOperationException("AR credit note posting is not part of the AR receipt posting migration batch.");
+
+            if (string.Equals(payment.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(payment.Status, "Bounced", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Cancelled or bounced AR receipts cannot be posted.");
+            }
+
+            var existingPostedEvent = payment.JournalEntryId.HasValue ||
+                await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(e =>
+                        e.TenantId == tenantId &&
+                        e.SourceDocumentType == "CustomerPayment" &&
+                        e.SourceDocumentId == payment.Id &&
+                        e.PostingAction == "Post" &&
+                        e.PostingStatus == "Posted" &&
+                        e.JournalEntryId.HasValue &&
+                        !e.IsDeleted)
+                    .AnyAsync(cancellationToken);
+
+            if (!existingPostedEvent &&
+                !string.Equals(payment.Status, "Pending", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(payment.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(payment.Status, "Processed", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("AR receipt workflow approval is not complete.");
+            }
+
+            if (payment.TotalAmount <= 0m)
+                throw new InvalidOperationException("AR receipt amount must be positive.");
+
+            var customer = await ResolveCustomerForPostingAsync(payment, cancellationToken);
+            var activeAllocations = payment.Allocations?
+                .Where(a => !a.IsReversal)
+                .OrderBy(a => a.AllocationDate)
+                .ThenBy(a => a.Id)
+                .ToList() ?? new List<PaymentAllocation>();
+
+            if (activeAllocations.Count == 0)
+                throw new InvalidOperationException("AR receipt must have at least one invoice allocation before posting. Customer advances are not supported in this batch.");
+
+            foreach (var allocation in activeAllocations)
+            {
+                if (allocation.TenantId != tenantId || allocation.CustomerPaymentId != payment.Id)
+                    throw new InvalidOperationException("AR receipt allocation belongs to another tenant or payment.");
+
+                if (allocation.Invoice == null || allocation.Invoice.TenantId != tenantId)
+                    throw new InvalidOperationException("AR receipt allocation references an invoice from another tenant.");
+
+                if (allocation.Invoice.BusinessPartnerId != payment.CustomerId)
+                    throw new InvalidOperationException("AR receipt allocation references an invoice for another customer.");
+
+                if (allocation.AllocatedAmount < 0m || allocation.DiscountAmount < 0m)
+                    throw new InvalidOperationException("AR receipt allocation amounts cannot be negative.");
+
+                if (!allocation.Invoice.JournalEntryId.HasValue)
+                    throw new InvalidOperationException($"AR receipt cannot settle unposted invoice '{allocation.Invoice.InvoiceNumber}'.");
+
+                var invoicePostingExists = await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(e =>
+                        e.TenantId == tenantId &&
+                        e.SourceDocumentType == "CustomerInvoice" &&
+                        e.SourceDocumentId == allocation.InvoiceId &&
+                        e.PostingAction == "Post" &&
+                        e.PostingStatus == "Posted" &&
+                        e.JournalEntryId.HasValue &&
+                        !e.IsDeleted)
+                    .AnyAsync(cancellationToken);
+
+                if (!invoicePostingExists)
+                    throw new InvalidOperationException($"AR receipt cannot settle invoice '{allocation.Invoice.InvoiceNumber}' because its central posting event was not found.");
+
+                var totalInvoiceSettlement = await _unitOfWork.Repository<PaymentAllocation>()
+                    .GetQueryable(a =>
+                        a.TenantId == tenantId &&
+                        a.InvoiceId == allocation.InvoiceId &&
+                        !a.IsReversal &&
+                        !a.IsDeleted)
+                    .SumAsync(a => a.AllocatedAmount + a.DiscountAmount, cancellationToken);
+
+                if (RoundMoney(totalInvoiceSettlement) > RoundMoney(allocation.Invoice.TotalAmount))
+                    throw new InvalidOperationException($"AR receipt would over-settle invoice '{allocation.Invoice.InvoiceNumber}'.");
+            }
+
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            foreach (var allocation in activeAllocations)
+            {
+                var invoiceCurrency = NormalizeCurrency(allocation.Invoice.CurrencyCode, paymentCurrency);
+                if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Cross-currency AR settlements are not supported in FX Batch 18. Customer receipt currency must match each allocated invoice currency.");
+                }
+            }
+
+            var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
+            var accountCache = new Dictionary<Guid, Account>();
+
+            var arAccountId = customer.DefaultArAccountId
+                ?? settings.ControlAccountArId
+                ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
+            await ResolveReceiptPostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            var bankAccountId = payment.BankAccountId
+                ?? settings.DefaultBankAccountId
+                ?? throw new InvalidOperationException("Bank account is not configured for AR receipt posting.");
+            var bankAccount = await _unitOfWork.Repository<BankAccount>()
+                .GetQueryable(a => a.TenantId == tenantId && a.Id == bankAccountId && !a.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (bankAccount == null)
+                throw new InvalidOperationException("AR receipt bank account was not found for this tenant.");
+
+            if (!bankAccount.IsActive)
+                throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is inactive.");
+
+            if (!bankAccount.GLAccountId.HasValue)
+                throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is not linked to a GL account.");
+
+            await ResolveReceiptPostingAccountAsync(bankAccount.GLAccountId.Value, "bank/cash account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            var discountAllowed = RoundMoney(activeAllocations.Sum(a => a.DiscountAmount));
+            var withholdingTaxAmount = RoundMoney(payment.WithholdingTaxAmount);
+            var vatWithholdingAmount = RoundMoney(payment.VatWithholdingAmount);
+            if (withholdingTaxAmount < 0m || vatWithholdingAmount < 0m)
+                throw new InvalidOperationException("AR receipt withholding amounts cannot be negative.");
+
+            var allocatedSettlementAmount = RoundMoney(activeAllocations.Sum(a => a.AllocatedAmount));
+            if (allocatedSettlementAmount != RoundMoney(payment.TotalAmount + withholdingTaxAmount + vatWithholdingAmount))
+                throw new InvalidOperationException("AR receipt allocations must equal cash received plus configured withholding amounts before posting.");
+
+            var arSettlementAmount = RoundMoney(payment.TotalAmount + discountAllowed + withholdingTaxAmount + vatWithholdingAmount);
+
+            var postingLines = new List<FinancePostingLineDto>();
+            var lineNumber = 1;
+
+            postingLines.Add(BuildPostingLine(
+                bankAccount.GLAccountId.Value,
+                $"AR receipt {payment.PaymentNumber}",
+                debitTransactionAmount: payment.TotalAmount,
+                creditTransactionAmount: 0m,
+                paymentCurrency,
+                functionalCurrency,
+                exchangeRate,
+                payment.PaymentDate,
+                payment.PaymentNumber,
+                lineNumber++,
+                    "AR-Bank"));
+
+            if (withholdingTaxAmount > 0m)
+            {
+                var withholdingAccountId = payment.WithholdingTaxAccountId
+                    ?? await ResolveConfiguredWithholdingReceivableAccountAsync(payment.PaymentDate, payment.WithholdingTaxId, TaxCategory.Withholding, cancellationToken)
+                    ?? throw new InvalidOperationException("AR withholding tax receivable account is not configured for this tenant.");
+                await ResolveReceiptPostingAccountAsync(withholdingAccountId, "withholding tax receivable account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+                postingLines.Add(BuildPostingLine(
+                    withholdingAccountId,
+                    $"Withholding tax receivable - {payment.PaymentNumber}",
+                    debitTransactionAmount: withholdingTaxAmount,
+                    creditTransactionAmount: 0m,
+                    paymentCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    lineNumber++,
+                    "AR-WHT"));
+            }
+
+            if (vatWithholdingAmount > 0m)
+            {
+                var vatWithholdingAccountId = payment.VatWithholdingAccountId
+                    ?? await ResolveConfiguredWithholdingReceivableAccountAsync(payment.PaymentDate, payment.VatWithholdingTaxId, TaxCategory.VatWithholding, cancellationToken)
+                    ?? throw new InvalidOperationException("AR VAT withholding receivable account is not configured for this tenant.");
+                await ResolveReceiptPostingAccountAsync(vatWithholdingAccountId, "VAT withholding receivable account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+                postingLines.Add(BuildPostingLine(
+                    vatWithholdingAccountId,
+                    $"VAT withholding receivable - {payment.PaymentNumber}",
+                    debitTransactionAmount: vatWithholdingAmount,
+                    creditTransactionAmount: 0m,
+                    paymentCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    lineNumber++,
+                    "AR-VAT-WHT"));
+            }
+
+            if (discountAllowed > 0m)
+            {
+                var discountAccountId = settings.DiscountAllowedAccountId
+                    ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
+                await ResolveReceiptPostingAccountAsync(discountAccountId, "sales discount allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+
+                postingLines.Add(BuildPostingLine(
+                    discountAccountId,
+                    $"Sales discount allowed - {payment.PaymentNumber}",
+                    debitTransactionAmount: discountAllowed,
+                    creditTransactionAmount: 0m,
+                    paymentCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    lineNumber++,
+                    "AR-Discount"));
+            }
+
+            postingLines.Add(BuildPostingLine(
+                arAccountId,
+                $"AR receipt {payment.PaymentNumber}",
+                debitTransactionAmount: 0m,
+                creditTransactionAmount: arSettlementAmount,
+                paymentCurrency,
+                functionalCurrency,
+                exchangeRate,
+                payment.PaymentDate,
+                payment.PaymentNumber,
+                lineNumber++,
+                "AR-Control"));
+
+            if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
+                throw new InvalidOperationException("AR receipt posting is not balanced.");
+
+            payment.BankAccountId ??= bankAccount.Id;
+
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerPayment",
+                SourceDocumentId = payment.Id,
+                SourceDocumentTenantId = payment.TenantId,
+                PostingAction = "Post",
+                SourceDocumentReference = payment.PaymentNumber,
+                Description = $"Customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
+                PostingDate = payment.PaymentDate,
+                JournalType = "AR Receipt",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = $"AR:CustomerPayment:{payment.TenantId:N}:{payment.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = postingLines
+            };
+        }
+
+        private async Task PostRealizedFxIfRequiredAsync(
+            CustomerPayment payment,
+            CancellationToken cancellationToken)
+        {
+            if (payment.IsCreditNote)
+            {
+                return;
+            }
+
+            var functionalCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync(), "GHS");
+            var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            if (string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (_fxAccountingService == null)
+            {
+                throw new InvalidOperationException("FX accounting service is not configured for AR realized FX settlement posting.");
+            }
+
+            await _fxAccountingService.PostRealizedFxForArReceiptAsync(payment.Id, cancellationToken);
+        }
+
+        private async Task<Guid?> ResolveConfiguredWithholdingReceivableAccountAsync(
+            DateTime paymentDate,
+            Guid? taxId,
+            TaxCategory category,
+            CancellationToken cancellationToken)
+        {
+            var configuredTax = await _unitOfWork.Repository<Tax>()
+                .GetQueryable(t =>
+                    t.TenantId == TenantId &&
+                    !t.IsDeleted &&
+                    t.IsActive &&
+                    (!taxId.HasValue || t.Id == taxId.Value) &&
+                    t.Category == category &&
+                    (t.Applicability == TaxApplicability.Sales || t.Applicability == TaxApplicability.Both) &&
+                    t.EffectiveFrom.Date <= paymentDate.Date &&
+                    t.TaxReceivableAccountId.HasValue)
+                .OrderByDescending(t => t.EffectiveFrom)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return configuredTax?.TaxReceivableAccountId;
+        }
+
+        private async Task<FinancePostingRequestDto> BuildCustomerCreditNotePostingRequestAsync(
+            CustomerPayment payment,
+            CancellationToken cancellationToken)
+        {
+            var tenantId = TenantId;
+            if (payment.TenantId != tenantId)
+                throw new InvalidOperationException("Customer credit note belongs to another tenant.");
+
+            if (!payment.IsCreditNote)
+                throw new InvalidOperationException("Customer payment is not an AR credit note.");
+
+            var existingPostedEvent = payment.JournalEntryId.HasValue ||
+                await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(e =>
+                        e.TenantId == tenantId &&
+                        e.SourceDocumentType == "CustomerCreditNote" &&
+                        e.SourceDocumentId == payment.Id &&
+                        e.PostingAction == "Post" &&
+                        e.PostingStatus == "Posted" &&
+                        e.JournalEntryId.HasValue &&
+                        !e.IsDeleted)
+                    .AnyAsync(cancellationToken);
+
+            if (!existingPostedEvent &&
+                !string.Equals(payment.Status, "Pending", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(payment.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("AR credit note workflow approval is not complete.");
+            }
+
+            if (payment.TotalAmount <= 0m)
+                throw new InvalidOperationException("AR credit note amount must be positive.");
+
+            var customer = await ResolveCustomerForPostingAsync(payment, cancellationToken);
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var creditNoteCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
+            var accountCache = new Dictionary<Guid, Account>();
+
+            var arAccountId = customer.DefaultArAccountId
+                ?? settings.ControlAccountArId
+                ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
+            await ResolveReceiptPostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            var salesReturnsAccountId = settings.DiscountAllowedAccountId
+                ?? throw new InvalidOperationException("Sales returns/allowance account is not configured for this tenant.");
+            await ResolveReceiptPostingAccountAsync(salesReturnsAccountId, "sales returns/allowance account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+
+            var postingLines = new List<FinancePostingLineDto>
+            {
+                BuildPostingLine(
+                    salesReturnsAccountId,
+                    $"Customer credit note {payment.PaymentNumber}",
+                    debitTransactionAmount: payment.TotalAmount,
+                    creditTransactionAmount: 0m,
+                    creditNoteCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    1,
+                    "AR-CreditNote-SalesReturn"),
+                BuildPostingLine(
+                    arAccountId,
+                    $"Customer credit note {payment.PaymentNumber}",
+                    debitTransactionAmount: 0m,
+                    creditTransactionAmount: payment.TotalAmount,
+                    creditNoteCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    2,
+                    "AR-Control")
+            };
+
+            if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
+                throw new InvalidOperationException("AR credit note posting is not balanced.");
+
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerCreditNote",
+                SourceDocumentId = payment.Id,
+                SourceDocumentTenantId = payment.TenantId,
+                PostingAction = "Post",
+                SourceDocumentReference = payment.PaymentNumber,
+                Description = $"Customer credit note {payment.PaymentNumber} - {customer.PartnerName}",
+                PostingDate = payment.PaymentDate,
+                JournalType = "AR Credit Note",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = $"AR:CustomerCreditNote:{payment.TenantId:N}:{payment.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = postingLines
+            };
+        }
+
+        private async Task<BusinessPartner> ResolveCustomerForPostingAsync(CustomerPayment payment, CancellationToken cancellationToken)
+        {
+            var customer = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    p.Id == payment.CustomerId &&
+                    !p.IsDeleted &&
+                    (p.PartnerType == "Customer" || p.PartnerType == "Both"))
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (customer == null)
+                throw new InvalidOperationException("AR receipt customer was not found for this tenant.");
+
+            if (!customer.IsActive || customer.IsBlacklisted || !string.Equals(customer.RegistrationStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Customer '{customer.PartnerName}' is not active for AR receipt posting.");
+
+            return customer;
+        }
+
+        private async Task<FinanceSettings> GetFinanceSettingsAsync(CancellationToken cancellationToken)
+        {
+            var settings = await _unitOfWork.Repository<FinanceSettings>()
+                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return settings ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
+        }
+
+        private async Task<Account> ResolveReceiptPostingAccountAsync(
+            Guid accountId,
+            string role,
+            Dictionary<Guid, Account> accountCache,
+            bool allowControlAccount,
+            bool requireDirectPosting,
+            CancellationToken cancellationToken)
+        {
+            if (accountCache.TryGetValue(accountId, out var cached))
+            {
+                return cached;
+            }
+
+            var account = await _unitOfWork.Repository<Account>()
+                .GetQueryable(a => a.TenantId == TenantId && a.Id == accountId && !a.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (account == null)
+                throw new InvalidOperationException($"AR receipt posting {role} was not found for this tenant.");
+
+            if (account.Status != AccountStatus.Active)
+                throw new InvalidOperationException($"AR receipt posting {role} account '{account.AccountNumber}' is not active.");
+
+            if (account.IsControlAccount && !allowControlAccount)
+                throw new InvalidOperationException($"AR receipt posting {role} account '{account.AccountNumber}' is a control account and cannot be used for this line.");
+
+            if (requireDirectPosting && !account.AllowDirectPosting)
+                throw new InvalidOperationException($"AR receipt posting {role} account '{account.AccountNumber}' does not allow direct posting.");
+
+            accountCache[accountId] = account;
+            return account;
+        }
+
+        private static FinancePostingLineDto BuildPostingLine(
+            Guid accountId,
+            string description,
+            decimal debitTransactionAmount,
+            decimal creditTransactionAmount,
+            string transactionCurrency,
+            string functionalCurrency,
+            decimal exchangeRate,
+            DateTime exchangeRateDate,
+            string reference,
+            int lineNumber,
+            string transactionTag)
+        {
+            var isForeign = !string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
+            var debitAmount = ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+            var creditAmount = ToFunctionalAmount(creditTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+
+            return new FinancePostingLineDto
+            {
+                AccountId = accountId,
+                Description = description,
+                DebitAmount = debitAmount,
+                CreditAmount = creditAmount,
+                TransactionCurrency = transactionCurrency,
+                ForeignCurrencyAmount = isForeign
+                    ? debitTransactionAmount > 0m ? debitTransactionAmount : creditTransactionAmount
+                    : null,
+                ExchangeRate = isForeign ? exchangeRate : null,
+                ExchangeRateSource = isForeign ? "AR receipt exchange-rate snapshot" : null,
+                ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
+                SourceReferenceNumber = reference,
+                LineNumber = lineNumber,
+                TransactionTag = transactionTag
+            };
+        }
+
+        private async Task RecordArReceiptAuditAsync(
+            string eventType,
+            CustomerPayment payment,
+            Guid? postingEventId = null,
+            Guid? journalEntryId = null,
+            object? beforeValues = null,
+            object? afterValues = null,
+            string? reason = null,
+            string? comment = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = payment.TenantId,
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerPayment",
+                SourceDocumentId = payment.Id,
+                JournalEntryId = journalEntryId ?? payment.JournalEntryId,
+                PostingEventId = postingEventId,
+                BeforeValues = beforeValues,
+                AfterValues = afterValues,
+                Reason = reason,
+                Comment = comment,
+                Resource = "Finance.ARReceipt",
+                ResourceId = payment.Id.ToString()
+            }, cancellationToken);
+        }
+
+        private async Task RecordArCreditNoteAuditAsync(
+            string eventType,
+            CustomerPayment payment,
+            Guid? postingEventId = null,
+            Guid? journalEntryId = null,
+            object? beforeValues = null,
+            object? afterValues = null,
+            string? reason = null,
+            string? comment = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = payment.TenantId,
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerCreditNote",
+                SourceDocumentId = payment.Id,
+                JournalEntryId = journalEntryId ?? payment.JournalEntryId,
+                PostingEventId = postingEventId,
+                BeforeValues = beforeValues,
+                AfterValues = afterValues,
+                Reason = reason,
+                Comment = comment,
+                Resource = "Finance.ARCreditNote",
+                ResourceId = payment.Id.ToString()
+            }, cancellationToken);
+        }
+
+        private static decimal ToFunctionalAmount(
+            decimal transactionAmount,
+            string transactionCurrency,
+            string functionalCurrency,
+            decimal exchangeRate)
+        {
+            if (transactionAmount == 0m)
+            {
+                return 0m;
+            }
+
+            var normalizedRate = NormalizeExchangeRate(exchangeRate);
+            return string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                ? RoundMoney(transactionAmount)
+                : RoundMoney(transactionAmount * normalizedRate);
+        }
+
+        private static decimal NormalizeExchangeRate(decimal exchangeRate)
+            => exchangeRate <= 0m ? 1m : exchangeRate;
+
+        private static string NormalizeCurrency(string? currencyCode, string defaultValue)
+            => string.IsNullOrWhiteSpace(currencyCode)
+                ? defaultValue.Trim().ToUpperInvariant()
+                : currencyCode.Trim().ToUpperInvariant();
+
+        private static decimal RoundMoney(decimal amount)
+            => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
         private async Task<BusinessPartner?> GetCustomerPartnerAsync(Guid customerId, CancellationToken cancellationToken)
         {
             return await _unitOfWork.Repository<BusinessPartner>()
@@ -615,14 +1510,97 @@ namespace ErpSystem.Api.Services.Finance.AR
                     (p.PartnerType == "Customer" || p.PartnerType == "Both"));
         }
 
-        private CustomerPaymentDto MapToDto(CustomerPayment payment)
+        private async Task CreateCashTransactionForReceiptAsync(CustomerPayment payment, BusinessPartner customer, CancellationToken cancellationToken)
+        {
+            if (payment.IsCreditNote)
+            {
+                return;
+            }
+
+            var settings = await _unitOfWork.Repository<FinanceSettings>()
+                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+            var bankAccountId = payment.BankAccountId ?? settings?.DefaultBankAccountId;
+            if (!bankAccountId.HasValue)
+            {
+                return;
+            }
+
+            var cashTransactionRepository = _unitOfWork.Repository<CashTransaction>();
+            var exists = await cashTransactionRepository
+                .GetQueryable(t =>
+                    !t.IsDeleted &&
+                    t.TransactionType == CashTransactionType.Receipt &&
+                    t.BankAccountId == bankAccountId.Value &&
+                    t.ReferenceNumber == payment.PaymentNumber)
+                .AnyAsync(cancellationToken);
+
+            if (exists)
+            {
+                return;
+            }
+
+            var bankAccountRepository = _unitOfWork.Repository<BankAccount>();
+            var bankAccount = await bankAccountRepository
+                .GetQueryable(a => a.Id == bankAccountId.Value && !a.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("Bank account not found for AR customer payment.");
+
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            var currencyCode = string.IsNullOrWhiteSpace(payment.CurrencyCode)
+                ? baseCurrencyCode
+                : payment.CurrencyCode.Trim().ToUpperInvariant();
+            var exchangeRate = payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate;
+            var baseAmount = decimal.Round(payment.TotalAmount * exchangeRate, 2, MidpointRounding.AwayFromZero);
+            var arAccountId = customer.DefaultArAccountId ?? settings?.ControlAccountArId;
+
+            var transactionNumber = await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.CashReceipt,
+                TenantId,
+                payment.PaymentDate,
+                nameof(CashTransaction),
+                cancellationToken: cancellationToken);
+
+            await cashTransactionRepository.AddAsync(new CashTransaction
+            {
+                Id = Guid.NewGuid(),
+                TransactionNumber = transactionNumber,
+                TransactionDate = payment.PaymentDate,
+                TransactionType = CashTransactionType.Receipt,
+                BankAccountId = bankAccountId.Value,
+                Amount = payment.TotalAmount,
+                Currency = currencyCode,
+                ExchangeRate = exchangeRate,
+                BaseAmount = baseAmount,
+                ReferenceNumber = payment.PaymentNumber,
+                PayeeOrPayer = customer.PartnerName,
+                Description = $"AR Customer Payment {payment.PaymentNumber} - {customer.PartnerName}",
+                GLAccountId = arAccountId,
+                IsReconciled = false,
+                IsPosted = true,
+                PostedDate = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            });
+
+            payment.BankAccountId ??= bankAccountId.Value;
+            bankAccount.CurrentBalance += payment.TotalAmount;
+            bankAccount.AvailableBalance += payment.TotalAmount;
+            bankAccount.UpdatedAt = DateTime.UtcNow;
+            bankAccount.UpdatedBy = UserName;
+            await bankAccountRepository.UpdateAsync(bankAccount);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        private CustomerPaymentDto MapToDto(CustomerPayment payment, BusinessPartner? customer = null)
         {
             return new CustomerPaymentDto
             {
                 Id = payment.Id,
                 PaymentNumber = payment.PaymentNumber,
                 CustomerId = payment.CustomerId,
-                CustomerName = string.Empty,
+                CustomerName = customer?.PartnerName ?? payment.Customer?.CustomerName ?? string.Empty,
                 PaymentDate = payment.PaymentDate,
                 TotalAmount = payment.TotalAmount,
                 AllocatedAmount = payment.AllocatedAmount,
@@ -633,10 +1611,19 @@ namespace ErpSystem.Api.Services.Finance.AR
                 BankAccountId = payment.BankAccountId,
                 CheckNumber = payment.CheckNumber,
                 TransactionReference = payment.TransactionReference,
+                WithholdingTaxId = payment.WithholdingTaxId,
+                WithholdingTaxAccountId = payment.WithholdingTaxAccountId,
+                WithholdingTaxAmount = payment.WithholdingTaxAmount,
+                VatWithholdingTaxId = payment.VatWithholdingTaxId,
+                VatWithholdingAccountId = payment.VatWithholdingAccountId,
+                VatWithholdingAmount = payment.VatWithholdingAmount,
+                WithholdingCertificateNumber = payment.WithholdingCertificateNumber,
+                WithholdingCertificateDate = payment.WithholdingCertificateDate,
                 Notes = payment.Notes,
                 Status = payment.Status,
                 ClearedDate = payment.ClearedDate,
                 IsCreditNote = payment.IsCreditNote,
+                JournalEntryId = payment.JournalEntryId,
                 Allocations = payment.Allocations?.Select(a => new PaymentAllocationDto
                 {
                     Id = a.Id,

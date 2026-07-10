@@ -15,6 +15,15 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid FixedAssetId { get; set; }
         public virtual FixedAsset FixedAsset { get; set; } = null!;
 
+        public Guid? FixedAssetDepreciationRunId { get; set; }
+        public virtual FixedAssetDepreciationRun? DepreciationRun { get; set; }
+
+        public Guid? AccountingBookId { get; set; }
+        public virtual AccountingBook? AccountingBook { get; set; }
+
+        [MaxLength(20)]
+        public string BookClassification { get; set; } = "IFRS";
+
         [Required]
         public Guid FiscalPeriodId { get; set; }
         public virtual FiscalPeriod FiscalPeriod { get; set; } = null!;
@@ -26,11 +35,17 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal DepreciationAmount { get; set; }
 
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal AccumulatedDepreciationBefore { get; set; }
+
         /// <summary>
         /// The accumulating depreciation total AFTER this entry is applied
         /// </summary>
         [Column(TypeName = "decimal(18,2)")]
         public decimal AccumulatedDepreciation { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal NetBookValueBefore { get; set; }
 
         /// <summary>
         /// The Net Book Value AFTER this entry is applied
@@ -38,16 +53,32 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal NetBookValue { get; set; }
 
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal DepreciableAmount { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal ResidualValueSnapshot { get; set; }
+
+        public int UsefulLifeMonthsSnapshot { get; set; }
+
+        public ErpSystem.Core.Enums.DepreciationMethod DepreciationMethodSnapshot { get; set; }
+
+        public DateTime? PlacedInServiceDateSnapshot { get; set; }
+
         // --- Status ---
 
         public bool IsPosted { get; set; } = false;
         public DateTime? PostedDate { get; set; }
+        public DateTime? PostingDate { get; set; }
 
         /// <summary>
         /// Link to the GL Journal Entry where this expense was booked
         /// </summary>
         public Guid? JournalEntryId { get; set; }
         public virtual JournalEntry? JournalEntry { get; set; }
+
+        public Guid? PostingEventId { get; set; }
+        public virtual FinancePostingEvent? PostingEvent { get; set; }
 
         public bool IsProjected { get; set; } = false; // True if this is a future forecast
     }

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -131,6 +132,16 @@ namespace ErpSystem.Api.Controllers.Finance
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
+        /// <summary>Posts an approved vendor invoice to the general ledger through the central finance posting engine.</summary>
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<VendorInvoiceDto>> Post(Guid id)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.PostApInvoices))
+                return Forbid();
+            try { return Ok(await _invoiceService.PostAsync(id)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
         /// <summary>Rejects a pending vendor invoice with a mandatory reason.</summary>
         [HttpPost("{id}/reject")]
         public async Task<ActionResult<VendorInvoiceDto>> Reject(Guid id, [FromBody] string comments)
@@ -249,6 +260,14 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("{id}/allocations")]
         public async Task<ActionResult<List<VendorPaymentAllocationDto>>> GetAllocations(Guid id)
             => Ok(await _paymentService.GetPaymentAllocationsAsync(id));
+
+        /// <summary>Posts an authorized vendor payment to the general ledger through the central finance posting engine.</summary>
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<VendorPaymentDto>> Post(Guid id)
+        {
+            try { return Ok(await _paymentService.PostAsync(id)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
 
         /// <summary>Reverses a specific payment allocation with a mandatory reason.</summary>
         [HttpPost("allocations/{allocationId}/reverse")]
@@ -380,6 +399,16 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<ApAgingReportDto>> GetAgingReport(
             [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? supplierId = null)
             => Ok(await _reportsService.GetAgingReportAsync(asOfDate, supplierId));
+
+        /// <summary>Rebuilds the AP settlement read model from posted AP source documents and posting events.</summary>
+        [HttpPost("settlements/rebuild")]
+        public async Task<ActionResult<SubledgerSettlementRebuildResultDto>> RebuildSettlementReadModel([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.RebuildSettlementReadModelAsync(asOfDate));
+
+        /// <summary>Reconciles the AP settlement read model to the posted AP control account balance.</summary>
+        [HttpGet("control-reconciliation")]
+        public async Task<ActionResult<SubledgerControlReconciliationDto>> GetControlReconciliation([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.GetControlReconciliationAsync(asOfDate));
 
         /// <summary>Generates a detailed AP aging report with per-supplier, per-invoice breakdown.</summary>
         [HttpGet("aging/detailed")]

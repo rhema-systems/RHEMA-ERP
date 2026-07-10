@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Api.Services.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -28,7 +29,7 @@ public class FixedAssetCategoriesController : ControllerBase
         _currentUser = currentUser;
     }
 
-    private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+    private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<FixedAssetCategoryDto>>> GetAll()
@@ -97,6 +98,30 @@ public class FixedAssetCategoriesController : ControllerBase
                 (a.AccountName ?? string.Empty).Contains("Surplus", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        var revaluationLossAccounts = expenseAccounts
+            .Where(a =>
+                (a.AccountName ?? string.Empty).Contains("Revaluation", StringComparison.OrdinalIgnoreCase) ||
+                (a.AccountName ?? string.Empty).Contains("Loss", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var impairmentLossAccounts = expenseAccounts
+            .Where(a =>
+                (a.AccountName ?? string.Empty).Contains("Impair", StringComparison.OrdinalIgnoreCase) ||
+                (a.AccountName ?? string.Empty).Contains("Loss", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var accumulatedImpairmentAccounts = assetAccounts
+            .Where(a =>
+                (a.AccountName ?? string.Empty).Contains("Accumulated", StringComparison.OrdinalIgnoreCase) &&
+                (a.AccountName ?? string.Empty).Contains("Impair", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var impairmentReversalAccounts = revenueAccounts
+            .Where(a =>
+                (a.AccountName ?? string.Empty).Contains("Impair", StringComparison.OrdinalIgnoreCase) ||
+                (a.AccountName ?? string.Empty).Contains("Reversal", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
         var aucAccounts = assetAccounts
             .Where(a =>
                 (a.AccountName ?? string.Empty).Contains("Construction", StringComparison.OrdinalIgnoreCase) ||
@@ -122,6 +147,18 @@ public class FixedAssetCategoriesController : ControllerBase
                 .OrderBy(a => a.AccountNumber)
                 .ToList(),
             RevaluationSurplusAccounts = (revaluationSurplusAccounts.Count > 0 ? revaluationSurplusAccounts : equityAccounts)
+                .OrderBy(a => a.AccountNumber)
+                .ToList(),
+            RevaluationLossAccounts = (revaluationLossAccounts.Count > 0 ? revaluationLossAccounts : expenseAccounts)
+                .OrderBy(a => a.AccountNumber)
+                .ToList(),
+            ImpairmentLossAccounts = (impairmentLossAccounts.Count > 0 ? impairmentLossAccounts : expenseAccounts)
+                .OrderBy(a => a.AccountNumber)
+                .ToList(),
+            AccumulatedImpairmentAccounts = (accumulatedImpairmentAccounts.Count > 0 ? accumulatedImpairmentAccounts : assetAccounts)
+                .OrderBy(a => a.AccountNumber)
+                .ToList(),
+            ImpairmentReversalAccounts = (impairmentReversalAccounts.Count > 0 ? impairmentReversalAccounts : revenueAccounts)
                 .OrderBy(a => a.AccountNumber)
                 .ToList(),
             AucAccounts = (aucAccounts.Count > 0 ? aucAccounts : assetAccounts)

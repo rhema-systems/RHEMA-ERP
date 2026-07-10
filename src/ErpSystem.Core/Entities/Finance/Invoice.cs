@@ -90,6 +90,14 @@ namespace ErpSystem.Core.Entities.Finance
         public Guid? PaymentTermId { get; set; }
         public virtual PaymentTerm? PaymentTerm { get; set; }
 
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal EarlyPaymentDiscountPercentage { get; set; }
+
+        public DateTime? EarlyPaymentDiscountDueDate { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal EarlyPaymentDiscountAmount { get; set; }
+
         // Taxation
         public Guid? TaxGroupId { get; set; }
         
@@ -167,6 +175,8 @@ namespace ErpSystem.Core.Entities.Finance
         
         [ForeignKey(nameof(TaxGroupId))]
         public virtual TaxGroup? TaxGroup { get; set; }
+
+        public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
         [Column(TypeName = "decimal(5,2)")]
         public decimal TaxRate { get; set; }

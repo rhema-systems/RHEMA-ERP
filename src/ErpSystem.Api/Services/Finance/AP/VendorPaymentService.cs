@@ -7,6 +7,8 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -26,29 +28,35 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<VendorPaymentService> _logger;
-        private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly IDocumentNumberingService _documentNumberingService;
         private readonly IWorkflowService _workflowService;
+        private readonly IFinancePostingEngine? _financePostingEngine;
+        private readonly IFinanceAuditService? _financeAuditService;
+        private readonly IFxAccountingService? _fxAccountingService;
 
         public VendorPaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ITenantSettingsService tenantSettingsService,
-            ISubledgerPostingService subledgerPostingService,
             ILogger<VendorPaymentService> logger,
             IDocumentNumberingService documentNumberingService,
-            IWorkflowService workflowService)
+            IWorkflowService workflowService,
+            IFinancePostingEngine? financePostingEngine = null,
+            IFinanceAuditService? financeAuditService = null,
+            IFxAccountingService? fxAccountingService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
-            _subledgerPostingService = subledgerPostingService;
             _logger = logger;
             _documentNumberingService = documentNumberingService;
             _workflowService = workflowService;
+            _financePostingEngine = financePostingEngine;
+            _financeAuditService = financeAuditService;
+            _fxAccountingService = fxAccountingService;
         }
 
-        private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
         private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
@@ -84,7 +92,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
 
             if (query.SupplierId.HasValue)
-                queryable = queryable.Where(p => p.SupplierId == query.SupplierId.Value);
+            {
+                var resolvedSupplierId = await ResolveSupplierIdForQueryAsync(query.SupplierId.Value, cancellationToken);
+                queryable = resolvedSupplierId.HasValue
+                    ? queryable.Where(p => p.SupplierId == resolvedSupplierId.Value)
+                    : queryable.Where(p => false);
+            }
 
             if (query.Status.HasValue)
                 queryable = queryable.Where(p => p.Status == query.Status.Value);
@@ -121,6 +134,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Skip((query.Page - 1) * query.PageSize)
                 .Take(query.PageSize)
                 .Include(p => p.Supplier)
+                .Include(p => p.BankAccount)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
                 .ToListAsync(cancellationToken);
@@ -140,11 +154,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         public async Task<VendorPaymentDto> CreateAsync(VendorPaymentCreateDto dto, CancellationToken cancellationToken = default)
         {
-            var supplier = await _unitOfWork.Repository<Supplier>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.Id == dto.SupplierId);
-
-            if (supplier == null)
-                throw new KeyNotFoundException($"Supplier with Id '{dto.SupplierId}' not found.");
+            var supplier = await ResolveSupplierForPaymentAsync(dto.SupplierId, cancellationToken);
 
             var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
@@ -165,7 +175,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 PaymentNumber = paymentNumber,
-                SupplierId = dto.SupplierId,
+                SupplierId = supplier.Id,
                 PaymentDate = dto.PaymentDate,
                 TotalAmount = dto.TotalAmount,
                 AllocatedAmount = 0,
@@ -177,6 +187,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TransactionReference = dto.TransactionReference,
                 WithholdingTaxRate = dto.WithholdingTaxRate,
                 WithholdingTaxAmount = whtAmount,
+                WithholdingTaxId = dto.WithholdingTaxId,
+                WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+                WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
+                WithholdingCertificateDate = dto.WithholdingCertificateDate,
                 Status = VendorPaymentStatus.Draft,
                 Notes = dto.Notes,
                 CreatedAt = now,
@@ -194,6 +208,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.Id == payment.Id)
                     .Include(p => p.Supplier)
+                    .Include(p => p.BankAccount)
                     .Include(p => p.Allocations)
                         .ThenInclude(a => a.VendorInvoice)
                     .FirstOrDefaultAsync(cancellationToken);
@@ -206,15 +221,110 @@ namespace ErpSystem.Api.Services.Finance.AP
             _logger.LogInformation("Created vendor payment {PaymentNumber} for supplier {SupplierId}, amount {Amount}",
                 paymentNumber, supplier.Id, dto.TotalAmount);
 
-            // Post to GL
-            await _subledgerPostingService.PostApPaymentAsync(payment!.Id, cancellationToken);
+            if (payment == null)
+                throw new InvalidOperationException("Failed to load created vendor payment.");
 
-            return MapToDto(payment);
+            return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
         }
 
         // ═════════════════════════════════════════════════════════════════
         //  ALLOCATIONS
         // ═════════════════════════════════════════════════════════════════
+
+        public async Task<VendorPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AP payment posting.");
+
+            var payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+            var wasAlreadyLinked = payment.JournalEntryId.HasValue;
+
+            try
+            {
+                var postingRequest = await BuildApPaymentPostingRequestAsync(payment, cancellationToken);
+                var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+
+                if (payment.JournalEntryId.HasValue && payment.JournalEntryId.Value != postingResult.JournalEntryId)
+                    throw new InvalidOperationException("Vendor payment is linked to a different journal entry than the posting engine result.");
+
+                if (!payment.JournalEntryId.HasValue)
+                {
+                    payment.JournalEntryId = postingResult.JournalEntryId;
+                    if (payment.Status == VendorPaymentStatus.Authorized || payment.Status == VendorPaymentStatus.PendingAuthorization)
+                    {
+                        payment.Status = VendorPaymentStatus.Processed;
+                    }
+                    payment.UpdatedAt = DateTime.UtcNow;
+                    payment.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                if (postingResult.WasDuplicate || wasAlreadyLinked)
+                {
+                    await RecordApPaymentAuditAsync(
+                        FinanceAuditEvents.ApPaymentDuplicatePostingAttempt,
+                        payment,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            postingResult.PostingEventId,
+                            postingResult.JournalEntryId,
+                            postingResult.PostingAction,
+                            postingResult.WasDuplicate
+                        },
+                        comment: "Duplicate AP payment posting request returned the existing posting.",
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    await RecordApPaymentAuditAsync(
+                        FinanceAuditEvents.ApPaymentPosted,
+                        payment,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            postingResult.PostingEventId,
+                            postingResult.JournalEntryId,
+                            postingResult.JournalEntryNumber,
+                            postingResult.TotalDebitAmount,
+                            postingResult.TotalCreditAmount,
+                            postingResult.FunctionalCurrencyCode,
+                            postingResult.PostingDate
+                        },
+                        comment: "AP payment posted through the central finance posting engine.",
+                        cancellationToken: cancellationToken);
+                }
+
+                _logger.LogInformation(
+                    "Posted AP payment {PaymentNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
+                    payment.PaymentNumber,
+                    postingResult.JournalEntryId,
+                    postingResult.WasDuplicate);
+
+                await PostRealizedFxIfRequiredAsync(payment, cancellationToken);
+
+                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+            }
+            catch (Exception ex)
+            {
+                await RecordApPaymentAuditAsync(
+                    FinanceAuditEvents.ApPaymentPostingFailed,
+                    payment,
+                    afterValues: new
+                    {
+                        payment.JournalEntryId,
+                        error = ex.Message
+                    },
+                    reason: ex.Message,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogError(ex, "Failed to post AP payment {PaymentNumber}", payment.PaymentNumber);
+                throw;
+            }
+        }
 
         public async Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync(
             Guid paymentId,
@@ -229,12 +339,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (payment == null)
                 throw new KeyNotFoundException($"Vendor payment with Id '{paymentId}' not found.");
 
+            if (payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted vendor payments cannot be allocated. Use a reversal, void, or adjustment workflow.");
+
             var result = new VendorPaymentAllocationResultDto
             {
                 PaymentId = paymentId
             };
 
             var now = DateTime.UtcNow;
+            var createdAllocations = new List<VendorPaymentAllocation>();
 
             foreach (var alloc in allocations)
             {
@@ -255,11 +369,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 }
 
                 // Cannot allocate more cash than remaining balance or unallocated payment amount.
-                var maxAllocatable = Math.Min(balance, payment.TotalAmount - payment.AllocatedAmount);
-                var allocAmount = Math.Min(alloc.AllocatedAmount, maxAllocatable);
-                var discountAmount = Math.Min(alloc.DiscountAmount, Math.Max(balance - allocAmount, 0m));
+                var maxAllocatable = Math.Min(balance, Math.Max(payment.TotalAmount - payment.AllocatedAmount, 0m));
+                var allocAmount = Math.Min(Math.Max(alloc.AllocatedAmount, 0m), maxAllocatable);
+                var discountAmount = Math.Min(Math.Max(alloc.DiscountAmount, 0m), Math.Max(balance - allocAmount, 0m));
 
-                if (allocAmount <= 0)
+                if (allocAmount <= 0 && discountAmount <= 0)
                 {
                     result.Warnings.Add($"No funds available to allocate to invoice '{invoice.InvoiceNumber}'.");
                     continue;
@@ -281,6 +395,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 };
 
                 await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(allocation);
+                createdAllocations.Add(allocation);
 
                 // Update invoice paid amount. Supplier discounts reduce the payable balance but are not cash.
                 invoice.PaidAmount += allocAmount + discountAmount;
@@ -314,6 +429,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (payment.AllocatedAmount >= payment.TotalAmount)
                 payment.Status = VendorPaymentStatus.Processed;
 
+            var createdAllocationIds = createdAllocations.Select(a => a.Id).ToHashSet();
+            payment.DiscountTaken = payment.Allocations
+                .Where(a => !a.IsReversal && !createdAllocationIds.Contains(a.Id))
+                .Sum(a => a.DiscountAmount) + createdAllocations.Sum(a => a.DiscountAmount);
             payment.UpdatedAt = now;
             payment.UpdatedBy = UserName;
             await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
@@ -342,6 +461,9 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (allocation.IsReversal)
                 throw new InvalidOperationException("Cannot reverse a reversal allocation.");
+
+            if (allocation.VendorPayment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted vendor payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
 
             var now = DateTime.UtcNow;
 
@@ -419,11 +541,16 @@ namespace ErpSystem.Api.Services.Finance.AP
         public async Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(Guid supplierId, CancellationToken cancellationToken = default)
         {
             var now = DateTime.UtcNow;
+            var resolvedSupplierId = await ResolveSupplierIdForQueryAsync(supplierId, cancellationToken);
+            if (!resolvedSupplierId.HasValue)
+            {
+                return new List<OutstandingVendorInvoiceDto>();
+            }
 
             var invoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.SupplierId == supplierId &&
+                    i.SupplierId == resolvedSupplierId.Value &&
                     (i.Status == VendorInvoiceStatus.Approved ||
                      i.Status == VendorInvoiceStatus.PartiallyPaid ||
                      i.Status == VendorInvoiceStatus.Overdue) &&
@@ -498,6 +625,9 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (payment.Status == VendorPaymentStatus.Voided)
                 throw new InvalidOperationException("Payment is already voided.");
+
+            if (payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted vendor payments cannot be voided by mutation until AP payment reversal posting is implemented.");
 
             var now = DateTime.UtcNow;
 
@@ -839,14 +969,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                         await AllocatePaymentAsync(payment.Id, allocs, cancellationToken);
                     }
 
-                    payment.Status = VendorPaymentStatus.Processed;
+                    payment.Status = VendorPaymentStatus.Authorized;
                     payment.UpdatedAt = now;
                     payment.UpdatedBy = UserName;
                     await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                    // Post to GL
-                    await _subledgerPostingService.PostApPaymentAsync(payment.Id, cancellationToken);
+                    await PostAsync(payment.Id, cancellationToken);
 
                     item.ItemStatus = "Processed";
                     processedCount++;
@@ -881,6 +1010,636 @@ namespace ErpSystem.Api.Services.Finance.AP
         // ═════════════════════════════════════════════════════════════════
         //  UTILITIES
         // ═════════════════════════════════════════════════════════════════
+
+        private async Task<VendorPayment> LoadPaymentForPostingAsync(Guid id, CancellationToken cancellationToken)
+        {
+            var payment = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
+                .Include(p => p.Supplier)
+                .Include(p => p.BankAccount)
+                .Include(p => p.Allocations)
+                    .ThenInclude(a => a.VendorInvoice)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (payment == null)
+                throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
+
+            return payment;
+        }
+
+        private async Task<FinancePostingRequestDto> BuildApPaymentPostingRequestAsync(
+            VendorPayment payment,
+            CancellationToken cancellationToken)
+        {
+            var tenantId = TenantId;
+            if (payment.TenantId != tenantId)
+                throw new InvalidOperationException("Vendor payment belongs to another tenant.");
+
+            if (!payment.JournalEntryId.HasValue &&
+                payment.Status != VendorPaymentStatus.Authorized &&
+                payment.Status != VendorPaymentStatus.Processed)
+            {
+                throw new InvalidOperationException("AP payment workflow approval is not complete.");
+            }
+
+            if (payment.Status == VendorPaymentStatus.Voided || payment.Status == VendorPaymentStatus.Failed)
+                throw new InvalidOperationException("Voided or failed AP payments cannot be posted.");
+
+            if (payment.TotalAmount <= 0m)
+                throw new InvalidOperationException("AP payment amount must be positive.");
+
+            var activeAllocations = payment.Allocations?
+                .Where(a => !a.IsReversal)
+                .OrderBy(a => a.AllocationDate)
+                .ThenBy(a => a.Id)
+                .ToList() ?? new List<VendorPaymentAllocation>();
+
+            if (activeAllocations.Count == 0)
+                throw new InvalidOperationException("AP payment must have at least one invoice allocation before posting.");
+
+            foreach (var allocation in activeAllocations)
+            {
+                if (allocation.TenantId != tenantId || allocation.VendorPaymentId != payment.Id)
+                    throw new InvalidOperationException("AP payment allocation belongs to another tenant or payment.");
+
+                if (allocation.VendorInvoice == null || allocation.VendorInvoice.TenantId != tenantId)
+                    throw new InvalidOperationException("AP payment allocation references an invoice from another tenant.");
+
+                if (allocation.AllocatedAmount < 0m || allocation.DiscountAmount < 0m || allocation.WithholdingTaxAmount < 0m)
+                    throw new InvalidOperationException("AP payment allocation amounts cannot be negative.");
+
+                if (!allocation.VendorInvoice.JournalEntryId.HasValue)
+                    throw new InvalidOperationException($"AP payment cannot settle unposted invoice '{allocation.VendorInvoice.InvoiceNumber}'.");
+
+                var invoicePostingExists = await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(e =>
+                        e.TenantId == tenantId &&
+                        e.SourceDocumentType == "VendorInvoice" &&
+                        e.SourceDocumentId == allocation.VendorInvoiceId &&
+                        e.PostingAction == "Post" &&
+                        e.PostingStatus == "Posted" &&
+                        e.JournalEntryId.HasValue &&
+                        !e.IsDeleted)
+                    .AnyAsync(cancellationToken);
+
+                if (!invoicePostingExists)
+                    throw new InvalidOperationException($"AP payment cannot settle invoice '{allocation.VendorInvoice.InvoiceNumber}' because its central posting event was not found.");
+
+                var totalInvoiceSettlement = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryable(a =>
+                        a.TenantId == tenantId &&
+                        a.VendorInvoiceId == allocation.VendorInvoiceId &&
+                        !a.IsReversal &&
+                        !a.IsDeleted)
+                    .SumAsync(a => a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount, cancellationToken);
+
+                if (RoundMoney(totalInvoiceSettlement) > RoundMoney(allocation.VendorInvoice.TotalAmount))
+                    throw new InvalidOperationException($"AP payment would over-settle invoice '{allocation.VendorInvoice.InvoiceNumber}'.");
+            }
+
+            var allocatedCashAmount = RoundMoney(activeAllocations.Sum(a => a.AllocatedAmount));
+            if (allocatedCashAmount != RoundMoney(payment.TotalAmount))
+            {
+                throw new InvalidOperationException("AP payment amount must equal allocated cash amount before posting. Overpayments are not supported in this batch.");
+            }
+
+            var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            foreach (var allocation in activeAllocations)
+            {
+                var invoiceCurrency = NormalizeCurrency(allocation.VendorInvoice.CurrencyCode, paymentCurrency);
+                if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Cross-currency AP settlements are not supported in FX Batch 18. Vendor payment currency must match each allocated invoice currency.");
+                }
+            }
+
+            var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
+            var accountCache = new Dictionary<Guid, Account>();
+
+            var apAccountId = supplier.DefaultApAccountId
+                ?? settings.ControlAccountApId
+                ?? throw new InvalidOperationException("AP control account is not configured for this tenant.");
+            await ResolvePaymentPostingAccountAsync(apAccountId, "AP control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            var bankAccountId = payment.BankAccountId
+                ?? settings.DefaultBankAccountId
+                ?? throw new InvalidOperationException("Bank account is not configured for AP payment posting.");
+            var bankAccount = await _unitOfWork.Repository<BankAccount>()
+                .GetQueryable(a => a.TenantId == tenantId && a.Id == bankAccountId && !a.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (bankAccount == null)
+                throw new InvalidOperationException("AP payment bank account was not found for this tenant.");
+
+            if (!bankAccount.IsActive)
+                throw new InvalidOperationException($"AP payment bank account '{bankAccount.AccountName}' is inactive.");
+
+            if (!bankAccount.GLAccountId.HasValue)
+                throw new InvalidOperationException($"AP payment bank account '{bankAccount.AccountName}' is not linked to a GL account.");
+
+            await ResolvePaymentPostingAccountAsync(bankAccount.GLAccountId.Value, "bank/cash account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            var discountTaken = RoundMoney(activeAllocations.Sum(a => a.DiscountAmount));
+            var allocationWithholdingTax = RoundMoney(activeAllocations.Sum(a => a.WithholdingTaxAmount));
+            var withholdingTaxAmount = allocationWithholdingTax > 0m
+                ? allocationWithholdingTax
+                : RoundMoney(payment.WithholdingTaxAmount);
+            var apSettlementAmount = RoundMoney(payment.TotalAmount + discountTaken + withholdingTaxAmount);
+
+            var postingLines = new List<FinancePostingLineDto>();
+            var lineNumber = 1;
+            postingLines.Add(BuildPostingLine(
+                apAccountId,
+                $"AP payment {payment.PaymentNumber}",
+                debitTransactionAmount: apSettlementAmount,
+                creditTransactionAmount: 0m,
+                paymentCurrency,
+                functionalCurrency,
+                exchangeRate,
+                payment.PaymentDate,
+                payment.PaymentNumber,
+                lineNumber++,
+                "AP-Control"));
+
+            postingLines.Add(BuildPostingLine(
+                bankAccount.GLAccountId.Value,
+                $"AP payment {payment.PaymentNumber}",
+                debitTransactionAmount: 0m,
+                creditTransactionAmount: payment.TotalAmount,
+                paymentCurrency,
+                functionalCurrency,
+                exchangeRate,
+                payment.PaymentDate,
+                payment.PaymentNumber,
+                lineNumber++,
+                "AP-Bank"));
+
+            if (discountTaken > 0m)
+            {
+                var discountAccountId = settings.DiscountReceivedAccountId
+                    ?? throw new InvalidOperationException("Purchase discount received account is not configured for this tenant.");
+                await ResolvePaymentPostingAccountAsync(discountAccountId, "purchase discount received account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+
+                postingLines.Add(BuildPostingLine(
+                    discountAccountId,
+                    $"Purchase discount taken - {payment.PaymentNumber}",
+                    debitTransactionAmount: 0m,
+                    creditTransactionAmount: discountTaken,
+                    paymentCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    lineNumber++,
+                    "AP-Discount"));
+            }
+
+            if (withholdingTaxAmount > 0m)
+            {
+                var taxAccountId = payment.WithholdingTaxAccountId
+                    ?? await ResolveConfiguredWithholdingTaxPayableAccountAsync(payment.PaymentDate, payment.WithholdingTaxId, cancellationToken)
+                    ?? throw new InvalidOperationException("AP withholding tax payable account is not configured for this tenant.");
+                await ResolvePaymentPostingAccountAsync(taxAccountId, "withholding tax payable account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+                postingLines.Add(BuildPostingLine(
+                    taxAccountId,
+                    $"Withholding tax - {payment.PaymentNumber}",
+                    debitTransactionAmount: 0m,
+                    creditTransactionAmount: withholdingTaxAmount,
+                    paymentCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    lineNumber++,
+                    "AP-WHT"));
+            }
+
+            if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
+                throw new InvalidOperationException("AP payment posting is not balanced.");
+
+            payment.BankAccountId ??= bankAccount.Id;
+
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "AP",
+                SourceDocumentType = "VendorPayment",
+                SourceDocumentId = payment.Id,
+                SourceDocumentTenantId = payment.TenantId,
+                PostingAction = "Post",
+                SourceDocumentReference = payment.PaymentNumber,
+                Description = $"Vendor payment {payment.PaymentNumber} - {supplier.Name}",
+                PostingDate = payment.PaymentDate,
+                JournalType = "AP Payment",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = $"AP:VendorPayment:{payment.TenantId:N}:{payment.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = postingLines
+            };
+        }
+
+        private async Task PostRealizedFxIfRequiredAsync(
+            VendorPayment payment,
+            CancellationToken cancellationToken)
+        {
+            var functionalCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync(), "GHS");
+            var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            if (string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (_fxAccountingService == null)
+            {
+                throw new InvalidOperationException("FX accounting service is not configured for AP realized FX settlement posting.");
+            }
+
+            await _fxAccountingService.PostRealizedFxForApPaymentAsync(payment.Id, cancellationToken);
+        }
+
+        private async Task<Guid?> ResolveConfiguredWithholdingTaxPayableAccountAsync(
+            DateTime paymentDate,
+            Guid? taxId,
+            CancellationToken cancellationToken)
+        {
+            var configuredTax = await _unitOfWork.Repository<Tax>()
+                .GetQueryable(t =>
+                    t.TenantId == TenantId &&
+                    !t.IsDeleted &&
+                    t.IsActive &&
+                    (!taxId.HasValue || t.Id == taxId.Value) &&
+                    t.Category == TaxCategory.Withholding &&
+                    (t.Applicability == TaxApplicability.Purchases || t.Applicability == TaxApplicability.Both) &&
+                    t.EffectiveFrom.Date <= paymentDate.Date &&
+                    t.TaxPayableAccountId.HasValue)
+                .OrderByDescending(t => t.EffectiveFrom)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return configuredTax?.TaxPayableAccountId;
+        }
+
+        private async Task<Supplier> ResolvePaymentSupplierForPostingAsync(VendorPayment payment, CancellationToken cancellationToken)
+        {
+            var supplier = await _unitOfWork.Repository<Supplier>()
+                .GetQueryable(s => s.TenantId == TenantId && s.Id == payment.SupplierId && !s.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (supplier == null)
+                throw new InvalidOperationException("AP payment supplier was not found for this tenant.");
+
+            if (!supplier.IsActive || supplier.IsBlacklisted || string.Equals(supplier.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Supplier '{supplier.Name}' is not active for AP payment posting.");
+
+            return supplier;
+        }
+
+        private async Task<FinanceSettings> GetFinanceSettingsAsync(CancellationToken cancellationToken)
+        {
+            var settings = await _unitOfWork.Repository<FinanceSettings>()
+                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return settings ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
+        }
+
+        private async Task<Account> ResolvePaymentPostingAccountAsync(
+            Guid accountId,
+            string role,
+            Dictionary<Guid, Account> accountCache,
+            bool allowControlAccount,
+            bool requireDirectPosting,
+            CancellationToken cancellationToken)
+        {
+            if (accountCache.TryGetValue(accountId, out var cached))
+            {
+                return cached;
+            }
+
+            var account = await _unitOfWork.Repository<Account>()
+                .GetQueryable(a => a.TenantId == TenantId && a.Id == accountId && !a.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (account == null)
+                throw new InvalidOperationException($"AP payment posting {role} was not found for this tenant.");
+
+            if (account.Status != AccountStatus.Active)
+                throw new InvalidOperationException($"AP payment posting {role} account '{account.AccountNumber}' is not active.");
+
+            if (account.IsControlAccount && !allowControlAccount)
+                throw new InvalidOperationException($"AP payment posting {role} account '{account.AccountNumber}' is a control account and cannot be used for this line.");
+
+            if (requireDirectPosting && !account.AllowDirectPosting)
+                throw new InvalidOperationException($"AP payment posting {role} account '{account.AccountNumber}' does not allow direct posting.");
+
+            accountCache[accountId] = account;
+            return account;
+        }
+
+        private static FinancePostingLineDto BuildPostingLine(
+            Guid accountId,
+            string description,
+            decimal debitTransactionAmount,
+            decimal creditTransactionAmount,
+            string transactionCurrency,
+            string functionalCurrency,
+            decimal exchangeRate,
+            DateTime exchangeRateDate,
+            string reference,
+            int lineNumber,
+            string transactionTag)
+        {
+            var isForeign = !string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
+            var debitAmount = ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+            var creditAmount = ToFunctionalAmount(creditTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+
+            return new FinancePostingLineDto
+            {
+                AccountId = accountId,
+                Description = description,
+                DebitAmount = debitAmount,
+                CreditAmount = creditAmount,
+                TransactionCurrency = transactionCurrency,
+                ForeignCurrencyAmount = isForeign
+                    ? debitTransactionAmount > 0m ? debitTransactionAmount : creditTransactionAmount
+                    : null,
+                ExchangeRate = isForeign ? exchangeRate : null,
+                ExchangeRateSource = isForeign ? "AP payment exchange-rate snapshot" : null,
+                ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
+                SourceReferenceNumber = reference,
+                LineNumber = lineNumber,
+                TransactionTag = transactionTag
+            };
+        }
+
+        private async Task RecordApPaymentAuditAsync(
+            string eventType,
+            VendorPayment payment,
+            Guid? postingEventId = null,
+            Guid? journalEntryId = null,
+            object? beforeValues = null,
+            object? afterValues = null,
+            string? reason = null,
+            string? comment = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = payment.TenantId,
+                SourceModule = "AP",
+                SourceDocumentType = "VendorPayment",
+                SourceDocumentId = payment.Id,
+                JournalEntryId = journalEntryId ?? payment.JournalEntryId,
+                PostingEventId = postingEventId,
+                BeforeValues = beforeValues,
+                AfterValues = afterValues,
+                Reason = reason,
+                Comment = comment,
+                Resource = "Finance.APPayment",
+                ResourceId = payment.Id.ToString()
+            }, cancellationToken);
+        }
+
+        private static decimal ToFunctionalAmount(
+            decimal transactionAmount,
+            string transactionCurrency,
+            string functionalCurrency,
+            decimal exchangeRate)
+        {
+            if (transactionAmount == 0m)
+            {
+                return 0m;
+            }
+
+            var normalizedRate = NormalizeExchangeRate(exchangeRate);
+            return string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                ? RoundMoney(transactionAmount)
+                : RoundMoney(transactionAmount * normalizedRate);
+        }
+
+        private static decimal NormalizeExchangeRate(decimal exchangeRate)
+            => exchangeRate <= 0m ? 1m : exchangeRate;
+
+        private static string NormalizeCurrency(string? currencyCode, string defaultValue)
+            => string.IsNullOrWhiteSpace(currencyCode)
+                ? defaultValue.Trim().ToUpperInvariant()
+                : currencyCode.Trim().ToUpperInvariant();
+
+        private static decimal RoundMoney(decimal amount)
+            => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+        private async Task<Supplier> ResolveSupplierForPaymentAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
+        {
+            var supplierRepository = _unitOfWork.Repository<Supplier>();
+            var supplier = await supplierRepository
+                .GetQueryable(s =>
+                    s.TenantId == TenantId &&
+                    !s.IsDeleted &&
+                    s.Id == supplierOrBusinessPartnerId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (supplier != null)
+            {
+                return supplier;
+            }
+
+            var partner = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    !p.IsDeleted &&
+                    p.Id == supplierOrBusinessPartnerId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (partner == null)
+            {
+                throw new KeyNotFoundException($"Supplier or business partner with Id '{supplierOrBusinessPartnerId}' not found.");
+            }
+
+            if (string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Customer business partners cannot be used for AP vendor payments.");
+            }
+
+            if (partner.IsBlacklisted)
+            {
+                throw new InvalidOperationException($"Business partner '{partner.PartnerName}' is blacklisted and cannot be used for AP vendor payments.");
+            }
+
+            supplier = await supplierRepository
+                .GetQueryable(s =>
+                    s.TenantId == TenantId &&
+                    !s.IsDeleted &&
+                    (s.Id == partner.Id ||
+                     s.SupplierCode == partner.PartnerCode ||
+                     s.Name == partner.PartnerName))
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (supplier != null)
+            {
+                return supplier;
+            }
+
+            supplier = new Supplier
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                SupplierCode = string.IsNullOrWhiteSpace(partner.PartnerCode)
+                    ? $"BP-{partner.Id.ToString("N")[..8].ToUpperInvariant()}"
+                    : partner.PartnerCode,
+                Name = partner.PartnerName,
+                SupplierType = partner.PartnerType.Contains("Manufacturer", StringComparison.OrdinalIgnoreCase)
+                    ? "Manufacturer"
+                    : "Vendor",
+                Address = partner.PhysicalAddress ?? partner.MailingAddress,
+                City = partner.PhysicalCity ?? partner.MailingCity,
+                State = partner.PhysicalState ?? partner.MailingState,
+                Country = partner.PhysicalCountry ?? partner.MailingCountry,
+                ZipCode = partner.PhysicalPostalCode ?? partner.MailingPostalCode,
+                Phone = partner.PrimaryPhone,
+                Email = partner.PrimaryEmail,
+                Website = partner.Website,
+                PrimaryContactName = partner.PrimaryContactName,
+                PrimaryContactTitle = partner.PrimaryContactTitle,
+                PrimaryContactPhone = partner.PrimaryPhone,
+                PrimaryContactEmail = partner.PrimaryEmail,
+                TaxId = partner.TaxIdentificationNumber ?? partner.VATNumber,
+                PaymentTerms = partner.PaymentTerms ?? "Net 30",
+                PaymentTermId = partner.PaymentTermId,
+                IsActive = partner.IsActive,
+                IsPreferred = partner.IsPreferred,
+                Status = partner.IsActive ? "Active" : "Inactive",
+                Notes = $"Auto-created from business partner {partner.PartnerCode} for AP vendor payment entry.",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+
+            await supplierRepository.AddAsync(supplier);
+            return supplier;
+        }
+
+        private async Task<Guid?> ResolveSupplierIdForQueryAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
+        {
+            var supplierRepository = _unitOfWork.Repository<Supplier>();
+            var supplierId = await supplierRepository
+                .GetQueryable(s =>
+                    s.TenantId == TenantId &&
+                    !s.IsDeleted &&
+                    s.Id == supplierOrBusinessPartnerId)
+                .Select(s => (Guid?)s.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (supplierId.HasValue)
+            {
+                return supplierId;
+            }
+
+            var partner = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    !p.IsDeleted &&
+                    p.Id == supplierOrBusinessPartnerId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (partner == null)
+            {
+                return null;
+            }
+
+            return await supplierRepository
+                .GetQueryable(s =>
+                    s.TenantId == TenantId &&
+                    !s.IsDeleted &&
+                    (s.Id == partner.Id ||
+                     s.SupplierCode == partner.PartnerCode ||
+                     s.Name == partner.PartnerName))
+                .Select(s => (Guid?)s.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        private async Task CreateCashTransactionForPaymentAsync(VendorPayment payment, Supplier supplier, CancellationToken cancellationToken)
+        {
+            if (!payment.BankAccountId.HasValue)
+            {
+                return;
+            }
+
+            var cashTransactionRepository = _unitOfWork.Repository<CashTransaction>();
+            var exists = await cashTransactionRepository
+                .GetQueryable(t =>
+                    !t.IsDeleted &&
+                    t.TransactionType == CashTransactionType.Payment &&
+                    t.BankAccountId == payment.BankAccountId.Value &&
+                    t.ReferenceNumber == payment.PaymentNumber)
+                .AnyAsync(cancellationToken);
+
+            if (exists)
+            {
+                return;
+            }
+
+            var bankAccountRepository = _unitOfWork.Repository<BankAccount>();
+            var bankAccount = await bankAccountRepository
+                .GetQueryable(a => a.Id == payment.BankAccountId.Value && !a.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("Bank account not found for AP vendor payment.");
+
+            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            var currencyCode = string.IsNullOrWhiteSpace(payment.CurrencyCode)
+                ? baseCurrencyCode
+                : payment.CurrencyCode.Trim().ToUpperInvariant();
+            var exchangeRate = payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate;
+            var baseAmount = decimal.Round(payment.TotalAmount * exchangeRate, 2, MidpointRounding.AwayFromZero);
+            var apAccountId = supplier.DefaultApAccountId ?? await _unitOfWork.Repository<FinanceSettings>()
+                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
+                .Select(s => s.ControlAccountApId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var transactionNumber = await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.CashPayment,
+                TenantId,
+                payment.PaymentDate,
+                nameof(CashTransaction),
+                cancellationToken: cancellationToken);
+
+            await cashTransactionRepository.AddAsync(new CashTransaction
+            {
+                Id = Guid.NewGuid(),
+                TransactionNumber = transactionNumber,
+                TransactionDate = payment.PaymentDate,
+                TransactionType = CashTransactionType.Payment,
+                BankAccountId = payment.BankAccountId.Value,
+                Amount = payment.TotalAmount,
+                Currency = currencyCode,
+                ExchangeRate = exchangeRate,
+                BaseAmount = baseAmount,
+                ReferenceNumber = payment.PaymentNumber,
+                PayeeOrPayer = supplier.Name,
+                Description = $"AP Vendor Payment {payment.PaymentNumber} - {supplier.Name}",
+                GLAccountId = apAccountId,
+                IsReconciled = false,
+                IsPosted = true,
+                PostedDate = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            });
+
+            bankAccount.CurrentBalance -= payment.TotalAmount;
+            bankAccount.AvailableBalance -= payment.TotalAmount;
+            bankAccount.UpdatedAt = DateTime.UtcNow;
+            bankAccount.UpdatedBy = UserName;
+            await bankAccountRepository.UpdateAsync(bankAccount);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
 
         private async Task<string> GeneratePaymentNumberAsync(CancellationToken cancellationToken)
         {
@@ -925,10 +1684,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TransactionReference = payment.TransactionReference,
                 WithholdingTaxRate = payment.WithholdingTaxRate,
                 WithholdingTaxAmount = payment.WithholdingTaxAmount,
+                WithholdingTaxId = payment.WithholdingTaxId,
+                WithholdingTaxAccountId = payment.WithholdingTaxAccountId,
+                WithholdingCertificateNumber = payment.WithholdingCertificateNumber,
+                WithholdingCertificateDate = payment.WithholdingCertificateDate,
                 DiscountTaken = payment.DiscountTaken,
                 Status = payment.Status,
                 PaymentBatchId = payment.PaymentBatchId,
                 PaymentBatchNumber = payment.PaymentBatch?.BatchNumber,
+                JournalEntryId = payment.JournalEntryId,
                 Notes = payment.Notes,
                 CreatedAt = payment.CreatedAt,
                 Allocations = payment.Allocations?.Select(a => new VendorPaymentAllocationDto

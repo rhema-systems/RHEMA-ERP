@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -25,7 +26,7 @@ public class CustomerService : ICustomerService
         _logger = logger;
     }
 
-    private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+    private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
     private string UserName => _currentUser.UserName ?? "system";
 
     public async Task<CustomerDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -124,6 +125,8 @@ public class CustomerService : ICustomerService
             throw new InvalidOperationException($"Customer code '{code}' already exists.");
         }
 
+        var paymentTerm = await ResolveCustomerPaymentTermAsync(dto.PaymentTermId, cancellationToken);
+        var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
         var now = DateTime.UtcNow;
         var partner = new BusinessPartner
         {
@@ -148,8 +151,8 @@ public class CustomerService : ICustomerService
             TaxIdentificationNumber = dto.TaxId,
             CreditLimit = dto.CreditLimit,
             OutstandingBalance = 0m,
-            PaymentTermId = NormalizeGuid(dto.PaymentTermId),
-            PaymentTerms = BuildPaymentTermsLabel(dto.PaymentTermsDays),
+            PaymentTermId = paymentTerm?.Id,
+            PaymentTerms = BuildPaymentTermsLabel(paymentTermsDays),
             PriceList = dto.PriceGroup,
             Currency = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? "GHS" : dto.CurrencyCode,
             Notes = dto.Notes,
@@ -187,8 +190,10 @@ public class CustomerService : ICustomerService
         partner.PhysicalCountry = dto.Country;
         partner.TaxIdentificationNumber = dto.TaxId;
         partner.CreditLimit = dto.CreditLimit;
-        partner.PaymentTermId = NormalizeGuid(dto.PaymentTermId);
-        partner.PaymentTerms = BuildPaymentTermsLabel(dto.PaymentTermsDays);
+        var paymentTerm = await ResolveCustomerPaymentTermAsync(dto.PaymentTermId, cancellationToken);
+        var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
+        partner.PaymentTermId = paymentTerm?.Id;
+        partner.PaymentTerms = BuildPaymentTermsLabel(paymentTermsDays);
         partner.PriceList = dto.PriceGroup;
         partner.Currency = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? partner.Currency : dto.CurrencyCode;
         partner.IsActive = dto.IsActive;
@@ -332,6 +337,42 @@ public class CustomerService : ICustomerService
     private static Guid? NormalizeGuid(Guid? value)
     {
         return value.HasValue && value.Value != Guid.Empty ? value : null;
+    }
+
+    private async Task<PaymentTerm?> ResolveCustomerPaymentTermAsync(Guid? paymentTermId, CancellationToken cancellationToken)
+    {
+        var normalizedPaymentTermId = NormalizeGuid(paymentTermId);
+        if (!normalizedPaymentTermId.HasValue)
+        {
+            return null;
+        }
+
+        var paymentTerm = await _unitOfWork.Repository<PaymentTerm>()
+            .GetQueryable(pt =>
+                pt.TenantId == TenantId &&
+                pt.Id == normalizedPaymentTermId.Value &&
+                pt.IsActive &&
+                !pt.IsDeleted)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (paymentTerm == null)
+        {
+            throw new InvalidOperationException($"Active payment term with Id '{normalizedPaymentTermId.Value}' was not found.");
+        }
+
+        if (!IsCustomerPaymentTerm(paymentTerm.ApplicableTo))
+        {
+            throw new InvalidOperationException($"Payment term '{paymentTerm.Code}' is not applicable to customers.");
+        }
+
+        return paymentTerm;
+    }
+
+    private static bool IsCustomerPaymentTerm(string applicableTo)
+    {
+        return string.Equals(applicableTo, "All", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(applicableTo, "Customer", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(applicableTo, "Client", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? BuildPaymentTermsLabel(int paymentTermsDays)

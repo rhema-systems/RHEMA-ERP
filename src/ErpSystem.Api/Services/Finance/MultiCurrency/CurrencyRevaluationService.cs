@@ -1,354 +1,1625 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
-using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
+using ErpSystem.Shared;
+using Microsoft.EntityFrameworkCore;
 
-namespace ErpSystem.Api.Services.Finance.MultiCurrency
+namespace ErpSystem.Api.Services.Finance.MultiCurrency;
+
+/// <summary>
+/// Central FX accounting service. Realized settlement FX and unrealized revaluation journals
+/// are posted only through <see cref="IFinancePostingEngine"/>.
+/// </summary>
+public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IFxAccountingService
 {
-    /// <summary>
-    /// Service implementation for foreign currency revaluation operations.
-    /// Handles unrealized gain/loss calculations and journal entry generation.
-    /// </summary>
-    public class CurrencyRevaluationService : ICurrencyRevaluationService
-    {
-        private readonly ApplicationDbContext _context;
-        private readonly ReportingDbContext _reportingContext;
-        private readonly ICurrentUserService _currentUserService;
-        private readonly ITenantSettingsService _tenantSettingsService;
-        private readonly ILogger<CurrencyRevaluationService> _logger;
-        private readonly IDocumentNumberingService _documentNumberingService;
+    private const string PostedStatus = "Posted";
+    private const string SourceModuleFx = "FX";
+    private readonly ApplicationDbContext _context;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly ITenantSettingsService _tenantSettingsService;
+    private readonly IFinancePostingEngine _financePostingEngine;
+    private readonly ILogger<CurrencyRevaluationService> _logger;
+    private readonly IFinanceAuditService? _financeAuditService;
 
-        public CurrencyRevaluationService(
-            ApplicationDbContext context,
-            ReportingDbContext reportingContext,
-            ICurrentUserService currentUserService,
-            ITenantSettingsService tenantSettingsService,
-            ILogger<CurrencyRevaluationService> logger,
-            IDocumentNumberingService documentNumberingService)
+    public CurrencyRevaluationService(
+        ApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ITenantSettingsService tenantSettingsService,
+        IFinancePostingEngine financePostingEngine,
+        ILogger<CurrencyRevaluationService> logger,
+        IFinanceAuditService? financeAuditService = null)
+    {
+        _context = context;
+        _currentUserService = currentUserService;
+        _tenantSettingsService = tenantSettingsService;
+        _financePostingEngine = financePostingEngine;
+        _logger = logger;
+        _financeAuditService = financeAuditService;
+    }
+
+    private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
+
+    public async Task<JournalEntry> RunCurrencyRevaluationAsync(
+        RevaluationRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var batch = await RunUnrealizedRevaluationAsync(request, cancellationToken);
+        if (batch.JournalEntryId.HasValue)
         {
-            _context = context;
-            _reportingContext = reportingContext;
-            _currentUserService = currentUserService;
-            _tenantSettingsService = tenantSettingsService;
-            _logger = logger;
-            _documentNumberingService = documentNumberingService;
+            var journal = await _context.JournalEntries
+                .Include(j => j.Transactions)
+                .FirstOrDefaultAsync(
+                    j => j.TenantId == TenantId && j.Id == batch.JournalEntryId.Value && !j.IsDeleted,
+                    cancellationToken);
+
+            if (journal != null)
+            {
+                return journal;
+            }
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+        return BuildPreviewJournal(batch, request);
+    }
 
-        public async Task<JournalEntry> RunCurrencyRevaluationAsync(
-            RevaluationRequestDto request,
-            CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<JournalEntry>> GetRevaluationHistoryAsync(
+        DateTime startDate,
+        DateTime endDate,
+        string? currencyCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var normalizedCurrency = NormalizeOptionalCurrency(currencyCode);
+
+        var query = _context.FxRevaluationBatches
+            .AsNoTracking()
+            .Where(b => b.TenantId == tenantId
+                && !b.IsDeleted
+                && b.RevaluationDate.Date >= startDate.Date
+                && b.RevaluationDate.Date <= endDate.Date
+                && b.JournalEntryId.HasValue)
+            .Include(b => b.Lines)
+            .Include(b => b.JournalEntry)
+                .ThenInclude(j => j!.Transactions)
+            .OrderByDescending(b => b.RevaluationDate);
+
+        var batches = await query.ToListAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(normalizedCurrency))
         {
-            var strategy = _context.Database.CreateExecutionStrategy();
-            return await strategy.ExecuteAsync(async () =>
+            batches = batches
+                .Where(b => b.Lines.Any(l => l.TransactionCurrency == normalizedCurrency))
+                .ToList();
+        }
+
+        return batches
+            .Select(b => b.JournalEntry)
+            .Where(j => j != null)
+            .Cast<JournalEntry>()
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<FxRealizedSettlement>> PostRealizedFxForApPaymentAsync(
+        Guid vendorPaymentId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var payment = await _context.Set<VendorPayment>()
+            .Include(p => p.Allocations)
+                .ThenInclude(a => a.VendorInvoice)
+            .FirstOrDefaultAsync(
+                p => p.TenantId == tenantId && p.Id == vendorPaymentId && !p.IsDeleted,
+                cancellationToken);
+
+        if (payment == null)
+        {
+            throw new KeyNotFoundException($"Vendor payment with Id '{vendorPaymentId}' was not found.");
+        }
+
+        var settings = await GetFinanceSettingsAsync(tenantId, cancellationToken);
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, await _tenantSettingsService.GetBaseCurrencyAsync());
+        var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+        EnsureApSettlementCurrencySupported(payment, paymentCurrency);
+        if (IsFunctionalCurrency(paymentCurrency, functionalCurrency))
+        {
+            return Array.Empty<FxRealizedSettlement>();
+        }
+
+        if (!payment.JournalEntryId.HasValue)
+        {
+            throw new InvalidOperationException("AP payment must be posted before realized FX can be calculated.");
+        }
+
+        var results = new List<FxRealizedSettlement>();
+        foreach (var allocation in payment.Allocations.Where(a => !a.IsReversal).OrderBy(a => a.AllocationDate).ThenBy(a => a.Id))
+        {
+            var existing = await LoadExistingRealizedSettlementAsync(
+                tenantId,
+                "VendorPayment",
+                payment.Id,
+                allocation.Id,
+                cancellationToken);
+            if (existing != null)
             {
-                return await RunCurrencyRevaluationCoreAsync(request, cancellationToken);
+                results.Add(existing);
+                continue;
+            }
+
+            try
+            {
+                var settlement = await PostApAllocationRealizedFxAsync(
+                    tenantId,
+                    settings,
+                    functionalCurrency,
+                    payment,
+                    allocation,
+                    paymentCurrency,
+                    cancellationToken);
+
+                if (settlement != null)
+                {
+                    results.Add(settlement);
+                }
+            }
+            catch (Exception ex)
+            {
+                await RecordFxAuditAsync(
+                    FinanceAuditEvents.RealizedFxPostingFailed,
+                    tenantId,
+                    "AP",
+                    "VendorPaymentAllocation",
+                    allocation.Id,
+                    reason: ex.Message,
+                    afterValues: new { PaymentId = payment.Id, AllocationId = allocation.Id, error = ex.Message },
+                    cancellationToken: cancellationToken);
+                throw;
+            }
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<FxRealizedSettlement>> PostRealizedFxForArReceiptAsync(
+        Guid customerPaymentId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var payment = await _context.Set<CustomerPayment>()
+            .Include(p => p.Allocations)
+                .ThenInclude(a => a.Invoice)
+            .FirstOrDefaultAsync(
+                p => p.TenantId == tenantId && p.Id == customerPaymentId && !p.IsDeleted,
+                cancellationToken);
+
+        if (payment == null)
+        {
+            throw new KeyNotFoundException($"Customer payment with Id '{customerPaymentId}' was not found.");
+        }
+
+        if (payment.IsCreditNote)
+        {
+            return Array.Empty<FxRealizedSettlement>();
+        }
+
+        var settings = await GetFinanceSettingsAsync(tenantId, cancellationToken);
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, await _tenantSettingsService.GetBaseCurrencyAsync());
+        var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+        EnsureArSettlementCurrencySupported(payment, paymentCurrency);
+        if (IsFunctionalCurrency(paymentCurrency, functionalCurrency))
+        {
+            return Array.Empty<FxRealizedSettlement>();
+        }
+
+        if (!payment.JournalEntryId.HasValue)
+        {
+            throw new InvalidOperationException("AR receipt must be posted before realized FX can be calculated.");
+        }
+
+        var results = new List<FxRealizedSettlement>();
+        foreach (var allocation in payment.Allocations.Where(a => !a.IsReversal).OrderBy(a => a.AllocationDate).ThenBy(a => a.Id))
+        {
+            var existing = await LoadExistingRealizedSettlementAsync(
+                tenantId,
+                "CustomerPayment",
+                payment.Id,
+                allocation.Id,
+                cancellationToken);
+            if (existing != null)
+            {
+                results.Add(existing);
+                continue;
+            }
+
+            try
+            {
+                var settlement = await PostArAllocationRealizedFxAsync(
+                    tenantId,
+                    settings,
+                    functionalCurrency,
+                    payment,
+                    allocation,
+                    paymentCurrency,
+                    cancellationToken);
+
+                if (settlement != null)
+                {
+                    results.Add(settlement);
+                }
+            }
+            catch (Exception ex)
+            {
+                await RecordFxAuditAsync(
+                    FinanceAuditEvents.RealizedFxPostingFailed,
+                    tenantId,
+                    "AR",
+                    "PaymentAllocation",
+                    allocation.Id,
+                    reason: ex.Message,
+                    afterValues: new { PaymentId = payment.Id, AllocationId = allocation.Id, error = ex.Message },
+                    cancellationToken: cancellationToken);
+                throw;
+            }
+        }
+
+        return results;
+    }
+
+    public async Task<FxRevaluationBatch> RunUnrealizedRevaluationAsync(
+        RevaluationRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var tenantId = TenantId;
+        var revaluationDate = request.RevaluationDate.Date;
+        var settings = await GetFinanceSettingsAsync(tenantId, cancellationToken);
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, await _tenantSettingsService.GetBaseCurrencyAsync());
+        var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, revaluationDate, cancellationToken);
+        var scope = ResolveRevaluationScope(request);
+
+        if (!request.PreviewOnly)
+        {
+            var existing = await _context.FxRevaluationBatches
+                .Include(b => b.Lines)
+                .FirstOrDefaultAsync(
+                    b => b.TenantId == tenantId
+                        && !b.IsDeleted
+                        && b.Scope == scope
+                        && b.RevaluationDate.Date == revaluationDate
+                        && b.FiscalPeriodId == fiscalPeriod.Id,
+                    cancellationToken);
+
+            if (existing != null)
+            {
+                return existing;
+            }
+        }
+
+        var unrealizedGainAccount = await ResolveRequiredFxAccountAsync(
+            tenantId,
+            settings.UnrealizedFxGainAccountId ?? settings.UnrealizedGainLossAccountId,
+            "unrealized FX gain account",
+            FinanceAuditEvents.FxPostingBlockedInvalidConfiguration,
+            cancellationToken);
+        var unrealizedLossAccount = await ResolveRequiredFxAccountAsync(
+            tenantId,
+            settings.UnrealizedFxLossAccountId,
+            "unrealized FX loss account",
+            FinanceAuditEvents.FxPostingBlockedInvalidConfiguration,
+            cancellationToken);
+
+        var exposures = await BuildPostedExposureBasisAsync(
+            tenantId,
+            functionalCurrency,
+            request.CurrencyCode,
+            revaluationDate,
+            settings,
+            cancellationToken);
+
+        var batch = new FxRevaluationBatch
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BatchNumber = $"FXR-{revaluationDate:yyyyMMdd}-{DateTime.UtcNow:HHmmssfff}",
+            RevaluationDate = revaluationDate,
+            FiscalPeriodId = fiscalPeriod.Id,
+            Scope = scope,
+            FunctionalCurrencyCode = functionalCurrency,
+            Status = request.PreviewOnly ? "Preview" : "Calculated",
+            IdempotencyKey = $"FX:Revaluation:{tenantId:N}:{scope}:{revaluationDate:yyyyMMdd}:{fiscalPeriod.Id:N}",
+            AutoReverseNextPeriod = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName
+        };
+
+        foreach (var exposure in exposures)
+        {
+            var closingRate = await ResolveClosingRateAsync(
+                tenantId,
+                functionalCurrency,
+                exposure.TransactionCurrency,
+                revaluationDate,
+                request.RevaluationType,
+                cancellationToken);
+
+            var revaluedFunctionalAmount = RoundMoney(exposure.ForeignCurrencyBalance * closingRate.Rate);
+            var gainLossAmount = RoundMoney(revaluedFunctionalAmount - exposure.CarryingFunctionalAmount);
+            if (gainLossAmount == 0m)
+            {
+                continue;
+            }
+
+            var gainLossType = ResolveUnrealizedGainLossType(exposure.Kind, gainLossAmount);
+            var gainLossAccountId = gainLossType == "Gain"
+                ? unrealizedGainAccount.Id
+                : unrealizedLossAccount.Id;
+
+            batch.Lines.Add(new FxRevaluationLine
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SourceModule = exposure.SourceModule,
+                SourceDocumentType = exposure.SourceDocumentType,
+                SourceDocumentId = exposure.SourceDocumentId,
+                AccountId = exposure.AccountId,
+                TransactionCurrency = exposure.TransactionCurrency,
+                FunctionalCurrencyCode = functionalCurrency,
+                ForeignCurrencyBalance = exposure.ForeignCurrencyBalance,
+                CarryingFunctionalAmount = exposure.CarryingFunctionalAmount,
+                ClosingExchangeRateId = closingRate.Id,
+                ClosingExchangeRate = closingRate.Rate,
+                RevaluedFunctionalAmount = revaluedFunctionalAmount,
+                GainLossAmount = gainLossAmount,
+                GainLossType = gainLossType,
+                GainLossAccountId = gainLossAccountId,
+                Notes = $"Closing rate {closingRate.Rate} effective {closingRate.EffectiveDate:yyyy-MM-dd}",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUserService.UserName
             });
         }
 
-        private async Task<JournalEntry> RunCurrencyRevaluationCoreAsync(
-            RevaluationRequestDto request,
-            CancellationToken cancellationToken)
+        UpdateBatchTotals(batch);
+
+        if (request.PreviewOnly)
         {
-            var tenantIdValue = TenantId;
-            var revaluationDate = request.RevaluationDate.Date;
-            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
-
-            // 1. Get Accounts to Revalue
-            var allAccounts = await _reportingContext.Accounts
-                .Where(a => a.TenantId == tenantIdValue
-                         && !a.IsDeleted
-                         && a.Status == AccountStatus.Active)
-                .ToListAsync(cancellationToken);
-
-            // Load currency links separately
-            var accountIds = allAccounts.Select(a => a.Id).ToList();
-            var currencyLinks = await _context.AccountCurrencyLinks
-                .IgnoreQueryFilters()
-                .Where(cl => accountIds.Contains(cl.AccountId) && cl.IsActive && !cl.IsDeleted)
-                .ToListAsync(cancellationToken);
-
-            // Attach currency links to accounts (in-memory)
-            foreach (var account in allAccounts)
-            {
-                account.CurrencyLinks = currencyLinks.Where(cl => cl.AccountId == account.Id).ToList();
-            }
-
-            // Filter accounts based on currency
-            var accounts = new List<Account>();
-            if (!string.IsNullOrEmpty(request.CurrencyCode))
-            {
-                accounts = allAccounts.Where(a =>
-                    a.CurrencyCode == request.CurrencyCode
-                    || a.IsMultiCurrency
-                    || a.CurrencyLinks.Any(c => c.LinkedCurrencyCode == request.CurrencyCode))
-                    .ToList();
-            }
-            else
-            {
-                accounts = allAccounts.Where(a =>
-                    a.IsMultiCurrency
-                    || !string.Equals(a.CurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase)
-                    || a.CurrencyLinks.Any())
-                    .ToList();
-            }
-
-            // 2. Prepare Journal Entry
-            var journalEntry = new JournalEntry
-            {
-                Id = Guid.NewGuid(),
-                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
-                    DocumentNumberingModules.Finance,
-                    FinanceDocumentTypes.CurrencyRevaluation,
-                    tenantIdValue,
-                    revaluationDate,
-                    nameof(JournalEntry),
-                    cancellationToken: cancellationToken),
-                EntryDate = revaluationDate,
-                Description = $"Currency Revaluation - {request.RevaluationType} - {revaluationDate:d}",
-                ReferenceNumber = request.RevaluationType,
-                PostingStatus = request.PreviewOnly ? "Draft" : "Posted",
-                PostingDate = DateTime.UtcNow,
-                IsBalanced = true,
-                BookClassification = "IFRS",
-                TenantId = tenantIdValue,
-                FiscalPeriodId = await GetOpenFiscalPeriodIdAsync(revaluationDate, cancellationToken)
-            };
-
-            var transactions = new List<AccountTransaction>();
-            decimal totalAdjustment = 0;
-            int lineNum = 1;
-
-            // 3. Process Each Account
-            foreach (var account in accounts)
-            {
-                var accountTransactions = await _context.AccountTransactions
-                    .Where(t => t.AccountId == account.Id && t.TransactionDate <= revaluationDate && !t.IsDeleted)
-                    .ToListAsync(cancellationToken);
-
-                // Group by currency
-                var currencyGroups = accountTransactions
-                    .Where(t => t.TransactionCurrency != null
-                        && !string.Equals(t.TransactionCurrency, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
-                    .GroupBy(t => t.TransactionCurrency);
-
-                foreach (var group in currencyGroups)
-                {
-                    string currency = group.Key!;
-                    if (!string.IsNullOrEmpty(request.CurrencyCode) && currency != request.CurrencyCode) continue;
-
-                    // Get balance from AccountCurrencyLink
-                    var currencyLink = account.CurrencyLinks
-                        .FirstOrDefault(c => c.LinkedCurrencyCode == currency && c.IsActive);
-
-                    decimal foreignBalance = currencyLink?.ForeignCurrencyBalance
-                        ?? group.Sum(t => t.ForeignCurrencyAmount ?? 0);
-                    decimal currentBaseBalance = group.Sum(t => t.DebitAmount - t.CreditAmount);
-
-                    if (foreignBalance == 0 && currentBaseBalance == 0) continue;
-
-                    // Get Exchange Rate
-                    var exchangeRateEntity = await _context.ExchangeRates
-                        .Where(r => r.TargetCurrencyCode == currency
-                            && r.BaseCurrencyCode == baseCurrencyCode
-                            && r.EffectiveDate <= revaluationDate)
-                        .OrderByDescending(r => r.EffectiveDate)
-                        .FirstOrDefaultAsync(cancellationToken);
-
-                    if (exchangeRateEntity == null)
-                    {
-                        _logger.LogWarning("No exchange rate found for {Currency} as of {Date}", currency, revaluationDate);
-                        continue;
-                    }
-
-                    decimal rate = exchangeRateEntity.Rate;
-                    decimal newBaseBalance = foreignBalance * rate;
-                    decimal adjustment = newBaseBalance - currentBaseBalance;
-
-                    if (adjustment == 0) continue;
-
-                    // Update AccountCurrencyLink metadata
-                    if (currencyLink != null)
-                    {
-                        currencyLink.LastRevaluationDate = revaluationDate;
-                        currencyLink.CurrentExchangeRate = rate;
-                        currencyLink.RateEffectiveDate = revaluationDate;
-                        currencyLink.LastRevaluationAdjustment = adjustment;
-                        currencyLink.CumulativeRevaluationAdjustment += adjustment;
-                    }
-
-                    // Create Adjustment Transaction
-                    var adjustmentTxn = new AccountTransaction
-                    {
-                        Id = Guid.NewGuid(),
-                        AccountId = account.Id,
-                        JournalEntryId = journalEntry.Id,
-                        TransactionDate = revaluationDate,
-                        Description = $"Revaluation {currency} @ {rate}",
-                        TransactionCurrency = currency,
-                        ForeignCurrencyAmount = 0,
-                        ExchangeRate = rate,
-                        IsRevaluationEntry = true,
-                        RevaluationType = "Unrealized",
-                        FiscalPeriodId = journalEntry.FiscalPeriodId,
-                        LineNumber = lineNum++,
-                        BookClassification = "IFRS",
-                        TenantId = tenantIdValue
-                    };
-
-                    if (adjustment > 0)
-                    {
-                        adjustmentTxn.DebitAmount = adjustment;
-                        adjustmentTxn.CreditAmount = 0;
-                    }
-                    else
-                    {
-                        adjustmentTxn.DebitAmount = 0;
-                        adjustmentTxn.CreditAmount = Math.Abs(adjustment);
-                    }
-
-                    transactions.Add(adjustmentTxn);
-                    totalAdjustment += adjustment;
-                }
-            }
-
-            if (transactions.Count == 0)
-            {
-                _logger.LogInformation("No revaluation adjustments needed for {Date}", revaluationDate);
-                return journalEntry;
-            }
-
-            // 4. Post Balancing Entry to Unrealized Gain/Loss Account
-            var balancingTxn = new AccountTransaction
-            {
-                Id = Guid.NewGuid(),
-                AccountId = request.UnrealizedGainLossAccountId,
-                JournalEntryId = journalEntry.Id,
-                TransactionDate = revaluationDate,
-                Description = "Unrealized Gain/Loss - Revaluation",
-                IsRevaluationEntry = true,
-                RevaluationType = "Unrealized",
-                FiscalPeriodId = journalEntry.FiscalPeriodId,
-                LineNumber = lineNum++,
-                BookClassification = "IFRS",
-                TenantId = tenantIdValue
-            };
-
-            if (totalAdjustment > 0)
-            {
-                balancingTxn.CreditAmount = totalAdjustment;
-                balancingTxn.DebitAmount = 0;
-            }
-            else
-            {
-                balancingTxn.DebitAmount = Math.Abs(totalAdjustment);
-                balancingTxn.CreditAmount = 0;
-            }
-            transactions.Add(balancingTxn);
-
-            // Update Header Totals
-            journalEntry.TotalDebitAmount = transactions.Sum(t => t.DebitAmount);
-            journalEntry.TotalCreditAmount = transactions.Sum(t => t.CreditAmount);
-
-            if (!request.PreviewOnly)
-            {
-                _context.JournalEntries.Add(journalEntry);
-                _context.AccountTransactions.AddRange(transactions);
-                await _context.SaveChangesAsync(cancellationToken);
-
-                _logger.LogInformation("Currency revaluation completed: {JournalNumber}, {Count} adjustments, Total: {Total}",
-                    journalEntry.JournalEntryNumber, transactions.Count - 1, totalAdjustment);
-            }
-            else
-            {
-                journalEntry.Transactions = transactions;
-                _logger.LogInformation("Currency revaluation preview generated: {Count} adjustments, Total: {Total}",
-                    transactions.Count - 1, totalAdjustment);
-            }
-
-            return journalEntry;
+            return batch;
         }
 
-        public async Task<IReadOnlyList<JournalEntry>> GetRevaluationHistoryAsync(
-            DateTime startDate,
-            DateTime endDate,
-            string? currencyCode = null,
-            CancellationToken cancellationToken = default)
+        _context.FxRevaluationBatches.Add(batch);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.UnrealizedRevaluationBatchCreated,
+            tenantId,
+            SourceModuleFx,
+            "FxRevaluationBatch",
+            batch.Id,
+            afterValues: BuildRevaluationAuditSnapshot(batch),
+            cancellationToken: cancellationToken);
+
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.UnrealizedRevaluationCalculated,
+            tenantId,
+            SourceModuleFx,
+            "FxRevaluationBatch",
+            batch.Id,
+            afterValues: BuildRevaluationAuditSnapshot(batch),
+            cancellationToken: cancellationToken);
+
+        if (!batch.Lines.Any())
         {
-            var query = _context.JournalEntries
-                .Where(je => je.TenantId == TenantId
-                    && je.EntryDate >= startDate
-                    && je.EntryDate <= endDate
-                    && je.ReferenceNumber != null
-                    && je.ReferenceNumber.Contains("Revaluation")
-                    && !je.IsDeleted)
-                .Include(je => je.Transactions)
-                .OrderByDescending(je => je.EntryDate);
-
-            var entries = await query.ToListAsync(cancellationToken);
-
-            if (!string.IsNullOrEmpty(currencyCode))
-            {
-                entries = entries.Where(je => je.Transactions.Any(t => t.TransactionCurrency == currencyCode)).ToList();
-            }
-
-            return entries;
+            batch.Status = "NoAdjustment";
+            batch.UpdatedAt = DateTime.UtcNow;
+            batch.UpdatedBy = _currentUserService.UserName;
+            await _context.SaveChangesAsync(cancellationToken);
+            return batch;
         }
 
-        private async Task<Guid> GetOpenFiscalPeriodIdAsync(DateTime date, CancellationToken cancellationToken)
+        try
         {
-            var period = await _context.FiscalPeriods
-                .FirstOrDefaultAsync(p => p.StartDate <= date && p.EndDate >= date && p.TenantId == TenantId, cancellationToken);
+            var postingRequest = BuildRevaluationPostingRequest(
+                batch,
+                unrealizedGainAccount.Id,
+                unrealizedLossAccount.Id);
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
 
-            if (period != null) return period.Id;
-
-            // Auto-create if missing
-            var fiscalYear = await _context.FiscalYears
-                .FirstOrDefaultAsync(fy => fy.TenantId == TenantId && fy.StartDate <= date && fy.EndDate >= date, cancellationToken)
-                ?? new FiscalYear
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = TenantId,
-                    FiscalYearCode = date.Year.ToString(),
-                    StartDate = new DateTime(date.Year, 1, 1),
-                    EndDate = new DateTime(date.Year, 12, 31),
-                    IsActive = true
-                };
-
-            if (_context.Entry(fiscalYear).State == EntityState.Detached)
+            batch.JournalEntryId = postingResult.JournalEntryId;
+            batch.PostingEventId = postingResult.PostingEventId;
+            batch.Status = PostedStatus;
+            batch.PostedAt = DateTime.UtcNow;
+            batch.UpdatedAt = DateTime.UtcNow;
+            batch.UpdatedBy = _currentUserService.UserName;
+            foreach (var line in batch.Lines)
             {
-                _context.FiscalYears.Add(fiscalYear);
-                await _context.SaveChangesAsync(cancellationToken);
+                line.JournalEntryId = postingResult.JournalEntryId;
+                line.PostingEventId = postingResult.PostingEventId;
             }
 
-            period = new FiscalPeriod
-            {
-                Id = Guid.NewGuid(),
-                TenantId = TenantId,
-                FiscalYearId = fiscalYear.Id,
-                PeriodName = $"{date:MMMM yyyy}",
-                PeriodCode = $"{date:yyyy-MM}",
-                PeriodNumber = date.Month,
-                StartDate = new DateTime(date.Year, date.Month, 1),
-                EndDate = new DateTime(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month)),
-                PeriodStatus = "Open",
-                IsOpen = true
-            };
-            _context.FiscalPeriods.Add(period);
+            await MarkClosingRatesUsedAsync(batch, postingResult.PostingEventId, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);
 
-            return period.Id;
+            await RecordFxAuditAsync(
+                FinanceAuditEvents.UnrealizedRevaluationPosted,
+                tenantId,
+                SourceModuleFx,
+                "FxRevaluationBatch",
+                batch.Id,
+                postingEventId: postingResult.PostingEventId,
+                journalEntryId: postingResult.JournalEntryId,
+                afterValues: BuildRevaluationAuditSnapshot(batch),
+                cancellationToken: cancellationToken);
+
+            foreach (var rateId in batch.Lines.Select(l => l.ClosingExchangeRateId).Distinct())
+            {
+                await RecordFxAuditAsync(
+                    FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+                    tenantId,
+                    SourceModuleFx,
+                    "ExchangeRate",
+                    rateId,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new { batch.Id, rateId, batch.RevaluationDate, batch.FunctionalCurrencyCode },
+                    cancellationToken: cancellationToken);
+            }
+
+            if (batch.Lines.Any(l => l.SourceModule == "BankCash"))
+            {
+                await RecordFxAuditAsync(
+                    FinanceAuditEvents.ForeignBankRevaluationPosted,
+                    tenantId,
+                    SourceModuleFx,
+                    "FxRevaluationBatch",
+                    batch.Id,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: BuildRevaluationAuditSnapshot(batch),
+                    cancellationToken: cancellationToken);
+            }
+
+            return batch;
         }
+        catch (Exception ex)
+        {
+            var failedBatch = await _context.FxRevaluationBatches
+                .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == batch.Id, cancellationToken);
+            if (failedBatch != null)
+            {
+                failedBatch.Status = "Failed";
+                failedBatch.Notes = ex.Message;
+                failedBatch.UpdatedAt = DateTime.UtcNow;
+                failedBatch.UpdatedBy = _currentUserService.UserName;
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            await RecordFxAuditAsync(
+                FinanceAuditEvents.UnrealizedRevaluationPostingFailed,
+                tenantId,
+                SourceModuleFx,
+                "FxRevaluationBatch",
+                batch.Id,
+                reason: ex.Message,
+                afterValues: new { batch.Id, error = ex.Message },
+                cancellationToken: cancellationToken);
+
+            throw;
+        }
+    }
+
+    public async Task<FxRevaluationBatch> ReverseRevaluationBatchAsync(
+        Guid batchId,
+        DateTime reversalDate,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A reversal reason is required.", nameof(reason));
+        }
+
+        var tenantId = TenantId;
+        var batch = await _context.FxRevaluationBatches
+            .Include(b => b.Lines)
+            .FirstOrDefaultAsync(
+                b => b.TenantId == tenantId && b.Id == batchId && !b.IsDeleted,
+                cancellationToken);
+
+        if (batch == null)
+        {
+            throw new KeyNotFoundException($"FX revaluation batch with Id '{batchId}' was not found.");
+        }
+
+        if (batch.ReversalPostingEventId.HasValue && batch.ReversalJournalEntryId.HasValue)
+        {
+            return batch;
+        }
+
+        if (batch.Status != PostedStatus || !batch.PostingEventId.HasValue || !batch.JournalEntryId.HasValue)
+        {
+            throw new InvalidOperationException("Only posted FX revaluation batches can be reversed.");
+        }
+
+        var plan = await _financePostingEngine.GetReversalPlanAsync(
+            batch.PostingEventId.Value,
+            reason,
+            reversalDate.Date,
+            cancellationToken);
+
+        var postingRequest = new FinancePostingRequestDto
+        {
+            SourceModule = SourceModuleFx,
+            SourceDocumentType = "FxRevaluationBatch",
+            SourceDocumentId = batch.Id,
+            SourceDocumentTenantId = batch.TenantId,
+            PostingAction = "ReverseUnrealizedRevaluation",
+            SourceDocumentReference = batch.BatchNumber,
+            Description = $"Reverse FX revaluation {batch.BatchNumber}",
+            PostingDate = reversalDate.Date,
+            JournalType = "FX Revaluation Reversal",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
+            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+            ReversalReason = reason.Trim(),
+            ReversalType = "Automatic",
+            IdempotencyKey = $"FX:Revaluation:{tenantId:N}:{batch.Id:N}:Reverse:{reversalDate:yyyyMMdd}",
+            ReturnExistingOnDuplicate = true,
+            Lines = plan.ReversalLines
+        };
+
+        var result = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+        batch.ReversalJournalEntryId = result.JournalEntryId;
+        batch.ReversalPostingEventId = result.PostingEventId;
+        batch.ReversedAt = DateTime.UtcNow;
+        batch.Status = "Reversed";
+        batch.UpdatedAt = DateTime.UtcNow;
+        batch.UpdatedBy = _currentUserService.UserName;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.UnrealizedRevaluationReversed,
+            tenantId,
+            SourceModuleFx,
+            "FxRevaluationBatch",
+            batch.Id,
+            postingEventId: result.PostingEventId,
+            journalEntryId: result.JournalEntryId,
+            reason: reason,
+            afterValues: new
+            {
+                batch.Id,
+                batch.JournalEntryId,
+                batch.PostingEventId,
+                batch.ReversalJournalEntryId,
+                batch.ReversalPostingEventId
+            },
+            cancellationToken: cancellationToken);
+
+        return batch;
+    }
+
+    private async Task<FxRealizedSettlement?> PostApAllocationRealizedFxAsync(
+        Guid tenantId,
+        FinanceSettings settings,
+        string functionalCurrency,
+        VendorPayment payment,
+        VendorPaymentAllocation allocation,
+        string paymentCurrency,
+        CancellationToken cancellationToken)
+    {
+        if (allocation.VendorInvoice == null || allocation.VendorInvoice.TenantId != tenantId)
+        {
+            throw new InvalidOperationException("AP payment allocation references an invoice from another tenant.");
+        }
+
+        if (!allocation.VendorInvoice.JournalEntryId.HasValue)
+        {
+            throw new InvalidOperationException("AP payment allocation references an unposted invoice.");
+        }
+
+        var invoiceCurrency = NormalizeCurrency(allocation.VendorInvoice.CurrencyCode, paymentCurrency);
+        if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Cross-currency AP settlements are not supported in FX Batch 18. Vendor payment currency must match each allocated invoice currency.");
+        }
+
+        var settledForeignAmount = RoundMoney(allocation.AllocatedAmount + allocation.DiscountAmount + allocation.WithholdingTaxAmount);
+        if (settledForeignAmount <= 0m)
+        {
+            return null;
+        }
+
+        var basis = await ResolveSettlementBasisAsync(
+            tenantId,
+            paymentCurrency,
+            invoiceJournalEntryId: allocation.VendorInvoice.JournalEntryId.Value,
+            invoiceDocumentType: "VendorInvoice",
+            invoiceDocumentId: allocation.VendorInvoiceId,
+            invoiceDebitSide: false,
+            settlementJournalEntryId: payment.JournalEntryId!.Value,
+            settlementDocumentType: "VendorPayment",
+            settlementDocumentId: payment.Id,
+            settlementDebitSide: true,
+            cancellationToken);
+
+        var historicalFunctionalAmount = RoundMoney(settledForeignAmount * basis.HistoricalRate);
+        var settlementFunctionalAmount = RoundMoney(settledForeignAmount * basis.SettlementRate);
+        var delta = RoundMoney(settlementFunctionalAmount - historicalFunctionalAmount);
+        if (delta == 0m)
+        {
+            return null;
+        }
+
+        var gainLossType = delta > 0m ? "Loss" : "Gain";
+        var gainLossAccount = gainLossType == "Gain"
+            ? await ResolveRequiredFxAccountAsync(tenantId, settings.RealizedFxGainAccountId, "realized FX gain account", FinanceAuditEvents.FxPostingBlockedInvalidConfiguration, cancellationToken)
+            : await ResolveRequiredFxAccountAsync(tenantId, settings.RealizedFxLossAccountId, "realized FX loss account", FinanceAuditEvents.FxPostingBlockedInvalidConfiguration, cancellationToken);
+
+        var amount = Math.Abs(delta);
+        var postingLines = gainLossType == "Loss"
+            ? new[]
+            {
+                BuildFunctionalPostingLine(gainLossAccount.Id, $"AP realized FX loss - {payment.PaymentNumber}", amount, 0m, 1, "FX-Realized-Loss"),
+                BuildFunctionalPostingLine(basis.ControlAccountId, $"AP realized FX loss - {payment.PaymentNumber}", 0m, amount, 2, "FX-AP-Control")
+            }
+            : new[]
+            {
+                BuildFunctionalPostingLine(basis.ControlAccountId, $"AP realized FX gain - {payment.PaymentNumber}", amount, 0m, 1, "FX-AP-Control"),
+                BuildFunctionalPostingLine(gainLossAccount.Id, $"AP realized FX gain - {payment.PaymentNumber}", 0m, amount, 2, "FX-Realized-Gain")
+            };
+
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.RealizedFxCalculated,
+            tenantId,
+            "AP",
+            "VendorPaymentAllocation",
+            allocation.Id,
+            afterValues: new
+            {
+                allocation.Id,
+                settledForeignAmount,
+                historicalFunctionalAmount,
+                settlementFunctionalAmount,
+                gainLossType,
+                amount
+            },
+            cancellationToken: cancellationToken);
+
+        var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+        {
+            SourceModule = SourceModuleFx,
+            SourceDocumentType = "VendorPaymentAllocation",
+            SourceDocumentId = allocation.Id,
+            SourceDocumentTenantId = tenantId,
+            PostingAction = "RealizedFx",
+            SourceDocumentReference = payment.PaymentNumber,
+            Description = $"AP realized FX {gainLossType.ToLowerInvariant()} for {payment.PaymentNumber}",
+            PostingDate = payment.PaymentDate,
+            JournalType = "Realized FX",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = functionalCurrency,
+            IdempotencyKey = $"FX:Realized:AP:{tenantId:N}:{allocation.Id:N}",
+            ReturnExistingOnDuplicate = true,
+            Lines = postingLines
+        }, cancellationToken);
+
+        var settlement = new FxRealizedSettlement
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceModule = "AP",
+            SettlementDocumentType = "VendorPayment",
+            SettlementDocumentId = payment.Id,
+            SettlementAllocationId = allocation.Id,
+            InvoiceDocumentType = "VendorInvoice",
+            InvoiceDocumentId = allocation.VendorInvoiceId,
+            ControlAccountId = basis.ControlAccountId,
+            TransactionCurrency = paymentCurrency,
+            FunctionalCurrencyCode = functionalCurrency,
+            SettledForeignAmount = settledForeignAmount,
+            HistoricalExchangeRate = basis.HistoricalRate,
+            HistoricalExchangeRateId = basis.HistoricalRateId,
+            SettlementExchangeRate = basis.SettlementRate,
+            SettlementExchangeRateId = basis.SettlementRateId,
+            HistoricalFunctionalAmount = historicalFunctionalAmount,
+            SettlementFunctionalAmount = settlementFunctionalAmount,
+            GainLossAmount = amount,
+            GainLossType = gainLossType,
+            GainLossAccountId = gainLossAccount.Id,
+            JournalEntryId = postingResult.JournalEntryId,
+            PostingEventId = postingResult.PostingEventId,
+            SettlementDate = payment.PaymentDate.Date,
+            PostedAt = DateTime.UtcNow,
+            Status = PostedStatus,
+            IdempotencyKey = $"FX:Realized:AP:{tenantId:N}:{allocation.Id:N}",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName
+        };
+
+        _context.FxRealizedSettlements.Add(settlement);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.RealizedFxPosted,
+            tenantId,
+            "AP",
+            "VendorPaymentAllocation",
+            allocation.Id,
+            postingEventId: postingResult.PostingEventId,
+            journalEntryId: postingResult.JournalEntryId,
+            afterValues: BuildRealizedAuditSnapshot(settlement),
+            cancellationToken: cancellationToken);
+
+        return settlement;
+    }
+
+    private async Task<FxRealizedSettlement?> PostArAllocationRealizedFxAsync(
+        Guid tenantId,
+        FinanceSettings settings,
+        string functionalCurrency,
+        CustomerPayment payment,
+        PaymentAllocation allocation,
+        string paymentCurrency,
+        CancellationToken cancellationToken)
+    {
+        if (allocation.Invoice == null || allocation.Invoice.TenantId != tenantId)
+        {
+            throw new InvalidOperationException("AR receipt allocation references an invoice from another tenant.");
+        }
+
+        if (!allocation.Invoice.JournalEntryId.HasValue)
+        {
+            throw new InvalidOperationException("AR receipt allocation references an unposted invoice.");
+        }
+
+        var invoiceCurrency = NormalizeCurrency(allocation.Invoice.CurrencyCode, paymentCurrency);
+        if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Cross-currency AR settlements are not supported in FX Batch 18. Customer receipt currency must match each allocated invoice currency.");
+        }
+
+        var settledForeignAmount = RoundMoney(allocation.AllocatedAmount + allocation.DiscountAmount);
+        if (settledForeignAmount <= 0m)
+        {
+            return null;
+        }
+
+        var basis = await ResolveSettlementBasisAsync(
+            tenantId,
+            paymentCurrency,
+            invoiceJournalEntryId: allocation.Invoice.JournalEntryId.Value,
+            invoiceDocumentType: "CustomerInvoice",
+            invoiceDocumentId: allocation.InvoiceId,
+            invoiceDebitSide: true,
+            settlementJournalEntryId: payment.JournalEntryId!.Value,
+            settlementDocumentType: "CustomerPayment",
+            settlementDocumentId: payment.Id,
+            settlementDebitSide: false,
+            cancellationToken);
+
+        var historicalFunctionalAmount = RoundMoney(settledForeignAmount * basis.HistoricalRate);
+        var settlementFunctionalAmount = RoundMoney(settledForeignAmount * basis.SettlementRate);
+        var delta = RoundMoney(settlementFunctionalAmount - historicalFunctionalAmount);
+        if (delta == 0m)
+        {
+            return null;
+        }
+
+        var gainLossType = delta > 0m ? "Gain" : "Loss";
+        var gainLossAccount = gainLossType == "Gain"
+            ? await ResolveRequiredFxAccountAsync(tenantId, settings.RealizedFxGainAccountId, "realized FX gain account", FinanceAuditEvents.FxPostingBlockedInvalidConfiguration, cancellationToken)
+            : await ResolveRequiredFxAccountAsync(tenantId, settings.RealizedFxLossAccountId, "realized FX loss account", FinanceAuditEvents.FxPostingBlockedInvalidConfiguration, cancellationToken);
+
+        var amount = Math.Abs(delta);
+        var postingLines = gainLossType == "Gain"
+            ? new[]
+            {
+                BuildFunctionalPostingLine(basis.ControlAccountId, $"AR realized FX gain - {payment.PaymentNumber}", amount, 0m, 1, "FX-AR-Control"),
+                BuildFunctionalPostingLine(gainLossAccount.Id, $"AR realized FX gain - {payment.PaymentNumber}", 0m, amount, 2, "FX-Realized-Gain")
+            }
+            : new[]
+            {
+                BuildFunctionalPostingLine(gainLossAccount.Id, $"AR realized FX loss - {payment.PaymentNumber}", amount, 0m, 1, "FX-Realized-Loss"),
+                BuildFunctionalPostingLine(basis.ControlAccountId, $"AR realized FX loss - {payment.PaymentNumber}", 0m, amount, 2, "FX-AR-Control")
+            };
+
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.RealizedFxCalculated,
+            tenantId,
+            "AR",
+            "PaymentAllocation",
+            allocation.Id,
+            afterValues: new
+            {
+                allocation.Id,
+                settledForeignAmount,
+                historicalFunctionalAmount,
+                settlementFunctionalAmount,
+                gainLossType,
+                amount
+            },
+            cancellationToken: cancellationToken);
+
+        var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+        {
+            SourceModule = SourceModuleFx,
+            SourceDocumentType = "PaymentAllocation",
+            SourceDocumentId = allocation.Id,
+            SourceDocumentTenantId = tenantId,
+            PostingAction = "RealizedFx",
+            SourceDocumentReference = payment.PaymentNumber,
+            Description = $"AR realized FX {gainLossType.ToLowerInvariant()} for {payment.PaymentNumber}",
+            PostingDate = payment.PaymentDate,
+            JournalType = "Realized FX",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = functionalCurrency,
+            IdempotencyKey = $"FX:Realized:AR:{tenantId:N}:{allocation.Id:N}",
+            ReturnExistingOnDuplicate = true,
+            Lines = postingLines
+        }, cancellationToken);
+
+        var settlement = new FxRealizedSettlement
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceModule = "AR",
+            SettlementDocumentType = "CustomerPayment",
+            SettlementDocumentId = payment.Id,
+            SettlementAllocationId = allocation.Id,
+            InvoiceDocumentType = "CustomerInvoice",
+            InvoiceDocumentId = allocation.InvoiceId,
+            ControlAccountId = basis.ControlAccountId,
+            TransactionCurrency = paymentCurrency,
+            FunctionalCurrencyCode = functionalCurrency,
+            SettledForeignAmount = settledForeignAmount,
+            HistoricalExchangeRate = basis.HistoricalRate,
+            HistoricalExchangeRateId = basis.HistoricalRateId,
+            SettlementExchangeRate = basis.SettlementRate,
+            SettlementExchangeRateId = basis.SettlementRateId,
+            HistoricalFunctionalAmount = historicalFunctionalAmount,
+            SettlementFunctionalAmount = settlementFunctionalAmount,
+            GainLossAmount = amount,
+            GainLossType = gainLossType,
+            GainLossAccountId = gainLossAccount.Id,
+            JournalEntryId = postingResult.JournalEntryId,
+            PostingEventId = postingResult.PostingEventId,
+            SettlementDate = payment.PaymentDate.Date,
+            PostedAt = DateTime.UtcNow,
+            Status = PostedStatus,
+            IdempotencyKey = $"FX:Realized:AR:{tenantId:N}:{allocation.Id:N}",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName
+        };
+
+        _context.FxRealizedSettlements.Add(settlement);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.RealizedFxPosted,
+            tenantId,
+            "AR",
+            "PaymentAllocation",
+            allocation.Id,
+            postingEventId: postingResult.PostingEventId,
+            journalEntryId: postingResult.JournalEntryId,
+            afterValues: BuildRealizedAuditSnapshot(settlement),
+            cancellationToken: cancellationToken);
+
+        return settlement;
+    }
+
+    private async Task<SettlementBasis> ResolveSettlementBasisAsync(
+        Guid tenantId,
+        string transactionCurrency,
+        Guid invoiceJournalEntryId,
+        string invoiceDocumentType,
+        Guid invoiceDocumentId,
+        bool invoiceDebitSide,
+        Guid settlementJournalEntryId,
+        string settlementDocumentType,
+        Guid settlementDocumentId,
+        bool settlementDebitSide,
+        CancellationToken cancellationToken)
+    {
+        var invoiceLines = await LoadControlCandidateLinesAsync(
+            tenantId,
+            invoiceJournalEntryId,
+            invoiceDocumentType,
+            invoiceDocumentId,
+            transactionCurrency,
+            invoiceDebitSide,
+            cancellationToken);
+        var settlementLines = await LoadControlCandidateLinesAsync(
+            tenantId,
+            settlementJournalEntryId,
+            settlementDocumentType,
+            settlementDocumentId,
+            transactionCurrency,
+            settlementDebitSide,
+            cancellationToken);
+
+        var invoiceLine = invoiceLines
+            .FirstOrDefault(i => settlementLines.Any(s => s.AccountId == i.AccountId))
+            ?? invoiceLines.FirstOrDefault();
+        var settlementLine = invoiceLine == null
+            ? null
+            : settlementLines.FirstOrDefault(s => s.AccountId == invoiceLine.AccountId) ?? settlementLines.FirstOrDefault();
+
+        if (invoiceLine == null || settlementLine == null)
+        {
+            throw new InvalidOperationException("Posted foreign-currency control-account snapshots were not found for FX settlement.");
+        }
+
+        if (!invoiceLine.ExchangeRate.HasValue || invoiceLine.ExchangeRate.Value <= 0m ||
+            !settlementLine.ExchangeRate.HasValue || settlementLine.ExchangeRate.Value <= 0m)
+        {
+            throw new InvalidOperationException("Posted foreign-currency control-account lines are missing exchange-rate snapshots.");
+        }
+
+        await EnsureExchangeRateSnapshotBelongsToTenantAsync(tenantId, invoiceLine.ExchangeRateId, "invoice", cancellationToken);
+        await EnsureExchangeRateSnapshotBelongsToTenantAsync(tenantId, settlementLine.ExchangeRateId, "settlement", cancellationToken);
+
+        return new SettlementBasis(
+            invoiceLine.AccountId,
+            invoiceLine.ExchangeRate.Value,
+            invoiceLine.ExchangeRateId,
+            settlementLine.ExchangeRate.Value,
+            settlementLine.ExchangeRateId);
+    }
+
+    private async Task<List<AccountTransaction>> LoadControlCandidateLinesAsync(
+        Guid tenantId,
+        Guid journalEntryId,
+        string sourceDocumentType,
+        Guid sourceDocumentId,
+        string transactionCurrency,
+        bool debitSide,
+        CancellationToken cancellationToken)
+    {
+        var lines = await _context.AccountTransactions
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId
+                && !t.IsDeleted
+                && t.JournalEntryId == journalEntryId
+                && t.SourceDocumentType == sourceDocumentType
+                && t.SourceDocumentId == sourceDocumentId
+                && t.PostingStatus == PostedStatus
+                && t.TransactionCurrency == transactionCurrency
+                && t.ExchangeRate.HasValue
+                && (debitSide ? t.DebitAmount > 0m : t.CreditAmount > 0m))
+            .OrderBy(t => t.LineNumber)
+            .ToListAsync(cancellationToken);
+
+        return lines;
+    }
+
+    private static void EnsureApSettlementCurrencySupported(VendorPayment payment, string paymentCurrency)
+    {
+        foreach (var allocation in payment.Allocations.Where(a => !a.IsReversal))
+        {
+            if (allocation.VendorInvoice == null)
+            {
+                continue;
+            }
+
+            var invoiceCurrency = NormalizeCurrency(allocation.VendorInvoice.CurrencyCode, paymentCurrency);
+            if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Cross-currency AP settlements are not supported in FX Batch 18. Vendor payment currency must match each allocated invoice currency.");
+            }
+        }
+    }
+
+    private static void EnsureArSettlementCurrencySupported(CustomerPayment payment, string paymentCurrency)
+    {
+        foreach (var allocation in payment.Allocations.Where(a => !a.IsReversal))
+        {
+            if (allocation.Invoice == null)
+            {
+                continue;
+            }
+
+            var invoiceCurrency = NormalizeCurrency(allocation.Invoice.CurrencyCode, paymentCurrency);
+            if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Cross-currency AR settlements are not supported in FX Batch 18. Customer receipt currency must match each allocated invoice currency.");
+            }
+        }
+    }
+
+    private async Task EnsureExchangeRateSnapshotBelongsToTenantAsync(
+        Guid tenantId,
+        Guid? exchangeRateId,
+        string snapshotRole,
+        CancellationToken cancellationToken)
+    {
+        if (!exchangeRateId.HasValue)
+        {
+            return;
+        }
+
+        var exists = await _context.ExchangeRates
+            .AsNoTracking()
+            .AnyAsync(r => r.TenantId == tenantId && r.Id == exchangeRateId.Value && !r.IsDeleted, cancellationToken);
+
+        if (!exists)
+        {
+            await RecordFxAuditAsync(
+                FinanceAuditEvents.FxPostingBlockedInvalidConfiguration,
+                tenantId,
+                SourceModuleFx,
+                "ExchangeRate",
+                exchangeRateId,
+                reason: $"Posted {snapshotRole} exchange-rate snapshot does not belong to this tenant.",
+                cancellationToken: cancellationToken);
+            throw new InvalidOperationException($"Posted {snapshotRole} exchange-rate snapshot does not belong to this tenant.");
+        }
+    }
+
+    private async Task<List<PostedExposure>> BuildPostedExposureBasisAsync(
+        Guid tenantId,
+        string functionalCurrency,
+        string? currencyFilter,
+        DateTime revaluationDate,
+        FinanceSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var normalizedCurrencyFilter = NormalizeOptionalCurrency(currencyFilter);
+        var accountMap = new Dictionary<Guid, ExposureAccount>();
+        if (settings.ControlAccountArId.HasValue)
+        {
+            accountMap[settings.ControlAccountArId.Value] = new ExposureAccount("AR", MonetaryExposureKind.Asset);
+        }
+
+        if (settings.ControlAccountApId.HasValue)
+        {
+            accountMap[settings.ControlAccountApId.Value] = new ExposureAccount("AP", MonetaryExposureKind.Liability);
+        }
+
+        var foreignBankAccounts = await _context.BankAccounts
+            .AsNoTracking()
+            .Where(b => b.TenantId == tenantId
+                && !b.IsDeleted
+                && b.GLAccountId.HasValue
+                && b.IsActive
+                && b.Currency != functionalCurrency)
+            .ToListAsync(cancellationToken);
+
+        foreach (var bankAccount in foreignBankAccounts)
+        {
+            accountMap[bankAccount.GLAccountId!.Value] = new ExposureAccount("BankCash", MonetaryExposureKind.Asset, "BankAccount", bankAccount.Id);
+        }
+
+        if (!accountMap.Any())
+        {
+            return new List<PostedExposure>();
+        }
+
+        var accountIds = accountMap.Keys.ToList();
+        var transactions = await _context.AccountTransactions
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId
+                && !t.IsDeleted
+                && t.PostingStatus == PostedStatus
+                && t.TransactionDate.Date <= revaluationDate.Date
+                && accountIds.Contains(t.AccountId)
+                && t.TransactionCurrency != null
+                && t.TransactionCurrency != functionalCurrency)
+            .ToListAsync(cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(normalizedCurrencyFilter))
+        {
+            transactions = transactions
+                .Where(t => t.TransactionCurrency == normalizedCurrencyFilter)
+                .ToList();
+        }
+
+        var priorRevaluations = await _context.FxRevaluationLines
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId
+                && !l.IsDeleted
+                && l.Batch.Status == PostedStatus
+                && l.Batch.RevaluationDate.Date <= revaluationDate.Date
+                && accountIds.Contains(l.AccountId))
+            .ToListAsync(cancellationToken);
+
+        var exposures = new List<PostedExposure>();
+        foreach (var group in transactions.GroupBy(t => new { t.AccountId, Currency = NormalizeCurrency(t.TransactionCurrency, functionalCurrency) }))
+        {
+            var exposureAccount = accountMap[group.Key.AccountId];
+            var foreignBalance = exposureAccount.Kind == MonetaryExposureKind.Liability
+                ? group.Sum(t => t.TransactionCreditAmount.GetValueOrDefault() - t.TransactionDebitAmount.GetValueOrDefault())
+                : group.Sum(t => t.TransactionDebitAmount.GetValueOrDefault() - t.TransactionCreditAmount.GetValueOrDefault());
+            var carryingFunctional = exposureAccount.Kind == MonetaryExposureKind.Liability
+                ? group.Sum(t => t.CreditAmount - t.DebitAmount)
+                : group.Sum(t => t.DebitAmount - t.CreditAmount);
+
+            var priorAdjustment = priorRevaluations
+                .Where(l => l.AccountId == group.Key.AccountId && l.TransactionCurrency == group.Key.Currency)
+                .Sum(l => l.GainLossAmount);
+            carryingFunctional = RoundMoney(carryingFunctional + priorAdjustment);
+            foreignBalance = RoundMoney(foreignBalance);
+
+            if (foreignBalance <= 0m)
+            {
+                continue;
+            }
+
+            exposures.Add(new PostedExposure(
+                group.Key.AccountId,
+                exposureAccount.SourceModule,
+                exposureAccount.SourceDocumentType,
+                exposureAccount.SourceDocumentId,
+                exposureAccount.Kind,
+                group.Key.Currency,
+                foreignBalance,
+                carryingFunctional));
+        }
+
+        return exposures;
+    }
+
+    private async Task<ExchangeRate> ResolveClosingRateAsync(
+        Guid tenantId,
+        string functionalCurrency,
+        string transactionCurrency,
+        DateTime revaluationDate,
+        string revaluationType,
+        CancellationToken cancellationToken)
+    {
+        var rateType = ResolveRevaluationRateType(revaluationType);
+        var rate = await _context.ExchangeRates
+            .Where(r => r.TenantId == tenantId
+                && !r.IsDeleted
+                && r.BaseCurrencyCode == functionalCurrency
+                && r.TargetCurrencyCode == transactionCurrency
+                && r.RateType == rateType
+                && r.IsActive
+                && r.Rate > 0m
+                && (r.ApprovalStatus == RateApprovalStatus.Approved || r.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                && r.EffectiveDate.Date <= revaluationDate.Date
+                && (r.EndDate == null || r.EndDate.Value.Date >= revaluationDate.Date))
+            .OrderByDescending(r => r.EffectiveDate)
+            .ThenByDescending(r => r.Priority)
+            .ThenByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (rate == null)
+        {
+            await RecordFxAuditAsync(
+                FinanceAuditEvents.FxPostingBlockedInvalidConfiguration,
+                tenantId,
+                SourceModuleFx,
+                "ExchangeRate",
+                null,
+                reason: $"Missing {rateType} closing rate for {transactionCurrency}/{functionalCurrency} on {revaluationDate:yyyy-MM-dd}.",
+                afterValues: new { transactionCurrency, functionalCurrency, revaluationDate, rateType },
+                cancellationToken: cancellationToken);
+            throw new InvalidOperationException($"No approved {rateType} exchange rate exists for {transactionCurrency} to {functionalCurrency} on {revaluationDate:yyyy-MM-dd}.");
+        }
+
+        return rate;
+    }
+
+    private FinancePostingRequestDto BuildRevaluationPostingRequest(
+        FxRevaluationBatch batch,
+        Guid unrealizedGainAccountId,
+        Guid unrealizedLossAccountId)
+    {
+        var lines = new List<FinancePostingLineDto>();
+        var lineNumber = 1;
+        foreach (var line in batch.Lines.OrderBy(l => l.SourceModule).ThenBy(l => l.AccountId).ThenBy(l => l.TransactionCurrency))
+        {
+            var amount = Math.Abs(line.GainLossAmount);
+            var isAssetExposure = line.SourceModule is "AR" or "BankCash";
+            if (line.GainLossType == "Gain")
+            {
+                if (isAssetExposure)
+                {
+                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation gain - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Revaluation-Control"));
+                    lines.Add(BuildFunctionalPostingLine(unrealizedGainAccountId, $"FX revaluation gain - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Unrealized-Gain"));
+                }
+                else
+                {
+                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation gain - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Revaluation-Control"));
+                    lines.Add(BuildFunctionalPostingLine(unrealizedGainAccountId, $"FX revaluation gain - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Unrealized-Gain"));
+                }
+            }
+            else
+            {
+                if (isAssetExposure)
+                {
+                    lines.Add(BuildFunctionalPostingLine(unrealizedLossAccountId, $"FX revaluation loss - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Unrealized-Loss"));
+                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation loss - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Revaluation-Control"));
+                }
+                else
+                {
+                    lines.Add(BuildFunctionalPostingLine(unrealizedLossAccountId, $"FX revaluation loss - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Unrealized-Loss"));
+                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation loss - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Revaluation-Control"));
+                }
+            }
+        }
+
+        return new FinancePostingRequestDto
+        {
+            SourceModule = SourceModuleFx,
+            SourceDocumentType = "FxRevaluationBatch",
+            SourceDocumentId = batch.Id,
+            SourceDocumentTenantId = batch.TenantId,
+            PostingAction = "UnrealizedRevaluation",
+            SourceDocumentReference = batch.BatchNumber,
+            Description = $"FX revaluation {batch.BatchNumber}",
+            PostingDate = batch.RevaluationDate,
+            FiscalPeriodId = batch.FiscalPeriodId,
+            JournalType = "FX Revaluation",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
+            IdempotencyKey = batch.IdempotencyKey,
+            ReturnExistingOnDuplicate = true,
+            Lines = lines
+        };
+    }
+
+    private static FinancePostingLineDto BuildFunctionalPostingLine(
+        Guid accountId,
+        string description,
+        decimal debitAmount,
+        decimal creditAmount,
+        int lineNumber,
+        string tag)
+    {
+        return new FinancePostingLineDto
+        {
+            AccountId = accountId,
+            Description = description,
+            DebitAmount = RoundMoney(debitAmount),
+            CreditAmount = RoundMoney(creditAmount),
+            LineNumber = lineNumber,
+            TransactionTag = tag
+        };
+    }
+
+    private async Task<FinanceSettings> GetFinanceSettingsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var settings = await _context.FinanceSettings
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken);
+
+        return settings ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
+    }
+
+    private async Task<Account> ResolveRequiredFxAccountAsync(
+        Guid tenantId,
+        Guid? accountId,
+        string accountPurpose,
+        string blockedAuditEvent,
+        CancellationToken cancellationToken)
+    {
+        if (!accountId.HasValue || accountId.Value == Guid.Empty)
+        {
+            await RecordFxAuditAsync(
+                blockedAuditEvent,
+                tenantId,
+                SourceModuleFx,
+                "FinanceSettings",
+                null,
+                reason: $"{accountPurpose} is not configured.",
+                cancellationToken: cancellationToken);
+            throw new InvalidOperationException($"{accountPurpose} is not configured for this tenant.");
+        }
+
+        var account = await _context.Accounts
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == accountId.Value && !a.IsDeleted, cancellationToken);
+
+        if (account == null)
+        {
+            await RecordFxAuditAsync(
+                blockedAuditEvent,
+                tenantId,
+                SourceModuleFx,
+                "Account",
+                accountId,
+                reason: $"{accountPurpose} does not belong to this tenant.",
+                cancellationToken: cancellationToken);
+            throw new InvalidOperationException($"{accountPurpose} was not found for this tenant.");
+        }
+
+        if (account.Status != AccountStatus.Active)
+        {
+            await RecordFxAuditAsync(
+                blockedAuditEvent,
+                tenantId,
+                SourceModuleFx,
+                "Account",
+                accountId,
+                reason: $"{accountPurpose} is inactive.",
+                cancellationToken: cancellationToken);
+            throw new InvalidOperationException($"{accountPurpose} is inactive.");
+        }
+
+        return account;
+    }
+
+    private async Task<FxRealizedSettlement?> LoadExistingRealizedSettlementAsync(
+        Guid tenantId,
+        string settlementDocumentType,
+        Guid settlementDocumentId,
+        Guid allocationId,
+        CancellationToken cancellationToken)
+    {
+        return await _context.FxRealizedSettlements
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId
+                && !s.IsDeleted
+                && s.SettlementDocumentType == settlementDocumentType
+                && s.SettlementDocumentId == settlementDocumentId
+                && s.SettlementAllocationId == allocationId,
+                cancellationToken);
+    }
+
+    private async Task<FiscalPeriod> ResolveFiscalPeriodAsync(
+        Guid tenantId,
+        DateTime date,
+        CancellationToken cancellationToken)
+    {
+        var period = await _context.FiscalPeriods
+            .FirstOrDefaultAsync(p => p.TenantId == tenantId
+                && !p.IsDeleted
+                && p.StartDate <= date
+                && p.EndDate >= date,
+                cancellationToken);
+
+        if (period == null)
+        {
+            throw new InvalidOperationException("No fiscal period covers the FX posting date for this tenant.");
+        }
+
+        if (!period.IsOpen || period.IsClosed || period.IsLocked)
+        {
+            throw new InvalidOperationException("FX posting period is not open.");
+        }
+
+        return period;
+    }
+
+    private async Task MarkClosingRatesUsedAsync(
+        FxRevaluationBatch batch,
+        Guid postingEventId,
+        CancellationToken cancellationToken)
+    {
+        var rateIds = batch.Lines
+            .Select(l => l.ClosingExchangeRateId)
+            .Distinct()
+            .ToList();
+
+        var rates = await _context.ExchangeRates
+            .Where(r => r.TenantId == batch.TenantId && rateIds.Contains(r.Id) && !r.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        foreach (var rate in rates)
+        {
+            rate.HasBeenUsedInTransactions = true;
+            rate.TransactionCount += batch.Lines.Count(l => l.ClosingExchangeRateId == rate.Id);
+            rate.FirstUsedDate ??= DateTime.UtcNow;
+            rate.LastUsedDate = DateTime.UtcNow;
+            rate.ModifiedDate = DateTime.UtcNow;
+            rate.ModifiedByUserId = GetCurrentUserGuid();
+        }
+    }
+
+    private async Task RecordFxAuditAsync(
+        string eventType,
+        Guid tenantId,
+        string? sourceModule,
+        string? sourceDocumentType,
+        Guid? sourceDocumentId,
+        Guid? journalEntryId = null,
+        Guid? postingEventId = null,
+        object? beforeValues = null,
+        object? afterValues = null,
+        object? context = null,
+        string? reason = null,
+        string? comment = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_financeAuditService == null)
+        {
+            return;
+        }
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = eventType,
+            TenantId = tenantId,
+            SourceModule = sourceModule,
+            SourceDocumentType = sourceDocumentType,
+            SourceDocumentId = sourceDocumentId,
+            JournalEntryId = journalEntryId,
+            PostingEventId = postingEventId,
+            BeforeValues = beforeValues,
+            AfterValues = afterValues,
+            Context = context,
+            Reason = reason,
+            Comment = comment,
+            Resource = sourceDocumentType,
+            ResourceId = sourceDocumentId?.ToString()
+        }, cancellationToken);
+    }
+
+    private static void UpdateBatchTotals(FxRevaluationBatch batch)
+    {
+        batch.TotalGainAmount = RoundMoney(batch.Lines.Where(l => l.GainLossType == "Gain").Sum(l => Math.Abs(l.GainLossAmount)));
+        batch.TotalLossAmount = RoundMoney(batch.Lines.Where(l => l.GainLossType == "Loss").Sum(l => Math.Abs(l.GainLossAmount)));
+        batch.NetGainLossAmount = RoundMoney(batch.TotalGainAmount - batch.TotalLossAmount);
+    }
+
+    private static string ResolveUnrealizedGainLossType(MonetaryExposureKind kind, decimal gainLossAmount)
+    {
+        if (kind == MonetaryExposureKind.Asset)
+        {
+            return gainLossAmount > 0m ? "Gain" : "Loss";
+        }
+
+        return gainLossAmount > 0m ? "Loss" : "Gain";
+    }
+
+    private static ExchangeRateType ResolveRevaluationRateType(string? revaluationType)
+    {
+        if (revaluationType?.Contains("Year", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return ExchangeRateType.YearEnd;
+        }
+
+        if (revaluationType?.Contains("Quarter", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return ExchangeRateType.QuarterEnd;
+        }
+
+        return ExchangeRateType.MonthEnd;
+    }
+
+    private static string ResolveRevaluationScope(RevaluationRequestDto request)
+    {
+        return string.IsNullOrWhiteSpace(request.CurrencyCode)
+            ? "Combined"
+            : $"Currency:{NormalizeCurrency(request.CurrencyCode, "Currency")}";
+    }
+
+    private static string? NormalizeOptionalCurrency(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : NormalizeCurrency(value, "Currency");
+    }
+
+    private static string NormalizeCurrency(string? value, string fallback)
+    {
+        var candidate = string.IsNullOrWhiteSpace(value) ? fallback : value;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            throw new InvalidOperationException("Currency code is required.");
+        }
+
+        var normalized = candidate.Trim().ToUpperInvariant();
+        if (normalized.Length != 3)
+        {
+            throw new InvalidOperationException($"Currency code '{candidate}' must be a three-letter ISO code.");
+        }
+
+        return normalized;
+    }
+
+    private static bool IsFunctionalCurrency(string currency, string functionalCurrency)
+    {
+        return string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static decimal RoundMoney(decimal value)
+    {
+        return Math.Round(value, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private Guid? GetCurrentUserGuid()
+    {
+        return Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;
+    }
+
+    private static object BuildRealizedAuditSnapshot(FxRealizedSettlement settlement)
+    {
+        return new
+        {
+            settlement.Id,
+            settlement.SourceModule,
+            settlement.SettlementDocumentType,
+            settlement.SettlementDocumentId,
+            settlement.SettlementAllocationId,
+            settlement.InvoiceDocumentType,
+            settlement.InvoiceDocumentId,
+            settlement.TransactionCurrency,
+            settlement.FunctionalCurrencyCode,
+            settlement.SettledForeignAmount,
+            settlement.HistoricalExchangeRate,
+            settlement.SettlementExchangeRate,
+            settlement.HistoricalFunctionalAmount,
+            settlement.SettlementFunctionalAmount,
+            settlement.GainLossAmount,
+            settlement.GainLossType,
+            settlement.GainLossAccountId,
+            settlement.JournalEntryId,
+            settlement.PostingEventId
+        };
+    }
+
+    private static object BuildRevaluationAuditSnapshot(FxRevaluationBatch batch)
+    {
+        return new
+        {
+            batch.Id,
+            batch.BatchNumber,
+            batch.RevaluationDate,
+            batch.FiscalPeriodId,
+            batch.Status,
+            batch.Scope,
+            batch.FunctionalCurrencyCode,
+            batch.TotalGainAmount,
+            batch.TotalLossAmount,
+            batch.NetGainLossAmount,
+            batch.JournalEntryId,
+            batch.PostingEventId,
+            LineCount = batch.Lines.Count
+        };
+    }
+
+    private static JournalEntry BuildPreviewJournal(FxRevaluationBatch batch, RevaluationRequestDto request)
+    {
+        return new JournalEntry
+        {
+            Id = batch.JournalEntryId ?? Guid.NewGuid(),
+            TenantId = batch.TenantId,
+            JournalEntryNumber = batch.BatchNumber,
+            EntryDate = batch.RevaluationDate,
+            Description = $"FX revaluation {request.RevaluationType} {batch.RevaluationDate:yyyy-MM-dd}",
+            ReferenceNumber = batch.BatchNumber,
+            PostingStatus = request.PreviewOnly ? "Draft" : batch.Status,
+            BookClassification = "IFRS",
+            PrimaryCurrency = batch.FunctionalCurrencyCode,
+            IsMultiCurrency = batch.Lines.Any(),
+            FiscalPeriodId = batch.FiscalPeriodId,
+            IsBalanced = true,
+            TotalDebitAmount = RoundMoney(batch.TotalGainAmount + batch.TotalLossAmount),
+            TotalCreditAmount = RoundMoney(batch.TotalGainAmount + batch.TotalLossAmount),
+            Transactions = new List<AccountTransaction>()
+        };
+    }
+
+    private sealed record SettlementBasis(
+        Guid ControlAccountId,
+        decimal HistoricalRate,
+        Guid? HistoricalRateId,
+        decimal SettlementRate,
+        Guid? SettlementRateId);
+
+    private sealed record ExposureAccount(
+        string SourceModule,
+        MonetaryExposureKind Kind,
+        string? SourceDocumentType = null,
+        Guid? SourceDocumentId = null);
+
+    private sealed record PostedExposure(
+        Guid AccountId,
+        string SourceModule,
+        string? SourceDocumentType,
+        Guid? SourceDocumentId,
+        MonetaryExposureKind Kind,
+        string TransactionCurrency,
+        decimal ForeignCurrencyBalance,
+        decimal CarryingFunctionalAmount);
+
+    private enum MonetaryExposureKind
+    {
+        Asset,
+        Liability
     }
 }

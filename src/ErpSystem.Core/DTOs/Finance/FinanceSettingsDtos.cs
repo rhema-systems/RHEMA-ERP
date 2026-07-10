@@ -12,9 +12,14 @@ namespace ErpSystem.Core.DTOs.Finance
         public string BaseCurrencyName { get; set; } = "Ghana Cedi";
         public string BaseCurrencySymbol { get; set; } = "₵";
         public int BaseCurrencyDecimalPlaces { get; set; } = 2;
+        public bool FunctionalCurrencyLocked { get; set; }
+        public DateTime? FunctionalCurrencyLockedAt { get; set; }
+        public string? FunctionalCurrencyLockedReason { get; set; }
         public string AccountSeparator { get; set; } = "-";
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }
+        public Guid? UnrealizedFxGainAccountId { get; set; }
+        public Guid? UnrealizedFxLossAccountId { get; set; }
         public Guid? RealizedGainLossAccountId { get; set; }
         public Guid? RealizedFxGainAccountId { get; set; }
         public Guid? RealizedFxLossAccountId { get; set; }
@@ -49,6 +54,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? AccountSeparator { get; set; }
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }
+        public Guid? UnrealizedFxGainAccountId { get; set; }
+        public Guid? UnrealizedFxLossAccountId { get; set; }
         public Guid? RealizedGainLossAccountId { get; set; }
         public Guid? RealizedFxGainAccountId { get; set; }
         public Guid? RealizedFxLossAccountId { get; set; }

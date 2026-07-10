@@ -1,11 +1,14 @@
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Sales;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +26,8 @@ public class ReturnOrderService : IReturnOrderService
     private readonly ILogger<ReturnOrderService> _logger;
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
-    private readonly ISubledgerPostingService _subledgerPostingService;
+    private readonly IFinancePostingEngine? _financePostingEngine;
+    private readonly IFinanceAuditService? _financeAuditService;
 
     public ReturnOrderService(
         IGenericRepository<ReturnOrder> returnRepo,
@@ -36,7 +40,8 @@ public class ReturnOrderService : IReturnOrderService
         ILogger<ReturnOrderService> logger,
         IDocumentNumberingService documentNumberingService,
         IWorkflowIntegrationService workflowIntegrationService,
-        ISubledgerPostingService subledgerPostingService)
+        IFinancePostingEngine? financePostingEngine = null,
+        IFinanceAuditService? financeAuditService = null)
     {
         _returnRepo = returnRepo;
         _returnLineRepo = returnLineRepo;
@@ -48,7 +53,8 @@ public class ReturnOrderService : IReturnOrderService
         _logger = logger;
         _documentNumberingService = documentNumberingService;
         _workflowIntegrationService = workflowIntegrationService;
-        _subledgerPostingService = subledgerPostingService;
+        _financePostingEngine = financePostingEngine;
+        _financeAuditService = financeAuditService;
     }
 
     // ═════════════════════════════════════
@@ -304,6 +310,20 @@ public class ReturnOrderService : IReturnOrderService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to start credit note approval workflow.");
         }
 
+        await RecordArCreditNoteAuditAsync(
+            FinanceAuditEvents.ArCreditNoteSubmitted,
+            cn,
+            afterValues: new
+            {
+                cn.DocumentNumber,
+                cn.CreditNoteStatus,
+                cn.CustomerId,
+                cn.OriginalInvoiceId,
+                cn.TotalAmount,
+                cn.TaxAmount
+            },
+            comment: "AR credit note submitted through the configured workflow engine.");
+
         _logger.LogInformation("Created Credit Note {DocNumber} for {Amount}", docNumber, cn.TotalAmount);
         return await GetCreditNoteByIdAsync(cn.Id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
@@ -342,10 +362,13 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<CreditNoteDetailDto?> GetCreditNoteByIdAsync(Guid id)
     {
-        var cn = await _creditNoteRepo.GetByIdAsync(id,
-            c => c.Customer,
-            c => c.ReturnOrder!,
-            c => c.Lines);
+        var tenantId = _currentUserProvider.TenantId;
+        var cn = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id)
+            .Include(c => c.Customer)
+            .Include(c => c.ReturnOrder!)
+            .Include(c => c.OriginalInvoice)
+            .Include(c => c.Lines)
+            .FirstOrDefaultAsync();
         return cn == null ? null : MapCreditNoteDetailDto(cn);
     }
 
@@ -354,7 +377,8 @@ public class ReturnOrderService : IReturnOrderService
         string? search = null, CreditNoteStatus? status = null,
         Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
-        var query = _creditNoteRepo.GetQueryable();
+        var tenantId = _currentUserProvider.TenantId;
+        var query = _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId);
         if (!string.IsNullOrEmpty(search))
             query = query.Where(c => c.DocumentNumber.Contains(search));
         if (status.HasValue)
@@ -383,7 +407,10 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<CreditNoteDetailDto> ApproveCreditNoteAsync(Guid id)
     {
-        var cn = await _creditNoteRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Credit Note {id} not found");
+        var tenantId = _currentUserProvider.TenantId;
+        var cn = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id)
+            .FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException($"Credit Note {id} not found");
         if (cn.CreditNoteStatus != CreditNoteStatus.Draft && cn.CreditNoteStatus != CreditNoteStatus.PendingApproval)
             throw new InvalidOperationException("Only draft/pending credit notes can be approved");
 
@@ -400,34 +427,131 @@ public class ReturnOrderService : IReturnOrderService
             cn.Reason = $"{cn.Reason}\n[Rejected] Workflow rejected".Trim();
             await _creditNoteRepo.UpdateAsync(cn);
             await _unitOfWork.SaveChangesAsync();
+            await RecordArCreditNoteAuditAsync(
+                FinanceAuditEvents.ArCreditNoteRejected,
+                cn,
+                afterValues: new { cn.CreditNoteStatus, cn.Reason },
+                reason: "Workflow rejected",
+                comment: "AR credit note rejected through the configured workflow engine.");
             return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
         }
 
-        await _unitOfWork.BeginTransactionAsync();
+        cn.CreditNoteStatus = CreditNoteStatus.Approved;
+        await _creditNoteRepo.UpdateAsync(cn);
+        await _unitOfWork.SaveChangesAsync();
+        await RecordArCreditNoteAuditAsync(
+            FinanceAuditEvents.ArCreditNoteApproved,
+            cn,
+            afterValues: new { cn.CreditNoteStatus },
+            comment: "AR credit note approved through the configured workflow engine.");
+
+        return await PostCreditNoteAsync(id);
+    }
+
+    public async Task<CreditNoteDetailDto> PostCreditNoteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (_financePostingEngine == null)
+            throw new InvalidOperationException("Central finance posting engine is not configured for AR credit note posting.");
+
+        var cn = await LoadCreditNoteForPostingAsync(id, cancellationToken);
+        var wasAlreadyLinked = cn.JournalEntryId.HasValue;
+
         try
         {
-            cn.CreditNoteStatus = CreditNoteStatus.Approved;
-            await _creditNoteRepo.UpdateAsync(cn);
-            await _unitOfWork.SaveChangesAsync();
+            var postingRequest = await BuildSalesCreditNotePostingRequestAsync(cn, cancellationToken);
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
 
-            await _subledgerPostingService.PostSalesCreditNoteAsync(cn.Id);
+            if (cn.JournalEntryId.HasValue && cn.JournalEntryId.Value != postingResult.JournalEntryId)
+                throw new InvalidOperationException("AR credit note is linked to a different journal entry than the posting engine result.");
 
-            await _unitOfWork.CommitAsync();
+            if (!cn.JournalEntryId.HasValue)
+            {
+                cn.JournalEntryId = postingResult.JournalEntryId;
+                cn.CreditNoteStatus = CreditNoteStatus.Approved;
+                cn.UpdatedAt = DateTime.UtcNow;
+                cn.UpdatedBy = _currentUserProvider.Username;
+                await _creditNoteRepo.UpdateAsync(cn);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            if (postingResult.WasDuplicate || wasAlreadyLinked)
+            {
+                await RecordArCreditNoteAuditAsync(
+                    FinanceAuditEvents.ArCreditNoteDuplicatePostingAttempt,
+                    cn,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        postingResult.PostingEventId,
+                        postingResult.JournalEntryId,
+                        postingResult.PostingAction,
+                        postingResult.WasDuplicate
+                    },
+                    comment: "Duplicate AR credit note posting request returned the existing posting.",
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                await RecordArCreditNoteAuditAsync(
+                    FinanceAuditEvents.ArCreditNotePosted,
+                    cn,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        postingResult.PostingEventId,
+                        postingResult.JournalEntryId,
+                        postingResult.JournalEntryNumber,
+                        postingResult.TotalDebitAmount,
+                        postingResult.TotalCreditAmount,
+                        postingResult.FunctionalCurrencyCode,
+                        postingResult.PostingDate
+                    },
+                    comment: "AR credit note posted through the central finance posting engine.",
+                    cancellationToken: cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "Posted AR credit note {DocumentNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
+                cn.DocumentNumber,
+                postingResult.JournalEntryId,
+                postingResult.WasDuplicate);
+
+            return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
         }
-        catch
+        catch (Exception ex)
         {
-            await _unitOfWork.RollbackAsync();
+            await RecordArCreditNoteAuditAsync(
+                FinanceAuditEvents.ArCreditNotePostingFailed,
+                cn,
+                afterValues: new { cn.JournalEntryId, error = ex.Message },
+                reason: ex.Message,
+                cancellationToken: cancellationToken);
+
+            _logger.LogError(ex, "Failed to post AR credit note {DocumentNumber}", cn.DocumentNumber);
             throw;
         }
-
-        return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
     public async Task<CreditNoteDetailDto> ApplyCreditNoteAsync(Guid id, Guid? invoiceId = null)
     {
-        var cn = await _creditNoteRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Credit Note {id} not found");
+        var tenantId = _currentUserProvider.TenantId;
+        var cn = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id)
+            .FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException($"Credit Note {id} not found");
         if (cn.CreditNoteStatus != CreditNoteStatus.Approved)
             throw new InvalidOperationException("Only approved credit notes can be applied");
+        if (invoiceId.HasValue)
+        {
+            var invoice = await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i => i.TenantId == tenantId && i.Id == invoiceId.Value && !i.IsDeleted)
+                .FirstOrDefaultAsync();
+            if (invoice == null)
+                throw new InvalidOperationException("AR credit note application invoice was not found for this tenant.");
+            if (!invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException($"AR credit note cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
+        }
         cn.CreditNoteStatus = CreditNoteStatus.Applied;
         cn.AppliedDate = DateTime.UtcNow;
         cn.AppliedToInvoiceId = invoiceId;
@@ -439,7 +563,12 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<CreditNoteDetailDto> VoidCreditNoteAsync(Guid id, string? reason = null)
     {
-        var cn = await _creditNoteRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Credit Note {id} not found");
+        var tenantId = _currentUserProvider.TenantId;
+        var cn = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id)
+            .FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException($"Credit Note {id} not found");
+        if (cn.JournalEntryId.HasValue)
+            throw new InvalidOperationException("Posted AR credit notes cannot be voided by mutation. Use a reversal or adjustment workflow.");
         cn.CreditNoteStatus = CreditNoteStatus.Voided;
         await _creditNoteRepo.UpdateAsync(cn);
         await _unitOfWork.SaveChangesAsync();
@@ -449,6 +578,335 @@ public class ReturnOrderService : IReturnOrderService
     // ═════════════════════════════════════
     //  REFUNDS
     // ═════════════════════════════════════
+
+    private async Task<CreditNote> LoadCreditNoteForPostingAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
+            .Include(c => c.Customer)
+            .Include(c => c.OriginalInvoice)
+            .Include(c => c.Lines)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (creditNote == null)
+            throw new KeyNotFoundException($"Credit Note {id} not found.");
+
+        return creditNote;
+    }
+
+    private async Task<FinancePostingRequestDto> BuildSalesCreditNotePostingRequestAsync(
+        CreditNote creditNote,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (creditNote.TenantId != tenantId)
+            throw new InvalidOperationException("AR credit note belongs to another tenant.");
+
+        var existingPostedEvent = creditNote.JournalEntryId.HasValue ||
+            await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e =>
+                    e.TenantId == tenantId &&
+                    e.SourceDocumentType == "SalesCreditNote" &&
+                    e.SourceDocumentId == creditNote.Id &&
+                    e.PostingAction == "Post" &&
+                    e.PostingStatus == "Posted" &&
+                    e.JournalEntryId.HasValue &&
+                    !e.IsDeleted)
+                .AnyAsync(cancellationToken);
+
+        if (!existingPostedEvent && creditNote.CreditNoteStatus != CreditNoteStatus.Approved)
+            throw new InvalidOperationException("AR credit note workflow approval is not complete.");
+
+        if (creditNote.TotalAmount <= 0m)
+            throw new InvalidOperationException("AR credit note amount must be positive.");
+
+        if (creditNote.Customer == null || creditNote.Customer.TenantId != tenantId)
+            throw new InvalidOperationException("AR credit note customer was not found for this tenant.");
+
+        if (!creditNote.Customer.IsActive)
+            throw new InvalidOperationException($"Customer '{creditNote.Customer.CustomerName}' is not active for AR credit note posting.");
+
+        var activeLines = creditNote.Lines?
+            .Where(l => !l.IsDeleted)
+            .OrderBy(l => l.CreatedAt)
+            .ThenBy(l => l.Id)
+            .ToList() ?? new List<CreditNoteLine>();
+
+        if (activeLines.Count == 0)
+            throw new InvalidOperationException("AR credit note must have at least one line before posting.");
+
+        foreach (var line in activeLines)
+        {
+            if (line.TenantId != tenantId || line.CreditNoteId != creditNote.Id)
+                throw new InvalidOperationException("AR credit note line belongs to another tenant or document.");
+            if (line.Quantity <= 0m || line.UnitPrice < 0m || line.TaxAmount < 0m)
+                throw new InvalidOperationException("AR credit note line quantities, unit prices, and tax amounts must be valid non-negative values.");
+        }
+
+        if (creditNote.OriginalInvoiceId.HasValue)
+        {
+            var originalInvoice = creditNote.OriginalInvoice;
+            if (originalInvoice == null || originalInvoice.TenantId != tenantId)
+                throw new InvalidOperationException("AR credit note original invoice was not found for this tenant.");
+
+            if (!originalInvoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException($"AR credit note cannot post against unposted invoice '{originalInvoice.InvoiceNumber}'.");
+
+            var invoicePostingExists = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e =>
+                    e.TenantId == tenantId &&
+                    e.SourceDocumentType == "CustomerInvoice" &&
+                    e.SourceDocumentId == originalInvoice.Id &&
+                    e.PostingAction == "Post" &&
+                    e.PostingStatus == "Posted" &&
+                    e.JournalEntryId.HasValue &&
+                    !e.IsDeleted)
+                .AnyAsync(cancellationToken);
+
+            if (!invoicePostingExists)
+                throw new InvalidOperationException($"AR credit note cannot post against invoice '{originalInvoice.InvoiceNumber}' because its central posting event was not found.");
+
+            var eligibleCreditAmount = RoundMoney(originalInvoice.TotalAmount - originalInvoice.CreditedAmount);
+            if (RoundMoney(creditNote.TotalAmount) > eligibleCreditAmount)
+                throw new InvalidOperationException($"AR credit note would exceed eligible credit amount for invoice '{originalInvoice.InvoiceNumber}'.");
+        }
+
+        var settings = await GetFinanceSettingsAsync(cancellationToken);
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+        var creditNoteCurrency = NormalizeCurrency(creditNote.Currency, functionalCurrency);
+        var exchangeRate = NormalizeExchangeRate(creditNote.ExchangeRate);
+        var accountCache = new Dictionary<Guid, Account>();
+
+        var arAccountId = creditNote.Customer.DefaultArAccountId
+            ?? settings.ControlAccountArId
+            ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
+        await ResolveCreditNotePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+        var salesReturnsAccountId = settings.DiscountAllowedAccountId
+            ?? throw new InvalidOperationException("Sales returns/allowance account is not configured for this tenant.");
+        await ResolveCreditNotePostingAccountAsync(salesReturnsAccountId, "sales returns/allowance account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+
+        var lineSubtotal = RoundMoney(activeLines.Sum(l => l.Quantity * l.UnitPrice));
+        var taxAmount = RoundMoney(creditNote.TaxAmount > 0m
+            ? creditNote.TaxAmount
+            : activeLines.Sum(l => l.TaxAmount));
+        var totalAmount = RoundMoney(creditNote.TotalAmount > 0m ? creditNote.TotalAmount : lineSubtotal + taxAmount);
+
+        if (totalAmount != RoundMoney(lineSubtotal + taxAmount))
+            throw new InvalidOperationException("AR credit note amount does not match posting line totals.");
+
+        var postingLines = new List<FinancePostingLineDto>();
+        var lineNumber = 1;
+
+        postingLines.Add(BuildCreditNotePostingLine(
+            salesReturnsAccountId,
+            $"Sales credit note {creditNote.DocumentNumber}",
+            debitTransactionAmount: lineSubtotal,
+            creditTransactionAmount: 0m,
+            creditNoteCurrency,
+            functionalCurrency,
+            exchangeRate,
+            creditNote.DocumentDate,
+            creditNote.DocumentNumber,
+            lineNumber++,
+            "AR-CreditNote-SalesReturn"));
+
+        if (taxAmount > 0m)
+        {
+            var taxAccountId = settings.ControlAccountTaxId
+                ?? throw new InvalidOperationException("Tax control account is not configured for AR credit note tax reversal.");
+            await ResolveCreditNotePostingAccountAsync(taxAccountId, "output tax reversal account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            postingLines.Add(BuildCreditNotePostingLine(
+                taxAccountId,
+                $"Reverse output tax - {creditNote.DocumentNumber}",
+                debitTransactionAmount: taxAmount,
+                creditTransactionAmount: 0m,
+                creditNoteCurrency,
+                functionalCurrency,
+                exchangeRate,
+                creditNote.DocumentDate,
+                creditNote.DocumentNumber,
+                lineNumber++,
+                "AR-CreditNote-Tax"));
+        }
+
+        postingLines.Add(BuildCreditNotePostingLine(
+            arAccountId,
+            $"Sales credit note {creditNote.DocumentNumber}",
+            debitTransactionAmount: 0m,
+            creditTransactionAmount: totalAmount,
+            creditNoteCurrency,
+            functionalCurrency,
+            exchangeRate,
+            creditNote.DocumentDate,
+            creditNote.DocumentNumber,
+            lineNumber++,
+            "AR-Control"));
+
+        if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
+            throw new InvalidOperationException("AR credit note posting is not balanced.");
+
+        return new FinancePostingRequestDto
+        {
+            SourceModule = "AR",
+            SourceDocumentType = "SalesCreditNote",
+            SourceDocumentId = creditNote.Id,
+            SourceDocumentTenantId = creditNote.TenantId,
+            PostingAction = "Post",
+            SourceDocumentReference = creditNote.DocumentNumber,
+            Description = $"Sales credit note {creditNote.DocumentNumber} - {creditNote.Customer.CustomerName}",
+            PostingDate = creditNote.DocumentDate,
+            JournalType = "AR Credit Note",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = functionalCurrency,
+            IdempotencyKey = $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Post",
+            ReturnExistingOnDuplicate = true,
+            Lines = postingLines
+        };
+    }
+
+    private async Task<FinanceSettings> GetFinanceSettingsAsync(CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var settings = await _unitOfWork.Repository<FinanceSettings>()
+            .GetQueryable(s => s.TenantId == tenantId && !s.IsDeleted)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return settings ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
+    }
+
+    private async Task<Account> ResolveCreditNotePostingAccountAsync(
+        Guid accountId,
+        string role,
+        Dictionary<Guid, Account> accountCache,
+        bool allowControlAccount,
+        bool requireDirectPosting,
+        CancellationToken cancellationToken)
+    {
+        if (accountCache.TryGetValue(accountId, out var cached))
+        {
+            return cached;
+        }
+
+        var tenantId = _currentUserProvider.TenantId;
+        var account = await _unitOfWork.Repository<Account>()
+            .GetQueryable(a => a.TenantId == tenantId && a.Id == accountId && !a.IsDeleted)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (account == null)
+            throw new InvalidOperationException($"AR credit note posting {role} was not found for this tenant.");
+
+        if (account.Status != AccountStatus.Active)
+            throw new InvalidOperationException($"AR credit note posting {role} account '{account.AccountNumber}' is not active.");
+
+        if (account.IsControlAccount && !allowControlAccount)
+            throw new InvalidOperationException($"AR credit note posting {role} account '{account.AccountNumber}' is a control account and cannot be used for this line.");
+
+        if (requireDirectPosting && !account.AllowDirectPosting)
+            throw new InvalidOperationException($"AR credit note posting {role} account '{account.AccountNumber}' does not allow direct posting.");
+
+        accountCache[accountId] = account;
+        return account;
+    }
+
+    private static FinancePostingLineDto BuildCreditNotePostingLine(
+        Guid accountId,
+        string description,
+        decimal debitTransactionAmount,
+        decimal creditTransactionAmount,
+        string transactionCurrency,
+        string functionalCurrency,
+        decimal exchangeRate,
+        DateTime exchangeRateDate,
+        string reference,
+        int lineNumber,
+        string transactionTag)
+    {
+        var isForeign = !string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
+        var debitAmount = ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+        var creditAmount = ToFunctionalAmount(creditTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+
+        return new FinancePostingLineDto
+        {
+            AccountId = accountId,
+            Description = description,
+            DebitAmount = debitAmount,
+            CreditAmount = creditAmount,
+            TransactionCurrency = transactionCurrency,
+            ForeignCurrencyAmount = isForeign
+                ? debitTransactionAmount > 0m ? debitTransactionAmount : creditTransactionAmount
+                : null,
+            ExchangeRate = isForeign ? exchangeRate : null,
+            ExchangeRateSource = isForeign ? "AR credit note exchange-rate snapshot" : null,
+            ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
+            SourceReferenceNumber = reference,
+            LineNumber = lineNumber,
+            TransactionTag = transactionTag
+        };
+    }
+
+    private async Task RecordArCreditNoteAuditAsync(
+        string eventType,
+        CreditNote creditNote,
+        Guid? postingEventId = null,
+        Guid? journalEntryId = null,
+        object? beforeValues = null,
+        object? afterValues = null,
+        string? reason = null,
+        string? comment = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_financeAuditService == null)
+        {
+            return;
+        }
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = eventType,
+            TenantId = creditNote.TenantId,
+            SourceModule = "AR",
+            SourceDocumentType = "SalesCreditNote",
+            SourceDocumentId = creditNote.Id,
+            JournalEntryId = journalEntryId ?? creditNote.JournalEntryId,
+            PostingEventId = postingEventId,
+            BeforeValues = beforeValues,
+            AfterValues = afterValues,
+            Reason = reason,
+            Comment = comment,
+            Resource = "Finance.ARCreditNote",
+            ResourceId = creditNote.Id.ToString()
+        }, cancellationToken);
+    }
+
+    private static decimal ToFunctionalAmount(
+        decimal transactionAmount,
+        string transactionCurrency,
+        string functionalCurrency,
+        decimal exchangeRate)
+    {
+        if (transactionAmount == 0m)
+        {
+            return 0m;
+        }
+
+        var normalizedRate = NormalizeExchangeRate(exchangeRate);
+        return string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+            ? RoundMoney(transactionAmount)
+            : RoundMoney(transactionAmount * normalizedRate);
+    }
+
+    private static decimal NormalizeExchangeRate(decimal exchangeRate)
+        => exchangeRate <= 0m ? 1m : exchangeRate;
+
+    private static string NormalizeCurrency(string? currencyCode, string defaultValue)
+        => string.IsNullOrWhiteSpace(currencyCode)
+            ? defaultValue.Trim().ToUpperInvariant()
+            : currencyCode.Trim().ToUpperInvariant();
+
+    private static decimal RoundMoney(decimal amount)
+        => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
     public async Task<RefundDetailDto> CreateRefundAsync(CreateRefundDto dto)
     {
@@ -652,6 +1110,7 @@ public class ReturnOrderService : IReturnOrderService
         TotalAmount = c.TotalAmount,
         Reason = c.Reason,
         AppliedDate = c.AppliedDate,
+        JournalEntryId = c.JournalEntryId,
         LineCount = c.Lines?.Count ?? 0,
         CreatedAt = c.CreatedAt
     };
@@ -665,6 +1124,7 @@ public class ReturnOrderService : IReturnOrderService
         TotalAmount = c.TotalAmount,
         Reason = c.Reason,
         AppliedDate = c.AppliedDate,
+        JournalEntryId = c.JournalEntryId,
         LineCount = c.Lines?.Count ?? 0,
         CreatedAt = c.CreatedAt,
         CustomerId = c.CustomerId,

@@ -94,6 +94,19 @@ namespace ErpSystem.Core.DTOs.Finance
     }
 
     /// <summary>
+    /// Request DTO for unlocking a locked fiscal period.
+    /// </summary>
+    public class PeriodUnlockRequestDto
+    {
+        /// <summary>
+        /// Mandatory reason for unlocking the period.
+        /// </summary>
+        [Required]
+        [MaxLength(1000)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Request DTO for year-end close
     /// </summary>
     public class YearEndCloseRequestDto

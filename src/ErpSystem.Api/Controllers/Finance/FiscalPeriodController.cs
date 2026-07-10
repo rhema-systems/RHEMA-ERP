@@ -301,13 +301,20 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("periods/{id}/close")]
         public async Task<ActionResult> ClosePeriod(Guid id, [FromBody] PeriodCloseRequestDto dto)
         {
+            if (dto == null)
+                return BadRequest("Period close request is required.");
+
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
             try
             {
+                dto.FiscalPeriodId = id;
                 var result = await _fiscalPeriodService.ClosePeriodAsync(dto);
-                return Ok(new { message = "Period closed successfully" });
+                if (!result.Success)
+                    return BadRequest(result);
+
+                return Ok(result);
             }
             catch (ArgumentException ex)
             {
@@ -348,13 +355,19 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("periods/{id}/reopen")]
-        public async Task<ActionResult> ReopenPeriod(Guid id)
+        public async Task<ActionResult> ReopenPeriod(Guid id, [FromBody] PeriodReopenRequestDto dto)
         {
+            if (dto == null)
+                return BadRequest("Period reopen request is required.");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             try
             {
-                var request = new PeriodReopenRequestDto { FiscalPeriodId = id, Reason = "Manual reopen request" };
-                var result = await _fiscalPeriodService.ReopenPeriodAsync(request);
-                return Ok(new { message = "Period reopened successfully" });
+                dto.FiscalPeriodId = id;
+                var result = await _fiscalPeriodService.ReopenPeriodAsync(dto);
+                return Ok(result);
             }
             catch (ArgumentException ex)
             {
@@ -390,12 +403,18 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("periods/{id}/unlock")]
-        public async Task<ActionResult> UnlockPeriod(Guid id)
+        public async Task<ActionResult> UnlockPeriod(Guid id, [FromBody] PeriodUnlockRequestDto dto)
         {
+            if (dto == null)
+                return BadRequest("Period unlock request is required.");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             try
             {
-                var result = await _fiscalPeriodService.UnlockPeriodAsync(id, "Manual unlock request");
-                return Ok(new { message = "Period unlocked successfully" });
+                var result = await _fiscalPeriodService.UnlockPeriodAsync(id, dto.Reason);
+                return Ok(result);
             }
             catch (ArgumentException ex)
             {

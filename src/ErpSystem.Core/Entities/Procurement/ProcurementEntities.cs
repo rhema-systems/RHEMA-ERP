@@ -70,6 +70,10 @@ public class Supplier : TenantEntity
     [MaxLength(50)]
     public string? TaxId { get; set; }
 
+    public bool IsWithholdingTaxApplicable { get; set; }
+
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
+
     [MaxLength(100)]
     public string? PaymentTerms { get; set; } = "Net 30";
 

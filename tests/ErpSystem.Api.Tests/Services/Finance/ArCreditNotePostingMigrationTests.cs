@@ -1,0 +1,731 @@
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AR;
+using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Services.Sales;
+using ErpSystem.Data;
+using ErpSystem.Data.Repositories;
+using ErpSystem.Shared;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+#pragma warning disable CS0618 // Regression tests intentionally assert obsolete legacy posting paths are not used.
+
+namespace ErpSystem.Api.Tests.Services.Finance;
+
+public sealed class ArCreditNotePostingMigrationTests
+{
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ApprovedSalesCreditNote_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, taxAmount: 20m);
+        var (service, subledgerPostingMock) = CreateReturnOrderService(db, tenantId);
+
+        var result = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        result.JournalEntryId.Should().NotBeNull();
+        subledgerPostingMock.Verify(x => x.PostSalesCreditNoteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var postingEvent = await db.FinancePostingEvents.SingleAsync(e =>
+            e.TenantId == tenantId &&
+            e.SourceModule == "AR" &&
+            e.SourceDocumentType == "SalesCreditNote" &&
+            e.SourceDocumentId == fixture.CreditNote.Id &&
+            e.PostingAction == "Post");
+        postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
+
+        var journal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == result.JournalEntryId);
+        journal.PostingStatus.Should().Be("Posted");
+        journal.SourceModule.Should().Be("AR");
+        journal.SourceDocumentType.Should().Be("SalesCreditNote");
+        journal.Transactions.Should().HaveCount(3);
+        journal.Transactions.Single(t => t.AccountId == fixture.SalesReturnsAccount.Id).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(t => t.AccountId == fixture.TaxAccount.Id).DebitAmount.Should().Be(20m);
+        journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(120m);
+
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
+        fixture.ArAccount.Balance.Should().Be(0m);
+        fixture.SalesReturnsAccount.Balance.Should().Be(0m);
+        fixture.TaxAccount.Balance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task UnapprovedSalesCreditNote_ShouldNotPost()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, cn => cn.CreditNoteStatus = CreditNoteStatus.PendingApproval);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note workflow approval is not complete.");
+        (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote")).Should().Be(0);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePostingFailed)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CreditNoteAgainstUnpostedInvoice_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, configureInvoice: invoice => invoice.JournalEntryId = null, seedInvoicePostingEvent: false);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"AR credit note cannot post against unposted invoice '{fixture.Invoice.InvoiceNumber}'.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ExcessCreditNoteAmount_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, amount: 125m);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"AR credit note would exceed eligible credit amount for invoice '{fixture.Invoice.InvoiceNumber}'.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CrossTenantCustomer_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherAr = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var otherCustomer = SeedSalesCustomer(db, otherTenantId, otherAr.Id);
+        fixture.CreditNote.CustomerId = otherCustomer.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note customer was not found for this tenant.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CrossTenantArControlAccount_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherAr = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        fixture.Customer.DefaultArAccountId = otherAr.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note posting AR control account was not found for this tenant.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CrossTenantSalesReturnsAccount_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherReturns = SeedAccount(db, otherTenantId, "5200", AccountType.Expense);
+        fixture.Settings.DiscountAllowedAccountId = otherReturns.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note posting sales returns/allowance account was not found for this tenant.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task NonPostableSalesReturnsAccount_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        fixture.SalesReturnsAccount.AllowDirectPosting = false;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note posting sales returns/allowance account account '5200' does not allow direct posting.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ClosedPeriod_ShouldBeRejectedByPostingEngine()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, periodIsOpen: false, periodIsClosed: true);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posting period is not open.");
+        fixture.CreditNote.JournalEntryId.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task DuplicateSalesCreditNotePosting_ShouldReturnExistingPostingAndAuditDuplicate()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var first = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        var second = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        second.JournalEntryId.Should().Be(first.JournalEntryId);
+        (await db.JournalEntries.CountAsync(j => j.SourceDocumentType == "SalesCreditNote")).Should().Be(1);
+        (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote")).Should().Be(1);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNoteDuplicatePostingAttempt)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task PostedSalesCreditNote_ShouldNotBeVoidedByMutation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        var act = () => service.VoidCreditNoteAsync(fixture.CreditNote.Id, "test void");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posted AR credit notes cannot be voided by mutation. Use a reversal or adjustment workflow.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CompatibilityCustomerCreditNote_ShouldPostThroughFinancePostingEngineAndNotLegacyArPaymentPath()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedCompatibilityCreditNoteAsync(db, tenantId);
+        var (service, subledgerPostingMock) = CreatePaymentService(db, tenantId);
+
+        var result = await service.CreateCreditNoteAsync(new CreditNoteCreateDto
+        {
+            CustomerId = fixture.BusinessPartner.Id,
+            CreditNoteDate = new DateTime(2026, 7, 5),
+            Amount = 100m,
+            Reason = "Commercial credit memo",
+            Reference = "CN-COMPAT"
+        });
+
+        result.JournalEntryId.Should().NotBeNull();
+        subledgerPostingMock.Verify(x => x.PostArPaymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var postingEvent = await db.FinancePostingEvents.SingleAsync(e =>
+            e.TenantId == tenantId &&
+            e.SourceDocumentType == "CustomerCreditNote" &&
+            e.SourceDocumentId == result.Id &&
+            e.PostingAction == "Post");
+        postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
+
+        var journal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == result.JournalEntryId);
+        journal.SourceDocumentType.Should().Be("CustomerCreditNote");
+        journal.Transactions.Single(t => t.AccountId == fixture.SalesReturnsAccount.Id).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(100m);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
+    }
+
+    private static ApplicationDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"ar-credit-note-posting-{Guid.NewGuid()}")
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+
+        return new ApplicationDbContext(options);
+    }
+
+    private static (ReturnOrderService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateReturnOrderService(
+        ApplicationDbContext db,
+        Guid tenantId)
+    {
+        var currentUserService = CreateCurrentUserService(tenantId);
+        var currentUserProvider = CreateCurrentUserProvider(tenantId, currentUserService.Object.UserId!);
+        var auditService = new FinanceAuditService(
+            db,
+            currentUserService.Object,
+            new HttpContextAccessor
+            {
+                HttpContext = new DefaultHttpContext { TraceIdentifier = "trace-ar-credit-note-posting" }
+            });
+        var postingEngine = new FinancePostingEngine(
+            db,
+            currentUserService.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>(),
+            auditService);
+        var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+        var workflowMock = new Mock<IWorkflowIntegrationService>();
+        workflowMock.Setup(x => x.ProcessApprovalAsync(
+                "CreditNote",
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                "Approve",
+                It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed },
+                WorkflowOutcome.Approved));
+        workflowMock.Setup(x => x.SubmitAsync("CreditNote", It.IsAny<Guid>()))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress },
+                WorkflowOutcome.Pending));
+
+        var service = new ReturnOrderService(
+            new GenericRepository<ReturnOrder>(db),
+            new GenericRepository<ReturnOrderLine>(db),
+            new GenericRepository<CreditNote>(db),
+            new GenericRepository<CreditNoteLine>(db),
+            new GenericRepository<Refund>(db),
+            new UnitOfWork(db),
+            currentUserProvider.Object,
+            Mock.Of<ILogger<ReturnOrderService>>(),
+            Mock.Of<IDocumentNumberingService>(),
+            workflowMock.Object,
+            postingEngine,
+            auditService);
+
+        return (service, subledgerPostingMock);
+    }
+
+    private static (PaymentService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreatePaymentService(
+        ApplicationDbContext db,
+        Guid tenantId)
+    {
+        var currentUser = CreateCurrentUserService(tenantId);
+        var auditService = new FinanceAuditService(
+            db,
+            currentUser.Object,
+            new HttpContextAccessor
+            {
+                HttpContext = new DefaultHttpContext { TraceIdentifier = "trace-ar-credit-note-payment-posting" }
+            });
+        var postingEngine = new FinancePostingEngine(
+            db,
+            currentUser.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>(),
+            auditService);
+        var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+        var tenantSettings = new Mock<ITenantSettingsService>();
+        tenantSettings.Setup(x => x.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(x => x.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.ARCreditNote,
+                tenantId,
+                It.IsAny<DateTime>(),
+                nameof(CustomerPayment),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("CN-2026-00001");
+
+        var service = new PaymentService(
+            new UnitOfWork(db),
+            currentUser.Object,
+            tenantSettings.Object,
+            Mock.Of<ILogger<PaymentService>>(),
+            numbering.Object,
+            postingEngine,
+            auditService);
+
+        return (service, subledgerPostingMock);
+    }
+
+    private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId)
+    {
+        var userId = Guid.NewGuid().ToString();
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
+        currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
+        currentUser.SetupGet(x => x.UserId).Returns(userId);
+        currentUser.SetupGet(x => x.UserName).Returns("ar.creditnote.poster");
+        currentUser.SetupGet(x => x.IpAddress).Returns("127.0.0.1");
+        currentUser.SetupGet(x => x.UserAgent).Returns("ar-credit-note-posting-tests");
+        currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
+        currentUser.SetupGet(x => x.Roles).Returns(Array.Empty<string>());
+        return currentUser;
+    }
+
+    private static Mock<ICurrentUserProvider> CreateCurrentUserProvider(Guid tenantId, string userId)
+    {
+        var currentUser = new Mock<ICurrentUserProvider>();
+        currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
+        currentUser.SetupGet(x => x.UserId).Returns(Guid.Parse(userId));
+        currentUser.SetupGet(x => x.Username).Returns("ar.creditnote.poster");
+        currentUser.SetupGet(x => x.FullName).Returns("AR Credit Note Poster");
+        currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
+        currentUser.SetupGet(x => x.Roles).Returns(Array.Empty<string>());
+        currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
+        return currentUser;
+    }
+
+    private static async Task<ArCreditNoteFixture> SeedApprovedSalesCreditNoteAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Action<CreditNote>? configureCreditNote = null,
+        Action<Invoice>? configureInvoice = null,
+        decimal amount = 100m,
+        decimal taxAmount = 0m,
+        bool seedInvoicePostingEvent = true,
+        bool periodIsOpen = true,
+        bool periodIsClosed = false)
+    {
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
+        var arAccount = SeedAccount(db, tenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var salesReturnsAccount = SeedAccount(db, tenantId, "5200", AccountType.Expense);
+        var taxAccount = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var customer = SeedSalesCustomer(db, tenantId, arAccount.Id);
+        var businessPartner = SeedBusinessPartner(db, tenantId, customer.Id, arAccount.Id);
+
+        var settings = new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrency = "GHS",
+            ControlAccountArId = arAccount.Id,
+            ControlAccountTaxId = taxAccount.Id,
+            DiscountAllowedAccountId = salesReturnsAccount.Id
+        };
+        db.Set<FinanceSettings>().Add(settings);
+
+        var invoice = SeedPostedInvoice(db, tenantId, businessPartner, arAccount, "INV-2026-00001", new DateTime(2026, 7, 5), 120m, period.Id, seedInvoicePostingEvent);
+        configureInvoice?.Invoke(invoice);
+
+        var creditNote = new CreditNote
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CustomerId = customer.Id,
+            OriginalInvoiceId = invoice.Id,
+            DocumentNumber = "SCN-2026-00001",
+            DocumentDate = new DateTime(2026, 7, 5),
+            Currency = "GHS",
+            ExchangeRate = 1m,
+            CreditNoteStatus = CreditNoteStatus.Approved,
+            TotalAmount = amount + taxAmount,
+            TaxAmount = taxAmount,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        creditNote.Lines.Add(new CreditNoteLine
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CreditNoteId = creditNote.Id,
+            Description = "Returned services",
+            Quantity = 1m,
+            UnitPrice = amount,
+            TaxAmount = taxAmount,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+        configureCreditNote?.Invoke(creditNote);
+
+        db.CreditNotes.Add(creditNote);
+        await db.SaveChangesAsync();
+
+        return new ArCreditNoteFixture(creditNote, invoice, customer, arAccount, salesReturnsAccount, taxAccount, settings);
+    }
+
+    private static async Task<CompatibilityCreditNoteFixture> SeedCompatibilityCreditNoteAsync(
+        ApplicationDbContext db,
+        Guid tenantId)
+    {
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var arAccount = SeedAccount(db, tenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var salesReturnsAccount = SeedAccount(db, tenantId, "5200", AccountType.Expense);
+        var taxAccount = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var businessPartner = SeedBusinessPartner(db, tenantId, Guid.NewGuid(), arAccount.Id);
+
+        db.Set<FinanceSettings>().Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrency = "GHS",
+            ControlAccountArId = arAccount.Id,
+            ControlAccountTaxId = taxAccount.Id,
+            DiscountAllowedAccountId = salesReturnsAccount.Id
+        });
+
+        await db.SaveChangesAsync();
+        return new CompatibilityCreditNoteFixture(businessPartner, arAccount, salesReturnsAccount);
+    }
+
+    private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")
+    {
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = $"Tenant {code}",
+            Code = code,
+            Status = TenantStatus.Active,
+            BaseCurrency = "GHS"
+        });
+    }
+
+    private static FiscalPeriod SeedOpenPeriod(
+        ApplicationDbContext db,
+        Guid tenantId,
+        bool isOpen = true,
+        bool isClosed = false)
+    {
+        var period = new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = Guid.NewGuid(),
+            PeriodName = "July 2026",
+            PeriodCode = "2026-07",
+            PeriodNumber = 7,
+            PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2026, 7, 1),
+            EndDate = new DateTime(2026, 7, 31),
+            PeriodDays = 31,
+            PeriodStatus = isClosed ? "Closed" : isOpen ? "Open" : "Future",
+            IsOpen = isOpen,
+            IsClosed = isClosed,
+            IsLocked = false
+        };
+
+        db.FiscalPeriods.Add(period);
+        return period;
+    }
+
+    private static Account SeedAccount(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string accountNumber,
+        AccountType accountType,
+        AccountStatus status = AccountStatus.Active,
+        bool isControlAccount = false,
+        bool allowDirectPosting = true)
+    {
+        var account = new Account
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountCode = accountNumber,
+            AccountNumber = accountNumber,
+            AccountName = $"Account {accountNumber}",
+            AccountType = accountType,
+            Status = status,
+            CurrencyCode = "GHS",
+            IsControlAccount = isControlAccount,
+            AllowDirectPosting = allowDirectPosting
+        };
+
+        db.Accounts.Add(account);
+        return account;
+    }
+
+    private static Customer SeedSalesCustomer(ApplicationDbContext db, Guid tenantId, Guid arAccountId)
+    {
+        var customer = new Customer
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CustomerCode = $"CUS-{tenantId.ToString("N")[..6]}",
+            CustomerName = "Test Sales Customer",
+            CustomerType = "Corporate",
+            IsActive = true,
+            CurrencyCode = "GHS",
+            DefaultArAccountId = arAccountId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+
+        db.Set<Customer>().Add(customer);
+        return customer;
+    }
+
+    private static BusinessPartner SeedBusinessPartner(ApplicationDbContext db, Guid tenantId, Guid businessPartnerId, Guid arAccountId)
+    {
+        var businessPartner = new BusinessPartner
+        {
+            Id = businessPartnerId,
+            TenantId = tenantId,
+            PartnerCode = $"CUS-BP-{tenantId.ToString("N")[..6]}",
+            PartnerName = "Test Customer BP",
+            PartnerType = "Customer",
+            RegistrationStatus = "Approved",
+            IsActive = true,
+            IsBlacklisted = false,
+            DefaultArAccountId = arAccountId,
+            CreditLimit = 10000m,
+            OutstandingBalance = 0m,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+
+        db.Set<BusinessPartner>().Add(businessPartner);
+        return businessPartner;
+    }
+
+    private static Invoice SeedPostedInvoice(
+        ApplicationDbContext db,
+        Guid tenantId,
+        BusinessPartner customer,
+        Account arAccount,
+        string invoiceNumber,
+        DateTime invoiceDate,
+        decimal amount,
+        Guid fiscalPeriodId,
+        bool seedPostingEvent = true)
+    {
+        var invoice = new Invoice
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            InvoiceNumber = invoiceNumber,
+            BusinessPartnerId = customer.Id,
+            CustomerName = customer.PartnerName,
+            InvoiceDate = invoiceDate,
+            DueDate = invoiceDate.AddDays(30),
+            SubTotal = amount,
+            TotalAmount = amount,
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            BaseCurrencyAmount = amount,
+            Status = InvoiceStatus.Sent,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+
+        var invoiceJournal = new JournalEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryNumber = $"JE-{invoiceNumber}",
+            JournalType = "AR Invoice",
+            EntryDate = invoiceDate,
+            Description = $"Posted invoice {invoiceNumber}",
+            ReferenceNumber = invoiceNumber,
+            SourceModule = "AR",
+            SourceDocumentId = invoice.Id,
+            SourceDocumentType = "CustomerInvoice",
+            TotalDebitAmount = amount,
+            TotalCreditAmount = amount,
+            IsBalanced = true,
+            FiscalPeriodId = fiscalPeriodId,
+            PostingStatus = "Posted",
+            ApprovalStatus = "Approved",
+            PostingDate = invoiceDate,
+            BookClassification = "IFRS",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        invoice.JournalEntryId = invoiceJournal.Id;
+
+        db.Invoices.Add(invoice);
+        db.JournalEntries.Add(invoiceJournal);
+
+        if (seedPostingEvent)
+        {
+            db.FinancePostingEvents.Add(new FinancePostingEvent
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerInvoice",
+                SourceDocumentId = invoice.Id,
+                PostingAction = "Post",
+                SourceDocumentReference = invoice.InvoiceNumber,
+                IdempotencyKey = $"AR:CustomerInvoice:{tenantId:N}:{invoice.Id:N}:Post",
+                JournalEntryId = invoiceJournal.Id,
+                PostingStatus = "Posted",
+                PostingDate = invoiceDate,
+                RequestedAt = DateTime.UtcNow,
+                PostedAt = DateTime.UtcNow,
+                TotalDebitAmount = amount,
+                TotalCreditAmount = amount,
+                FunctionalCurrencyCode = "GHS",
+                BookClassification = "IFRS",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "seed"
+            });
+        }
+
+        return invoice;
+    }
+
+    private sealed record ArCreditNoteFixture(
+        CreditNote CreditNote,
+        Invoice Invoice,
+        Customer Customer,
+        Account ArAccount,
+        Account SalesReturnsAccount,
+        Account TaxAccount,
+        FinanceSettings Settings);
+
+    private sealed record CompatibilityCreditNoteFixture(
+        BusinessPartner BusinessPartner,
+        Account ArAccount,
+        Account SalesReturnsAccount);
+}

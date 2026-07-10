@@ -67,5 +67,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime AsAtDate { get; set; } = DateTime.UtcNow.Date;
         public string BookClassification { get; set; } = "IFRS";
         public bool IncludeAccountDetails { get; set; } = false;
+        public List<Guid> AccountIds { get; set; } = new();
+        public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
     }
 }

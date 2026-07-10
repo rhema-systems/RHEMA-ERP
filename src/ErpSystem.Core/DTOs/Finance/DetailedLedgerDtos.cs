@@ -11,6 +11,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string BookClassification { get; set; } = "IFRS";
         public bool IncludeReversed { get; set; } = true;
         public bool IncludeOpeningBalances { get; set; } = true;
+        public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
     }
 
     public class DetailedLedgerReportDto
@@ -61,5 +62,6 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? ForeignAmount { get; set; }
         public decimal? ExchangeRate { get; set; }
         public bool IsReversed { get; set; }
+        public string? SegmentString { get; set; }
     }
 }

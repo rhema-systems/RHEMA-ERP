@@ -284,6 +284,15 @@ namespace ErpSystem.Api.Controllers.Finance
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<InvoiceDto>> Post(Guid id)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AR.Invoices.ApprovePost"))
+                return Forbid();
+            try { return Ok(await _invoiceService.PostAsync(id)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
         /// <summary>
         /// Voids a previously sent invoice, reversing its GL journal entry and updating the customer balance.
         /// </summary>
@@ -570,6 +579,16 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Posts a customer receipt to the general ledger through the central finance posting engine.
+        /// </summary>
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<CustomerPaymentDto>> Post(Guid id)
+        {
+            try { return Ok(await _paymentService.PostAsync(id)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>
         /// Marks a customer payment as cleared by the bank on the specified date.
         /// </summary>
         /// <remarks>
@@ -780,6 +799,20 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("aging")]
         public async Task<ActionResult<AgingReportDto>> GetAgingReport([FromQuery] DateTime? asOfDate = null)
             => Ok(await _reportsService.GetAgingReportAsync(asOfDate));
+
+        /// <summary>
+        /// Rebuilds the AR settlement read model from posted AR source documents and posting events.
+        /// </summary>
+        [HttpPost("settlements/rebuild")]
+        public async Task<ActionResult<SubledgerSettlementRebuildResultDto>> RebuildSettlementReadModel([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.RebuildSettlementReadModelAsync(asOfDate));
+
+        /// <summary>
+        /// Reconciles the AR settlement read model to the posted AR control account balance.
+        /// </summary>
+        [HttpGet("control-reconciliation")]
+        public async Task<ActionResult<SubledgerControlReconciliationDto>> GetControlReconciliation([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.GetControlReconciliationAsync(asOfDate));
 
         /// <summary>
         /// Generates a detailed AR aging report with per-customer and per-invoice breakdown by aging buckets.

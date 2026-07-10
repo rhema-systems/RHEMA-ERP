@@ -15,9 +15,18 @@ public interface IFixedAssetService
     Task<byte[]> GenerateImportTemplateAsync();
 
     // Lifecycle Management
+    Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
+    Task<FixedAssetDto> CapitalizeAsync(Guid id, CapitalizeFixedAssetDto dto);
     Task<FixedAssetDto> ActivateAsync(Guid id, DateTime? placedInServiceDate);
     Task<FixedAssetDto> PutOnHoldAsync(Guid id, string reason);
     Task<FixedAssetDto> ResumeAsync(Guid id);
+
+    // Source-document capitalization back-reference maintenance
+    Task RecordApInvoiceCapitalizationAsync(
+        Guid vendorInvoiceId,
+        Guid journalEntryId,
+        Guid postingEventId,
+        CancellationToken cancellationToken = default);
 
     // Dashboard
     Task<FixedAssetDashboardDto> GetDashboardAsync();

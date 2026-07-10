@@ -26,13 +26,46 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
+    <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Procurement\BusinessPartnersControllerContactRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
+    <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
+    <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
+    <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
+    <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ArCreditNotePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
+    <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
+    <Compile Include="Services\Finance\BankReconciliationPostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\AccountingPeriodClosePostingDateTests.cs" />
+    <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
+    <Compile Include="Services\Finance\GhanaStatutoryTaxEngineTests.cs" />
+    <Compile Include="Services\Finance\FxFunctionalCurrencyGovernanceTests.cs" />
+    <Compile Include="Services\Finance\FxRealizedUnrealizedRevaluationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetDepreciationFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetRevaluationImpairmentFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetTransferFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetDisposalFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetReportingReconciliationFoundationTests.cs" />
+    <Compile Include="Services\Finance\SubledgerSettlementReadModelFoundationTests.cs" />
+    <Compile Include="Services\Finance\BackendReportingExportFoundationTests.cs" />
+    <Compile Include="Services\Finance\GhanaTaxReportingExportFoundationTests.cs" />
+    <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
+    <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />
   </ItemGroup>

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -36,7 +36,6 @@ import {
 import { Calendar } from '@/components/ui/calendar';
 import {
     Tabs,
-    TabsContent,
     TabsList,
     TabsTrigger,
 } from "@/components/ui/tabs"
@@ -46,7 +45,6 @@ import { cn } from '@/lib/utils';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
-import { arService } from '@/services/ar-service';
 import { CreateCashReceiptDto } from '@/types/cash-management';
 
 const receiptSchema = z.object({
@@ -61,7 +59,6 @@ const receiptSchema = z.object({
     // Specific fields
     payerName: z.string().optional(),
     glAccountId: z.string().optional(), // For Direct Receipt
-    customerId: z.string().optional(), // For Customer Payment
 });
 
 type ReceiptFormValues = z.infer<typeof receiptSchema>;
@@ -69,9 +66,7 @@ type ReceiptFormValues = z.infer<typeof receiptSchema>;
 export default function RecordReceiptPage() {
     const router = useRouter();
     const { toast } = useToast();
-    const queryClient = useQueryClient();
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [transactionType, setTransactionType] = useState<"direct" | "customer">("direct");
 
     // Fetch data
     const { data: bankAccounts } = useQuery({
@@ -89,11 +84,6 @@ export default function RecordReceiptPage() {
         queryFn: () => financeDataService.getAccounts({ status: 'Active' }),
     });
 
-    const { data: customers } = useQuery({
-        queryKey: ['customers', 'active'],
-        queryFn: () => arService.getCustomers({ pageSize: 100 }), // Fetching first 100 for now. Ideal would be a searchable dropdown.
-    });
-
     const form = useForm<ReceiptFormValues>({
         resolver: zodResolver(receiptSchema),
         defaultValues: {
@@ -105,6 +95,20 @@ export default function RecordReceiptPage() {
     });
 
     const selectedBankAccountId = form.watch('bankAccountId');
+
+    const openCustomerPaymentFlow = () => {
+        const values = form.getValues();
+        const params = new URLSearchParams();
+
+        if (values.bankAccountId) params.set('bankAccountId', values.bankAccountId);
+        if (values.amount > 0) params.set('amount', String(values.amount));
+        if (values.referenceNumber) params.set('referenceNumber', values.referenceNumber);
+        if (values.description) params.set('description', values.description);
+        if (values.transactionDate) params.set('paymentDate', values.transactionDate.toISOString());
+
+        const queryString = params.toString();
+        router.push(`/finance/ar/payments/new${queryString ? `?${queryString}` : ''}`);
+    };
 
     // Update currency when bank account changes
     useEffect(() => {
@@ -138,75 +142,13 @@ export default function RecordReceiptPage() {
                 description: data.description,
             };
 
-            if (transactionType === 'direct') {
-                if (!data.glAccountId) {
-                    form.setError('glAccountId', { type: 'manual', message: 'GL Account is required for Direct Receipts' });
-                    setIsSubmitting(false);
-                    return;
-                }
-                payload.glAccountId = data.glAccountId;
-                payload.payerName = data.payerName || 'Miscellaneous';
-            } else {
-                // Customer Payment logic
-                // NOTE: The current CreateCashReceiptDto might not explicitly have customerId if the backend expects it to be handled via GL Account or Payer Name magic.
-                // However, usually for AR integration, we want to link it to a Customer. 
-                // Since the DTO (viewed in file) doesn't have customerId, we might need to rely on PayerName or implicit linking. 
-                // BUT, wait, checking CreateCashReceiptDto in step 3148:
-                // export interface CreateCashReceiptDto { ... payerName?: string; glAccountId?: string; ... }
-                // It does NOT have customerId. This means the backend might not support direct AR linking via THIS endpoint yet, 
-                // OR we map Customer Name to Payer Name and Customer's Control Account to GL Account?
-                // Let's assume for now we map Customer Name -> PayerName. 
-                // Ideally, we should have a customerId in the DTO or use a different endpoint `POST /payments` in AR module ???
-                // Wait, `arService` handles customer payments (`/finance/ar/payments`). 
-                // This `Cash Management` module is for GENERAL cash. 
-                // IF the user selects "Customer Payment", maybe we should redirect them or use the AR service? 
-                // OR, maybe we just record the cash side here and let the backend handle the rest?
-                // The prompt asked for "Record receipts against both GL and AR accounts".
-                // If I use `CreateCashReceiptDto` (Cash Module), I can only send what it supports.
-                // If I need to support AR, I might need to call `arService.createPayment` instead?
-                // Let's update `onSubmit` to switch service calls based on type!
-
-                if (!data.customerId) {
-                    form.setError('customerId', { type: 'manual', message: 'Customer is required for Customer Payments' });
-                    setIsSubmitting(false);
-                    return;
-                }
-
-                // If it's a customer payment, we likely want to use the AR Service to ensure it links to the customer ledger
-                // But wait, the task is "Cash Management". 
-                // If I use AR Service, it creates a Payment record. Does that create a Cash Transaction?
-                // Usually yes, if the AR Payment endpoint is well-designed.
-                // Let's assume for this "Record Receipt" page, if Type is Customer, we call AR Service.
-
-                // However, let's verify arService.createPayment signature.
-                // I don't have it visible right now. Checking `ar-service.ts` in step 3105 would have been good.
-                // I will assume for now I should use the Cash Service and just put the Customer Name in PayerName 
-                // AND ideally the Customer's AR Control Account in glAccountId? 
-                // Or, if I am forced to use `CreateCashReceiptDto`, I am limited.
-
-                // ALTERNATIVE: Use the existing AR Payment form logic for "Customer Payment"?
-                // The user asked for it *here*.
-
-                // Let's try to stick to `cashManagementDataService.createCashReceipt`.
-                // If I can't pass customerId, I'll pass the customer name in `payerName`.
-                // And I might leave glAccountId empty (or selecting AR Control?).
-
-                // Re-reading User Comment: "Should be able to record receipts against both GL and AR accounts"
-                // If I select "Customer Payment", and I select a Customer, I should populate `payerName` with Customer Name.
-                // Ideally I'd pass `customerId` but the DTO doesn't show it. 
-                // I will stick to mapping Customer Name -> PayerName for now to satisfy the "Record against AR" (loosely) 
-                // unless I see an obvious AR integration point.
-
-                // Wait, if I look at `ar-service.ts` (viewed in step 3105), it has `getPayments`. 
-                // Im assuming there is a `createPayment`. 
-                // For now, I will implement valid logic for `CreateCashReceiptDto`.
-
-                const customer = customers?.items.find((c: any) => c.id === data.customerId);
-                if (customer) {
-                    payload.payerName = customer.customerName;
-                    // payload.description = `Payment from ${customer.customerName} - ${data.description || ''}`;
-                }
+            if (!data.glAccountId) {
+                form.setError('glAccountId', { type: 'manual', message: 'GL Account is required for Direct Receipts' });
+                setIsSubmitting(false);
+                return;
             }
+            payload.glAccountId = data.glAccountId;
+            payload.payerName = data.payerName || 'Miscellaneous';
 
             await cashManagementDataService.createCashReceipt(payload);
 
@@ -253,7 +195,15 @@ export default function RecordReceiptPage() {
                             </CardHeader>
                             <CardContent className="space-y-4">
 
-                                <Tabs value={transactionType} onValueChange={(v) => setTransactionType(v as any)} className="w-full">
+                                <Tabs
+                                    value="direct"
+                                    onValueChange={(value) => {
+                                        if (value === 'customer') {
+                                            openCustomerPaymentFlow();
+                                        }
+                                    }}
+                                    className="w-full"
+                                >
                                     <TabsList className="grid w-full grid-cols-2">
                                         <TabsTrigger value="direct">Direct Receipt (GL)</TabsTrigger>
                                         <TabsTrigger value="customer">Customer Payment (AR)</TabsTrigger>
@@ -364,54 +314,29 @@ export default function RecordReceiptPage() {
                                     </div>
                                 </div>
 
-                                {transactionType === 'direct' ? (
-                                    <>
-                                        <div className="space-y-2">
-                                            <Label>Payer Name</Label>
-                                            <Input {...form.register('payerName')} placeholder="From whom was received?" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>GL Account (Income/Revenue)</Label>
-                                            <Select
-                                                onValueChange={(val) => form.setValue('glAccountId', val)}
-                                                defaultValue={form.watch('glAccountId')}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select GL account" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {glAccounts?.map((account) => (
-                                                        <SelectItem key={account.id} value={account.id}>
-                                                            {account.accountCode} - {account.accountName}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            {form.formState.errors.glAccountId && <p className="text-sm text-red-500">{form.formState.errors.glAccountId.message}</p>}
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="space-y-2">
-                                        <Label>Customer</Label>
-                                        <Select
-                                            onValueChange={(val) => form.setValue('customerId', val)}
-                                            defaultValue={form.watch('customerId')}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Select customer" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {customers?.items?.map((customer: any) => (
-                                                    <SelectItem key={customer.id} value={customer.id}>
-                                                        {customer.customerName} ({customer.customerCode})
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <p className="text-xs text-muted-foreground">Select the customer making this payment.</p>
-                                        {form.formState.errors.customerId && <p className="text-sm text-red-500">{form.formState.errors.customerId.message}</p>}
-                                    </div>
-                                )}
+                                <div className="space-y-2">
+                                    <Label>Payer Name</Label>
+                                    <Input {...form.register('payerName')} placeholder="From whom was received?" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>GL Account (Income/Revenue)</Label>
+                                    <Select
+                                        onValueChange={(val) => form.setValue('glAccountId', val)}
+                                        defaultValue={form.watch('glAccountId')}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select GL account" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {glAccounts?.map((account) => (
+                                                <SelectItem key={account.id} value={account.id}>
+                                                    {account.accountCode} - {account.accountName}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {form.formState.errors.glAccountId && <p className="text-sm text-red-500">{form.formState.errors.glAccountId.message}</p>}
+                                </div>
 
                                 <div className="space-y-2">
                                     <Label>Description</Label>
@@ -447,7 +372,7 @@ export default function RecordReceiptPage() {
                                 <User className="h-4 w-4 text-green-500 flex-shrink-0" />
                                 <div>
                                     <p className="font-medium">Customer Payment</p>
-                                    <p className="text-muted-foreground">Use when a customer pays an invoice or makes a down payment. This will link to their account.</p>
+                                    <p className="text-muted-foreground">Opens the Accounts Receivable payment flow for customer balances and invoice allocation.</p>
                                 </div>
                             </div>
                         </CardContent>

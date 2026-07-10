@@ -6,10 +6,13 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.Fiscal
 {
@@ -18,18 +21,21 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<FiscalPeriodService> _logger;
+        private readonly IFinanceAuditService? _financeAuditService;
 
         public FiscalPeriodService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
-            ILogger<FiscalPeriodService> logger)
+            ILogger<FiscalPeriodService> logger,
+            IFinanceAuditService? financeAuditService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _logger = logger;
+            _financeAuditService = financeAuditService;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
         private Guid? CurrentUserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : null;
 
@@ -264,30 +270,52 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (period == null)
                 throw new ArgumentException($"Fiscal period with Id '{request.FiscalPeriodId}' not found.");
 
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodCloseRequested,
+                period,
+                beforeValues: null,
+                afterValues: BuildPeriodAuditSnapshot(period),
+                comment: request.ClosingNotes,
+                context: new { request.SkipValidation },
+                cancellationToken: cancellationToken);
+
             if (period.IsLocked)
                 throw new InvalidOperationException("Cannot close a locked period.");
 
             if (period.PeriodStatus == "Closed")
                 throw new InvalidOperationException("Period is already closed.");
 
-            if (!request.SkipValidation)
+            if (!period.IsOpen || !string.Equals(period.PeriodStatus, "Open", StringComparison.OrdinalIgnoreCase))
             {
-                var validation = await ValidatePeriodCloseAsync(request.FiscalPeriodId, cancellationToken);
-                if (!validation.CanClose)
-                {
-                    return new PeriodCloseResultDto
-                    {
-                        Success = false,
-                        Message = "Validation failed",
-                        FiscalPeriodId = period.Id,
-                        PeriodName = period.PeriodName,
-                        Errors = validation.ValidationErrors
-                    };
-                }
+                throw new InvalidOperationException("Only open periods can be closed.");
             }
 
+            var validation = await ValidatePeriodCloseAsync(request.FiscalPeriodId, cancellationToken);
+            if (!validation.CanClose)
+            {
+                await RecordPeriodAuditAsync(
+                    FinanceAuditEvents.AccountingPeriodCloseValidationFailed,
+                    period,
+                    beforeValues: BuildPeriodAuditSnapshot(period),
+                    afterValues: validation,
+                    comment: "Accounting period close validation failed.",
+                    context: new { request.SkipValidation, validation.ValidationErrors, validation.ValidationWarnings },
+                    cancellationToken: cancellationToken);
+
+                return new PeriodCloseResultDto
+                {
+                    Success = false,
+                    Message = "Validation failed",
+                    FiscalPeriodId = period.Id,
+                    PeriodName = period.PeriodName,
+                    Errors = validation.ValidationErrors
+                };
+            }
+
+            var beforeClose = BuildPeriodAuditSnapshot(period);
             period.PeriodStatus = "Closed";
             period.IsOpen = false;
+            period.IsClosed = true;
             period.ClosedDate = DateTime.UtcNow;
             period.ClosedByUserId = CurrentUserId;
             period.ClosingNotes = request.ClosingNotes;
@@ -296,6 +324,21 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             period.LastModifiedById = CurrentUserId;
 
             await _unitOfWork.Repository<FiscalPeriod>().UpdateAsync(period);
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodClosed,
+                period,
+                beforeValues: beforeClose,
+                afterValues: BuildPeriodAuditSnapshot(period),
+                comment: request.ClosingNotes,
+                context: new
+                {
+                    validation.TotalDebits,
+                    validation.TotalCredits,
+                    validation.Difference,
+                    validation.TotalJournalEntries,
+                    validation.TotalTransactionLines
+                },
+                cancellationToken: cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Fiscal period {Code} closed by {User}", period.PeriodCode, UserName);
@@ -313,6 +356,9 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<FiscalPeriodDto> ReopenPeriodAsync(PeriodReopenRequestDto request, CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(request.Reason))
+                throw new InvalidOperationException("A reason is required to reopen an accounting period.");
+
             var period = await _unitOfWork.Repository<FiscalPeriod>()
                 .FirstOrDefaultAsync(fp => fp.TenantId == TenantId && fp.Id == request.FiscalPeriodId);
 
@@ -325,33 +371,54 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (period.PeriodStatus != "Closed")
                 throw new InvalidOperationException("Only closed periods can be reopened.");
 
+            var beforeReopen = BuildPeriodAuditSnapshot(period);
+            var reason = request.Reason.Trim();
             period.PeriodStatus = "Open";
             period.IsOpen = true;
+            period.IsClosed = false;
             period.HasBeenReopened = true;
             period.ReopenCount++;
             period.LastReopenedDate = DateTime.UtcNow;
             period.LastReopenedByUserId = CurrentUserId;
-            period.ReopenReason = request.Reason;
+            period.ReopenReason = reason;
             period.UpdatedAt = DateTime.UtcNow;
             period.UpdatedBy = UserName;
             period.LastModifiedById = CurrentUserId;
 
             await _unitOfWork.Repository<FiscalPeriod>().UpdateAsync(period);
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodReopened,
+                period,
+                beforeValues: beforeReopen,
+                afterValues: BuildPeriodAuditSnapshot(period),
+                reason: reason,
+                cancellationToken: cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Fiscal period {Code} reopened by {User}. Reason: {Reason}",
-                period.PeriodCode, UserName, request.Reason);
+                period.PeriodCode, UserName, reason);
 
             return MapFiscalPeriodToDto(period);
         }
 
         public async Task<FiscalPeriodDto> LockPeriodAsync(PeriodLockRequestDto request, CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(request.LockReason))
+                throw new InvalidOperationException("A reason is required to lock an accounting period.");
+
             var period = await _unitOfWork.Repository<FiscalPeriod>()
                 .FirstOrDefaultAsync(fp => fp.TenantId == TenantId && fp.Id == request.FiscalPeriodId);
 
             if (period == null)
                 throw new ArgumentException($"Fiscal period with Id '{request.FiscalPeriodId}' not found.");
+
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodLockAttempted,
+                period,
+                beforeValues: BuildPeriodAuditSnapshot(period),
+                afterValues: BuildPeriodAuditSnapshot(period),
+                reason: request.LockReason.Trim(),
+                cancellationToken: cancellationToken);
 
             if (period.IsLocked)
                 throw new InvalidOperationException("Period is already locked.");
@@ -359,16 +426,25 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (period.PeriodStatus != "Closed")
                 throw new InvalidOperationException("Only closed periods can be locked.");
 
+            var beforeLock = BuildPeriodAuditSnapshot(period);
             period.IsLocked = true;
             period.LockedDate = DateTime.UtcNow;
             period.LockedByUserId = CurrentUserId;
-            period.LockReason = request.LockReason;
+            period.LockReason = request.LockReason.Trim();
             period.PeriodStatus = "Locked";
             period.UpdatedAt = DateTime.UtcNow;
             period.UpdatedBy = UserName;
             period.LastModifiedById = CurrentUserId;
 
             await _unitOfWork.Repository<FiscalPeriod>().UpdateAsync(period);
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodLocked,
+                period,
+                beforeValues: beforeLock,
+                afterValues: BuildPeriodAuditSnapshot(period),
+                reason: period.LockReason,
+                comment: "Accounting period locked.",
+                cancellationToken: cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Fiscal period {Code} locked by {User}. Reason: {Reason}",
@@ -379,6 +455,9 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<FiscalPeriodDto> UnlockPeriodAsync(Guid periodId, string reason, CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new InvalidOperationException("A reason is required to unlock an accounting period.");
+
             var period = await _unitOfWork.Repository<FiscalPeriod>()
                 .FirstOrDefaultAsync(fp => fp.TenantId == TenantId && fp.Id == periodId);
 
@@ -388,6 +467,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (!period.IsLocked)
                 throw new InvalidOperationException("Period is not locked.");
 
+            var beforeUnlock = BuildPeriodAuditSnapshot(period);
             period.IsLocked = false;
             period.LockedDate = null;
             period.LockedByUserId = null;
@@ -399,6 +479,14 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             period.LastModifiedById = CurrentUserId;
 
             await _unitOfWork.Repository<FiscalPeriod>().UpdateAsync(period);
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodUnlocked,
+                period,
+                beforeValues: beforeUnlock,
+                afterValues: BuildPeriodAuditSnapshot(period),
+                reason: reason.Trim(),
+                comment: "Accounting period unlocked.",
+                cancellationToken: cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogWarning("Fiscal period {Code} UNLOCKED by {User}. Reason: {Reason}",
@@ -576,6 +664,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             }
 
             var errors = new List<string>();
+            var warnings = new List<string>();
 
             if (period.PeriodStatus == "Closed")
                 errors.Add("Period is already closed.");
@@ -583,14 +672,38 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (period.IsLocked)
                 errors.Add("Period is locked.");
 
-            var unpostedEntries = await _unitOfWork.Repository<JournalEntry>()
-                .GetQueryable(je => je.FiscalPeriodId == periodId
+            if (!period.IsOpen || !string.Equals(period.PeriodStatus, "Open", StringComparison.OrdinalIgnoreCase))
+                errors.Add("Period must be open before it can be closed.");
+
+            var postedJournalsQuery = _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(je => je.TenantId == TenantId
+                    && je.FiscalPeriodId == periodId
+                    && je.PostingStatus == "Posted"
+                    && !je.IsDeleted);
+
+            var unpostedApprovedJournalEntries = await _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(je => je.TenantId == TenantId
+                    && je.FiscalPeriodId == periodId
+                    && !je.IsDeleted
                     && je.PostingStatus != "Posted"
-                    && !je.IsDeleted)
+                    && (je.PostingStatus == "Approved" || je.ApprovalStatus == "Approved"))
                 .CountAsync(cancellationToken);
 
-            if (unpostedEntries > 0)
-                errors.Add($"{unpostedEntries} unposted journal entries exist.");
+            if (unpostedApprovedJournalEntries > 0)
+                errors.Add($"{unpostedApprovedJournalEntries} approved journal entries are not posted.");
+
+            var submittedUnapprovedJournalEntries = await _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(je => je.TenantId == TenantId
+                    && je.FiscalPeriodId == periodId
+                    && !je.IsDeleted
+                    && je.PostingStatus != "Posted"
+                    && (je.PostingStatus == "Submitted"
+                        || je.ApprovalStatus == "Pending"
+                        || je.ApprovalStatus == "PendingApproval"))
+                .CountAsync(cancellationToken);
+
+            if (submittedUnapprovedJournalEntries > 0)
+                errors.Add($"{submittedUnapprovedJournalEntries} submitted journal entries are still awaiting approval.");
 
             var futurePeriodsClosed = await _unitOfWork.Repository<FiscalPeriod>()
                 .GetQueryable(fp => fp.TenantId == TenantId
@@ -600,6 +713,47 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             if (futurePeriodsClosed)
                 errors.Add("Cannot close period while future periods are closed.");
+
+            var approvedUnpostedSourceDocuments = await CountApprovedUnpostedSourceDocumentsAsync(period, cancellationToken);
+            if (approvedUnpostedSourceDocuments > 0)
+                errors.Add($"{approvedUnpostedSourceDocuments} approved Finance source documents in this period are not posted.");
+
+            var submittedUnapprovedSourceDocuments = await CountSubmittedUnapprovedSourceDocumentsAsync(period, cancellationToken);
+            if (submittedUnapprovedSourceDocuments > 0)
+                errors.Add($"{submittedUnapprovedSourceDocuments} submitted Finance source documents in this period still require approval.");
+
+            var unfinalizedReconciliations = await CountUnfinalizedReconciliationsAsync(period, cancellationToken);
+            if (unfinalizedReconciliations > 0)
+                errors.Add($"{unfinalizedReconciliations} bank reconciliations in this period are not finalized or approved.");
+
+            var orphanedPostingEvents = await CountOrphanedPostingEventsAsync(period, cancellationToken);
+            if (orphanedPostingEvents > 0)
+                errors.Add($"{orphanedPostingEvents} posted Finance posting events have missing or invalid same-tenant journal references.");
+
+            var postedEventJournalIds = _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e => e.TenantId == TenantId
+                    && !e.IsDeleted
+                    && e.PostingStatus == "Posted"
+                    && e.JournalEntryId.HasValue)
+                .Select(e => e.JournalEntryId!.Value);
+
+            var postedJournalsMissingPostingEvents = await postedJournalsQuery
+                .CountAsync(je => !postedEventJournalIds.Contains(je.Id), cancellationToken);
+
+            if (postedJournalsMissingPostingEvents > 0)
+                errors.Add($"{postedJournalsMissingPostingEvents} posted journal entries are missing posting events.");
+
+            var postedDocumentsMissingPostingEvents = await CountPostedDocumentsMissingPostingEventsAsync(period, cancellationToken);
+            if (postedDocumentsMissingPostingEvents > 0)
+                errors.Add($"{postedDocumentsMissingPostingEvents} posted Finance source documents are missing posting events.");
+
+            var postedDocumentJournalTenantMismatches = await CountPostedDocumentJournalTenantMismatchesAsync(period, cancellationToken);
+            if (postedDocumentJournalTenantMismatches > 0)
+                errors.Add($"{postedDocumentJournalTenantMismatches} posted Finance source documents reference journals outside the tenant.");
+
+            var periodReferenceMismatches = await CountCrossTenantPeriodReferenceMismatchesAsync(period, cancellationToken);
+            if (periodReferenceMismatches > 0)
+                errors.Add($"{periodReferenceMismatches} ledger records reference this period from another tenant.");
 
             // Validate Trial Balance (Debits = Credits)
             var transactions = await _unitOfWork.Repository<AccountTransaction>()
@@ -616,17 +770,365 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 errors.Add($"Trial Balance is not balanced. Difference: {difference}");
             }
 
+            var unbalancedPostedJournals = await postedJournalsQuery
+                .CountAsync(je => je.TotalDebitAmount != je.TotalCreditAmount, cancellationToken);
+
+            if (unbalancedPostedJournals > 0)
+                errors.Add($"{unbalancedPostedJournals} posted journal entries are unbalanced.");
+
             return new PeriodCloseValidationDto
             {
                 CanClose = errors.Count == 0,
                 ValidationErrors = errors,
+                ValidationWarnings = warnings,
                 PeriodName = period.PeriodName,
                 StartDate = period.StartDate,
                 EndDate = period.EndDate,
                 TotalDebits = totalDebits,
                 TotalCredits = totalCredits,
                 Difference = difference,
+                TotalJournalEntries = await postedJournalsQuery.CountAsync(cancellationToken),
                 TotalTransactionLines = transactions.Count
+            };
+        }
+
+        private async Task<int> CountApprovedUnpostedSourceDocumentsAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var start = period.StartDate.Date;
+            var end = period.EndDate.Date.AddDays(1);
+
+            var apInvoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i => i.TenantId == TenantId
+                    && !i.IsDeleted
+                    && i.InvoiceDate >= start
+                    && i.InvoiceDate < end
+                    && i.Status == VendorInvoiceStatus.Approved
+                    && !i.JournalEntryId.HasValue)
+                .CountAsync(cancellationToken);
+
+            var apPayments = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(p => p.TenantId == TenantId
+                    && !p.IsDeleted
+                    && p.PaymentDate >= start
+                    && p.PaymentDate < end
+                    && p.Status == VendorPaymentStatus.Authorized
+                    && !p.JournalEntryId.HasValue)
+                .CountAsync(cancellationToken);
+
+            var arInvoices = await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i => i.TenantId == TenantId
+                    && !i.IsDeleted
+                    && i.InvoiceDate >= start
+                    && i.InvoiceDate < end
+                    && i.Status == InvoiceStatus.Sent
+                    && !i.JournalEntryId.HasValue)
+                .CountAsync(cancellationToken);
+
+            var arReceipts = await _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(p => p.TenantId == TenantId
+                    && !p.IsDeleted
+                    && p.PaymentDate >= start
+                    && p.PaymentDate < end
+                    && p.Status == "Cleared"
+                    && !p.JournalEntryId.HasValue)
+                .CountAsync(cancellationToken);
+
+            var cashBankTransactions = await _unitOfWork.Repository<CashTransaction>()
+                .GetQueryable(t => t.TenantId == TenantId
+                    && !t.IsDeleted
+                    && t.TransactionDate >= start
+                    && t.TransactionDate < end
+                    && t.ApprovalStatus == CashTransactionApprovalStatus.Approved
+                    && !t.IsPosted
+                    && !t.JournalEntryId.HasValue)
+                .CountAsync(cancellationToken);
+
+            return apInvoices + apPayments + arInvoices + arReceipts + cashBankTransactions;
+        }
+
+        private async Task<int> CountSubmittedUnapprovedSourceDocumentsAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var start = period.StartDate.Date;
+            var end = period.EndDate.Date.AddDays(1);
+
+            var apInvoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i => i.TenantId == TenantId
+                    && !i.IsDeleted
+                    && i.InvoiceDate >= start
+                    && i.InvoiceDate < end
+                    && i.Status == VendorInvoiceStatus.PendingApproval)
+                .CountAsync(cancellationToken);
+
+            var apPayments = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(p => p.TenantId == TenantId
+                    && !p.IsDeleted
+                    && p.PaymentDate >= start
+                    && p.PaymentDate < end
+                    && p.Status == VendorPaymentStatus.PendingAuthorization)
+                .CountAsync(cancellationToken);
+
+            var cashBankTransactions = await _unitOfWork.Repository<CashTransaction>()
+                .GetQueryable(t => t.TenantId == TenantId
+                    && !t.IsDeleted
+                    && t.TransactionDate >= start
+                    && t.TransactionDate < end
+                    && t.ApprovalStatus == CashTransactionApprovalStatus.Submitted)
+                .CountAsync(cancellationToken);
+
+            return apInvoices + apPayments + cashBankTransactions;
+        }
+
+        private async Task<int> CountUnfinalizedReconciliationsAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var start = period.StartDate.Date;
+            var end = period.EndDate.Date.AddDays(1);
+
+            return await _unitOfWork.Repository<BankReconciliation>()
+                .GetQueryable(r => r.TenantId == TenantId
+                    && !r.IsDeleted
+                    && r.ReconciliationDate >= start
+                    && r.ReconciliationDate < end
+                    && r.Status != ReconciliationStatus.Completed
+                    && r.Status != ReconciliationStatus.Approved
+                    && r.Status != ReconciliationStatus.Cancelled)
+                .CountAsync(cancellationToken);
+        }
+
+        private async Task<int> CountOrphanedPostingEventsAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var start = period.StartDate.Date;
+            var end = period.EndDate.Date.AddDays(1);
+            var postedJournalIds = _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(j => j.TenantId == TenantId
+                    && !j.IsDeleted
+                    && j.PostingStatus == "Posted")
+                .Select(j => j.Id);
+
+            return await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e => e.TenantId == TenantId
+                    && !e.IsDeleted
+                    && e.PostingStatus == "Posted"
+                    && e.PostingDate >= start
+                    && e.PostingDate < end
+                    && (!e.JournalEntryId.HasValue
+                        || !postedJournalIds.Contains(e.JournalEntryId.Value)))
+                .CountAsync(cancellationToken);
+        }
+
+        private async Task<int> CountPostedDocumentsMissingPostingEventsAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var start = period.StartDate.Date;
+            var end = period.EndDate.Date.AddDays(1);
+            var count = 0;
+
+            count += await CountPostedDocumentsMissingEventAsync<VendorInvoice>(
+                i => i.TenantId == TenantId && !i.IsDeleted && i.InvoiceDate >= start && i.InvoiceDate < end && i.JournalEntryId.HasValue,
+                "VendorInvoice",
+                cancellationToken);
+
+            count += await CountPostedDocumentsMissingEventAsync<VendorPayment>(
+                p => p.TenantId == TenantId && !p.IsDeleted && p.PaymentDate >= start && p.PaymentDate < end && p.JournalEntryId.HasValue,
+                "VendorPayment",
+                cancellationToken);
+
+            count += await CountPostedDocumentsMissingEventAsync<Invoice>(
+                i => i.TenantId == TenantId && !i.IsDeleted && i.InvoiceDate >= start && i.InvoiceDate < end && i.JournalEntryId.HasValue,
+                "CustomerInvoice",
+                cancellationToken);
+
+            count += await CountPostedDocumentsMissingEventAsync<CustomerPayment>(
+                p => p.TenantId == TenantId && !p.IsDeleted && p.PaymentDate >= start && p.PaymentDate < end && p.JournalEntryId.HasValue && !p.IsCreditNote,
+                "CustomerPayment",
+                cancellationToken);
+
+            count += await CountPostedDocumentsMissingEventAsync<CustomerPayment>(
+                p => p.TenantId == TenantId && !p.IsDeleted && p.PaymentDate >= start && p.PaymentDate < end && p.JournalEntryId.HasValue && p.IsCreditNote,
+                "CustomerCreditNote",
+                cancellationToken);
+
+            count += await CountPostedDocumentsMissingEventAsync<CashTransaction>(
+                t => t.TenantId == TenantId && !t.IsDeleted && t.TransactionDate >= start && t.TransactionDate < end && t.IsPosted && t.JournalEntryId.HasValue && t.TransactionType == CashTransactionType.Receipt,
+                "CashBankReceipt",
+                cancellationToken);
+
+            count += await CountPostedDocumentsMissingEventAsync<CashTransaction>(
+                t => t.TenantId == TenantId && !t.IsDeleted && t.TransactionDate >= start && t.TransactionDate < end && t.IsPosted && t.JournalEntryId.HasValue && t.TransactionType == CashTransactionType.Payment,
+                "CashBankPayment",
+                cancellationToken);
+
+            count += await CountPostedDocumentsMissingEventAsync<CashTransaction>(
+                t => t.TenantId == TenantId && !t.IsDeleted && t.TransactionDate >= start && t.TransactionDate < end && t.IsPosted && t.JournalEntryId.HasValue && t.TransactionType == CashTransactionType.Transfer,
+                "CashBankTransfer",
+                cancellationToken);
+
+            return count;
+        }
+
+        private async Task<int> CountPostedDocumentsMissingEventAsync<T>(
+            System.Linq.Expressions.Expression<Func<T, bool>> predicate,
+            string sourceDocumentType,
+            CancellationToken cancellationToken)
+            where T : BaseEntity
+        {
+            var postedDocumentIds = _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e => e.TenantId == TenantId
+                    && !e.IsDeleted
+                    && e.SourceDocumentType == sourceDocumentType
+                    && e.PostingAction == "Post"
+                    && e.PostingStatus == "Posted")
+                .Select(e => e.SourceDocumentId);
+
+            return await _unitOfWork.Repository<T>()
+                .GetQueryable(predicate)
+                .CountAsync(document => !postedDocumentIds.Contains(document.Id), cancellationToken);
+        }
+
+        private async Task<int> CountPostedDocumentJournalTenantMismatchesAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var start = period.StartDate.Date;
+            var end = period.EndDate.Date.AddDays(1);
+            var count = 0;
+            var tenantJournalIds = _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(j => j.TenantId == TenantId && !j.IsDeleted)
+                .Select(j => j.Id);
+
+            count += await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i => i.TenantId == TenantId
+                    && !i.IsDeleted
+                    && i.InvoiceDate >= start
+                    && i.InvoiceDate < end
+                    && i.JournalEntryId.HasValue
+                    && !tenantJournalIds.Contains(i.JournalEntryId.Value))
+                .CountAsync(cancellationToken);
+
+            count += await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(p => p.TenantId == TenantId
+                    && !p.IsDeleted
+                    && p.PaymentDate >= start
+                    && p.PaymentDate < end
+                    && p.JournalEntryId.HasValue
+                    && !tenantJournalIds.Contains(p.JournalEntryId.Value))
+                .CountAsync(cancellationToken);
+
+            count += await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i => i.TenantId == TenantId
+                    && !i.IsDeleted
+                    && i.InvoiceDate >= start
+                    && i.InvoiceDate < end
+                    && i.JournalEntryId.HasValue
+                    && !tenantJournalIds.Contains(i.JournalEntryId.Value))
+                .CountAsync(cancellationToken);
+
+            count += await _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(p => p.TenantId == TenantId
+                    && !p.IsDeleted
+                    && p.PaymentDate >= start
+                    && p.PaymentDate < end
+                    && p.JournalEntryId.HasValue
+                    && !tenantJournalIds.Contains(p.JournalEntryId.Value))
+                .CountAsync(cancellationToken);
+
+            count += await _unitOfWork.Repository<CashTransaction>()
+                .GetQueryable(t => t.TenantId == TenantId
+                    && !t.IsDeleted
+                    && t.TransactionDate >= start
+                    && t.TransactionDate < end
+                    && t.JournalEntryId.HasValue
+                    && !tenantJournalIds.Contains(t.JournalEntryId.Value))
+                .CountAsync(cancellationToken);
+
+            return count;
+        }
+
+        private async Task<int> CountCrossTenantPeriodReferenceMismatchesAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var journalMismatches = await _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(je => je.FiscalPeriodId == period.Id
+                    && je.TenantId != TenantId
+                    && !je.IsDeleted)
+                .CountAsync(cancellationToken);
+
+            var transactionMismatches = await _unitOfWork.Repository<AccountTransaction>()
+                .GetQueryable(t => t.FiscalPeriodId == period.Id
+                    && t.TenantId != TenantId
+                    && !t.IsDeleted)
+                .CountAsync(cancellationToken);
+
+            return journalMismatches + transactionMismatches;
+        }
+
+        private async Task RecordPeriodAuditAsync(
+            string eventType,
+            FiscalPeriod period,
+            object? beforeValues = null,
+            object? afterValues = null,
+            string? reason = null,
+            string? comment = null,
+            object? context = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = period.TenantId,
+                SourceModule = "FINANCE",
+                SourceDocumentType = "FiscalPeriod",
+                SourceDocumentId = period.Id,
+                BeforeValues = beforeValues,
+                AfterValues = afterValues,
+                Reason = reason,
+                Comment = comment,
+                Context = context,
+                Resource = "Finance.FiscalPeriod",
+                ResourceId = period.Id.ToString()
+            }, cancellationToken);
+        }
+
+        private static object BuildPeriodAuditSnapshot(FiscalPeriod period)
+        {
+            return new
+            {
+                period.Id,
+                period.TenantId,
+                period.FiscalYearId,
+                period.PeriodCode,
+                period.PeriodName,
+                period.StartDate,
+                period.EndDate,
+                period.PeriodStatus,
+                period.IsOpen,
+                period.IsClosed,
+                period.IsLocked,
+                period.ClosedDate,
+                period.ClosedByUserId,
+                period.LockedDate,
+                period.LockedByUserId,
+                period.LockReason,
+                period.HasBeenReopened,
+                period.ReopenCount,
+                period.LastReopenedDate,
+                period.LastReopenedByUserId,
+                period.ReopenReason,
+                period.ClosingNotes
             };
         }
 
@@ -664,12 +1166,30 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 PeriodStatus = period.PeriodStatus,
                 IsOpen = period.IsOpen,
                 IsLocked = period.IsLocked,
+                IsClosed = period.IsClosed,
+                IsCloseInitiated = period.IsCloseInitiated,
+                CloseInitiatedDate = period.CloseInitiatedDate,
                 ClosedDate = period.ClosedDate,
                 // ClosedBy = period.ClosedByUserId.ToString(), // TODO: Resolve username
+                TrialBalanceValidated = period.TrialBalanceValidated,
+                BankReconciliationComplete = period.BankReconciliationComplete,
+                CurrencyRevaluationComplete = period.CurrencyRevaluationComplete,
+                DepreciationComplete = period.DepreciationComplete,
+                InventoryValuationComplete = period.InventoryValuationComplete,
+                AccrualsComplete = period.AccrualsComplete,
+                HasBeenReopened = period.HasBeenReopened,
+                ReopenCount = period.ReopenCount,
                 LastReopenedDate = period.LastReopenedDate,
                 // ReopenedBy = period.LastReopenedByUserId.ToString(), // TODO: Resolve username
                 LockedDate = period.LockedDate,
                 // LockedBy = period.LockedByUserId.ToString(), // TODO: Resolve username
+                IsYearEnd = period.IsYearEnd,
+                YearEndCloseComplete = period.YearEndCloseComplete,
+                TotalJournalEntries = period.TotalJournalEntries,
+                TotalTransactionLines = period.TotalTransactionLines,
+                TotalDebits = period.TotalDebits,
+                TotalCredits = period.TotalCredits,
+                BalanceDifference = period.BalanceDifference,
                 CreatedAt = period.CreatedAt,
                 UpdatedAt = period.UpdatedAt,
                 CreatedBy = period.CreatedBy,

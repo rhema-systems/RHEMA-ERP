@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,7 +26,7 @@ public class AssetVerificationService : IAssetVerificationService
         _documentNumberingService = documentNumberingService;
     }
 
-    private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+    private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
     private string UserName => _currentUser.UserName ?? "system";
     private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 

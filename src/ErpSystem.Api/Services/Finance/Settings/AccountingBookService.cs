@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,8 +25,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
             _currentUserService = currentUserService;
         }
 
-        private Guid TenantId => _currentUserService.TenantId
-            ?? throw new InvalidOperationException("Tenant context is required.");
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
         public async Task<IReadOnlyList<AccountingBookDto>> GetBooksAsync(
             bool includeInactive = false,

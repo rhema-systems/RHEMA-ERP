@@ -35,20 +35,24 @@ import {
 } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
-import { businessPartnerService } from '@/services/businessPartnerService';
+import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { financeService } from '@/services/finance.service';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 
 const paymentSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
+    bankAccountId: z.string().min(1, 'Bank account is required'),
     paymentDate: z.date(),
     totalAmount: z.coerce.number().min(0.01, 'Amount must be positive'),
     paymentMethod: z.enum(['BankTransfer', 'Cheque', 'Cash', 'WireTransfer', 'MobileMoney', 'DirectDebit', 'Other']).default('BankTransfer'),
     transactionReference: z.string().optional(),
-    currencyCode: z.string().default('USD'),
+    currencyCode: z.string().default('GHS'),
+    exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
     notes: z.string().optional(),
 });
 
@@ -59,15 +63,30 @@ export default function NewVendorPaymentPage() {
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
+    const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
+    const preselectedAmountParam = searchParams.get('amount');
+    const preselectedAmount = preselectedAmountParam && Number.isFinite(Number(preselectedAmountParam))
+        ? Number(preselectedAmountParam)
+        : 0;
+    const preselectedPaymentDateParam = searchParams.get('paymentDate');
+    const preselectedPaymentDate = preselectedPaymentDateParam && !Number.isNaN(Date.parse(preselectedPaymentDateParam))
+        ? new Date(preselectedPaymentDateParam)
+        : new Date();
+    const preselectedReferenceNumber = searchParams.get('referenceNumber') || '';
+    const preselectedDescription = searchParams.get('description') || '';
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [allocations, setAllocations] = useState<Record<string, number>>({});
-    const [createdPaymentId, setCreatedPaymentId] = useState<string | null>(null);
+    const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
 
-    // Fetch suppliers
     const { data: suppliersData } = useQuery({
-        queryKey: ['suppliers'],
-        queryFn: () => businessPartnerService.getPartners({ partnerType: 'Supplier', pageSize: 100 }),
+        queryKey: ['business-partners', 'ap-suppliers'],
+        queryFn: () => businessPartnerService.getPartners({ pageSize: 100 }),
+    });
+
+    const { data: bankAccounts } = useQuery({
+        queryKey: ['bank-accounts', 'active'],
+        queryFn: () => cashManagementDataService.getActiveBankAccounts(),
     });
 
     const form = useForm<PaymentFormValues>({
@@ -75,15 +94,41 @@ export default function NewVendorPaymentPage() {
         resolver: zodResolver(paymentSchema),
         defaultValues: {
             supplierId: preselectedSupplierId || '',
-            paymentDate: new Date(),
-            totalAmount: 0,
+            bankAccountId: preselectedBankAccountId,
+            paymentDate: preselectedPaymentDate,
+            totalAmount: preselectedAmount,
             paymentMethod: 'BankTransfer',
-            currencyCode: 'USD',
-            notes: '',
+            transactionReference: preselectedReferenceNumber,
+            currencyCode: 'GHS',
+            exchangeRate: 1,
+            notes: preselectedDescription,
         },
     });
 
     const selectedSupplierId = form.watch('supplierId');
+    const selectedBankAccountId = form.watch('bankAccountId');
+    const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const supplierOptions = (suppliersData?.items ?? []).filter((partner: BusinessPartnerDto) =>
+        ['supplier', 'contractor', 'both'].includes((partner.partnerType ?? '').toLowerCase()) &&
+        !partner.isBlacklisted
+    );
+
+    useEffect(() => {
+        if (!selectedBankAccountId || !bankAccounts) return;
+
+        const account = bankAccounts.find((item) => item.id === selectedBankAccountId);
+        if (!account) return;
+
+        form.setValue('currencyCode', account.currency);
+        if (account.currency === 'GHS') {
+            form.setValue('exchangeRate', 1);
+            return;
+        }
+
+        void financeService.getCurrentExchangeRate(account.currency)
+            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
+            .catch(() => form.setValue('exchangeRate', 1));
+    }, [selectedBankAccountId, bankAccounts, form]);
 
     // Fetch outstanding invoices for selected supplier
     const { data: outstandingInvoices, isLoading: isLoadingInvoices } = useQuery({
@@ -97,54 +142,45 @@ export default function NewVendorPaymentPage() {
         if (preselectedInvoiceId && outstandingInvoices) {
             const invoice = outstandingInvoices.find(inv => inv.invoiceId === preselectedInvoiceId);
             if (invoice) {
-                form.setValue('totalAmount', invoice.balanceAmount);
-                setAllocations({ [invoice.invoiceId]: invoice.balanceAmount });
+                const discountAmount = Number(invoice.discountAmount) || 0;
+                const netPaymentAmount = Math.max(invoice.balanceAmount - discountAmount, 0);
+                form.setValue('totalAmount', netPaymentAmount);
+                setAllocations({ [invoice.invoiceId]: netPaymentAmount });
+                setDiscountAllocations({ [invoice.invoiceId]: discountAmount });
             }
         }
     }, [preselectedInvoiceId, outstandingInvoices, form]);
 
 
-    const allocatePaymentMutation = useMutation({
-        mutationFn: async (paymentId: string) => {
-            // Process allocations sequentially or concurrently
-            const allocationPromises = Object.entries(allocations).map(([invoiceId, amount]) => {
-                if (amount <= 0) return Promise.resolve();
-                return accountsPayableService.allocatePayment(paymentId, {
-                    vendorInvoiceId: invoiceId,
-                    allocatedAmount: amount
-                });
-            });
-            await Promise.all(allocationPromises);
-        },
-        onSuccess: () => {
-            toast({ title: 'Success', description: 'Vendor payment allocated successfully' });
-            router.push('/finance/ap/payments');
-        },
-        onError: () => {
-            toast({ title: 'Error', description: 'Failed to allocate payment', variant: 'destructive' });
-        }
-    });
-
     const onSubmit = async (data: PaymentFormValues) => {
         setIsSubmitting(true);
         try {
-            // 1. Create Payment
-            const payment = await accountsPayableService.createPayment({
-                ...data,
-                paymentDate: data.paymentDate.toISOString(),
-            });
+            const paymentAllocations = Object.entries(allocations)
+                .filter(([, amount]) => amount > 0)
+                .map(([invoiceId, amount]) => ({
+                    vendorInvoiceId: invoiceId,
+                    allocatedAmount: amount,
+                    discountAmount: Number(discountAllocations[invoiceId]) || 0,
+                }));
 
-            setCreatedPaymentId(payment.id);
-
-            // 2. Allocate if any allocations set
-            const totalAllocated = Object.values(allocations).reduce((a, b) => a + b, 0);
-            if (totalAllocated > 0) {
-                await allocatePaymentMutation.mutateAsync(payment.id);
-            } else {
-                toast({ title: 'Success', description: 'Vendor payment recorded (unallocated)' });
-                router.push('/finance/ap/payments');
+            const totalAllocated = paymentAllocations.reduce((sum, allocation) => sum + allocation.allocatedAmount, 0);
+            if (totalAllocated > data.totalAmount) {
+                toast({
+                    title: 'Allocation exceeds payment',
+                    description: 'Allocated bill amounts cannot exceed the payment amount.',
+                    variant: 'destructive',
+                });
+                return;
             }
 
+            await accountsPayableService.createPayment({
+                ...data,
+                paymentDate: data.paymentDate.toISOString(),
+                allocations: paymentAllocations.length > 0 ? paymentAllocations : undefined,
+            });
+
+            toast({ title: 'Success', description: 'Vendor payment recorded successfully' });
+            router.push('/finance/ap/payments');
         } catch (error: any) {
             toast({
                 title: 'Error',
@@ -158,23 +194,31 @@ export default function NewVendorPaymentPage() {
 
     const currentAmount = form.watch('totalAmount');
     const totalAllocated = Object.values(allocations).reduce((acc, curr) => acc + curr, 0);
+    const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
     const remainingAmount = currentAmount - totalAllocated;
 
     const handleAutoAllocate = () => {
         if (!outstandingInvoices) return;
         let remaining = currentAmount;
         const newAllocations: Record<string, number> = {};
+        const newDiscountAllocations: Record<string, number> = {};
 
         // Allocate to oldest invoices first
         const sortedInvoices = [...outstandingInvoices].sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
 
         for (const inv of sortedInvoices) {
             if (remaining <= 0) break;
-            const allocateAmount = Math.min(remaining, inv.balanceAmount);
+            const discountAmount = Number(inv.discountAmount) || 0;
+            const netBalance = Math.max(inv.balanceAmount - discountAmount, 0);
+            const allocateAmount = Math.min(remaining, netBalance);
             newAllocations[inv.invoiceId] = allocateAmount;
+            if (discountAmount > 0 && allocateAmount >= netBalance) {
+                newDiscountAllocations[inv.invoiceId] = discountAmount;
+            }
             remaining -= allocateAmount;
         }
         setAllocations(newAllocations);
+        setDiscountAllocations(newDiscountAllocations);
     };
 
     return (
@@ -203,22 +247,46 @@ export default function NewVendorPaymentPage() {
                                 <Label htmlFor="supplier">Supplier</Label>
                                 <Select
                                     onValueChange={(val) => form.setValue('supplierId', val)}
-                                    defaultValue={preselectedSupplierId || ''}
-                                    disabled={!!createdPaymentId}
+                                    value={form.watch('supplierId') || undefined}
+                                    disabled={isSubmitting}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select supplier..." />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {suppliersData?.items?.map((supplier: any) => (
+                                        {supplierOptions.map((supplier) => (
                                             <SelectItem key={supplier.id} value={supplier.id}>
-                                                {supplier.name}
+                                                {supplier.partnerName}
+                                                {supplier.partnerCode ? ` (${supplier.partnerCode})` : ''}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                                 {form.formState.errors.supplierId && (
                                     <p className="text-sm text-red-500">{form.formState.errors.supplierId.message}</p>
+                                )}
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="bankAccount">Pay From Bank Account</Label>
+                                <Select
+                                    onValueChange={(val) => form.setValue('bankAccountId', val)}
+                                    value={form.watch('bankAccountId') || undefined}
+                                    disabled={isSubmitting}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select bank account..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {bankAccounts?.map((account) => (
+                                            <SelectItem key={account.id} value={account.id}>
+                                                {account.accountName} ({account.currency}) - {account.bankName}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {form.formState.errors.bankAccountId && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.bankAccountId.message}</p>
                                 )}
                             </div>
 
@@ -236,7 +304,7 @@ export default function NewVendorPaymentPage() {
                                                         "w-full justify-start text-left font-normal",
                                                         !field.value && "text-muted-foreground"
                                                     )}
-                                                    disabled={!!createdPaymentId}
+                                                    disabled={isSubmitting}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
                                                     {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
@@ -258,14 +326,16 @@ export default function NewVendorPaymentPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="amount">Amount Paid</Label>
                                 <div className="relative">
-                                    <span className="absolute left-3 top-2.5 text-gray-500">$</span>
+                                    <span className="absolute left-3 top-2.5 text-gray-500 text-sm font-medium">
+                                        {currentCurrencyCode}
+                                    </span>
                                     <Input
                                         id="amount"
                                         type="number"
-                                        className="pl-7"
+                                        className="pl-14"
                                         step="0.01"
                                         {...form.register('totalAmount')}
-                                        disabled={!!createdPaymentId}
+                                        disabled={isSubmitting}
                                     />
                                 </div>
                                 {form.formState.errors.totalAmount && (
@@ -274,11 +344,28 @@ export default function NewVendorPaymentPage() {
                             </div>
 
                             <div className="space-y-2">
+                                <Label htmlFor="exchangeRate">Exchange Rate</Label>
+                                <Input
+                                    id="exchangeRate"
+                                    type="number"
+                                    step="0.000001"
+                                    {...form.register('exchangeRate')}
+                                    disabled={isSubmitting || currentCurrencyCode === 'GHS'}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} GHS
+                                </p>
+                                {form.formState.errors.exchangeRate && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
+                                )}
+                            </div>
+
+                            <div className="space-y-2">
                                 <Label htmlFor="paymentMethod">Payment Method</Label>
                                 <Select
                                     onValueChange={(val: any) => form.setValue('paymentMethod', val)}
-                                    defaultValue="BankTransfer"
-                                    disabled={!!createdPaymentId}
+                                    value={form.watch('paymentMethod')}
+                                    disabled={isSubmitting}
                                 >
                                     <SelectTrigger>
                                         <SelectValue />
@@ -295,22 +382,20 @@ export default function NewVendorPaymentPage() {
 
                             <div className="space-y-2">
                                 <Label htmlFor="reference">Reference #</Label>
-                                <Input id="reference" placeholder="e.g. Cheque No. / Receipt" {...form.register('transactionReference')} disabled={!!createdPaymentId} />
+                                <Input id="reference" placeholder="e.g. Cheque No. / Receipt" {...form.register('transactionReference')} disabled={isSubmitting} />
                             </div>
 
                             <div className="space-y-2">
                                 <Label htmlFor="notes">Notes</Label>
-                                <Textarea id="notes" {...form.register('notes')} disabled={!!createdPaymentId} />
+                                <Textarea id="notes" {...form.register('notes')} disabled={isSubmitting} />
                             </div>
                         </form>
                     </CardContent>
                     <CardFooter>
-                        {!createdPaymentId && (
-                            <Button type="submit" form="payment-form" className="w-full" disabled={isSubmitting}>
-                                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Record Payment
-                            </Button>
-                        )}
+                        <Button type="submit" form="payment-form" className="w-full" disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Record Payment
+                        </Button>
                     </CardFooter>
                 </Card>
 
@@ -318,7 +403,7 @@ export default function NewVendorPaymentPage() {
                 <Card className="md:col-span-2">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Allocate to Bills</CardTitle>
-                        <Button variant="outline" size="sm" onClick={handleAutoAllocate} disabled={!!createdPaymentId || !outstandingInvoices || outstandingInvoices.length === 0}>
+                        <Button variant="outline" size="sm" onClick={handleAutoAllocate} disabled={isSubmitting || !outstandingInvoices || outstandingInvoices.length === 0}>
                             Auto Allocate
                         </Button>
                     </CardHeader>
@@ -340,9 +425,16 @@ export default function NewVendorPaymentPage() {
                         ) : (
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center bg-muted/50 p-4 rounded-lg font-medium">
-                                    <span>Remaining to Allocate:</span>
+                                    <div>
+                                        <div>Remaining Cash to Allocate:</div>
+                                        {totalDiscounts > 0 && (
+                                            <div className="text-xs text-muted-foreground">
+                                                Discounts taken: {formatCurrency(totalDiscounts, currentCurrencyCode)}
+                                            </div>
+                                        )}
+                                    </div>
                                     <span className={remainingAmount < 0 ? 'text-red-500' : 'text-green-600'}>
-                                        {formatCurrency(remainingAmount)}
+                                        {formatCurrency(remainingAmount, currentCurrencyCode)}
                                     </span>
                                 </div>
 
@@ -354,43 +446,71 @@ export default function NewVendorPaymentPage() {
                                                 <th className="p-3 text-left">Due Date</th>
                                                 <th className="p-3 text-right">Balance Due</th>
                                                 <th className="p-3 text-right w-[150px]">Allocate</th>
+                                                <th className="p-3 text-right w-[150px]">Discount</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {outstandingInvoices.map((inv) => (
-                                                <tr key={inv.invoiceId} className="border-t">
-                                                    <td className="p-3 font-medium flex flex-col items-start gap-1">
-                                                        <span>{inv.invoiceNumber}</span>
-                                                        {inv.supplierInvoiceNumber && (
-                                                            <span className="text-xs text-muted-foreground">Ref: {inv.supplierInvoiceNumber}</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-3">
-                                                        {inv.dueDate ? format(new Date(inv.dueDate), 'MMM dd, yyyy') : '-'}
-                                                        {inv.dueDate && new Date(inv.dueDate) < new Date() && (
-                                                            <span className="ml-2 text-xs text-red-500 font-bold">Overdue</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-3 text-right">{formatCurrency(inv.balanceAmount)}</td>
-                                                    <td className="p-3">
-                                                        <Input
-                                                            type="number"
-                                                            className="text-right h-8"
-                                                            min={0}
-                                                            max={inv.balanceAmount}
-                                                            value={allocations[inv.invoiceId] || ''}
-                                                            onChange={(e) => {
-                                                                const val = Number(e.target.value);
-                                                                setAllocations(prev => ({
-                                                                    ...prev,
-                                                                    [inv.invoiceId]: val
-                                                                }));
-                                                            }}
-                                                            disabled={!!createdPaymentId}
-                                                        />
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                            {outstandingInvoices.map((inv) => {
+                                                const availableDiscount = Number(inv.discountAmount) || 0;
+                                                const maxCashAllocation = Math.max(inv.balanceAmount - availableDiscount, 0);
+
+                                                return (
+                                                    <tr key={inv.invoiceId} className="border-t">
+                                                        <td className="p-3 font-medium flex flex-col items-start gap-1">
+                                                            <span>{inv.invoiceNumber}</span>
+                                                            {inv.supplierInvoiceNumber && (
+                                                                <span className="text-xs text-muted-foreground">Ref: {inv.supplierInvoiceNumber}</span>
+                                                            )}
+                                                            {availableDiscount > 0 && (
+                                                                <span className="text-xs text-emerald-700">
+                                                                    Discount available: {formatCurrency(availableDiscount, currentCurrencyCode)}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3">
+                                                            {inv.dueDate ? format(new Date(inv.dueDate), 'MMM dd, yyyy') : '-'}
+                                                            {inv.dueDate && new Date(inv.dueDate) < new Date() && (
+                                                                <span className="ml-2 text-xs text-red-500 font-bold">Overdue</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3 text-right">{formatCurrency(inv.balanceAmount, currentCurrencyCode)}</td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                max={maxCashAllocation}
+                                                                value={allocations[inv.invoiceId] || ''}
+                                                                onChange={(e) => {
+                                                                    const val = Number(e.target.value);
+                                                                    setAllocations(prev => ({
+                                                                        ...prev,
+                                                                        [inv.invoiceId]: val
+                                                                    }));
+                                                                }}
+                                                                disabled={isSubmitting}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                max={availableDiscount}
+                                                                value={discountAllocations[inv.invoiceId] || ''}
+                                                                onChange={(e) => {
+                                                                    const val = Number(e.target.value);
+                                                                    setDiscountAllocations(prev => ({
+                                                                        ...prev,
+                                                                        [inv.invoiceId]: val
+                                                                    }));
+                                                                }}
+                                                                disabled={isSubmitting || availableDiscount <= 0}
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>

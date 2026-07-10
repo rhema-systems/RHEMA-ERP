@@ -63,4 +63,27 @@ public class BankAccountBalanceDto
     public DateTime AsOfDate { get; set; }
 }
 
+public class CashPositionSummaryDto
+{
+    public decimal TotalBalance { get; set; }
+    public string Currency { get; set; } = "GHS";
+    public int AccountCount { get; set; }
+    public List<CashPositionByAccountTypeDto> ByAccountType { get; set; } = new();
+    public List<CashPositionByCurrencyDto> ByCurrency { get; set; } = new();
+}
+
+public class CashPositionByAccountTypeDto
+{
+    public BankAccountType Type { get; set; }
+    public decimal Balance { get; set; }
+    public int Count { get; set; }
+}
+
+public class CashPositionByCurrencyDto
+{
+    public string Currency { get; set; } = "GHS";
+    public decimal Balance { get; set; }
+    public int Count { get; set; }
+}
+
 #endregion

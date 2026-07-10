@@ -13,6 +13,9 @@ export type PostingStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted'
 export type ExchangeRateType = 'Daily' | 'Average' | 'MonthEnd' | 'QuarterEnd' | 'YearEnd' | 'Budget' | 'Fixed' | 'Spot' | 'Official' | 'Market' | 'Custom';
 export type PeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
 export type RevaluationFrequency = 'None' | 'Monthly' | 'Quarterly' | 'Annually';
+export type SubledgerModule = 'AR' | 'AP';
+export type SubledgerAdjustmentType = 'Debit' | 'Credit';
+export type SubledgerAdjustmentStatus = 'Posted' | 'Reversed';
 
 // ============================================
 // CORE ENTITIES
@@ -371,6 +374,60 @@ export interface FinanceJournalAuditLog {
     newValues?: unknown;
 }
 
+export interface SubledgerAdjustmentJournal {
+    id: string;
+    module: SubledgerModule;
+    adjustmentNumber: string;
+    customerId?: string;
+    customerName?: string;
+    supplierId?: string;
+    supplierName?: string;
+    adjustmentDate: string;
+    dueDate?: string;
+    adjustmentType: SubledgerAdjustmentType;
+    amount: number;
+    signedSubledgerAmount: number;
+    currencyCode: string;
+    exchangeRate: number;
+    baseCurrencyAmount: number;
+    contraAccountId: string;
+    contraAccountNumber?: string;
+    contraAccountName?: string;
+    journalEntryId?: string;
+    journalNumber?: string;
+    status: SubledgerAdjustmentStatus;
+    reference?: string;
+    reason: string;
+    notes?: string;
+    originalAdjustmentId?: string;
+    reversalAdjustmentId?: string;
+    reversalReason?: string;
+    reversedAt?: string;
+    createdAt: string;
+    createdBy?: string;
+}
+
+export interface CreateSubledgerAdjustmentJournalDto {
+    module: SubledgerModule;
+    customerId?: string;
+    supplierId?: string;
+    adjustmentDate: string;
+    dueDate?: string;
+    adjustmentType: SubledgerAdjustmentType;
+    amount: number;
+    currencyCode?: string;
+    exchangeRate: number;
+    contraAccountId: string;
+    reference?: string;
+    reason: string;
+    notes?: string;
+}
+
+export interface ReverseSubledgerAdjustmentJournalDto {
+    reason: string;
+    reversalDate?: string;
+}
+
 export interface AccountBalance {
     accountId: string;
     balance: number;
@@ -663,6 +720,7 @@ export interface JournalEntryFilters {
     periodId?: string;
     status?: PostingStatus;
     journalType?: JournalType;
+    sourceModule?: string;
     from?: string;
     to?: string;
     search?: string;

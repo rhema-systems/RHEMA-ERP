@@ -101,12 +101,66 @@ public class FixedAssetsController : ControllerBase
         }
     }
 
+    [HttpPost("{id}/capitalize")]
+    public async Task<ActionResult<FixedAssetDto>> Capitalize(Guid id, CapitalizeFixedAssetDto dto)
+    {
+        try
+        {
+            var result = await _fixedAssetService.CapitalizeAsync(id, dto);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("{id}/capitalization/submit")]
+    public async Task<ActionResult<FixedAssetDto>> SubmitCapitalizationForApproval(Guid id, [FromBody] FixedAssetApprovalActionRequest? request)
+    {
+        try
+        {
+            var result = await _fixedAssetService.SubmitCapitalizationForApprovalAsync(id, request?.Comments);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
     [HttpPost("depreciation/run")]
     public async Task<ActionResult<IReadOnlyList<AssetDepreciationScheduleDto>>> RunDepreciation(RunDepreciationDto dto)
     {
         try
         {
             var result = await _depreciationService.RunDepreciationAsync(dto);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("depreciation/runs/{runId}/post-approved")]
+    public async Task<ActionResult<IReadOnlyList<AssetDepreciationScheduleDto>>> PostApprovedDepreciationRun(Guid runId)
+    {
+        try
+        {
+            var result = await _depreciationService.PostApprovedRunAsync(runId);
             return Ok(result);
         }
         catch (KeyNotFoundException)
@@ -335,6 +389,30 @@ public class FixedAssetsController : ControllerBase
         return Ok(await _reportsService.GetAssetRegisterAsync(query));
     }
 
+    [HttpGet("reports/additions")]
+    public async Task<ActionResult<FixedAssetAdditionsReportDto>> GetAdditionsReport([FromQuery] FixedAssetReportQueryDto query)
+    {
+        return Ok(await _reportsService.GetAdditionsReportAsync(query));
+    }
+
+    [HttpGet("reports/depreciation")]
+    public async Task<ActionResult<FixedAssetDepreciationReportDto>> GetDepreciationReport([FromQuery] FixedAssetReportQueryDto query)
+    {
+        return Ok(await _reportsService.GetDepreciationReportAsync(query));
+    }
+
+    [HttpGet("reports/accumulated-depreciation")]
+    public async Task<ActionResult<FixedAssetAccumulatedDepreciationReportDto>> GetAccumulatedDepreciationReport([FromQuery] FixedAssetReportQueryDto query)
+    {
+        return Ok(await _reportsService.GetAccumulatedDepreciationReportAsync(query));
+    }
+
+    [HttpGet("reports/valuations")]
+    public async Task<ActionResult<FixedAssetValuationMovementReportDto>> GetValuationMovementReport([FromQuery] FixedAssetReportQueryDto query)
+    {
+        return Ok(await _reportsService.GetValuationMovementReportAsync(query));
+    }
+
     [HttpGet("reports/disposals")]
     public async Task<ActionResult<List<AssetDisposalReportDto>>> GetDisposalReport([FromQuery] FixedAssetReportQueryDto query)
     {
@@ -345,6 +423,18 @@ public class FixedAssetsController : ControllerBase
     public async Task<ActionResult<List<AssetTransferReportDto>>> GetTransferReport([FromQuery] FixedAssetReportQueryDto query)
     {
         return Ok(await _reportsService.GetTransferReportAsync(query));
+    }
+
+    [HttpGet("reports/roll-forward")]
+    public async Task<ActionResult<FixedAssetRollForwardReportDto>> GetRollForwardReport([FromQuery] FixedAssetReportQueryDto query)
+    {
+        return Ok(await _reportsService.GetRollForwardReportAsync(query));
+    }
+
+    [HttpGet("reports/gl-reconciliation")]
+    public async Task<ActionResult<FixedAssetGlReconciliationReportDto>> GetGlReconciliationReport([FromQuery] FixedAssetReportQueryDto query)
+    {
+        return Ok(await _reportsService.GetGlReconciliationReportAsync(query));
     }
 
     [HttpGet("reports/export/excel")]
@@ -578,4 +668,10 @@ public class FixedAssetsController : ControllerBase
             return NotFound(new { error = ex.Message });
         }
     }
+}
+
+public sealed class FixedAssetApprovalActionRequest
+{
+    public string? Comments { get; set; }
+    public string? Reason { get; set; }
 }

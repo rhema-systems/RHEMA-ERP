@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Finance;
@@ -28,6 +29,7 @@ namespace ErpSystem.Api.Controllers.Finance;
 /// **Authorization:** Requires Finance module permissions.
 /// </remarks>
 [ApiController]
+[Authorize]
 [Route("api/finance/cash-transactions")]
 public class CashTransactionController : ControllerBase
 {
@@ -320,6 +322,102 @@ public class CashTransactionController : ControllerBase
         {
             var (fromTransaction, toTransaction) = await _cashTransactionService.CreateTransferAsync(dto);
             return Ok(new { fromTransaction, toTransaction });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/submit")]
+    public async Task<ActionResult<CashTransactionDto>> Submit(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var transaction = await _cashTransactionService.SubmitAsync(id, cancellationToken);
+            return Ok(transaction);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/approve")]
+    public async Task<ActionResult<CashTransactionDto>> Approve(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var transaction = await _cashTransactionService.ApproveAsync(id, request?.Comments, cancellationToken);
+            return Ok(transaction);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/reject")]
+    public async Task<ActionResult<CashTransactionDto>> Reject(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var transaction = await _cashTransactionService.RejectAsync(id, request?.Reason ?? request?.Comments, cancellationToken);
+            return Ok(transaction);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/return")]
+    public async Task<ActionResult<CashTransactionDto>> Return(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var transaction = await _cashTransactionService.ReturnAsync(id, request?.Comments ?? request?.Reason, cancellationToken);
+            return Ok(transaction);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/cancel")]
+    public async Task<ActionResult<CashTransactionDto>> Cancel(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var transaction = await _cashTransactionService.CancelAsync(id, request?.Reason ?? request?.Comments ?? string.Empty, cancellationToken);
+            return Ok(transaction);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/post")]
+    public async Task<ActionResult<CashTransactionDto>> Post(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var transaction = await _cashTransactionService.PostAsync(id, cancellationToken);
+            return Ok(transaction);
         }
         catch (Exception ex)
         {

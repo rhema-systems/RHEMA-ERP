@@ -12,6 +12,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.Segments
 {
@@ -32,8 +33,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<AccountCombinationService> _logger;
 
-        private Guid TenantId => _currentUser.TenantId 
-            ?? throw new UnauthorizedAccessException("Tenant context required");
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserId ?? "system";
 
         public AccountCombinationService(

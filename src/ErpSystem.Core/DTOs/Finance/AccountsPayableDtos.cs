@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
@@ -49,6 +50,10 @@ public class VendorInvoiceDto
     // Withholding tax
     public decimal WithholdingTaxRate { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
 
     // Matching
     public InvoiceMatchingType MatchingType { get; set; }
@@ -64,6 +69,7 @@ public class VendorInvoiceDto
     public string? ExpenseAccountName { get; set; }
     public Guid? ApAccountId { get; set; }
     public string? ApAccountName { get; set; }
+    public Guid? JournalEntryId { get; set; }
 
     public string? Notes { get; set; }
     public string? Reference { get; set; }
@@ -103,6 +109,10 @@ public class VendorInvoiceCreateDto
 
     // Withholding tax
     public decimal WithholdingTaxRate { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
 
     // Matching
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
@@ -141,6 +151,10 @@ public class VendorInvoiceUpdateDto
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
     public decimal WithholdingTaxRate { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
 
     public InvoiceMatchingType MatchingType { get; set; }
 
@@ -180,11 +194,17 @@ public class VendorInvoiceLineItemDto
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
     public string? GLAccountName { get; set; }
+    public Guid? FixedAssetId { get; set; }
+    public Guid? CapitalizationJournalEntryId { get; set; }
+    public Guid? CapitalizationPostingEventId { get; set; }
+    public DateTime? CapitalizedAt { get; set; }
     public Guid? PurchaseOrderItemId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal LineTotal { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
     public decimal TaxRate { get; set; }
     public decimal TaxAmount { get; set; }
     public string? TaxCode { get; set; }
@@ -197,6 +217,7 @@ public class VendorInvoiceLineItemCreateDto
 {
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
+    public Guid? FixedAssetId { get; set; }
     public Guid? PurchaseOrderItemId { get; set; }
 
     [Required]
@@ -207,6 +228,8 @@ public class VendorInvoiceLineItemCreateDto
     [Required]
     public decimal UnitPrice { get; set; }
 
+    public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
     public decimal TaxRate { get; set; }
     public string? TaxCode { get; set; }
     public decimal DiscountPercentage { get; set; }
@@ -263,10 +286,15 @@ public class VendorPaymentDto
     public string? TransactionReference { get; set; }
     public decimal WithholdingTaxRate { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
     public decimal DiscountTaken { get; set; }
     public VendorPaymentStatus Status { get; set; }
     public Guid? PaymentBatchId { get; set; }
     public string? PaymentBatchNumber { get; set; }
+    public Guid? JournalEntryId { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
@@ -294,6 +322,10 @@ public class VendorPaymentCreateDto
     public string? TransactionReference { get; set; }
 
     public decimal WithholdingTaxRate { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
 
     public string? Notes { get; set; }
 
@@ -470,6 +502,7 @@ public class ApAgingReportDto
 {
     public DateTime AsOfDate { get; set; }
     public string CurrencyCode { get; set; } = "USD";
+    public bool UsesSettlementReadModel { get; set; }
     public decimal TotalOutstanding { get; set; }
     public decimal Current { get; set; }         // 0-30 days
     public decimal ThirtyDays { get; set; }      // 31-60 days
@@ -478,6 +511,7 @@ public class ApAgingReportDto
     public int TotalSuppliers { get; set; }
     public int TotalInvoices { get; set; }
     public List<SupplierAgingDetailDto> SupplierDetails { get; set; } = new();
+    public List<SubledgerSettlementDiagnosticDto> Diagnostics { get; set; } = new();
 }
 
 public class SupplierAgingDetailDto
@@ -492,7 +526,7 @@ public class SupplierAgingDetailDto
     public decimal NinetyPlusDays { get; set; }
     public int InvoiceCount { get; set; }
     public DateTime? OldestInvoiceDate { get; set; }
-    public List<ApAgingInvoiceDto>? Invoices { get; set; }
+    public List<ApAgingInvoiceDto> Invoices { get; set; } = new();
 }
 
 public class ApAgingInvoiceDto
@@ -502,7 +536,14 @@ public class ApAgingInvoiceDto
     public DateTime InvoiceDate { get; set; }
     public DateTime? DueDate { get; set; }
     public decimal TotalAmount { get; set; }
+    public decimal SettledAmount { get; set; }
+    public decimal CreditedAmount { get; set; }
+    public decimal WithheldAmount { get; set; }
     public decimal BalanceAmount { get; set; }
+    public Guid? SourcePostingEventId { get; set; }
+    public Guid? SourceJournalEntryId { get; set; }
+    public string? SettlementStatus { get; set; }
+    public string? DiagnosticFlags { get; set; }
     public int DaysOutstanding { get; set; }
     public string AgingBucket { get; set; } = string.Empty;
 }

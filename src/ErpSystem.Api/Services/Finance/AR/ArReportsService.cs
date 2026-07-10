@@ -1,15 +1,19 @@
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,21 +24,32 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ILogger<ArReportsService> _logger;
+        private readonly ISubledgerSettlementReadModelService? _settlementReadModelService;
+        private readonly IFinanceAuditService? _financeAuditService;
 
         public ArReportsService(
             IUnitOfWork _unitOfWork,
             ICurrentUserService currentUser,
-            ILogger<ArReportsService> logger)
+            ILogger<ArReportsService> logger,
+            ISubledgerSettlementReadModelService? settlementReadModelService = null,
+            IFinanceAuditService? financeAuditService = null)
         {
             this._unitOfWork = _unitOfWork;
             _currentUser = currentUser;
             _logger = logger;
+            _settlementReadModelService = settlementReadModelService;
+            _financeAuditService = financeAuditService;
         }
 
-        private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
 
         public async Task<AgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default)
         {
+            if (_settlementReadModelService != null)
+            {
+                return await GetSettlementReadModelAgingReportAsync(asOfDate, customerId, cancellationToken);
+            }
+
             var effectiveDate = asOfDate ?? DateTime.UtcNow;
 
             var query = _unitOfWork.Repository<Invoice>()
@@ -42,55 +57,63 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.TenantId == TenantId &&
                     (i.TotalAmount - i.PaidAmount) > 0 &&
                     (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue));
+            query = ApplyPostedArInvoiceFilter(query);
 
             if (customerId.HasValue)
                 query = query.Where(i => i.BusinessPartnerId == customerId.Value);
 
             var invoices = await query.ToListAsync(cancellationToken);
-
-            // Group by customer
-            var customerGroups = invoices.GroupBy(i => new { i.CustomerId, i.CustomerName });
+            var adjustments = await GetPostedArAdjustmentsAsync(customerId, cancellationToken);
 
             var customerAging = new List<CustomerAgingDto>();
+            var customerAgingById = new Dictionary<Guid, CustomerAgingDto>();
 
-            foreach (var group in customerGroups)
+            CustomerAgingDto GetOrCreateCustomerAging(Guid id, string name)
             {
+                if (customerAgingById.TryGetValue(id, out var existing))
+                    return existing;
+
                 var aging = new CustomerAgingDto
                 {
-                    CustomerId = group.Key.CustomerId,
+                    CustomerId = id,
                     CustomerCode = string.Empty,
-                    CustomerName = group.Key.CustomerName,
+                    CustomerName = name,
                     Phone = null,
                     Email = null
                 };
-
-                foreach (var invoice in group)
-                {
-                    var daysOverdue = invoice.DueDate.HasValue
-                        ? (effectiveDate - invoice.DueDate.Value).Days
-                        : (effectiveDate - invoice.InvoiceDate).Days;
-
-                    if (daysOverdue < 0 || !invoice.DueDate.HasValue)
-                        aging.Current += invoice.BalanceAmount;
-                    else if (daysOverdue <= 30)
-                        aging.Days1To30 += invoice.BalanceAmount;
-                    else if (daysOverdue <= 60)
-                        aging.Days31To60 += invoice.BalanceAmount;
-                    else if (daysOverdue <= 90)
-                        aging.Days61To90 += invoice.BalanceAmount;
-                    else
-                        aging.Days90Plus += invoice.BalanceAmount;
-                }
-
-                aging.TotalOutstanding = aging.Current + aging.Days1To30 + aging.Days31To60 + aging.Days61To90 + aging.Days90Plus;
-
+                customerAgingById[id] = aging;
                 customerAging.Add(aging);
+                return aging;
             }
+
+            foreach (var invoice in invoices)
+            {
+                var aging = GetOrCreateCustomerAging(invoice.CustomerId, invoice.CustomerName);
+                AddToAgingBucket(aging, invoice.BalanceAmount, invoice.DueDate, invoice.InvoiceDate, effectiveDate);
+            }
+
+            foreach (var adjustment in adjustments)
+            {
+                if (!adjustment.CustomerId.HasValue)
+                    continue;
+
+                var amount = GetSignedSubledgerAmount(adjustment);
+                if (amount == 0)
+                    continue;
+
+                var aging = GetOrCreateCustomerAging(
+                    adjustment.CustomerId.Value,
+                    adjustment.Customer?.PartnerName ?? "Customer");
+                AddToAgingBucket(aging, amount, adjustment.DueDate, adjustment.AdjustmentDate, effectiveDate);
+            }
+
+            foreach (var aging in customerAging)
+                aging.TotalOutstanding = aging.Current + aging.Days1To30 + aging.Days31To60 + aging.Days61To90 + aging.Days90Plus;
 
             var report = new AgingReportDto
             {
                 AsOfDate = effectiveDate,
-                Customers = customerAging.OrderByDescending(c => c.TotalOutstanding).ToList(),
+                Customers = customerAging.Where(c => c.TotalOutstanding != 0).OrderByDescending(c => c.TotalOutstanding).ToList(),
                 Summary = new AgingSummaryDto
                 {
                     TotalCurrent = customerAging.Sum(c => c.Current),
@@ -152,6 +175,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<DetailedAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default)
         {
+            if (_settlementReadModelService != null)
+            {
+                return await GetSettlementReadModelDetailedAgingReportAsync(asOfDate, customerId, cancellationToken);
+            }
+
             var effectiveDate = asOfDate ?? DateTime.UtcNow;
 
             var query = _unitOfWork.Repository<Invoice>()
@@ -159,65 +187,87 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.TenantId == TenantId &&
                     (i.TotalAmount - i.PaidAmount) > 0 &&
                     (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue));
+            query = ApplyPostedArInvoiceFilter(query);
 
             if (customerId.HasValue)
                 query = query.Where(i => i.BusinessPartnerId == customerId.Value);
 
             var invoices = await query.ToListAsync(cancellationToken);
-
-            var customerGroups = invoices.GroupBy(i => new { i.CustomerId, i.CustomerName });
+            var adjustments = await GetPostedArAdjustmentsAsync(customerId, cancellationToken);
 
             var customerDetailedAging = new List<CustomerDetailedAgingDto>();
+            var customerDetailedById = new Dictionary<Guid, CustomerDetailedAgingDto>();
 
-            foreach (var group in customerGroups)
+            CustomerDetailedAgingDto GetOrCreateDetailed(Guid id, string name)
             {
+                if (customerDetailedById.TryGetValue(id, out var existing))
+                    return existing;
+
                 var detailedAging = new CustomerDetailedAgingDto
                 {
-                    CustomerId = group.Key.CustomerId,
+                    CustomerId = id,
                     CustomerCode = string.Empty,
-                    CustomerName = group.Key.CustomerName
+                    CustomerName = name
                 };
-
-                foreach (var invoice in group)
-                {
-                    var daysOverdue = invoice.DueDate.HasValue
-                        ? (effectiveDate - invoice.DueDate.Value).Days
-                        : (effectiveDate - invoice.InvoiceDate).Days;
-
-                    string agingBucket;
-                    if (daysOverdue < 0 || !invoice.DueDate.HasValue)
-                        agingBucket = "Current";
-                    else if (daysOverdue <= 30)
-                        agingBucket = "1-30 Days";
-                    else if (daysOverdue <= 60)
-                        agingBucket = "31-60 Days";
-                    else if (daysOverdue <= 90)
-                        agingBucket = "61-90 Days";
-                    else
-                        agingBucket = "90+ Days";
-
-                    detailedAging.Invoices.Add(new InvoiceAgingDto
-                    {
-                        InvoiceId = invoice.Id,
-                        InvoiceNumber = invoice.InvoiceNumber,
-                        InvoiceDate = invoice.InvoiceDate,
-                        DueDate = invoice.DueDate,
-                        DaysOverdue = Math.Max(0, daysOverdue),
-                        TotalAmount = invoice.TotalAmount,
-                        PaidAmount = invoice.PaidAmount,
-                        BalanceAmount = invoice.BalanceAmount,
-                        AgingBucket = agingBucket
-                    });
-                }
-
-                detailedAging.TotalOutstanding = detailedAging.Invoices.Sum(i => i.BalanceAmount);
+                customerDetailedById[id] = detailedAging;
                 customerDetailedAging.Add(detailedAging);
+                return detailedAging;
             }
+
+            foreach (var invoice in invoices)
+            {
+                var detailedAging = GetOrCreateDetailed(invoice.CustomerId, invoice.CustomerName);
+                var daysOverdue = GetDaysOverdue(invoice.DueDate, invoice.InvoiceDate, effectiveDate);
+
+                detailedAging.Invoices.Add(new InvoiceAgingDto
+                {
+                    InvoiceId = invoice.Id,
+                    InvoiceNumber = invoice.InvoiceNumber,
+                    InvoiceDate = invoice.InvoiceDate,
+                    DueDate = invoice.DueDate,
+                    DaysOverdue = Math.Max(0, daysOverdue),
+                    TotalAmount = invoice.TotalAmount,
+                    PaidAmount = invoice.PaidAmount,
+                    BalanceAmount = invoice.BalanceAmount,
+                    AgingBucket = GetAgingBucket(daysOverdue, invoice.DueDate)
+                });
+            }
+
+            foreach (var adjustment in adjustments)
+            {
+                if (!adjustment.CustomerId.HasValue)
+                    continue;
+
+                var amount = GetSignedSubledgerAmount(adjustment);
+                if (amount == 0)
+                    continue;
+
+                var detailedAging = GetOrCreateDetailed(
+                    adjustment.CustomerId.Value,
+                    adjustment.Customer?.PartnerName ?? "Customer");
+                var daysOverdue = GetDaysOverdue(adjustment.DueDate, adjustment.AdjustmentDate, effectiveDate);
+
+                detailedAging.Invoices.Add(new InvoiceAgingDto
+                {
+                    InvoiceId = adjustment.Id,
+                    InvoiceNumber = adjustment.AdjustmentNumber,
+                    InvoiceDate = adjustment.AdjustmentDate,
+                    DueDate = adjustment.DueDate,
+                    DaysOverdue = Math.Max(0, daysOverdue),
+                    TotalAmount = amount,
+                    PaidAmount = 0,
+                    BalanceAmount = amount,
+                    AgingBucket = GetAgingBucket(daysOverdue, adjustment.DueDate)
+                });
+            }
+
+            foreach (var detailedAging in customerDetailedAging)
+                detailedAging.TotalOutstanding = detailedAging.Invoices.Sum(i => i.BalanceAmount);
 
             var report = new DetailedAgingReportDto
             {
                 AsOfDate = effectiveDate,
-                Customers = customerDetailedAging.OrderByDescending(c => c.TotalOutstanding).ToList(),
+                Customers = customerDetailedAging.Where(c => c.TotalOutstanding != 0).OrderByDescending(c => c.TotalOutstanding).ToList(),
                 Summary = new AgingSummaryDto
                 {
                     GrandTotal = customerDetailedAging.Sum(c => c.TotalOutstanding),
@@ -225,6 +275,210 @@ namespace ErpSystem.Api.Services.Finance.AR
                 }
             };
 
+            return report;
+        }
+
+        public Task<SubledgerSettlementRebuildResultDto> RebuildSettlementReadModelAsync(
+            DateTime? asOfDate = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_settlementReadModelService == null)
+            {
+                throw new InvalidOperationException("AR settlement read-model service is not configured.");
+            }
+
+            return _settlementReadModelService.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsReceivable,
+                AsOfDate = asOfDate
+            }, cancellationToken);
+        }
+
+        public Task<SubledgerControlReconciliationDto> GetControlReconciliationAsync(
+            DateTime? asOfDate = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_settlementReadModelService == null)
+            {
+                throw new InvalidOperationException("AR settlement read-model service is not configured.");
+            }
+
+            return _settlementReadModelService.GetControlReconciliationAsync(
+                SubledgerSettlementModules.AccountsReceivable,
+                asOfDate,
+                cancellationToken);
+        }
+
+        private async Task<AgingReportDto> GetSettlementReadModelAgingReportAsync(
+            DateTime? asOfDate,
+            Guid? customerId,
+            CancellationToken cancellationToken)
+        {
+            var effectiveDate = asOfDate ?? DateTime.UtcNow;
+            var rebuild = await _settlementReadModelService!.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsReceivable,
+                AsOfDate = effectiveDate,
+                RecordAudit = false
+            }, cancellationToken);
+
+            var balances = (await _settlementReadModelService.GetBalancesAsync(
+                    SubledgerSettlementModules.AccountsReceivable,
+                    effectiveDate,
+                    customerId,
+                    cancellationToken))
+                .Where(b => b.OutstandingAmount != 0)
+                .ToList();
+
+            var customerNames = await LoadArCustomerNamesAsync(balances.Select(b => b.SourceDocumentId).Distinct().ToList(), cancellationToken);
+            var adjustments = await GetPostedArAdjustmentsAsync(customerId, cancellationToken);
+
+            var customerAging = new List<CustomerAgingDto>();
+            var byId = new Dictionary<Guid, CustomerAgingDto>();
+            CustomerAgingDto GetOrCreate(Guid id, string name)
+            {
+                if (byId.TryGetValue(id, out var existing))
+                    return existing;
+
+                var aging = new CustomerAgingDto
+                {
+                    CustomerId = id,
+                    CustomerCode = string.Empty,
+                    CustomerName = name
+                };
+                byId[id] = aging;
+                customerAging.Add(aging);
+                return aging;
+            }
+
+            foreach (var balance in balances)
+            {
+                var aging = GetOrCreate(
+                    balance.CounterpartyId,
+                    customerNames.GetValueOrDefault(balance.SourceDocumentId) ?? "Customer");
+                AddToAgingBucket(aging, balance.OutstandingAmount, balance.DueDate, balance.TransactionDate, effectiveDate);
+            }
+
+            foreach (var adjustment in adjustments)
+            {
+                if (!adjustment.CustomerId.HasValue)
+                    continue;
+
+                var amount = GetSignedSubledgerAmount(adjustment);
+                if (amount == 0)
+                    continue;
+
+                var aging = GetOrCreate(adjustment.CustomerId.Value, adjustment.Customer?.PartnerName ?? "Customer");
+                AddToAgingBucket(aging, amount, adjustment.DueDate, adjustment.AdjustmentDate, effectiveDate);
+            }
+
+            foreach (var aging in customerAging)
+                aging.TotalOutstanding = aging.Current + aging.Days1To30 + aging.Days31To60 + aging.Days61To90 + aging.Days90Plus;
+
+            var report = new AgingReportDto
+            {
+                AsOfDate = effectiveDate,
+                UsesSettlementReadModel = true,
+                Customers = customerAging.Where(c => c.TotalOutstanding != 0).OrderByDescending(c => c.TotalOutstanding).ToList(),
+                Diagnostics = rebuild.Diagnostics,
+                Summary = new AgingSummaryDto
+                {
+                    TotalCurrent = customerAging.Sum(c => c.Current),
+                    TotalDays1To30 = customerAging.Sum(c => c.Days1To30),
+                    TotalDays31To60 = customerAging.Sum(c => c.Days31To60),
+                    TotalDays61To90 = customerAging.Sum(c => c.Days61To90),
+                    TotalDays90Plus = customerAging.Sum(c => c.Days90Plus),
+                    GrandTotal = customerAging.Sum(c => c.TotalOutstanding),
+                    TotalCustomers = customerAging.Count,
+                    OverdueCustomers = customerAging.Count(c => c.Days1To30 + c.Days31To60 + c.Days61To90 + c.Days90Plus > 0)
+                }
+            };
+
+            report.Buckets = BuildAgingBuckets(report.Summary, customerAging);
+            await RecordReportAuditAsync(FinanceAuditEvents.ArAgingGeneratedFromSettlementReadModel, report, cancellationToken);
+            return report;
+        }
+
+        private async Task<DetailedAgingReportDto> GetSettlementReadModelDetailedAgingReportAsync(
+            DateTime? asOfDate,
+            Guid? customerId,
+            CancellationToken cancellationToken)
+        {
+            var effectiveDate = asOfDate ?? DateTime.UtcNow;
+            var rebuild = await _settlementReadModelService!.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsReceivable,
+                AsOfDate = effectiveDate,
+                RecordAudit = false
+            }, cancellationToken);
+
+            var balances = (await _settlementReadModelService.GetBalancesAsync(
+                    SubledgerSettlementModules.AccountsReceivable,
+                    effectiveDate,
+                    customerId,
+                    cancellationToken))
+                .Where(b => b.OutstandingAmount != 0)
+                .ToList();
+
+            var customerNames = await LoadArCustomerNamesAsync(balances.Select(b => b.SourceDocumentId).Distinct().ToList(), cancellationToken);
+            var adjustments = await GetPostedArAdjustmentsAsync(customerId, cancellationToken);
+            var detailed = new List<CustomerDetailedAgingDto>();
+            var byId = new Dictionary<Guid, CustomerDetailedAgingDto>();
+            CustomerDetailedAgingDto GetOrCreate(Guid id, string name)
+            {
+                if (byId.TryGetValue(id, out var existing))
+                    return existing;
+
+                var row = new CustomerDetailedAgingDto
+                {
+                    CustomerId = id,
+                    CustomerCode = string.Empty,
+                    CustomerName = name
+                };
+                byId[id] = row;
+                detailed.Add(row);
+                return row;
+            }
+
+            foreach (var balance in balances)
+            {
+                var row = GetOrCreate(
+                    balance.CounterpartyId,
+                    customerNames.GetValueOrDefault(balance.SourceDocumentId) ?? "Customer");
+                row.Invoices.Add(MapArBalanceToAgingInvoice(balance, effectiveDate));
+            }
+
+            foreach (var adjustment in adjustments)
+            {
+                if (!adjustment.CustomerId.HasValue)
+                    continue;
+
+                var amount = GetSignedSubledgerAmount(adjustment);
+                if (amount == 0)
+                    continue;
+
+                var row = GetOrCreate(adjustment.CustomerId.Value, adjustment.Customer?.PartnerName ?? "Customer");
+                row.Invoices.Add(MapArAdjustmentToAgingInvoice(adjustment, effectiveDate));
+            }
+
+            foreach (var row in detailed)
+                row.TotalOutstanding = row.Invoices.Sum(i => i.BalanceAmount);
+
+            var customerRows = detailed.Where(c => c.TotalOutstanding != 0).OrderByDescending(c => c.TotalOutstanding).ToList();
+            var report = new DetailedAgingReportDto
+            {
+                AsOfDate = effectiveDate,
+                UsesSettlementReadModel = true,
+                Customers = customerRows,
+                Diagnostics = rebuild.Diagnostics,
+                Summary = new AgingSummaryDto
+                {
+                    GrandTotal = customerRows.Sum(c => c.TotalOutstanding),
+                    TotalCustomers = customerRows.Count
+                }
+            };
+
+            await RecordReportAuditAsync(FinanceAuditEvents.ArAgingGeneratedFromSettlementReadModel, report, cancellationToken);
             return report;
         }
 
@@ -255,7 +509,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                     p.PaymentDate < fromDate)
                 .ToListAsync(cancellationToken);
 
-            var openingBalance = openingInvoices.Sum(i => i.TotalAmount) - openingPayments.Sum(p => p.AllocatedAmount);
+            var openingAdjustments = await GetPostedArAdjustmentsAsync(customerId, cancellationToken);
+            var openingBalance = openingInvoices.Sum(i => i.TotalAmount)
+                - openingPayments.Sum(p => p.AllocatedAmount)
+                + openingAdjustments
+                    .Where(a => a.AdjustmentDate < fromDate)
+                    .Sum(GetSignedSubledgerAmount);
 
             // Get transactions in period
             var periodInvoices = await _unitOfWork.Repository<Invoice>()
@@ -276,38 +535,54 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .OrderBy(p => p.PaymentDate)
                 .ToListAsync(cancellationToken);
 
+            var periodAdjustments = openingAdjustments
+                .Where(a => a.AdjustmentDate >= fromDate && a.AdjustmentDate <= toDate)
+                .ToList();
+
             var transactions = new List<StatementTransactionDto>();
             var runningBalance = openingBalance;
 
-            // Combine and sort transactions
-            foreach (var invoice in periodInvoices)
-            {
-                runningBalance += invoice.TotalAmount;
-                transactions.Add(new StatementTransactionDto
+            var orderedTransactions = periodInvoices
+                .Select(invoice => new StatementTransactionDto
                 {
                     TransactionDate = invoice.InvoiceDate,
                     TransactionType = "Invoice",
                     Reference = invoice.InvoiceNumber,
                     Description = invoice.Notes ?? "Sales Invoice",
                     Debit = invoice.TotalAmount,
-                    Credit = 0,
-                    Balance = runningBalance
-                });
-            }
-
-            foreach (var payment in periodPayments)
-            {
-                runningBalance -= payment.AllocatedAmount;
-                transactions.Add(new StatementTransactionDto
+                    Credit = 0
+                })
+                .Concat(periodPayments.Select(payment => new StatementTransactionDto
                 {
                     TransactionDate = payment.PaymentDate,
                     TransactionType = payment.IsCreditNote ? "CreditNote" : "Payment",
                     Reference = payment.PaymentNumber,
                     Description = payment.Notes ?? $"Payment - {payment.PaymentMethod}",
                     Debit = 0,
-                    Credit = payment.AllocatedAmount,
-                    Balance = runningBalance
-                });
+                    Credit = payment.AllocatedAmount
+                }))
+                .Concat(periodAdjustments.Select(adjustment =>
+                {
+                    var amount = GetSignedSubledgerAmount(adjustment);
+                    return new StatementTransactionDto
+                    {
+                        TransactionDate = adjustment.AdjustmentDate,
+                        TransactionType = "Adjustment",
+                        Reference = adjustment.AdjustmentNumber,
+                        Description = adjustment.Reason,
+                        Debit = amount > 0 ? amount : 0,
+                        Credit = amount < 0 ? Math.Abs(amount) : 0
+                    };
+                }))
+                .OrderBy(t => t.TransactionDate)
+                .ThenBy(t => t.Reference)
+                .ToList();
+
+            foreach (var transaction in orderedTransactions)
+            {
+                runningBalance += transaction.Debit - transaction.Credit;
+                transaction.Balance = runningBalance;
+                transactions.Add(transaction);
             }
 
             var statement = new CustomerStatementDto
@@ -319,9 +594,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                 FromDate = fromDate,
                 ToDate = toDate,
                 OpeningBalance = openingBalance,
-                Transactions = transactions.OrderBy(t => t.TransactionDate).ToList(),
-                TotalInvoices = periodInvoices.Sum(i => i.TotalAmount),
-                TotalPayments = periodPayments.Sum(p => p.AllocatedAmount),
+                Transactions = transactions,
+                TotalInvoices = periodInvoices.Sum(i => i.TotalAmount) + periodAdjustments.Where(a => GetSignedSubledgerAmount(a) > 0).Sum(GetSignedSubledgerAmount),
+                TotalPayments = periodPayments.Sum(p => p.AllocatedAmount) + periodAdjustments.Where(a => GetSignedSubledgerAmount(a) < 0).Sum(a => Math.Abs(GetSignedSubledgerAmount(a))),
                 ClosingBalance = runningBalance
             };
 
@@ -332,13 +607,13 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var now = DateTime.UtcNow;
 
-            var overdueInvoices = await _unitOfWork.Repository<Invoice>()
+            var overdueQuery = _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
                     i.DueDate.HasValue &&
                     i.DueDate.Value < now &&
-                    (i.TotalAmount - i.PaidAmount) > 0)
-                .ToListAsync(cancellationToken);
+                    (i.TotalAmount - i.PaidAmount) > 0);
+            var overdueInvoices = await ApplyPostedArInvoiceFilter(overdueQuery).ToListAsync(cancellationToken);
 
             var customerGroups = overdueInvoices
                 .GroupBy(i => new { i.CustomerId, i.CustomerName })
@@ -358,16 +633,22 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Take(50)
                 .ToList();
 
-            var allOutstanding = await _unitOfWork.Repository<Invoice>()
+            var outstandingQuery = _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    (i.TotalAmount - i.PaidAmount) > 0)
+                    (i.TotalAmount - i.PaidAmount) > 0);
+            var allOutstanding = await ApplyPostedArInvoiceFilter(outstandingQuery)
                 .SumAsync(i => i.TotalAmount - i.PaidAmount, cancellationToken);
+            var allAdjustments = await GetPostedArAdjustmentsAsync(null, cancellationToken);
+            var adjustmentOutstanding = allAdjustments.Sum(GetSignedSubledgerAmount);
+            var overdueAdjustmentAmount = allAdjustments
+                .Where(a => GetSignedSubledgerAmount(a) > 0 && (a.DueDate ?? a.AdjustmentDate) < now)
+                .Sum(GetSignedSubledgerAmount);
 
             var dashboard = new CollectionsDashboardDto
             {
-                TotalOutstanding = allOutstanding,
-                TotalOverdue = overdueInvoices.Sum(i => i.BalanceAmount),
+                TotalOutstanding = allOutstanding + adjustmentOutstanding,
+                TotalOverdue = overdueInvoices.Sum(i => i.BalanceAmount) + overdueAdjustmentAmount,
                 OverdueInvoiceCount = overdueInvoices.Count,
                 OverdueCustomers = customerGroups
             };
@@ -379,24 +660,35 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var now = DateTime.UtcNow;
 
-            var allInvoices = await _unitOfWork.Repository<Invoice>()
-                .GetQueryable(i => i.TenantId == TenantId)
-                .ToListAsync(cancellationToken);
+            var allInvoiceQuery = _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i => i.TenantId == TenantId);
+            var allInvoices = await ApplyPostedArInvoiceFilter(allInvoiceQuery).ToListAsync(cancellationToken);
 
             var overdueInvoices = allInvoices.Where(i =>
                 i.DueDate.HasValue &&
                 i.DueDate.Value < now &&
                 i.BalanceAmount > 0).ToList();
+            var adjustments = await GetPostedArAdjustmentsAsync(null, cancellationToken);
+            var positiveAdjustments = adjustments.Where(a => GetSignedSubledgerAmount(a) > 0).ToList();
+            var overdueAdjustments = positiveAdjustments
+                .Where(a => (a.DueDate ?? a.AdjustmentDate) < now)
+                .ToList();
+            var currentAdjustmentAmount = adjustments
+                .Where(a => (a.DueDate ?? a.AdjustmentDate) >= now)
+                .Sum(GetSignedSubledgerAmount);
 
             var summary = new ArSummaryDto
             {
-                TotalOutstanding = allInvoices.Where(i => i.BalanceAmount > 0).Sum(i => i.BalanceAmount),
-                TotalOverdue = overdueInvoices.Sum(i => i.BalanceAmount),
+                TotalOutstanding = allInvoices.Where(i => i.BalanceAmount > 0).Sum(i => i.BalanceAmount)
+                    + adjustments.Sum(GetSignedSubledgerAmount),
+                TotalOverdue = overdueInvoices.Sum(i => i.BalanceAmount)
+                    + overdueAdjustments.Sum(GetSignedSubledgerAmount),
                 TotalCurrent = allInvoices.Where(i =>
                     i.BalanceAmount > 0 &&
-                    (!i.DueDate.HasValue || i.DueDate.Value >= now)).Sum(i => i.BalanceAmount),
+                    (!i.DueDate.HasValue || i.DueDate.Value >= now)).Sum(i => i.BalanceAmount)
+                    + currentAdjustmentAmount,
                 TotalInvoices = allInvoices.Count,
-                OverdueInvoices = overdueInvoices.Count,
+                OverdueInvoices = overdueInvoices.Count + overdueAdjustments.Count,
                 // Simplified calculation - would need payment history for accurate DSO
                 AverageDaysToPayment = 30, // Placeholder
                 BadDebtProvision = 0, // Would be configured
@@ -472,11 +764,47 @@ namespace ErpSystem.Api.Services.Finance.AR
             return trends;
         }
 
-        public async Task<byte[]> ExportAgingReportAsync(DateTime? asOfDate = null, string format = "Excel", CancellationToken cancellationToken = default)
+        public async Task<byte[]> ExportAgingReportAsync(DateTime? asOfDate = null, string format = "Csv", CancellationToken cancellationToken = default)
         {
-            // Placeholder - would integrate with an Excel/PDF library
-            await Task.CompletedTask;
-            throw new NotImplementedException("Export functionality will be implemented with an Excel/PDF library.");
+            if (!string.Equals(format, "Csv", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new NotSupportedException("AR aging export supports Csv in the backend reporting foundation. Use the central finance report export service for other formats when added.");
+            }
+
+            var exportReport = await GetDetailedAgingReportAsync(asOfDate, null, cancellationToken);
+            if (!exportReport.UsesSettlementReadModel)
+            {
+                throw new InvalidOperationException("AR aging export requires the AR settlement read model. Legacy operational-field aging is not allowed for production export.");
+            }
+
+            var csv = new StringBuilder();
+            csv.AppendLine("Customer,InvoiceNumber,InvoiceDate,DueDate,TotalAmount,PaidAmount,CreditedAmount,WithheldAmount,OutstandingAmount,AgingBucket,SettlementStatus,SourcePostingEventId,SourceJournalEntryId,Diagnostics");
+            foreach (var customer in exportReport.Customers)
+            {
+                foreach (var invoice in customer.Invoices)
+                {
+                    csv.AppendLine(string.Join(",", new[]
+                    {
+                        Csv(customer.CustomerName),
+                        Csv(invoice.InvoiceNumber),
+                        Csv(invoice.InvoiceDate.ToString("yyyy-MM-dd")),
+                        Csv(invoice.DueDate?.ToString("yyyy-MM-dd") ?? string.Empty),
+                        invoice.TotalAmount.ToString("0.00"),
+                        invoice.PaidAmount.ToString("0.00"),
+                        invoice.CreditedAmount.ToString("0.00"),
+                        invoice.WithheldAmount.ToString("0.00"),
+                        invoice.BalanceAmount.ToString("0.00"),
+                        Csv(invoice.AgingBucket),
+                        Csv(invoice.SettlementStatus ?? string.Empty),
+                        Csv(invoice.SourcePostingEventId?.ToString() ?? string.Empty),
+                        Csv(invoice.SourceJournalEntryId?.ToString() ?? string.Empty),
+                        Csv(invoice.DiagnosticFlags ?? string.Empty)
+                    }));
+                }
+            }
+
+            await RecordReportAuditAsync(FinanceAuditEvents.ArAgingExported, exportReport, cancellationToken);
+            return Encoding.UTF8.GetBytes(csv.ToString());
         }
 
         public async Task<byte[]> ExportCustomerStatementAsync(Guid customerId, DateTime fromDate, DateTime toDate, string format = "PDF", CancellationToken cancellationToken = default)
@@ -484,6 +812,223 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Placeholder - would integrate with a PDF library
             await Task.CompletedTask;
             throw new NotImplementedException("Export functionality will be implemented with a PDF library.");
+        }
+
+        private Task<List<SubledgerAdjustmentJournal>> GetPostedArAdjustmentsAsync(
+            Guid? customerId,
+            CancellationToken cancellationToken)
+        {
+            IQueryable<SubledgerAdjustmentJournal> query = _unitOfWork.Repository<SubledgerAdjustmentJournal>()
+                .GetQueryable(a =>
+                    a.TenantId == TenantId &&
+                    a.Module == SubledgerModules.AccountsReceivable &&
+                    a.Status == SubledgerAdjustmentStatuses.Posted &&
+                    !a.IsDeleted)
+                .Include(a => a.Customer);
+
+            if (customerId.HasValue)
+                query = query.Where(a => a.CustomerId == customerId.Value);
+
+            return query.ToListAsync(cancellationToken);
+        }
+
+        private IQueryable<Invoice> ApplyPostedArInvoiceFilter(IQueryable<Invoice> query)
+        {
+            var postedInvoiceEvents = _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e =>
+                    e.TenantId == TenantId &&
+                    e.SourceDocumentType == "CustomerInvoice" &&
+                    e.PostingAction == "Post" &&
+                    e.PostingStatus == "Posted");
+
+            return query.Where(i => postedInvoiceEvents.Any(e => e.SourceDocumentId == i.Id));
+        }
+
+        private static void AddToAgingBucket(
+            CustomerAgingDto aging,
+            decimal amount,
+            DateTime? dueDate,
+            DateTime transactionDate,
+            DateTime asOfDate)
+        {
+            var daysOverdue = GetDaysOverdue(dueDate, transactionDate, asOfDate);
+
+            if (daysOverdue < 0 || !dueDate.HasValue)
+                aging.Current += amount;
+            else if (daysOverdue <= 30)
+                aging.Days1To30 += amount;
+            else if (daysOverdue <= 60)
+                aging.Days31To60 += amount;
+            else if (daysOverdue <= 90)
+                aging.Days61To90 += amount;
+            else
+                aging.Days90Plus += amount;
+        }
+
+        private static int GetDaysOverdue(DateTime? dueDate, DateTime transactionDate, DateTime asOfDate)
+        {
+            return dueDate.HasValue
+                ? (asOfDate - dueDate.Value).Days
+                : (asOfDate - transactionDate).Days;
+        }
+
+        private static string GetAgingBucket(int daysOverdue, DateTime? dueDate)
+        {
+            if (daysOverdue < 0 || !dueDate.HasValue) return "Current";
+            if (daysOverdue <= 30) return "1-30 Days";
+            if (daysOverdue <= 60) return "31-60 Days";
+            if (daysOverdue <= 90) return "61-90 Days";
+            return "90+ Days";
+        }
+
+        private async Task<Dictionary<Guid, string>> LoadArCustomerNamesAsync(
+            IReadOnlyCollection<Guid> invoiceIds,
+            CancellationToken cancellationToken)
+        {
+            if (invoiceIds.Count == 0)
+            {
+                return new Dictionary<Guid, string>();
+            }
+
+            return await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i => i.TenantId == TenantId && invoiceIds.Contains(i.Id))
+                .Select(i => new { i.Id, i.CustomerName })
+                .ToDictionaryAsync(i => i.Id, i => i.CustomerName, cancellationToken);
+        }
+
+        private static List<AgingBucketDto> BuildAgingBuckets(AgingSummaryDto summary, IReadOnlyCollection<CustomerAgingDto> customerAging)
+        {
+            return new List<AgingBucketDto>
+            {
+                new()
+                {
+                    BucketName = "Current",
+                    Amount = summary.TotalCurrent,
+                    CustomerCount = customerAging.Count(c => c.Current > 0),
+                    Percentage = summary.GrandTotal > 0 ? summary.TotalCurrent / summary.GrandTotal * 100 : 0
+                },
+                new()
+                {
+                    BucketName = "1-30 Days",
+                    Amount = summary.TotalDays1To30,
+                    CustomerCount = customerAging.Count(c => c.Days1To30 > 0),
+                    Percentage = summary.GrandTotal > 0 ? summary.TotalDays1To30 / summary.GrandTotal * 100 : 0
+                },
+                new()
+                {
+                    BucketName = "31-60 Days",
+                    Amount = summary.TotalDays31To60,
+                    CustomerCount = customerAging.Count(c => c.Days31To60 > 0),
+                    Percentage = summary.GrandTotal > 0 ? summary.TotalDays31To60 / summary.GrandTotal * 100 : 0
+                },
+                new()
+                {
+                    BucketName = "61-90 Days",
+                    Amount = summary.TotalDays61To90,
+                    CustomerCount = customerAging.Count(c => c.Days61To90 > 0),
+                    Percentage = summary.GrandTotal > 0 ? summary.TotalDays61To90 / summary.GrandTotal * 100 : 0
+                },
+                new()
+                {
+                    BucketName = "90+ Days",
+                    Amount = summary.TotalDays90Plus,
+                    CustomerCount = customerAging.Count(c => c.Days90Plus > 0),
+                    Percentage = summary.GrandTotal > 0 ? summary.TotalDays90Plus / summary.GrandTotal * 100 : 0
+                }
+            };
+        }
+
+        private static InvoiceAgingDto MapArBalanceToAgingInvoice(
+            SubledgerSettlementBalance balance,
+            DateTime asOfDate)
+        {
+            var daysOverdue = GetDaysOverdue(balance.DueDate, balance.TransactionDate, asOfDate);
+            return new InvoiceAgingDto
+            {
+                InvoiceId = balance.SourceDocumentId,
+                InvoiceNumber = balance.SourceDocumentNumber,
+                InvoiceDate = balance.TransactionDate,
+                DueDate = balance.DueDate,
+                DaysOverdue = Math.Max(0, daysOverdue),
+                TotalAmount = balance.OriginalDocumentAmount,
+                PaidAmount = balance.SettledAmount,
+                CreditedAmount = balance.CreditedAmount,
+                WithheldAmount = balance.WithheldAmount,
+                BalanceAmount = balance.OutstandingAmount,
+                SourcePostingEventId = balance.SourcePostingEventId,
+                SourceJournalEntryId = balance.SourceJournalEntryId,
+                SettlementStatus = balance.SettlementStatus,
+                DiagnosticFlags = balance.DiagnosticFlags,
+                AgingBucket = GetAgingBucket(daysOverdue, balance.DueDate)
+            };
+        }
+
+        private static InvoiceAgingDto MapArAdjustmentToAgingInvoice(
+            SubledgerAdjustmentJournal adjustment,
+            DateTime asOfDate)
+        {
+            var amount = GetSignedSubledgerAmount(adjustment);
+            var daysOverdue = GetDaysOverdue(adjustment.DueDate, adjustment.AdjustmentDate, asOfDate);
+            return new InvoiceAgingDto
+            {
+                InvoiceId = adjustment.Id,
+                InvoiceNumber = adjustment.AdjustmentNumber,
+                InvoiceDate = adjustment.AdjustmentDate,
+                DueDate = adjustment.DueDate,
+                DaysOverdue = Math.Max(0, daysOverdue),
+                TotalAmount = amount,
+                PaidAmount = 0,
+                BalanceAmount = amount,
+                AgingBucket = GetAgingBucket(daysOverdue, adjustment.DueDate),
+                SettlementStatus = "PostedAdjustment"
+            };
+        }
+
+        private async Task RecordReportAuditAsync(string eventType, object report, CancellationToken cancellationToken)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+                {
+                    EventType = eventType,
+                    TenantId = TenantId,
+                    SourceModule = "AR",
+                    SourceDocumentType = "AgingReport",
+                    Resource = "Finance.AR.AgingReport",
+                    ResourceId = TenantId.ToString(),
+                    AfterValues = report
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to record AR report audit event {EventType}", eventType);
+            }
+        }
+
+        private static string Csv(string value)
+        {
+            if (value.Contains('"', StringComparison.Ordinal))
+            {
+                value = value.Replace("\"", "\"\"", StringComparison.Ordinal);
+            }
+
+            return value.Contains(',', StringComparison.Ordinal) ||
+                   value.Contains('\r', StringComparison.Ordinal) ||
+                   value.Contains('\n', StringComparison.Ordinal) ||
+                   value.Contains('"', StringComparison.Ordinal)
+                ? $"\"{value}\""
+                : value;
+        }
+
+        private static decimal GetSignedSubledgerAmount(SubledgerAdjustmentJournal adjustment)
+        {
+            var isDebit = string.Equals(adjustment.AdjustmentType, SubledgerAdjustmentTypes.Debit, StringComparison.OrdinalIgnoreCase);
+            return isDebit ? adjustment.Amount : -adjustment.Amount;
         }
     }
 }

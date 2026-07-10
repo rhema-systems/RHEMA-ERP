@@ -148,10 +148,14 @@ export interface PaymentCreateRequest {
     totalAmount: number;
     paymentMethod: string;
     referenceNumber?: string;
+    bankAccountId?: string;
+    checkNumber?: string;
+    transactionReference?: string;
     currencyCode: string;
     exchangeRate?: number;
     notes?: string;
     isCreditNote?: boolean;
+    allocations?: InvoiceAllocationRequest[];
 }
 
 export interface PaymentAllocation {

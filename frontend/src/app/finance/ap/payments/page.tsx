@@ -47,6 +47,7 @@ export default function VendorPaymentsPage() {
         queryFn: () => accountsPayableService.getPayments({
             page,
             pageSize,
+            searchTerm: debouncedSearchTerm,
             status: statusFilter
         }),
     });

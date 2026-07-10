@@ -40,9 +40,11 @@ public static class FinanceDocumentTypes
     public const string ARInvoice = "ARInvoice";
     public const string ARPayment = "ARPayment";
     public const string ARCreditNote = "ARCreditNote";
+    public const string ARAdjustmentJournal = "ARAdjustmentJournal";
     public const string APInvoice = "APInvoice";
     public const string APPayment = "APPayment";
     public const string APPaymentBatch = "APPaymentBatch";
+    public const string APAdjustmentJournal = "APAdjustmentJournal";
     public const string APSupplierReturn = "APSupplierReturn";
     public const string APSupplierDebitNote = "APSupplierDebitNote";
     public const string CashReceipt = "CashReceipt";
@@ -80,9 +82,11 @@ public static class DocumentSequenceDefaults
             Finance(tenantId, FinanceDocumentTypes.ARInvoice, "Customer Invoice", "INV-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable invoices."),
             Finance(tenantId, FinanceDocumentTypes.ARPayment, "Customer Payment", "PMT-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable receipts/payments."),
             Finance(tenantId, FinanceDocumentTypes.ARCreditNote, "AR Credit Note", "CN-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable credit notes."),
+            Finance(tenantId, FinanceDocumentTypes.ARAdjustmentJournal, "AR Adjustment Journal", "ARJ-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable subledger adjustment journals."),
             Finance(tenantId, FinanceDocumentTypes.APInvoice, "Vendor Invoice", "VI-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Accounts payable invoices."),
             Finance(tenantId, FinanceDocumentTypes.APPayment, "Vendor Payment", "VP-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Accounts payable payments."),
             Finance(tenantId, FinanceDocumentTypes.APPaymentBatch, "Vendor Payment Batch", "PB-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Accounts payable payment batches."),
+            Finance(tenantId, FinanceDocumentTypes.APAdjustmentJournal, "AP Adjustment Journal", "APJ-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts payable subledger adjustment journals."),
             Finance(tenantId, FinanceDocumentTypes.APSupplierReturn, "AP Supplier Return", "SR-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, true, "Supplier return slips and AP return workflows."),
             Finance(tenantId, FinanceDocumentTypes.APSupplierDebitNote, "AP Supplier Debit Note", "SDN-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Supplier debit notes generated from AP supplier returns."),
             Finance(tenantId, FinanceDocumentTypes.CashReceipt, "Cash Receipt", "RCT-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Cash management receipts."),

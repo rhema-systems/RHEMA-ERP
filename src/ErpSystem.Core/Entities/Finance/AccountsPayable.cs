@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance;
 
@@ -192,6 +194,17 @@ public class VendorInvoice : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
+    public Guid? WithholdingTaxId { get; set; }
+    public virtual Tax? WithholdingTax { get; set; }
+
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public virtual Account? WithholdingTaxAccount { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingCertificateNumber { get; set; }
+
+    public DateTime? WithholdingCertificateDate { get; set; }
+
     // ── Matching ────────────────────────────────────────────────────────
 
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
@@ -270,6 +283,13 @@ public class VendorInvoiceLineItem : TenantEntity
     public Guid? GLAccountId { get; set; }
     public virtual Account? GLAccount { get; set; }
 
+    public Guid? FixedAssetId { get; set; }
+    public virtual FixedAsset? FixedAsset { get; set; }
+
+    public Guid? CapitalizationJournalEntryId { get; set; }
+    public Guid? CapitalizationPostingEventId { get; set; }
+    public DateTime? CapitalizedAt { get; set; }
+
     // ── For product-based lines (links to PO item for matching) ─────────
 
     public Guid? PurchaseOrderItemId { get; set; }
@@ -311,6 +331,11 @@ public class VendorInvoiceLineItem : TenantEntity
     public decimal LineTotal => Quantity * UnitPrice;
 
     // ── Tax ──────────────────────────────────────────────────────────────
+
+    public Guid? TaxGroupId { get; set; }
+    public virtual TaxGroup? TaxGroup { get; set; }
+
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
     [Column(TypeName = "decimal(5,2)")]
     public decimal TaxRate { get; set; }
@@ -405,6 +430,17 @@ public class VendorPayment : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
+
+    public Guid? WithholdingTaxId { get; set; }
+    public virtual Tax? WithholdingTax { get; set; }
+
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public virtual Account? WithholdingTaxAccount { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingCertificateNumber { get; set; }
+
+    public DateTime? WithholdingCertificateDate { get; set; }
 
     // ── Early-Payment Discount Applied ──────────────────────────────────
 

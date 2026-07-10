@@ -47,6 +47,8 @@ namespace ErpSystem.Core.DTOs.Finance
         
         /// <summary>TRUE if rate has been used in transactions</summary>
         public bool HasBeenUsed { get; set; }
+        public bool UsageLocked { get; set; }
+        public string ApprovalStatus { get; set; } = "Approved";
         
         /// <summary>Count of transactions using this rate</summary>
         public int UsageCount { get; set; }
@@ -100,6 +102,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? SourceReference { get; set; }
         
         public bool IsActive { get; set; } = true;
+        public string ApprovalStatus { get; set; } = "Approved";
     }
 
     /// <summary>
@@ -126,6 +129,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? SourceReference { get; set; }
         
         public bool IsActive { get; set; } = true;
+        public string ApprovalStatus { get; set; } = "Approved";
     }
 
     /// <summary>

@@ -5,68 +5,106 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
 public class AssetValuationService : IAssetValuationService
 {
+    private const string SourceModule = "FixedAssets";
+    private const string SourceDocumentType = "FixedAssetValuation";
+
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
-    private readonly IJournalEntryService _journalEntryService;
+    private readonly IAccountingBookService? _accountingBookService;
+    private readonly IFinancePostingEngine? _financePostingEngine;
+    private readonly IFinanceAuditService? _financeAuditService;
+    private readonly IWorkflowService? _workflowService;
 
     public AssetValuationService(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
-        IJournalEntryService journalEntryService)
+        IJournalEntryService? journalEntryService = null,
+        IAccountingBookService? accountingBookService = null,
+        IFinancePostingEngine? financePostingEngine = null,
+        IFinanceAuditService? financeAuditService = null,
+        IWorkflowService? workflowService = null)
     {
         _context = context;
         _currentUser = currentUser;
-        _journalEntryService = journalEntryService;
+        _accountingBookService = accountingBookService;
+        _financePostingEngine = financePostingEngine;
+        _financeAuditService = financeAuditService;
+        _workflowService = workflowService;
     }
 
-    private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+    private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
     private Guid? UserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : null;
+    private string UserName => _currentUser.UserName ?? "system";
 
     public async Task<AssetValuationDto> CreateValuationAsync(
         CreateAssetValuationDto dto, Guid performedByUserId)
     {
-        var asset = await _context.FixedAssets
-            .Include(a => a.Category)
-            .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == dto.FixedAssetId)
+        var asset = await LoadAssetForValuationAsync(dto.FixedAssetId)
             ?? throw new KeyNotFoundException("Fixed asset not found.");
 
-        if (asset.Status != FixedAssetStatus.Active)
-            throw new InvalidOperationException("Can only revalue Active assets.");
+        var bookValue = ResolveDefaultBookValue(asset);
+        var fiscalPeriod = await ResolveFiscalPeriodAsync(dto.ValuationDate);
+        var valuation = await BuildValuationAsync(asset, bookValue, fiscalPeriod, dto, performedByUserId);
 
-        var valuation = BuildValuation(asset, dto, performedByUserId);
-        _context.Set<AssetValuation>().Add(valuation);
-
-        // Update asset NBV
-        asset.NetBookValue = valuation.CarryingAmountAfter;
-        if (dto.RevisedUsefulLifeMonths.HasValue)
-            asset.UsefulLifeMonths = dto.RevisedUsefulLifeMonths.Value;
-        asset.UpdatedAt = DateTime.UtcNow;
-        asset.UpdatedBy = _currentUser.UserName ?? "system";
-
-        // Log AssetTransaction
-        _context.AssetTransactions.Add(new AssetTransaction
+        var existing = await _context.AssetValuations
+            .Include(v => v.FixedAsset)
+            .FirstOrDefaultAsync(v => v.TenantId == TenantId && v.IdempotencyKey == valuation.IdempotencyKey);
+        if (existing != null)
         {
-            TenantId = TenantId,
-            FixedAssetId = asset.Id,
-            TransactionDate = dto.ValuationDate,
-            TransactionType = dto.ValuationType == ValuationType.Revaluation
-                ? "Revaluation" : dto.ValuationType == ValuationType.ImpairmentReversal
-                    ? "Impairment Reversal" : "Impairment",
-            Description = $"{dto.ValuationType} — Fair value: {dto.FairValue:N2}, Carrying: {valuation.CarryingAmountBefore:N2} → {valuation.CarryingAmountAfter:N2}",
-            Amount = valuation.CarryingAmountAfter - valuation.CarryingAmountBefore,
-            ResultingBookValue = valuation.CarryingAmountAfter,
-            RelatedEntityId = valuation.Id,
-            PerformedByUserId = performedByUserId,
-            CreatedAt = DateTime.UtcNow
-        });
+            return MapToDto(existing, existing.FixedAsset);
+        }
 
+        if (_workflowService != null)
+        {
+            valuation.Status = "PendingApproval";
+        }
+
+        _context.AssetValuations.Add(valuation);
         await _context.SaveChangesAsync();
+
+        await RecordValuationAuditAsync(
+            dto.ValuationType == ValuationType.Revaluation
+                ? FinanceAuditEvents.FixedAssetRevaluationCalculated
+                : FinanceAuditEvents.FixedAssetImpairmentCalculated,
+            valuation,
+            afterValues: BuildValuationAuditSnapshot(valuation),
+            comment: $"{dto.ValuationType} calculated for fixed asset.",
+            cancellationToken: CancellationToken.None);
+
+        if (_workflowService != null)
+        {
+            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("AssetValuation", valuation.Id);
+            if (!workflowResult.Success)
+            {
+                valuation.Status = "Failed";
+                valuation.FailedAt = DateTime.UtcNow;
+                valuation.FailureReason = workflowResult.Message;
+                await _context.SaveChangesAsync();
+                await RecordValuationAuditAsync(
+                    FinanceAuditEvents.FinanceWorkflowApprovalFailed,
+                    valuation,
+                    afterValues: new { workflowResult.Status, workflowResult.Message },
+                    reason: workflowResult.Message,
+                    comment: "Fixed asset valuation workflow submission failed.",
+                    cancellationToken: CancellationToken.None);
+                throw new InvalidOperationException(workflowResult.Message ?? "Fixed asset valuation workflow could not be started.");
+            }
+
+            await RecordValuationAuditAsync(
+                FinanceAuditEvents.FinanceWorkflowSubmitted,
+                valuation,
+                afterValues: new { valuation.Status, workflowResult.WorkflowInstanceId },
+                comment: $"{dto.ValuationType} submitted for workflow approval.",
+                cancellationToken: CancellationToken.None);
+        }
+
         return MapToDto(valuation, asset);
     }
 
@@ -80,84 +118,88 @@ public class AssetValuationService : IAssetValuationService
 
         var assets = await _context.FixedAssets
             .Include(a => a.Category)
-            .Where(a => a.TenantId == TenantId
-                && dto.FixedAssetIds.Contains(a.Id)
-                && a.Status == FixedAssetStatus.Active)
+            .Include(a => a.BookValues)
+                .ThenInclude(b => b.AccountingBook)
+            .Where(a => a.TenantId == TenantId && dto.FixedAssetIds.Contains(a.Id))
             .ToListAsync();
 
-        using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        var fiscalPeriod = await ResolveFiscalPeriodAsync(dto.ValuationDate);
+        var createdValuations = new List<AssetValuation>();
+        foreach (var asset in assets)
         {
-            foreach (var asset in assets)
+            try
             {
-                // Calculate fair value from index percentage
-                var fairValue = asset.NetBookValue * (1 + dto.IndexPercentage / 100m);
-
+                var bookValue = ResolveDefaultBookValue(asset);
+                var fairValue = Math.Round(bookValue.NetBookValue * (1 + dto.IndexPercentage / 100m), 2);
                 var singleDto = new CreateAssetValuationDto
                 {
                     FixedAssetId = asset.Id,
                     ValuationDate = dto.ValuationDate,
                     ValuationType = dto.ValuationType,
-                    FairValue = Math.Round(fairValue, 2),
+                    FairValue = fairValue,
                     ValuerName = dto.ValuerName,
                     ValuationMethod = dto.ValuationMethod,
                     ValuationReportReference = dto.ValuationReportReference,
-                    Reason = dto.Reason ?? $"Bulk revaluation — {dto.IndexPercentage}% index adjustment",
+                    Reason = dto.Reason ?? $"Bulk revaluation index adjustment {dto.IndexPercentage:N2}%.",
                     Notes = dto.Notes
                 };
 
-                try
+                var valuation = await BuildValuationAsync(asset, bookValue, fiscalPeriod, singleDto, performedByUserId);
+                var exists = await _context.AssetValuations
+                    .AnyAsync(v => v.TenantId == TenantId && v.IdempotencyKey == valuation.IdempotencyKey);
+                if (!exists)
                 {
-                    var valuation = BuildValuation(asset, singleDto, performedByUserId);
-                    _context.Set<AssetValuation>().Add(valuation);
-
-                    asset.NetBookValue = valuation.CarryingAmountAfter;
-                    asset.UpdatedAt = DateTime.UtcNow;
-                    asset.UpdatedBy = _currentUser.UserName ?? "system";
-
-                    _context.AssetTransactions.Add(new AssetTransaction
+                    if (_workflowService != null)
                     {
-                        TenantId = TenantId,
-                        FixedAssetId = asset.Id,
-                        TransactionDate = dto.ValuationDate,
-                        TransactionType = dto.ValuationType == ValuationType.Revaluation
-                            ? "Revaluation" : "Impairment",
-                        Description = $"Bulk {dto.ValuationType} — {dto.IndexPercentage}% index, {valuation.CarryingAmountBefore:N2} → {valuation.CarryingAmountAfter:N2}",
-                        Amount = valuation.CarryingAmountAfter - valuation.CarryingAmountBefore,
-                        ResultingBookValue = valuation.CarryingAmountAfter,
-                        RelatedEntityId = valuation.Id,
-                        PerformedByUserId = performedByUserId,
-                        CreatedAt = DateTime.UtcNow
-                    });
+                        valuation.Status = "PendingApproval";
+                    }
 
+                    _context.AssetValuations.Add(valuation);
+                    createdValuations.Add(valuation);
                     result.SuccessfulItems.Add(MapToDto(valuation, asset));
                     result.SuccessCount++;
                 }
-                catch (Exception ex)
-                {
-                    result.Errors.Add($"Asset {asset.AssetCode}: {ex.Message}");
-                    result.FailureCount++;
-                }
             }
-
-            // Report assets that weren't found or weren't Active
-            var processedIds = assets.Select(a => a.Id).ToHashSet();
-            foreach (var missingId in dto.FixedAssetIds.Where(id => !processedIds.Contains(id)))
+            catch (Exception ex)
             {
-                result.Errors.Add($"Asset {missingId}: Not found or not in Active status");
+                result.Errors.Add($"Asset {asset.AssetCode}: {ex.Message}");
                 result.FailureCount++;
+            }
+        }
+
+        var processedIds = assets.Select(a => a.Id).ToHashSet();
+        foreach (var missingId in dto.FixedAssetIds.Where(id => !processedIds.Contains(id)))
+        {
+            result.Errors.Add($"Asset {missingId}: Not found for this tenant");
+            result.FailureCount++;
+        }
+
+        await _context.SaveChangesAsync();
+
+        if (_workflowService != null)
+        {
+            foreach (var valuation in createdValuations)
+            {
+                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("AssetValuation", valuation.Id);
+                if (!workflowResult.Success)
+                {
+                    valuation.Status = "Failed";
+                    valuation.FailedAt = DateTime.UtcNow;
+                    valuation.FailureReason = workflowResult.Message;
+                    result.Errors.Add($"Valuation {valuation.Id}: {workflowResult.Message}");
+                    result.FailureCount++;
+                    continue;
+                }
+
+                await RecordValuationAuditAsync(
+                    FinanceAuditEvents.FinanceWorkflowSubmitted,
+                    valuation,
+                    afterValues: new { valuation.Status, workflowResult.WorkflowInstanceId },
+                    comment: $"{valuation.ValuationType} submitted for workflow approval.",
+                    cancellationToken: CancellationToken.None);
             }
 
             await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            result.Errors.Add($"Bulk operation failed: {ex.Message}");
-            result.SuccessCount = 0;
-            result.FailureCount = result.TotalCount;
-            result.SuccessfulItems.Clear();
         }
 
         return result;
@@ -168,7 +210,12 @@ public class AssetValuationService : IAssetValuationService
         var asset = await _context.FixedAssets
             .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == assetId);
 
-        var valuations = await _context.Set<AssetValuation>()
+        if (asset == null)
+        {
+            throw new KeyNotFoundException("Fixed asset not found.");
+        }
+
+        var valuations = await _context.AssetValuations
             .Where(v => v.TenantId == TenantId && v.FixedAssetId == assetId)
             .OrderByDescending(v => v.ValuationDate)
             .ToListAsync();
@@ -178,179 +225,600 @@ public class AssetValuationService : IAssetValuationService
 
     public async Task<AssetValuationDto> PostValuationToGLAsync(Guid valuationId)
     {
-        var valuation = await _context.Set<AssetValuation>()
+        if (_financePostingEngine == null)
+        {
+            throw new InvalidOperationException("Central finance posting engine is not configured for fixed asset valuation.");
+        }
+
+        var valuation = await _context.AssetValuations
             .Include(v => v.FixedAsset)
                 .ThenInclude(a => a.Category)
+            .Include(v => v.FixedAsset)
+                .ThenInclude(a => a.BookValues)
+                    .ThenInclude(b => b.AccountingBook)
             .FirstOrDefaultAsync(v => v.TenantId == TenantId && v.Id == valuationId)
             ?? throw new KeyNotFoundException("Valuation not found.");
 
-        if (valuation.IsPostedToGL)
-            throw new InvalidOperationException("Valuation has already been posted to GL.");
-
         var asset = valuation.FixedAsset;
-        var category = asset.Category;
-
-        // Determine GL accounts based on valuation type
-        var journalNumber = await _journalEntryService.GenerateJournalEntryNumberAsync();
-        var reference = $"VAL-{asset.AssetCode}-{valuation.ValuationDate:yyyyMMdd}";
-
-        var transactions = new List<CreateAccountTransactionDto>();
-
-        switch (valuation.ValuationType)
+        EnsureValuationTenant(asset);
+        if (valuation.IsPostedToGL)
         {
-            case ValuationType.Revaluation:
-                // Dr Asset Account (increase value)
-                // Cr Revaluation Surplus (OCI)
-                if (category.RevaluationSurplusAccountId == null)
-                    throw new InvalidOperationException("Revaluation Surplus GL account not configured for this category.");
-
-                transactions.Add(new CreateAccountTransactionDto
-                {
-                    AccountId = category.AssetAccountId,
-                    Amount = valuation.RevaluationSurplus,
-                    TransactionType = "Debit",
-                    Description = "Revaluation — asset value increase",
-                    Reference = reference,
-                    LineNumber = 1
-                });
-                transactions.Add(new CreateAccountTransactionDto
-                {
-                    AccountId = category.RevaluationSurplusAccountId.Value,
-                    Amount = valuation.RevaluationSurplus,
-                    TransactionType = "Credit",
-                    Description = "Revaluation Surplus (OCI)",
-                    Reference = reference,
-                    LineNumber = 2
-                });
-                break;
-
-            case ValuationType.Impairment:
-                // Dr Impairment Loss (P&L) — use Depreciation Expense account or Loss on Disposal
-                // Cr Asset Account (reduce value)
-                var impairmentLossAccountId = category.LossOnDisposalAccountId
-                    ?? category.DepreciationExpenseAccountId;
-
-                transactions.Add(new CreateAccountTransactionDto
-                {
-                    AccountId = impairmentLossAccountId,
-                    Amount = valuation.ImpairmentLoss,
-                    TransactionType = "Debit",
-                    Description = "Impairment Loss",
-                    Reference = reference,
-                    LineNumber = 1
-                });
-                transactions.Add(new CreateAccountTransactionDto
-                {
-                    AccountId = category.AssetAccountId,
-                    Amount = valuation.ImpairmentLoss,
-                    TransactionType = "Credit",
-                    Description = "Asset value reduction — impairment",
-                    Reference = reference,
-                    LineNumber = 2
-                });
-                break;
-
-            case ValuationType.ImpairmentReversal:
-                // Dr Asset Account (restore value)
-                // Cr Impairment Reversal (P&L)
-                var reversalAccountId = category.GainOnDisposalAccountId
-                    ?? category.DepreciationExpenseAccountId;
-
-                transactions.Add(new CreateAccountTransactionDto
-                {
-                    AccountId = category.AssetAccountId,
-                    Amount = valuation.ImpairmentReversal,
-                    TransactionType = "Debit",
-                    Description = "Impairment reversal — asset value restoration",
-                    Reference = reference,
-                    LineNumber = 1
-                });
-                transactions.Add(new CreateAccountTransactionDto
-                {
-                    AccountId = reversalAccountId,
-                    Amount = valuation.ImpairmentReversal,
-                    TransactionType = "Credit",
-                    Description = "Impairment Reversal (P&L)",
-                    Reference = reference,
-                    LineNumber = 2
-                });
-                break;
+            await RecordValuationAuditAsync(
+                FinanceAuditEvents.DuplicatePostingAttempt,
+                valuation,
+                afterValues: new { valuation.JournalEntryId, valuation.PostingEventId },
+                comment: "Fixed asset valuation posting retried after it was already posted.",
+                cancellationToken: CancellationToken.None);
+            return MapToDto(valuation, asset);
         }
 
-        var entry = new CreateJournalEntryDto
+        if (_workflowService != null && !string.Equals(valuation.Status, "Approved", StringComparison.OrdinalIgnoreCase))
         {
-            JournalNumber = journalNumber,
-            TransactionDate = valuation.ValuationDate,
-            Description = $"{valuation.ValuationType} for {asset.AssetCode} — {asset.Name}",
-            Reference = reference,
-            SourceModule = "FixedAssets",
-            Transactions = transactions
-        };
+            var rejected = string.Equals(valuation.Status, "Rejected", StringComparison.OrdinalIgnoreCase);
+            await RecordValuationAuditAsync(
+                rejected
+                    ? FinanceAuditEvents.FinancePostingBlockedAfterRejection
+                    : FinanceAuditEvents.FinancePostingBlockedPendingApproval,
+                valuation,
+                afterValues: new { valuation.Status },
+                reason: rejected
+                    ? "Fixed asset valuation was rejected by workflow."
+                    : "Fixed asset valuation has not been approved.",
+                comment: "Fixed asset valuation posting blocked by workflow status.",
+                cancellationToken: CancellationToken.None);
+            throw new InvalidOperationException(rejected
+                ? "Rejected fixed asset valuations cannot be posted."
+                : "Fixed asset valuation must be approved before posting.");
+        }
 
-        var created = await _journalEntryService.CreateJournalEntryAsync(entry);
-        var posted = await _journalEntryService.PostJournalEntryAsync(created.Id);
+        var bookValue = ResolveBookValue(asset, valuation.AccountingBookId, valuation.BookClassification);
+        var fiscalPeriod = await ResolveFiscalPeriodAsync(valuation.AccountingDate == default ? valuation.ValuationDate : valuation.AccountingDate);
+        if (fiscalPeriod == null)
+        {
+            throw new InvalidOperationException("No fiscal period covers the valuation accounting date.");
+        }
 
-        valuation.IsPostedToGL = true;
-        valuation.PostedDate = DateTime.UtcNow;
-        valuation.JournalEntryId = posted.Id;
+        var functionalCurrency = await GetFunctionalCurrencyAsync();
+        try
+        {
+            var postingRequest = await BuildPostingRequestAsync(valuation, asset, fiscalPeriod, functionalCurrency);
 
-        await _context.SaveChangesAsync();
-        return MapToDto(valuation, asset);
+            await RecordValuationAuditAsync(
+                FinanceAuditEvents.FixedAssetValuationConfigurationUsed,
+                valuation,
+                afterValues: new
+                {
+                    asset.FixedAssetCategoryId,
+                    asset.Category.AssetAccountId,
+                    asset.Category.RevaluationSurplusAccountId,
+                    asset.Category.RevaluationLossAccountId,
+                    asset.Category.ImpairmentLossAccountId,
+                    asset.Category.AccumulatedImpairmentAccountId
+                },
+                comment: "Fixed asset valuation account mappings used for posting.",
+                cancellationToken: CancellationToken.None);
+
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest);
+            ApplyPostedValuation(valuation, asset, bookValue, postingResult);
+
+            await _context.SaveChangesAsync();
+            await RecordValuationAuditAsync(
+                valuation.ValuationType == ValuationType.Revaluation
+                    ? FinanceAuditEvents.FixedAssetRevaluationPosted
+                    : FinanceAuditEvents.FixedAssetImpairmentPosted,
+                valuation,
+                postingEventId: postingResult.PostingEventId,
+                journalEntryId: postingResult.JournalEntryId,
+                afterValues: BuildValuationAuditSnapshot(valuation),
+                comment: $"{valuation.ValuationType} posted through the central posting engine.",
+                cancellationToken: CancellationToken.None);
+
+            return MapToDto(valuation, asset);
+        }
+        catch (Exception ex)
+        {
+            valuation.Status = "Failed";
+            valuation.FailedAt = DateTime.UtcNow;
+            valuation.FailureReason = ex.Message;
+            valuation.UpdatedAt = DateTime.UtcNow;
+            valuation.UpdatedBy = UserName;
+            await _context.SaveChangesAsync();
+
+            var eventType = ex.Message.Contains("period is not open", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("locked", StringComparison.OrdinalIgnoreCase)
+                    ? FinanceAuditEvents.FixedAssetValuationBlockedClosedPeriod
+                    : valuation.ValuationType == ValuationType.Revaluation
+                        ? FinanceAuditEvents.FixedAssetRevaluationPostingFailed
+                        : FinanceAuditEvents.FixedAssetImpairmentPostingFailed;
+
+            await RecordValuationAuditAsync(
+                eventType,
+                valuation,
+                afterValues: new { error = ex.Message },
+                reason: ex.Message,
+                comment: "Fixed asset valuation posting failed.",
+                cancellationToken: CancellationToken.None);
+            throw;
+        }
     }
 
-    #region Private Helpers
-
-    private AssetValuation BuildValuation(FixedAsset asset, CreateAssetValuationDto dto, Guid performedByUserId)
+    private async Task<FixedAsset?> LoadAssetForValuationAsync(Guid assetId)
     {
-        var carryingBefore = asset.NetBookValue;
-        var carryingAfter = dto.FairValue;
+        var asset = await _context.FixedAssets
+            .Include(a => a.Category)
+            .Include(a => a.BookValues)
+                .ThenInclude(b => b.AccountingBook)
+            .Include(a => a.Valuations)
+            .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == assetId);
 
-        decimal surplus = 0, deficit = 0, impairmentLoss = 0, impairmentReversal = 0;
-
-        switch (dto.ValuationType)
+        if (_accountingBookService != null)
         {
-            case ValuationType.Revaluation:
-                if (dto.FairValue > carryingBefore)
-                    surplus = dto.FairValue - carryingBefore;
-                else
-                    deficit = carryingBefore - dto.FairValue;
-                break;
-
-            case ValuationType.Impairment:
-                if (dto.FairValue >= carryingBefore)
-                    throw new InvalidOperationException("Fair value must be less than carrying amount for impairment.");
-                impairmentLoss = carryingBefore - dto.FairValue;
-                break;
-
-            case ValuationType.ImpairmentReversal:
-                if (dto.FairValue <= carryingBefore)
-                    throw new InvalidOperationException("Fair value must be greater than carrying amount for impairment reversal.");
-                impairmentReversal = dto.FairValue - carryingBefore;
-                break;
+            await _accountingBookService.EnsureTenantDefaultsAsync(CancellationToken.None);
         }
 
+        return asset;
+    }
+
+    private async Task<AssetValuation> BuildValuationAsync(
+        FixedAsset asset,
+        FixedAssetBookValue bookValue,
+        FiscalPeriod? fiscalPeriod,
+        CreateAssetValuationDto dto,
+        Guid performedByUserId)
+    {
+        EnsureAssetEligibleForValuation(asset, dto);
+        if (dto.ValuationType == ValuationType.ImpairmentReversal)
+        {
+            throw new InvalidOperationException("Impairment reversal is not supported in the Batch 21A foundation.");
+        }
+
+        if (dto.FairValue < 0m)
+        {
+            throw new InvalidOperationException("Valuation amount cannot be negative.");
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            throw new InvalidOperationException("A valuation reason is required.");
+        }
+
+        var carryingBefore = RoundMoney(bookValue.NetBookValue);
+        var carryingAfter = RoundMoney(dto.FairValue);
+        if (carryingBefore == carryingAfter)
+        {
+            throw new InvalidOperationException("Valuation does not change the asset carrying amount.");
+        }
+
+        decimal surplus = 0m;
+        decimal deficit = 0m;
+        decimal impairmentLoss = 0m;
+        decimal surplusApplied = 0m;
+        decimal revaluationLossRecognized = 0m;
+
+        if (dto.ValuationType == ValuationType.Revaluation)
+        {
+            if (carryingAfter > carryingBefore)
+            {
+                surplus = RoundMoney(carryingAfter - carryingBefore);
+            }
+            else
+            {
+                deficit = RoundMoney(carryingBefore - carryingAfter);
+                var availableSurplus = await GetAvailableRevaluationSurplusAsync(asset.Id, bookValue.BookClassification);
+                surplusApplied = Math.Min(deficit, availableSurplus);
+                revaluationLossRecognized = RoundMoney(deficit - surplusApplied);
+            }
+        }
+        else if (dto.ValuationType == ValuationType.Impairment)
+        {
+            if (carryingAfter >= carryingBefore)
+            {
+                throw new InvalidOperationException("Recoverable amount must be less than carrying amount for impairment.");
+            }
+
+            impairmentLoss = RoundMoney(carryingBefore - carryingAfter);
+        }
+
+        var accountingDate = dto.ValuationDate.Date;
         return new AssetValuation
         {
             TenantId = TenantId,
             FixedAssetId = asset.Id,
-            ValuationDate = dto.ValuationDate,
+            AccountingBookId = bookValue.AccountingBookId,
+            BookClassification = bookValue.BookClassification,
+            FiscalPeriodId = fiscalPeriod?.Id,
+            ValuationDate = dto.ValuationDate.Date,
+            AccountingDate = accountingDate,
             ValuationType = dto.ValuationType,
             CarryingAmountBefore = carryingBefore,
-            FairValue = dto.FairValue,
+            AccumulatedDepreciationBefore = RoundMoney(bookValue.AccumulatedDepreciation),
+            NetBookValueBefore = carryingBefore,
+            FairValue = carryingAfter,
             CarryingAmountAfter = carryingAfter,
             RevaluationSurplus = surplus,
             RevaluationDeficit = deficit,
             ImpairmentLoss = impairmentLoss,
-            ImpairmentReversal = impairmentReversal,
+            ImpairmentReversal = 0m,
+            AdjustmentAmount = RoundMoney(carryingAfter - carryingBefore),
+            RevaluationSurplusApplied = surplusApplied,
+            RevaluationLossRecognized = revaluationLossRecognized,
             RevisedUsefulLifeMonths = dto.RevisedUsefulLifeMonths,
             ValuerName = dto.ValuerName,
             ValuationMethod = dto.ValuationMethod,
             ValuationReportReference = dto.ValuationReportReference,
-            Reason = dto.Reason,
+            Reason = dto.Reason.Trim(),
             Notes = dto.Notes,
-            PerformedByUserId = performedByUserId,
-            CreatedAt = DateTime.UtcNow
+            Status = "Calculated",
+            IdempotencyKey = BuildValuationIdempotencyKey(asset.TenantId, asset.Id, bookValue.BookClassification, dto),
+            PerformedByUserId = performedByUserId == Guid.Empty ? UserId ?? Guid.Empty : performedByUserId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = UserName
         };
+    }
+
+    private async Task<FinancePostingRequestDto> BuildPostingRequestAsync(
+        AssetValuation valuation,
+        FixedAsset asset,
+        FiscalPeriod fiscalPeriod,
+        string functionalCurrency)
+    {
+        var category = asset.Category;
+        var reference = $"VAL-{asset.AssetCode}-{valuation.ValuationDate:yyyyMMdd}";
+        var lineNumber = 1;
+        var lines = new List<FinancePostingLineDto>();
+
+        if (valuation.ValuationType == ValuationType.Revaluation)
+        {
+            var assetAccount = await ResolveValuationAccountAsync(category.AssetAccountId, "fixed asset carrying amount account", AccountType.Asset);
+
+            if (valuation.RevaluationSurplus > 0m)
+            {
+                var surplusAccount = await ResolveValuationAccountAsync(category.RevaluationSurplusAccountId, "revaluation surplus account", AccountType.Equity);
+                lines.Add(CreatePostingLine(assetAccount.Id, valuation.RevaluationSurplus, 0m, "Revaluation increase - asset carrying amount", reference, lineNumber++, "FA-RevaluationAsset", valuation, functionalCurrency));
+                lines.Add(CreatePostingLine(surplusAccount.Id, 0m, valuation.RevaluationSurplus, "Revaluation surplus", reference, lineNumber++, "FA-RevaluationSurplus", valuation, functionalCurrency));
+            }
+            else if (valuation.RevaluationDeficit > 0m)
+            {
+                lines.Add(CreatePostingLine(assetAccount.Id, 0m, valuation.RevaluationDeficit, "Revaluation decrease - asset carrying amount", reference, lineNumber++, "FA-RevaluationAsset", valuation, functionalCurrency));
+
+                if (valuation.RevaluationSurplusApplied > 0m)
+                {
+                    var surplusAccount = await ResolveValuationAccountAsync(category.RevaluationSurplusAccountId, "revaluation surplus account", AccountType.Equity);
+                    lines.Add(CreatePostingLine(surplusAccount.Id, valuation.RevaluationSurplusApplied, 0m, "Revaluation surplus utilized", reference, lineNumber++, "FA-RevaluationSurplusApplied", valuation, functionalCurrency));
+                }
+
+                if (valuation.RevaluationLossRecognized > 0m)
+                {
+                    var lossAccount = await ResolveValuationAccountAsync(category.RevaluationLossAccountId, "revaluation loss account", AccountType.Expense);
+                    lines.Add(CreatePostingLine(lossAccount.Id, valuation.RevaluationLossRecognized, 0m, "Revaluation loss", reference, lineNumber++, "FA-RevaluationLoss", valuation, functionalCurrency));
+                }
+            }
+        }
+        else if (valuation.ValuationType == ValuationType.Impairment)
+        {
+            var lossAccount = await ResolveValuationAccountAsync(category.ImpairmentLossAccountId, "impairment loss account", AccountType.Expense);
+            var allowanceAccount = await ResolveValuationAccountAsync(category.AccumulatedImpairmentAccountId, "accumulated impairment account", AccountType.Asset);
+            lines.Add(CreatePostingLine(lossAccount.Id, valuation.ImpairmentLoss, 0m, "Impairment loss", reference, lineNumber++, "FA-ImpairmentLoss", valuation, functionalCurrency));
+            lines.Add(CreatePostingLine(allowanceAccount.Id, 0m, valuation.ImpairmentLoss, "Accumulated impairment", reference, lineNumber++, "FA-AccumulatedImpairment", valuation, functionalCurrency));
+        }
+        else
+        {
+            throw new InvalidOperationException("Impairment reversal is not supported in the Batch 21A foundation.");
+        }
+
+        if (lines.Count < 2)
+        {
+            throw new InvalidOperationException("Valuation posting requires at least two balanced posting lines.");
+        }
+
+        return new FinancePostingRequestDto
+        {
+            SourceModule = SourceModule,
+            SourceDocumentType = SourceDocumentType,
+            SourceDocumentId = valuation.Id,
+            SourceDocumentTenantId = valuation.TenantId,
+            PostingAction = valuation.ValuationType == ValuationType.Revaluation ? "Revaluation" : "Impairment",
+            SourceDocumentReference = reference,
+            Description = $"{valuation.ValuationType} for {asset.AssetCode} - {asset.Name}",
+            PostingDate = valuation.AccountingDate == default ? valuation.ValuationDate.Date : valuation.AccountingDate.Date,
+            FiscalPeriodId = fiscalPeriod.Id,
+            JournalType = valuation.ValuationType == ValuationType.Revaluation
+                ? "Fixed Asset Revaluation"
+                : "Fixed Asset Impairment",
+            BookClassification = valuation.BookClassification,
+            FunctionalCurrencyCode = functionalCurrency,
+            IdempotencyKey = $"FA:Valuation:{valuation.TenantId:N}:{valuation.Id:N}:{valuation.ValuationType}",
+            ReturnExistingOnDuplicate = true,
+            Lines = lines
+        };
+    }
+
+    private static FinancePostingLineDto CreatePostingLine(
+        Guid accountId,
+        decimal debit,
+        decimal credit,
+        string description,
+        string reference,
+        int lineNumber,
+        string tag,
+        AssetValuation valuation,
+        string functionalCurrency)
+    {
+        return new FinancePostingLineDto
+        {
+            AccountId = accountId,
+            DebitAmount = RoundMoney(debit),
+            CreditAmount = RoundMoney(credit),
+            TransactionCurrency = functionalCurrency,
+            TransactionDebitAmount = RoundMoney(debit),
+            TransactionCreditAmount = RoundMoney(credit),
+            Description = description,
+            SourceReferenceNumber = reference,
+            LineNumber = lineNumber,
+            Notes = $"FixedAssetId={valuation.FixedAssetId:N};ValuationId={valuation.Id:N};Book={valuation.BookClassification}",
+            TransactionTag = tag
+        };
+    }
+
+    private void ApplyPostedValuation(
+        AssetValuation valuation,
+        FixedAsset asset,
+        FixedAssetBookValue bookValue,
+        FinancePostingResultDto postingResult)
+    {
+        valuation.IsPostedToGL = true;
+        valuation.Status = "Posted";
+        valuation.PostedDate = DateTime.UtcNow;
+        valuation.PostedAt = DateTime.UtcNow;
+        valuation.JournalEntryId = postingResult.JournalEntryId;
+        valuation.PostingEventId = postingResult.PostingEventId;
+        valuation.FailureReason = null;
+        valuation.FailedAt = null;
+        valuation.UpdatedAt = DateTime.UtcNow;
+        valuation.UpdatedBy = UserName;
+
+        bookValue.NetBookValue = valuation.CarryingAmountAfter;
+        if (valuation.RevisedUsefulLifeMonths.HasValue)
+        {
+            bookValue.RemainingUsefulLifeMonths = valuation.RevisedUsefulLifeMonths.Value;
+            bookValue.UsefulLifeMonths = valuation.RevisedUsefulLifeMonths.Value;
+        }
+        bookValue.UpdatedAt = DateTime.UtcNow;
+        bookValue.UpdatedBy = UserName;
+
+        if (bookValue.AccountingBook?.IsDefault == true ||
+            bookValue.BookClassification.Equals("IFRS", StringComparison.OrdinalIgnoreCase))
+        {
+            asset.NetBookValue = valuation.CarryingAmountAfter;
+            if (valuation.RevisedUsefulLifeMonths.HasValue)
+            {
+                asset.UsefulLifeMonths = valuation.RevisedUsefulLifeMonths.Value;
+            }
+        }
+
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+
+        _context.AssetTransactions.Add(new AssetTransaction
+        {
+            TenantId = TenantId,
+            FixedAssetId = asset.Id,
+            AccountingBookId = bookValue.AccountingBookId,
+            BookClassification = bookValue.BookClassification,
+            TransactionDate = valuation.AccountingDate == default ? valuation.ValuationDate : valuation.AccountingDate,
+            TransactionType = valuation.ValuationType == ValuationType.Revaluation ? "Revaluation" : "Impairment",
+            Description = $"{valuation.ValuationType} posted through finance posting engine",
+            Amount = valuation.AdjustmentAmount,
+            ResultingBookValue = valuation.CarryingAmountAfter,
+            RelatedEntityId = postingResult.PostingEventId,
+            PerformedByUserId = UserId ?? valuation.PerformedByUserId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = UserName
+        });
+    }
+
+    private void EnsureAssetEligibleForValuation(FixedAsset asset, CreateAssetValuationDto dto)
+    {
+        EnsureValuationTenant(asset);
+
+        if (asset.Status is FixedAssetStatus.Disposed or FixedAssetStatus.WrittenOff or FixedAssetStatus.HeldForSale)
+        {
+            throw new InvalidOperationException("Disposed, written-off, or held-for-sale assets cannot be revalued or impaired.");
+        }
+
+        if (!IsCapitalized(asset))
+        {
+            throw new InvalidOperationException("Fixed asset must be capitalized before revaluation or impairment.");
+        }
+
+        var capitalizationDate = asset.CapitalizationDate ?? asset.CapitalizedAt ?? asset.PurchaseDate;
+        if (dto.ValuationDate.Date < capitalizationDate.Date)
+        {
+            throw new InvalidOperationException("Valuation date cannot be before the asset capitalization date.");
+        }
+    }
+
+    private void EnsureValuationTenant(FixedAsset asset)
+    {
+        if (asset.TenantId != TenantId || asset.Category.TenantId != TenantId)
+        {
+            throw new InvalidOperationException("Fixed asset or category belongs to another tenant.");
+        }
+    }
+
+    private static bool IsCapitalized(FixedAsset asset)
+        => asset.CapitalizationDate.HasValue
+            || asset.CapitalizedAt.HasValue
+            || asset.JournalEntryId.HasValue
+            || asset.PostingEventId.HasValue
+            || asset.Status is FixedAssetStatus.Capitalized or FixedAssetStatus.Active or FixedAssetStatus.FullyDepreciated;
+
+    private FixedAssetBookValue ResolveDefaultBookValue(FixedAsset asset)
+    {
+        var bookValue = asset.BookValues
+            .Where(b => b.TenantId == TenantId && !b.IsDeleted)
+            .OrderByDescending(b => b.AccountingBook != null && b.AccountingBook.IsDefault)
+            .ThenByDescending(b => b.BookClassification.Equals("IFRS", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(b => b.BookClassification)
+            .FirstOrDefault();
+
+        return bookValue ?? throw new InvalidOperationException("Fixed asset requires a book-value record before valuation.");
+    }
+
+    private FixedAssetBookValue ResolveBookValue(FixedAsset asset, Guid? accountingBookId, string bookClassification)
+    {
+        var normalized = NormalizeBookClassification(bookClassification);
+        var bookValue = asset.BookValues.FirstOrDefault(b =>
+            b.TenantId == TenantId &&
+            !b.IsDeleted &&
+            (!accountingBookId.HasValue || b.AccountingBookId == accountingBookId.Value) &&
+            b.BookClassification.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+
+        return bookValue ?? throw new InvalidOperationException("Fixed asset valuation book value was not found for this tenant.");
+    }
+
+    private async Task<decimal> GetAvailableRevaluationSurplusAsync(Guid assetId, string bookClassification)
+    {
+        var normalized = NormalizeBookClassification(bookClassification);
+        var postedRevaluations = await _context.AssetValuations
+            .AsNoTracking()
+            .Where(v => v.TenantId == TenantId
+                && v.FixedAssetId == assetId
+                && v.BookClassification == normalized
+                && v.ValuationType == ValuationType.Revaluation
+                && v.IsPostedToGL
+                && !v.IsDeleted)
+            .ToListAsync();
+
+        return RoundMoney(postedRevaluations.Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied));
+    }
+
+    private async Task<Account> ResolveValuationAccountAsync(Guid? accountId, string label, params AccountType[] allowedTypes)
+    {
+        if (!accountId.HasValue || accountId.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException($"Fixed asset {label} is required.");
+        }
+
+        var account = await _context.Accounts
+            .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == accountId.Value && !a.IsDeleted)
+            ?? throw new InvalidOperationException($"Fixed asset {label} was not found for this tenant.");
+
+        if (account.Status != AccountStatus.Active)
+        {
+            throw new InvalidOperationException($"Fixed asset {label} must be active.");
+        }
+
+        if (!account.AllowDirectPosting)
+        {
+            throw new InvalidOperationException($"Fixed asset {label} must allow direct posting.");
+        }
+
+        if (allowedTypes.Length > 0 && !allowedTypes.Contains(account.AccountType))
+        {
+            throw new InvalidOperationException($"Fixed asset {label} has an invalid account type.");
+        }
+
+        return account;
+    }
+
+    private async Task<FiscalPeriod?> ResolveFiscalPeriodAsync(DateTime accountingDate)
+    {
+        var date = accountingDate.Date;
+        return await _context.FiscalPeriods
+            .FirstOrDefaultAsync(p => p.TenantId == TenantId && !p.IsDeleted && p.StartDate <= date && p.EndDate >= date);
+    }
+
+    private async Task<string> GetFunctionalCurrencyAsync()
+    {
+        var settings = await _context.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == TenantId && !s.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(settings?.BaseCurrency))
+        {
+            return settings.BaseCurrency.Trim().ToUpperInvariant();
+        }
+
+        var tenantCurrency = await _context.Tenants
+            .AsNoTracking()
+            .Where(t => t.Id == TenantId && !t.IsDeleted)
+            .Select(t => t.BaseCurrency)
+            .FirstOrDefaultAsync();
+
+        return string.IsNullOrWhiteSpace(tenantCurrency)
+            ? "GHS"
+            : tenantCurrency.Trim().ToUpperInvariant();
+    }
+
+    private static string BuildValuationIdempotencyKey(
+        Guid tenantId,
+        Guid fixedAssetId,
+        string bookClassification,
+        CreateAssetValuationDto dto)
+        => $"FA:Valuation:{tenantId:N}:{fixedAssetId:N}:{NormalizeBookClassification(bookClassification)}:{dto.ValuationDate:yyyyMMdd}:{dto.ValuationType}:{RoundMoney(dto.FairValue):0.00}";
+
+    private static string NormalizeBookClassification(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "IFRS" : value.Trim().ToUpperInvariant();
+
+    private static decimal RoundMoney(decimal amount)
+        => Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+    private static object BuildValuationAuditSnapshot(AssetValuation valuation)
+        => new
+        {
+            valuation.FixedAssetId,
+            valuation.AccountingBookId,
+            valuation.BookClassification,
+            valuation.FiscalPeriodId,
+            valuation.ValuationDate,
+            valuation.AccountingDate,
+            valuation.ValuationType,
+            valuation.CarryingAmountBefore,
+            valuation.CarryingAmountAfter,
+            valuation.RevaluationSurplus,
+            valuation.RevaluationDeficit,
+            valuation.RevaluationSurplusApplied,
+            valuation.RevaluationLossRecognized,
+            valuation.ImpairmentLoss,
+            valuation.AdjustmentAmount,
+            valuation.JournalEntryId,
+            valuation.PostingEventId,
+            valuation.Status
+        };
+
+    private async Task RecordValuationAuditAsync(
+        string eventType,
+        AssetValuation valuation,
+        Guid? postingEventId = null,
+        Guid? journalEntryId = null,
+        object? beforeValues = null,
+        object? afterValues = null,
+        string? reason = null,
+        string? comment = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_financeAuditService == null)
+        {
+            return;
+        }
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = eventType,
+            TenantId = valuation.TenantId,
+            SourceModule = "FA",
+            SourceDocumentType = SourceDocumentType,
+            SourceDocumentId = valuation.Id,
+            PostingEventId = postingEventId ?? valuation.PostingEventId,
+            JournalEntryId = journalEntryId ?? valuation.JournalEntryId,
+            BeforeValues = beforeValues,
+            AfterValues = afterValues,
+            Reason = reason,
+            Comment = comment,
+            Resource = "Finance.FixedAssetValuation",
+            ResourceId = valuation.Id.ToString()
+        }, cancellationToken);
     }
 
     private static AssetValuationDto MapToDto(AssetValuation v, FixedAsset? asset)
@@ -361,15 +829,24 @@ public class AssetValuationService : IAssetValuationService
             FixedAssetId = v.FixedAssetId,
             AssetCode = asset?.AssetCode,
             AssetName = asset?.Name,
+            AccountingBookId = v.AccountingBookId,
+            BookClassification = v.BookClassification,
+            FiscalPeriodId = v.FiscalPeriodId,
             ValuationDate = v.ValuationDate,
+            AccountingDate = v.AccountingDate,
             ValuationType = v.ValuationType,
             CarryingAmountBefore = v.CarryingAmountBefore,
+            AccumulatedDepreciationBefore = v.AccumulatedDepreciationBefore,
+            NetBookValueBefore = v.NetBookValueBefore,
             FairValue = v.FairValue,
             CarryingAmountAfter = v.CarryingAmountAfter,
             RevaluationSurplus = v.RevaluationSurplus,
             RevaluationDeficit = v.RevaluationDeficit,
             ImpairmentLoss = v.ImpairmentLoss,
             ImpairmentReversal = v.ImpairmentReversal,
+            AdjustmentAmount = v.AdjustmentAmount,
+            RevaluationSurplusApplied = v.RevaluationSurplusApplied,
+            RevaluationLossRecognized = v.RevaluationLossRecognized,
             RevisedUsefulLifeMonths = v.RevisedUsefulLifeMonths,
             ValuerName = v.ValuerName,
             ValuationMethod = v.ValuationMethod,
@@ -378,10 +855,14 @@ public class AssetValuationService : IAssetValuationService
             Notes = v.Notes,
             IsPostedToGL = v.IsPostedToGL,
             JournalEntryId = v.JournalEntryId,
+            PostingEventId = v.PostingEventId,
+            Status = v.Status,
+            IdempotencyKey = v.IdempotencyKey,
             PostedDate = v.PostedDate,
+            PostedAt = v.PostedAt,
+            FailedAt = v.FailedAt,
+            FailureReason = v.FailureReason,
             CreatedAt = v.CreatedAt
         };
     }
-
-    #endregion
 }

@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -33,7 +34,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _logger = logger;
         }
 
-        private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
 
         public async Task<AccountDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)

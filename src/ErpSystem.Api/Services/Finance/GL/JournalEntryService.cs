@@ -12,6 +12,8 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Services;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.GL
 {
@@ -23,6 +25,8 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IAuditLogService _auditLogService;
         private readonly INotificationService _notificationService;
         private readonly IAccountingBookService _accountingBookService;
+        private readonly IFinancePostingEngine? _financePostingEngine;
+        private readonly IFinanceAuditService? _financeAuditService;
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -31,7 +35,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             IGeneralLedgerService generalLedgerService,
             IAuditLogService auditLogService,
             INotificationService notificationService,
-            IAccountingBookService accountingBookService)
+            IAccountingBookService accountingBookService,
+            IFinancePostingEngine? financePostingEngine = null,
+            IFinanceAuditService? financeAuditService = null)
         {
             _context = context;
             _currentUserService = currentUserService;
@@ -39,11 +45,15 @@ namespace ErpSystem.Api.Services.Finance.GL
             _auditLogService = auditLogService;
             _notificationService = notificationService;
             _accountingBookService = accountingBookService;
+            _financePostingEngine = financePostingEngine;
+            _financeAuditService = financeAuditService;
         }
+
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
         public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var entries = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
@@ -57,18 +67,19 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<JournalEntryDto?> GetJournalEntryByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
+            var tenantId = TenantId;
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Attachments)
-                .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
 
             return entry == null ? null : MapToDto(entry);
         }
 
         public async Task<JournalEntryDto?> GetJournalEntryByNumberAsync(string journalNumber, CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
@@ -80,7 +91,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var entries = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
@@ -94,13 +105,14 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<JournalEntryDto> CreateJournalEntryAsync(CreateJournalEntryDto dto, CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
 
             // Basic validation
             if (dto.Transactions == null || !dto.Transactions.Any())
                 throw new InvalidOperationException("Journal entry must have at least one transaction line.");
 
             var fiscalPeriodId = dto.FiscalPeriodId ?? await GetOpenFiscalPeriodIdAsync(dto.TransactionDate, tenantId);
+            await EnsureFiscalPeriodOpenAsync(fiscalPeriodId, tenantId, dto.TransactionDate, cancellationToken);
             var bookClassification = string.IsNullOrWhiteSpace(dto.BookClassification) ? "IFRS" : dto.BookClassification.Trim();
             Guid.TryParse(_currentUserService.UserId, out var currentUserId);
 
@@ -167,6 +179,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 if (!isDebit && !isCredit)
                     throw new InvalidOperationException("Transaction type must be either Debit or Credit.");
 
+                await GetValidManualPostingAccountAsync(tenantId, txnDto.AccountId, cancellationToken);
+
                 var transaction = new AccountTransaction
                 {
                     Id = Guid.NewGuid(),
@@ -191,8 +205,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             _context.JournalEntries.Add(journalEntry);
-            await _context.SaveChangesAsync(cancellationToken);
-            await LogJournalAuditAsync("Finance.JournalEntry.Created", journalEntry, null, BuildJournalAuditSnapshot(journalEntry));
+            await PersistJournalMutationWithAuditAsync(
+                () => LogJournalAuditAsync(FinanceAuditEvents.JournalCreated, journalEntry, null, BuildJournalAuditSnapshot(journalEntry)),
+                cancellationToken);
 
             var createdEntry = await LoadJournalEntryAsync(journalEntry.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Journal entry was saved but could not be reloaded.");
@@ -202,10 +217,11 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<JournalEntryDto> UpdateJournalEntryAsync(Guid id, UpdateJournalEntryDto dto, CancellationToken cancellationToken = default)
         {
+            var currentTenantId = TenantId;
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .Include(j => j.Attachments)
-                .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+                .FirstOrDefaultAsync(j => j.TenantId == currentTenantId && j.Id == id && !j.IsDeleted, cancellationToken);
 
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
             if (entry.PostingStatus != "Draft") throw new InvalidOperationException("Only Draft journal entries can be updated.");
@@ -214,7 +230,14 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             // Update Header
             var transactionDate = dto.TransactionDate ?? entry.EntryDate;
-            if (dto.TransactionDate.HasValue) entry.EntryDate = transactionDate;
+            if (dto.TransactionDate.HasValue)
+            {
+                entry.EntryDate = transactionDate;
+                entry.FiscalPeriodId = await GetOpenFiscalPeriodIdAsync(transactionDate, entry.TenantId);
+            }
+
+            await EnsureFiscalPeriodOpenAsync(entry.FiscalPeriodId, entry.TenantId, transactionDate, cancellationToken);
+
             if (dto.Description != null) entry.Description = dto.Description;
             if (dto.Reference != null) entry.ReferenceNumber = dto.Reference;
             if (!string.IsNullOrWhiteSpace(dto.BookClassification))
@@ -272,10 +295,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     if (!isDebit && !isCredit)
                         throw new InvalidOperationException("Transaction type must be either Debit or Credit.");
 
-                    var accountExists = await _context.Accounts
-                        .AnyAsync(a => a.Id == txnDto.AccountId && a.TenantId == tenantId && !a.IsDeleted, cancellationToken);
-                    if (!accountExists)
-                        throw new InvalidOperationException($"Account {txnDto.AccountId} was not found.");
+                    await GetValidManualPostingAccountAsync(tenantId, txnDto.AccountId, cancellationToken);
 
                     var transaction = new AccountTransaction
                     {
@@ -310,8 +330,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 entry.BookClassification = bookClassification;
             }
 
-            await _context.SaveChangesAsync(cancellationToken);
-            await LogJournalAuditAsync("Finance.JournalEntry.Updated", entry, before, BuildJournalAuditSnapshot(entry));
+            await PersistJournalMutationWithAuditAsync(
+                () => LogJournalAuditAsync(FinanceAuditEvents.JournalUpdated, entry, before, BuildJournalAuditSnapshot(entry)),
+                cancellationToken);
 
             var updatedEntry = await LoadJournalEntryAsync(entry.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Journal entry was updated but could not be reloaded.");
@@ -321,7 +342,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task DeleteJournalEntryAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            var entry = await _context.JournalEntries.FindAsync(new object[] { id }, cancellationToken);
+            var tenantId = TenantId;
+            var entry = await _context.JournalEntries
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
             if (entry.PostingStatus != "Draft") throw new InvalidOperationException("Only Draft journal entries can be deleted.");
 
@@ -331,64 +354,102 @@ namespace ErpSystem.Api.Services.Finance.GL
             entry.DeletedAt = DateTime.UtcNow;
             
             // Soft delete transactions too
-            var transactions = await _context.AccountTransactions.Where(t => t.JournalEntryId == id).ToListAsync(cancellationToken);
+            var transactions = await _context.AccountTransactions
+                .Where(t => t.TenantId == tenantId && t.JournalEntryId == id)
+                .ToListAsync(cancellationToken);
             foreach(var t in transactions)
             {
                 t.IsDeleted = true;
             }
 
-            await _context.SaveChangesAsync(cancellationToken);
-            await LogJournalAuditAsync("Finance.JournalEntry.Deleted", entry, before, BuildJournalAuditSnapshot(entry));
+            await PersistJournalMutationWithAuditAsync(
+                () => LogJournalAuditAsync(FinanceAuditEvents.JournalDeleted, entry, before, BuildJournalAuditSnapshot(entry)),
+                cancellationToken);
         }
 
         public async Task<JournalEntryDto> PostJournalEntryAsync(Guid id, CancellationToken cancellationToken = default)
         {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Finance posting engine is not configured.");
+
+            var tenantId = TenantId;
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
-                .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
             
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
-            if (entry.PostingStatus == "Posted") throw new InvalidOperationException("Journal Entry is already posted.");
-            if (entry.PostingStatus != "Draft" && entry.PostingStatus != "Approved")
-                throw new InvalidOperationException($"Cannot post entry with status '{entry.PostingStatus}'. Entry must be 'Draft' or 'Approved'.");
+            if (entry.PostingStatus == "Posted")
+            {
+                var existingPostedEntry = await LoadJournalEntryAsync(entry.Id, cancellationToken)
+                    ?? throw new InvalidOperationException("Posted journal entry could not be reloaded.");
+                var existingPostingEvent = await _context.FinancePostingEvents
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(e =>
+                        e.TenantId == tenantId &&
+                        e.SourceDocumentType == "ManualJournalEntry" &&
+                        e.SourceDocumentId == entry.Id &&
+                        e.PostingAction == "Post" &&
+                        !e.IsDeleted,
+                        cancellationToken);
 
-            var before = BuildJournalAuditSnapshot(entry);
+                await LogJournalAuditAsync(
+                    FinanceAuditEvents.DuplicatePostingAttempt,
+                    existingPostedEntry,
+                    null,
+                    BuildJournalAuditSnapshot(existingPostedEntry),
+                    new
+                    {
+                        sourceDocumentType = "ManualJournalEntry",
+                        postingAction = "Post",
+                        existingPostingEventId = existingPostingEvent?.Id
+                    },
+                    postingEventId: existingPostingEvent?.Id);
+                return MapToDto(existingPostedEntry);
+            }
 
-            // Validate Balance
-            var debit = entry.Transactions.Sum(t => t.DebitAmount);
-            var credit = entry.Transactions.Sum(t => t.CreditAmount);
-            if (debit != credit) throw new InvalidOperationException("Journal Entry must be balanced to post.");
+            if (entry.PostingStatus != "Approved")
+                throw new InvalidOperationException("Manual journal entries must be approved before posting.");
 
             if (IsAllActiveBooks(entry.BookClassification))
+                throw new InvalidOperationException("All Active Books manual posting must be migrated to the posting engine before it can be used.");
+
+            var before = BuildJournalAuditSnapshot(entry);
+            FinancePostingResultDto postingResult;
+            try
             {
-                return await PostOpeningBalanceToAllActiveBooksAsync(entry, before, cancellationToken);
+                await ValidateManualJournalEntryAsync(entry, requireApproved: true, cancellationToken);
+
+                var functionalCurrency = await GetBaseCurrencyCodeForTenantAsync(entry.TenantId, cancellationToken);
+                postingResult = await _financePostingEngine.PostAsync(BuildManualJournalPostingRequest(entry, functionalCurrency), cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await LogJournalAuditAsync(
+                    FinanceAuditEvents.JournalPostingFailed,
+                    entry,
+                    before,
+                    BuildJournalAuditSnapshot(entry),
+                    new { errorMessage = ex.Message, sourceDocumentType = "ManualJournalEntry", postingAction = "Post" },
+                    reason: ex.Message);
+                throw;
             }
 
-            // Update Account Balances
-            foreach (var txn in entry.Transactions)
-            {
-                var account = await _context.Accounts.FindAsync(txn.AccountId);
-                if (account == null) throw new InvalidOperationException($"Account {txn.AccountId} not found.");
+            var postedEntry = await LoadJournalEntryAsync(entry.Id, cancellationToken)
+                ?? throw new InvalidOperationException("Journal entry was posted but could not be reloaded.");
 
-                ValidateControlAccountPosting(account, entry);
-                ApplyAccountBalanceMovement(account, txn);
-
-                txn.PostingStatus = "Posted";
-                txn.PostedDate = DateTime.UtcNow;
-            }
-
-            entry.PostingStatus = "Posted";
-            entry.PostingDate = DateTime.UtcNow;
-            entry.PostedByUserId = Guid.TryParse(_currentUserService.UserId, out var postingUserId) ? postingUserId : null;
-
-            await _context.SaveChangesAsync(cancellationToken);
-            await LogJournalAuditAsync("Finance.JournalEntry.Posted", entry, before, BuildJournalAuditSnapshot(entry));
+            await LogJournalAuditAsync(
+                FinanceAuditEvents.JournalPosted,
+                postedEntry,
+                before,
+                BuildJournalAuditSnapshot(postedEntry),
+                new { postingResult.PostingEventId, postingResult.JournalEntryId, postingResult.PostingAction },
+                postingEventId: postingResult.PostingEventId);
             await NotifyJournalOwnerAsync(
-                entry,
+                postedEntry,
                 "Journal entry posted",
-                $"{entry.JournalEntryNumber} has been posted to the General Ledger.",
+                $"{postedEntry.JournalEntryNumber} has been posted to the General Ledger.",
                 "FinanceJournalPosted");
-            return MapToDto(entry);
+            return MapToDto(postedEntry);
         }
 
         public async Task<JournalEntryDto> ReverseJournalEntryAsync(
@@ -397,12 +458,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             DateTime? reversalDate = null,
             CancellationToken cancellationToken = default)
         {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Finance posting engine is not configured.");
+
             if (string.IsNullOrWhiteSpace(reason))
                 throw new InvalidOperationException("A reversal reason is required.");
 
+            var tenantId = TenantId;
             var original = await _context.JournalEntries
                 .Include(j => j.Transactions)
-                .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
 
             if (original == null) throw new ArgumentException($"Journal Entry {id} not found.");
             if (original.PostingStatus != "Posted") throw new InvalidOperationException("Only posted entries can be reversed.");
@@ -416,127 +481,64 @@ namespace ErpSystem.Api.Services.Finance.GL
             var reversalFiscalPeriodId = await GetOpenFiscalPeriodIdAsync(effectiveReversalDate, original.TenantId);
             var trimmedReason = reason.Trim();
 
-            var reversal = new JournalEntry
-            {
-                Id = Guid.NewGuid(),
-                JournalEntryNumber = await _generalLedgerService.GenerateJournalEntryNumberAsync(cancellationToken),
-                EntryDate = effectiveReversalDate,
-                JournalType = "Reversing",
-                Description = $"Reversal of {original.JournalEntryNumber}: {trimmedReason}",
-                ReferenceNumber = $"REV-{original.JournalEntryNumber}",
-                SourceModule = "GL",
-                SourceDocumentId = original.Id,
-                SourceDocumentType = "JournalEntryReversal",
-                TotalDebitAmount = original.TotalCreditAmount, // Swap
-                TotalCreditAmount = original.TotalDebitAmount, // Swap
-                PostingStatus = "Posted", // Auto-post reversal
-                PostingDate = DateTime.UtcNow,
-                PostedByUserId = Guid.TryParse(_currentUserService.UserId, out var currentUserId) ? currentUserId : null,
-                IsBalanced = true,
-                TenantId = original.TenantId,
-                FiscalPeriodId = reversalFiscalPeriodId,
-                BookClassification = original.BookClassification,
-                OriginalJournalEntryId = original.Id,
-                ReversalType = "Manual",
-                ReversalReason = trimmedReason,
-                Notes = $"Auto-posted reversal for {original.JournalEntryNumber}. Reason: {trimmedReason}"
-            };
+            var postingResult = await _financePostingEngine.PostAsync(
+                BuildManualJournalReversalRequest(
+                    original,
+                    effectiveReversalDate,
+                    reversalFiscalPeriodId,
+                    trimmedReason,
+                    await GetBaseCurrencyCodeForTenantAsync(original.TenantId, cancellationToken)),
+                cancellationToken);
 
-            int lineNum = 1;
-            foreach (var txn in original.Transactions)
-            {
-                // Create reversing transaction (Debit -> Credit, Credit -> Debit)
-                var revTxn = new AccountTransaction
-                {
-                    Id = Guid.NewGuid(),
-                    JournalEntryId = reversal.Id,
-                    AccountId = txn.AccountId,
-                    Description = $"Reversal: {txn.Description}",
-                    DebitAmount = txn.CreditAmount, // Swap
-                    CreditAmount = txn.DebitAmount, // Swap
-                    TransactionDate = reversal.EntryDate,
-                    LineNumber = lineNum++,
-                    TransactionCurrency = txn.TransactionCurrency,
-                    ExchangeRate = txn.ExchangeRate,
-                    ForeignCurrencyAmount = txn.ForeignCurrencyAmount,
-                    TenantId = reversal.TenantId,
-                    FiscalPeriodId = reversal.FiscalPeriodId,
-                    BookClassification = txn.BookClassification,
-                    PostingStatus = "Posted",
-                    PostedDate = DateTime.UtcNow,
-                    OriginalTransactionId = txn.Id,
-                    ReversalType = "Manual",
-                    ReversalReason = trimmedReason
-                };
+            var updatedOriginal = await LoadJournalEntryAsync(original.Id, cancellationToken)
+                ?? throw new InvalidOperationException("Original journal entry was reversed but could not be reloaded.");
 
-                // Update Balances (Reversing effect)
-                var account = await _context.Accounts.FindAsync(txn.AccountId);
-                if (account != null)
-                {
-                    if (revTxn.DebitAmount > 0)
-                    {
-                         if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                                account.Balance += revTxn.DebitAmount;
-                            else
-                                account.Balance -= revTxn.DebitAmount;
-                    }
-                    else
-                    {
-                         if (account.AccountType == AccountType.Liability || account.AccountType == AccountType.Equity || account.AccountType == AccountType.Revenue)
-                                account.Balance += revTxn.CreditAmount;
-                            else
-                                account.Balance -= revTxn.CreditAmount;
-                    }
-                }
+            var reversal = await LoadJournalEntryAsync(updatedOriginal.ReversalJournalEntryId!.Value, cancellationToken)
+                ?? throw new InvalidOperationException("Reversal journal entry was posted but could not be reloaded.");
 
-                txn.IsReversed = true;
-                txn.ReversalDate = effectiveReversalDate;
-                txn.ReversalTransactionId = revTxn.Id;
-                txn.ReversalType = "Manual";
-                txn.ReversalReason = trimmedReason;
-                txn.PostingStatus = "Reversed";
-                
-                _context.AccountTransactions.Add(revTxn);
-                reversal.Transactions.Add(revTxn);
-            }
-
-            original.PostingStatus = "Reversed";
-            original.IsReversed = true;
-            original.ReversalDate = effectiveReversalDate;
-            original.ReversalJournalEntryId = reversal.Id;
-            original.ReversalType = "Manual";
-            original.ReversalReason = trimmedReason;
-            _context.JournalEntries.Add(reversal);
-            await _context.SaveChangesAsync(cancellationToken);
             await LogJournalAuditAsync(
-                "Finance.JournalEntry.Reversed",
-                original,
+                FinanceAuditEvents.JournalReversed,
+                updatedOriginal,
                 originalBefore,
-                BuildJournalAuditSnapshot(original),
-                new { reversalJournalEntryId = reversal.Id, reversalJournalNumber = reversal.JournalEntryNumber, reason = trimmedReason });
+                BuildJournalAuditSnapshot(updatedOriginal),
+                new
+                {
+                    reversalJournalEntryId = reversal.Id,
+                    reversalJournalNumber = reversal.JournalEntryNumber,
+                    reason = trimmedReason,
+                    postingResult.PostingEventId
+                },
+                postingEventId: postingResult.PostingEventId,
+                reason: trimmedReason);
             await LogJournalAuditAsync(
-                "Finance.JournalEntry.ReversalCreated",
+                FinanceAuditEvents.JournalReversalCreated,
                 reversal,
                 null,
                 BuildJournalAuditSnapshot(reversal),
-                new { originalJournalEntryId = original.Id, originalJournalNumber = original.JournalEntryNumber, reason = trimmedReason });
+                new
+                {
+                    originalJournalEntryId = original.Id,
+                    originalJournalNumber = original.JournalEntryNumber,
+                    reason = trimmedReason,
+                    postingResult.PostingEventId
+                },
+                postingEventId: postingResult.PostingEventId,
+                reason: trimmedReason);
             await NotifyJournalOwnerAsync(
-                original,
+                updatedOriginal,
                 "Journal entry reversed",
-                $"{original.JournalEntryNumber} has been reversed. Reason: {trimmedReason}",
+                $"{updatedOriginal.JournalEntryNumber} has been reversed. Reason: {trimmedReason}",
                 "FinanceJournalReversed");
 
-            var createdReversal = await LoadJournalEntryAsync(reversal.Id, cancellationToken)
-                ?? throw new InvalidOperationException("Reversal journal entry was saved but could not be reloaded.");
-
-            return MapToDto(createdReversal);
+            return MapToDto(reversal);
         }
 
         public async Task<bool> ValidateBalanceAsync(Guid id, CancellationToken cancellationToken = default)
         {
+            var tenantId = TenantId;
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
-                .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
             
             if (entry == null) return false;
 
@@ -565,6 +567,203 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             throw new InvalidOperationException(
                 $"No open fiscal period exists for journal date {targetDate:yyyy-MM-dd}. Open or seed the fiscal period before saving the journal entry.");
+        }
+
+        private async Task EnsureFiscalPeriodOpenAsync(
+            Guid fiscalPeriodId,
+            Guid tenantId,
+            DateTime journalDate,
+            CancellationToken cancellationToken)
+        {
+            var targetDate = journalDate.Date;
+            var period = await _context.FiscalPeriods
+                .FirstOrDefaultAsync(p =>
+                    p.TenantId == tenantId
+                    && p.Id == fiscalPeriodId
+                    && !p.IsDeleted,
+                    cancellationToken);
+
+            if (period == null)
+                throw new InvalidOperationException("Fiscal period was not found for this tenant.");
+
+            if (!period.IsOpen || period.IsClosed || period.IsLocked)
+                throw new InvalidOperationException($"Fiscal period '{period.PeriodName}' is not open for posting.");
+
+            if (targetDate < period.StartDate.Date || targetDate > period.EndDate.Date)
+                throw new InvalidOperationException($"Journal date {targetDate:yyyy-MM-dd} does not fall inside fiscal period '{period.PeriodName}'.");
+        }
+
+        private async Task<Account> GetValidManualPostingAccountAsync(
+            Guid tenantId,
+            Guid accountId,
+            CancellationToken cancellationToken)
+        {
+            if (accountId == Guid.Empty)
+                throw new InvalidOperationException("Transaction line account is required.");
+
+            var account = await _context.Accounts
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == accountId && !a.IsDeleted, cancellationToken);
+
+            if (account == null)
+                throw new InvalidOperationException($"Account {accountId} was not found.");
+
+            if (account.Status != AccountStatus.Active)
+                throw new InvalidOperationException($"Account '{account.AccountNumber}' is not active.");
+
+            if (!account.AllowDirectPosting)
+                throw new InvalidOperationException($"Account '{account.AccountNumber}' does not allow direct posting.");
+
+            if (account.IsControlAccount)
+                throw new InvalidOperationException($"Direct manual posting to Control Account '{account.AccountName}' is not allowed.");
+
+            return account;
+        }
+
+        public async Task ValidateJournalEntryReadyForSubmissionAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var tenantId = TenantId;
+            var entry = await _context.JournalEntries
+                .Include(j => j.Transactions)
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
+
+            if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
+            if (entry.PostingStatus != "Draft")
+                throw new InvalidOperationException($"Only Draft journal entries can be submitted for approval. Current status: {entry.PostingStatus}.");
+
+            await ValidateManualJournalEntryAsync(entry, requireApproved: false, cancellationToken);
+        }
+
+        private async Task ValidateManualJournalEntryAsync(
+            JournalEntry entry,
+            bool requireApproved,
+            CancellationToken cancellationToken)
+        {
+            if (requireApproved && !string.Equals(entry.PostingStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Manual journal entries must be approved before posting.");
+
+            var transactions = entry.Transactions
+                .Where(t => !t.IsDeleted)
+                .OrderBy(t => t.LineNumber)
+                .ToList();
+
+            if (transactions.Count < 2)
+                throw new InvalidOperationException("Journal entry must have at least two transaction lines.");
+
+            decimal debit = 0;
+            decimal credit = 0;
+            foreach (var transaction in transactions)
+            {
+                if (transaction.TenantId != entry.TenantId)
+                    throw new InvalidOperationException("Journal line tenant does not match the journal header tenant.");
+
+                if (transaction.DebitAmount < 0 || transaction.CreditAmount < 0)
+                    throw new InvalidOperationException("Journal line debit and credit amounts cannot be negative.");
+
+                if ((transaction.DebitAmount > 0 && transaction.CreditAmount > 0) ||
+                    (transaction.DebitAmount == 0 && transaction.CreditAmount == 0))
+                    throw new InvalidOperationException("Each journal line must contain either a debit or a credit amount.");
+
+                await GetValidManualPostingAccountAsync(entry.TenantId, transaction.AccountId, cancellationToken);
+                debit += transaction.DebitAmount;
+                credit += transaction.CreditAmount;
+            }
+
+            if (debit <= 0 || credit <= 0)
+                throw new InvalidOperationException("Journal entry must include at least one debit and one credit line.");
+
+            if (decimal.Round(debit, 2, MidpointRounding.AwayFromZero) != decimal.Round(credit, 2, MidpointRounding.AwayFromZero))
+                throw new InvalidOperationException("Journal Entry must be balanced.");
+
+            await EnsureFiscalPeriodOpenAsync(entry.FiscalPeriodId, entry.TenantId, entry.EntryDate, cancellationToken);
+        }
+
+        private FinancePostingRequestDto BuildManualJournalPostingRequest(JournalEntry entry, string functionalCurrency)
+        {
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "GL",
+                SourceDocumentType = "ManualJournalEntry",
+                SourceDocumentId = entry.Id,
+                SourceDocumentTenantId = entry.TenantId,
+                ExistingJournalEntryId = entry.Id,
+                PostingAction = "Post",
+                SourceDocumentReference = entry.JournalEntryNumber,
+                Description = entry.Description,
+                PostingDate = entry.EntryDate,
+                FiscalPeriodId = entry.FiscalPeriodId,
+                JournalType = entry.JournalType,
+                BookClassification = entry.BookClassification,
+                FunctionalCurrencyCode = functionalCurrency,
+                Lines = entry.Transactions
+                    .Where(t => !t.IsDeleted)
+                    .OrderBy(t => t.LineNumber)
+                    .Select(t => new FinancePostingLineDto
+                    {
+                        AccountId = t.AccountId,
+                        Description = t.Description,
+                        DebitAmount = t.DebitAmount,
+                        CreditAmount = t.CreditAmount,
+                        TransactionCurrency = t.TransactionCurrency,
+                        ForeignCurrencyAmount = t.ForeignCurrencyAmount,
+                        ExchangeRate = t.ExchangeRate,
+                        ExchangeRateSource = t.ExchangeRateSource,
+                        ExchangeRateDate = t.ExchangeRateDate,
+                        SourceReferenceNumber = t.SourceReferenceNumber,
+                        LineNumber = t.LineNumber,
+                        SegmentString = t.SegmentString,
+                        Notes = t.Notes,
+                        TransactionTag = t.TransactionTag
+                    })
+                    .ToList()
+            };
+        }
+
+        private FinancePostingRequestDto BuildManualJournalReversalRequest(
+            JournalEntry original,
+            DateTime reversalDate,
+            Guid reversalFiscalPeriodId,
+            string reason,
+            string functionalCurrency)
+        {
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "GL",
+                SourceDocumentType = "ManualJournalReversal",
+                SourceDocumentId = original.Id,
+                SourceDocumentTenantId = original.TenantId,
+                ReversalOfJournalEntryId = original.Id,
+                ReversalReason = reason,
+                ReversalType = "Manual",
+                PostingAction = "Reverse",
+                SourceDocumentReference = $"REV-{original.JournalEntryNumber}",
+                Description = $"Reversal of {original.JournalEntryNumber}: {reason}",
+                PostingDate = reversalDate,
+                FiscalPeriodId = reversalFiscalPeriodId,
+                JournalType = "Reversing",
+                BookClassification = original.BookClassification,
+                FunctionalCurrencyCode = functionalCurrency,
+                Lines = original.Transactions
+                    .Where(t => !t.IsDeleted)
+                    .OrderBy(t => t.LineNumber)
+                    .Select(t => new FinancePostingLineDto
+                    {
+                        AccountId = t.AccountId,
+                        Description = $"Reversal: {t.Description}",
+                        DebitAmount = t.CreditAmount,
+                        CreditAmount = t.DebitAmount,
+                        TransactionCurrency = t.TransactionCurrency,
+                        ForeignCurrencyAmount = t.ForeignCurrencyAmount,
+                        ExchangeRate = t.ExchangeRate,
+                        ExchangeRateSource = t.ExchangeRateSource,
+                        ExchangeRateDate = t.ExchangeRateDate,
+                        SourceReferenceNumber = t.SourceReferenceNumber,
+                        LineNumber = t.LineNumber,
+                        SegmentString = t.SegmentString,
+                        Notes = reason,
+                        TransactionTag = "Reversal"
+                    })
+                    .ToList()
+            };
         }
 
         private async Task<(bool IsMultiCurrency, string? PrimaryCurrency)> ResolveJournalCurrencyMetadataAsync(
@@ -760,7 +959,8 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             foreach (var transaction in sourceTransactions)
             {
-                var account = await _context.Accounts.FindAsync(new object[] { transaction.AccountId }, cancellationToken);
+                var account = await _context.Accounts
+                    .FirstOrDefaultAsync(a => a.TenantId == entry.TenantId && a.Id == transaction.AccountId && !a.IsDeleted, cancellationToken);
                 if (account == null) throw new InvalidOperationException($"Account {transaction.AccountId} not found.");
 
                 ValidateControlAccountPosting(account, entry);
@@ -795,7 +995,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         lineNumber++,
                         postingDate);
 
-                    var account = await _context.Accounts.FindAsync(new object[] { childTransaction.AccountId }, cancellationToken);
+                    var account = await _context.Accounts
+                        .FirstOrDefaultAsync(a => a.TenantId == childEntry.TenantId && a.Id == childTransaction.AccountId && !a.IsDeleted, cancellationToken);
                     if (account == null) throw new InvalidOperationException($"Account {childTransaction.AccountId} not found.");
 
                     ValidateControlAccountPosting(account, childEntry);
@@ -1071,11 +1272,12 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private Task<JournalEntry?> LoadJournalEntryAsync(Guid id, CancellationToken cancellationToken)
         {
+            var tenantId = TenantId;
             return _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Attachments)
-                .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
         }
 
         private static JournalEntryDto MapToDto(JournalEntry entry)
@@ -1152,7 +1354,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             string? rejectionReason = null,
             CancellationToken cancellationToken = default)
         {
-            var entry = await _context.JournalEntries.FindAsync(new object[] { id }, cancellationToken);
+            var tenantId = TenantId;
+            var entry = await _context.JournalEntries
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
 
             var before = BuildJournalAuditSnapshot(entry);
@@ -1182,7 +1386,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 entry,
                 before,
                 BuildJournalAuditSnapshot(entry),
-                new { approvedByUserId, rejectionReason });
+                new { approvedByUserId, rejectionReason },
+                reason: rejectionReason);
 
             if (approvalStatus == "Pending")
             {
@@ -1208,7 +1413,12 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
+
+            var journal = await _context.JournalEntries
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == journalEntryId && !j.IsDeleted, cancellationToken);
+            if (journal == null) throw new ArgumentException($"Journal Entry {journalEntryId} not found.");
+            if (journal.PostingStatus != "Draft") throw new InvalidOperationException("Only Draft journal entries can be modified.");
 
             var exists = await _context.Set<JournalEntryAttachment>()
                 .AnyAsync(x => x.TenantId == tenantId && x.JournalEntryId == journalEntryId && x.FileUploadRecordId == fileUploadRecordId, cancellationToken);
@@ -1226,7 +1436,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _context.Set<JournalEntryAttachment>().Add(link);
             await _context.SaveChangesAsync(cancellationToken);
             await LogJournalAuditAsync(
-                "Finance.JournalEntry.AttachmentLinked",
+                FinanceAuditEvents.JournalAttachmentLinked,
                 journalEntryId,
                 null,
                 new { journalEntryId, fileUploadRecordId });
@@ -1234,7 +1444,12 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task UnlinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
+
+            var journal = await _context.JournalEntries
+                .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == journalEntryId && !j.IsDeleted, cancellationToken);
+            if (journal == null) throw new ArgumentException($"Journal Entry {journalEntryId} not found.");
+            if (journal.PostingStatus != "Draft") throw new InvalidOperationException("Only Draft journal entries can be modified.");
 
             var link = await _context.Set<JournalEntryAttachment>()
                 .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.JournalEntryId == journalEntryId && x.FileUploadRecordId == fileUploadRecordId, cancellationToken);
@@ -1244,7 +1459,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _context.Set<JournalEntryAttachment>().Remove(link);
             await _context.SaveChangesAsync(cancellationToken);
             await LogJournalAuditAsync(
-                "Finance.JournalEntry.AttachmentUnlinked",
+                FinanceAuditEvents.JournalAttachmentUnlinked,
                 journalEntryId,
                 new { journalEntryId, fileUploadRecordId },
                 null);
@@ -1252,7 +1467,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<IReadOnlyList<Guid>> GetAttachmentIdsAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
 
             return await _context.Set<JournalEntryAttachment>()
                 .Where(x => x.TenantId == tenantId && x.JournalEntryId == journalEntryId)
@@ -1262,7 +1477,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<IReadOnlyList<JournalEntryAttachmentDto>> GetAttachmentsAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
 
             var rows = await _context.Set<JournalEntryAttachment>()
                 .Include(x => x.FileUploadRecord)
@@ -1289,9 +1504,51 @@ namespace ErpSystem.Api.Services.Finance.GL
             JournalEntry entry,
             object? oldValues,
             object? newValues,
-            object? context = null)
+            object? context = null,
+            Guid? postingEventId = null,
+            string? reason = null,
+            string? comment = null,
+            Guid? workflowInstanceId = null,
+            Guid? workflowApprovalId = null)
         {
+            if (_financeAuditService != null)
+            {
+                var workflowContext = await ResolveJournalWorkflowAuditContextAsync(entry.Id, entry.TenantId);
+                await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+                {
+                    EventType = action,
+                    TenantId = entry.TenantId,
+                    SourceModule = string.IsNullOrWhiteSpace(entry.SourceModule) ? "GL" : entry.SourceModule,
+                    SourceDocumentType = string.IsNullOrWhiteSpace(entry.SourceDocumentType) ? "ManualJournalEntry" : entry.SourceDocumentType,
+                    SourceDocumentId = entry.SourceDocumentId.HasValue && entry.SourceDocumentId.Value != Guid.Empty ? entry.SourceDocumentId : entry.Id,
+                    JournalEntryId = entry.Id,
+                    PostingEventId = postingEventId,
+                    WorkflowInstanceId = workflowInstanceId ?? workflowContext.WorkflowInstanceId,
+                    WorkflowApprovalId = workflowApprovalId ?? workflowContext.WorkflowApprovalId,
+                    BeforeValues = oldValues,
+                    AfterValues = newValues,
+                    Context = context,
+                    Reason = reason,
+                    Comment = comment
+                });
+                return;
+            }
+
             await LogJournalAuditAsync(action, entry.Id, oldValues, newValues, context);
+        }
+
+        private async Task PersistJournalMutationWithAuditAsync(
+            Func<Task> auditOperation,
+            CancellationToken cancellationToken)
+        {
+            if (_financeAuditService != null)
+            {
+                await auditOperation();
+                return;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await auditOperation();
         }
 
         private async Task LogJournalAuditAsync(
@@ -1320,15 +1577,39 @@ namespace ErpSystem.Api.Services.Finance.GL
                 _currentUserService.UserAgent);
         }
 
+        private async Task<(Guid? WorkflowInstanceId, Guid? WorkflowApprovalId)> ResolveJournalWorkflowAuditContextAsync(
+            Guid journalEntryId,
+            Guid tenantId)
+        {
+            var workflow = await _context.WorkflowInstances
+                .Where(i => i.TenantId == tenantId && i.EntityId == journalEntryId && !i.IsDeleted)
+                .OrderByDescending(i => i.CreatedDate)
+                .Select(i => new
+                {
+                    WorkflowInstanceId = (Guid?)i.Id,
+                    WorkflowApprovalId = i.StepInstances
+                        .SelectMany(si => si.Approvals)
+                        .OrderByDescending(a => a.ProcessedDate ?? a.RequestedDate)
+                        .Select(a => (Guid?)a.Id)
+                        .FirstOrDefault()
+                })
+                .FirstOrDefaultAsync();
+
+            return workflow == null
+                ? (null, null)
+                : (workflow.WorkflowInstanceId, workflow.WorkflowApprovalId);
+        }
+
         private static string GetApprovalAuditAction(string approvalStatus)
         {
             return approvalStatus switch
             {
-                "Pending" => "Finance.JournalEntry.SubmittedForApproval",
-                "Approved" => "Finance.JournalEntry.Approved",
-                "Rejected" => "Finance.JournalEntry.Rejected",
-                "Withdrawn" => "Finance.JournalEntry.ApprovalWithdrawn",
-                _ => "Finance.JournalEntry.StatusChanged"
+                "Pending" => FinanceAuditEvents.JournalSubmitted,
+                "Approved" => FinanceAuditEvents.JournalApproved,
+                "Rejected" => FinanceAuditEvents.JournalRejected,
+                "Withdrawn" => FinanceAuditEvents.JournalWithdrawn,
+                "Returned" => FinanceAuditEvents.JournalReturned,
+                _ => FinanceAuditEvents.JournalStatusChanged
             };
         }
 

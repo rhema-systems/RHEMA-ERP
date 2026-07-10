@@ -5,10 +5,12 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Shared.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -46,17 +48,24 @@ namespace ErpSystem.Api.Controllers.Finance
     {
         private readonly ApplicationDbContext _context;
         private readonly ITaxConfigurationService _taxService;
+        private readonly ICurrentUserService _currentUserService;
 
         /// <summary>
         /// Initializes a new instance of <see cref="TaxRuleController"/> with required dependencies.
         /// </summary>
         /// <param name="context">The application database context for tax rule entity operations.</param>
         /// <param name="taxService">The tax configuration service used for seeding default tax rules.</param>
-        public TaxRuleController(ApplicationDbContext context, ITaxConfigurationService taxService)
+        public TaxRuleController(
+            ApplicationDbContext context,
+            ITaxConfigurationService taxService,
+            ICurrentUserService currentUserService)
         {
             _context = context;
             _taxService = taxService;
+            _currentUserService = currentUserService;
         }
+
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
         /// <summary>
         /// Seeds the system with default tax rules using the tax configuration service.
@@ -116,8 +125,10 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet]
         public async Task<ActionResult<IEnumerable<TaxRuleDto>>> GetTaxRules()
         {
+            var tenantId = TenantId;
             var rules = await _context.TaxRules
                 .Include(r => r.TaxGroup)
+                .Where(r => r.TenantId == tenantId && !r.IsDeleted)
                 .OrderBy(r => r.Priority)
                 .Select(r => new TaxRuleDto
                 {
@@ -167,9 +178,10 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("{id}")]
         public async Task<ActionResult<TaxRuleDto>> GetTaxRule(Guid id)
         {
+            var tenantId = TenantId;
             var r = await _context.TaxRules
                 .Include(r => r.TaxGroup)
-                .FirstOrDefaultAsync(x => x.Id == id);
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id && !x.IsDeleted);
 
             if (r == null) return NotFound();
 
@@ -222,6 +234,14 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost]
         public async Task<ActionResult<TaxRuleDto>> CreateTaxRule(CreateTaxRuleDto dto)
         {
+            var tenantId = TenantId;
+            var taxGroupExists = await _context.TaxGroups
+                .AnyAsync(g => g.TenantId == tenantId && g.Id == dto.TaxGroupId && !g.IsDeleted);
+            if (!taxGroupExists)
+            {
+                return BadRequest("Tax group not found for this tenant.");
+            }
+
             var rule = new TaxRule
             {
                 Id = Guid.NewGuid(),
@@ -235,13 +255,8 @@ namespace ErpSystem.Api.Controllers.Finance
                 ServiceType = dto.ServiceType,
                 IsActive = dto.IsActive,
                 CreatedAt = DateTime.UtcNow,
-                TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001") // Mock Tenant URL
+                TenantId = tenantId
             };
-
-            // In real app, tenant ID comes from context. Assuming handled by Global Filter or Context/Interceptor
-            // But since I'm using context directly, I should set it if not automated.
-            // The DbContext constructors seem to handle TenantId logic, but usually entities need it set.
-            // I'll assume 00...01 for dev.
 
             _context.TaxRules.Add(rule);
             await _context.SaveChangesAsync();
@@ -283,8 +298,17 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateTaxRule(Guid id, UpdateTaxRuleDto dto)
         {
-            var rule = await _context.TaxRules.FindAsync(id);
+            var tenantId = TenantId;
+            var rule = await _context.TaxRules
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted);
             if (rule == null) return NotFound();
+
+            var taxGroupExists = await _context.TaxGroups
+                .AnyAsync(g => g.TenantId == tenantId && g.Id == dto.TaxGroupId && !g.IsDeleted);
+            if (!taxGroupExists)
+            {
+                return BadRequest("Tax group not found for this tenant.");
+            }
 
             rule.Name = dto.Name;
             rule.Description = dto.Description;
@@ -335,15 +359,13 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteTaxRule(Guid id)
         {
-            var rule = await _context.TaxRules.FindAsync(id);
+            var tenantId = TenantId;
+            var rule = await _context.TaxRules
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted);
             if (rule == null) return NotFound();
 
-            // Hard delete or soft delete? BaseEntity has IsDeleted.
-             _context.TaxRules.Remove(rule); // Or set IsDeleted = true
-             // For now hard delete to be simple, or soft delete if configured
-             // BaseEntity normally implies soft delete if configured in OnModelCreating query filter.
-             // But explicit Remove() in EF Core usually hard deletes unless overridden.
-             // I'll assume Hard Delete corresponds to user intent "Delete".
+            rule.IsDeleted = true;
+            rule.DeletedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
             return NoContent();

@@ -88,6 +88,7 @@ public class CreditNoteSummaryDto
     public decimal TotalAmount { get; set; }
     public string? Reason { get; set; }
     public DateTime? AppliedDate { get; set; }
+    public Guid? JournalEntryId { get; set; }
     public int LineCount { get; set; }
     public DateTime CreatedAt { get; set; }
 }

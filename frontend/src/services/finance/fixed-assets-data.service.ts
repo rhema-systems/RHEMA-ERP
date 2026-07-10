@@ -44,6 +44,7 @@ class FixedAssetsDataService {
     if (query.categoryId) params.append('categoryId', query.categoryId);
     if (query.status !== undefined) params.append('status', query.status.toString());
     if (query.searchTerm) params.append('searchTerm', query.searchTerm);
+    if (query.bookClassification) params.append('bookClassification', query.bookClassification);
     const qs = params.toString();
     return qs ? `?${qs}` : '';
   }

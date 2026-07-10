@@ -64,6 +64,14 @@ public class AccountTransaction : BusinessEntity
     // ========================================================================
     // MULTI-CURRENCY SUPPORT (Section 3.2.4)
     // ========================================================================
+
+    /// <summary>
+    /// Tenant functional currency used to measure this posted line.
+    /// DebitAmount and CreditAmount are expressed in this currency.
+    /// </summary>
+    [Required]
+    [MaxLength(3)]
+    public string FunctionalCurrencyCode { get; set; } = "GHS";
     
     /// <summary>
     /// Currency code for this transaction.
@@ -72,6 +80,20 @@ public class AccountTransaction : BusinessEntity
     /// </summary>
     [MaxLength(3)]
     public string? TransactionCurrency { get; set; }
+
+    /// <summary>
+    /// Debit amount in the original transaction currency.
+    /// For functional-currency transactions this normally matches DebitAmount.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? TransactionDebitAmount { get; set; }
+
+    /// <summary>
+    /// Credit amount in the original transaction currency.
+    /// For functional-currency transactions this normally matches CreditAmount.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? TransactionCreditAmount { get; set; }
 
     /// <summary>
     /// Foreign currency amount (if TransactionCurrency is not base currency).
@@ -90,6 +112,12 @@ public class AccountTransaction : BusinessEntity
     public decimal? ExchangeRate { get; set; }
 
     /// <summary>
+    /// Tenant-owned exchange-rate record used for this line, when foreign currency applies.
+    /// This preserves the exact rate source independently of later rate edits.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+
+    /// <summary>
     /// Source of exchange rate used.
     /// Examples: "Bank of Ghana", "Manual Entry", "Bloomberg", "Automatic-Daily Rate"
     /// </summary>
@@ -101,6 +129,9 @@ public class AccountTransaction : BusinessEntity
     /// Used for historical rate tracking and validation.
     /// </summary>
     public DateTime? ExchangeRateDate { get; set; }
+
+    [ForeignKey(nameof(ExchangeRateId))]
+    public virtual ExchangeRate? ExchangeRateRecord { get; set; }
 
     // ========================================================================
     // SOURCE DOCUMENT TRACKING

@@ -173,6 +173,8 @@ const navigationItems: NavItem[] = [
           { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
           { title: 'Supplier Returns', href: '/finance/ap/returns', icon: RotateCcw },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
+          { title: 'Adjustment Journal', href: '/finance/subledger-adjustments/new?module=AP', icon: FileText },
+          { title: 'Journals', href: '/finance/journal-entries?sourceModule=AP', icon: FileText },
           {
             title: 'Reports',
             href: '/finance/ap/reports',
@@ -202,7 +204,8 @@ const navigationItems: NavItem[] = [
           { title: 'Credit Notes', href: '/sales/credit-notes', icon: CreditCard },
           { title: 'Payments', href: '/finance/ar/payments', icon: CreditCard },
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
-          { title: 'Journals', href: '/finance/ar/journals', icon: FileText },
+          { title: 'Adjustment Journal', href: '/finance/subledger-adjustments/new?module=AR', icon: FileText },
+          { title: 'Journals', href: '/finance/journal-entries?sourceModule=AR', icon: FileText },
           {
             title: 'Reports',
             href: '/finance/ar/reports',

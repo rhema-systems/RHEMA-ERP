@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -36,15 +38,18 @@ namespace ErpSystem.Api.Controllers
         private readonly IGeneralLedgerService _glService;
         private readonly ICurrencyRevaluationService _revaluationService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IFinanceAuditService? _financeAuditService;
 
         public FinanceController(
             IGeneralLedgerService glService,
             ICurrencyRevaluationService revaluationService,
-            ICurrentUserService currentUserService)
+            ICurrentUserService currentUserService,
+            IFinanceAuditService? financeAuditService = null)
         {
             _glService = glService;
             _revaluationService = revaluationService;
             _currentUserService = currentUserService;
+            _financeAuditService = financeAuditService;
         }
 
         /// <summary>
@@ -116,15 +121,50 @@ namespace ErpSystem.Api.Controllers
         [HttpPost("journal-entries/post-to-ledger")]
         public async Task<IActionResult> PostJournalEntry([FromBody] CreateJournalEntryDto entryDto)
         {
-            try
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            await RecordPostingBypassRejectedAsync(
+                tenantId,
+                entryDto.SourceModule,
+                entryDto.SourceDocumentType,
+                entryDto.SourceDocumentId,
+                "Legacy generic GL post-to-ledger endpoint is disabled. Use JournalEntryController create/approve/post for manual journals or the owning Finance module service for subledger postings.");
+
+            return BadRequest(new
             {
-                var journalEntry = await _glService.PostJournalEntryAsync(entryDto);
-                return Ok(journalEntry);
-            }
-            catch (Exception ex)
+                message = "Legacy generic GL post-to-ledger endpoint is disabled. Manual journals must use the journal entry lifecycle, and subledger postings must use their owning service through IFinancePostingEngine."
+            });
+        }
+
+        private async Task RecordPostingBypassRejectedAsync(
+            Guid tenantId,
+            string? sourceModule,
+            string? sourceDocumentType,
+            Guid? sourceDocumentId,
+            string reason)
+        {
+            if (_financeAuditService == null)
             {
-                return BadRequest(new { message = ex.Message });
+                return;
             }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = FinanceAuditEvents.PostingEngineBypassRejected,
+                TenantId = tenantId,
+                SourceModule = sourceModule,
+                SourceDocumentType = sourceDocumentType,
+                SourceDocumentId = sourceDocumentId,
+                Reason = reason,
+                Comment = "Blocked legacy generic GL posting endpoint.",
+                Resource = "FinanceController",
+                ResourceId = "journal-entries/post-to-ledger",
+                Context = new
+                {
+                    sourceModule,
+                    sourceDocumentType,
+                    sourceDocumentId
+                }
+            });
         }
 
         /// <summary>

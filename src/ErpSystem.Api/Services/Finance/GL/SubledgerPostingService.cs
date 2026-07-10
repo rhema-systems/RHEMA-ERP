@@ -9,12 +9,19 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Data;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.GL
 {
+    /// <summary>
+    /// Legacy implementation retained for historical migration reference only.
+    /// This service is intentionally not registered in normal application DI; normal Finance posting must use IFinancePostingEngine.
+    /// </summary>
+    [Obsolete("Legacy subledger posting is disabled for normal runtime flows. Use IFinancePostingEngine through the owning Finance module.")]
     public class SubledgerPostingService : ISubledgerPostingService
     {
         private readonly ApplicationDbContext _context;
@@ -37,9 +44,11 @@ namespace ErpSystem.Api.Services.Finance.GL
             _logger = logger;
         }
 
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
+
         private async Task<FinanceSettings> GetSettingsAsync(CancellationToken cancellationToken)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var settings = await _context.Set<FinanceSettings>()
                 .FirstOrDefaultAsync(s => s.TenantId == tenantId, cancellationToken);
 
@@ -53,8 +62,10 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<JournalEntryDto> PostFinancePurchaseOrderReceiptAsync(Guid receiptId, CancellationToken cancellationToken = default)
         {
+            var tenantId = TenantId;
             var existingJournal = await _context.JournalEntries
                 .FirstOrDefaultAsync(j =>
+                    j.TenantId == tenantId &&
                     j.SourceDocumentId == receiptId &&
                     j.SourceDocumentType == "FinancePurchaseOrderReceipt" &&
                     !j.IsDeleted,
@@ -76,7 +87,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     .ThenInclude(po => po.Vendor)
                 .Include(r => r.Items.Where(i => !i.IsDeleted))
                     .ThenInclude(i => i.FinancePurchaseOrderItem)
-                .FirstOrDefaultAsync(r => r.Id == receiptId && !r.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == receiptId && !r.IsDeleted, cancellationToken);
 
             if (receipt == null)
             {
@@ -175,16 +186,21 @@ namespace ErpSystem.Api.Services.Finance.GL
             return await _journalEntryService.PostJournalEntryAsync(journalEntry.Id, cancellationToken);
         }
 
+        [Obsolete("Normal AP invoice posting uses IVendorInvoiceService.PostAsync and IFinancePostingEngine. This legacy method is reserved for guarded opening-balance/migration paths.")]
         public async Task<JournalEntryDto> PostApInvoiceAsync(Guid vendorInvoiceId, CancellationToken cancellationToken = default)
         {
+            var tenantId = TenantId;
             var invoice = await _context.Set<VendorInvoice>()
                 .Include(i => i.LineItems)
                 .Include(i => i.Supplier) // BusinessPartner
-                .FirstOrDefaultAsync(i => i.Id == vendorInvoiceId, cancellationToken);
+                .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.Id == vendorInvoiceId && !i.IsDeleted, cancellationToken);
 
             if (invoice == null) throw new ArgumentException($"Vendor Invoice {vendorInvoiceId} not found.");
+            if (!invoice.IsOpeningBalance)
+                throw new InvalidOperationException("Legacy AP invoice posting is disabled for normal invoices. Use IVendorInvoiceService.PostAsync.");
 
             var existingInvoiceJournal = await GetExistingSourceJournalAsync(
+                tenantId,
                 invoice.JournalEntryId,
                 invoice.Id,
                 "VendorInvoice",
@@ -265,7 +281,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var linkedFinanceReceipt = await _context.FinancePurchaseOrderReceipts
-                .FirstOrDefaultAsync(r => r.VendorInvoiceId == invoice.Id && !r.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.VendorInvoiceId == invoice.Id && !r.IsDeleted, cancellationToken);
             var clearsFinanceGrv = linkedFinanceReceipt != null;
             var grvAccrualAccountId = settings.ControlAccountGRVAccrualId;
             if (clearsFinanceGrv && grvAccrualAccountId == null)
@@ -450,16 +466,24 @@ namespace ErpSystem.Api.Services.Finance.GL
         private static string NormalizeCurrency(string? currencyCode)
             => string.IsNullOrWhiteSpace(currencyCode) ? "GHS" : currencyCode.Trim().ToUpperInvariant();
 
+        private static bool IsLegacyApPaymentPostingDisabled() => true;
+
+        [Obsolete("Normal AP payment posting uses IVendorPaymentService.PostAsync and IFinancePostingEngine. This legacy method is reserved for migration compatibility only.")]
         public async Task<JournalEntryDto> PostApPaymentAsync(Guid vendorPaymentId, CancellationToken cancellationToken = default)
         {
+            if (IsLegacyApPaymentPostingDisabled())
+                throw new InvalidOperationException("Legacy AP payment posting is disabled. Use IVendorPaymentService.PostAsync.");
+
+            var tenantId = TenantId;
             var payment = await _context.Set<VendorPayment>()
                 .Include(p => p.Supplier)
                 .Include(p => p.Allocations)
-                .FirstOrDefaultAsync(p => p.Id == vendorPaymentId && !p.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Id == vendorPaymentId && !p.IsDeleted, cancellationToken);
 
             if (payment == null) throw new ArgumentException($"Vendor Payment {vendorPaymentId} not found.");
 
             var existingPaymentJournal = await GetExistingSourceJournalAsync(
+                tenantId,
                 payment.JournalEntryId,
                 payment.Id,
                 "VendorPayment",
@@ -480,12 +504,26 @@ namespace ErpSystem.Api.Services.Finance.GL
             var bankAccountId = payment.BankAccountId ?? settings.DefaultBankAccountId;
             if (bankAccountId == null) throw new InvalidOperationException("Bank Account not configured for payment.");
 
+            var bankAccount = await _context.Set<BankAccount>()
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == bankAccountId.Value && !a.IsDeleted, cancellationToken);
+            if (bankAccount == null) throw new InvalidOperationException("Bank Account not found for payment.");
+            if (bankAccount.GLAccountId == null) throw new InvalidOperationException($"Bank Account '{bankAccount.AccountName}' is not linked to a GL account.");
+            payment.BankAccountId ??= bankAccount.Id;
+
             var currencyCode = NormalizeCurrency(payment.CurrencyCode);
             var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
             var discountTaken = payment.Allocations?
                 .Where(a => !a.IsReversal)
                 .Sum(a => a.DiscountAmount) ?? payment.DiscountTaken;
-            var apSettlementAmount = payment.TotalAmount + discountTaken;
+            var withholdingTaxAmount = payment.Allocations?
+                .Where(a => !a.IsReversal)
+                .Sum(a => a.WithholdingTaxAmount) ?? 0m;
+            if (withholdingTaxAmount <= 0m)
+            {
+                withholdingTaxAmount = payment.WithholdingTaxAmount;
+            }
+
+            var apSettlementAmount = payment.TotalAmount + discountTaken + withholdingTaxAmount;
 
             var transactions = new List<CreateAccountTransactionDto>
             {
@@ -502,7 +540,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 },
                 new CreateAccountTransactionDto
                 {
-                    AccountId = bankAccountId.Value,
+                    AccountId = bankAccount.GLAccountId.Value,
                     Description = $"Vendor Payment {payment.PaymentNumber}",
                     TransactionType = "Credit",
                     Amount = ToBaseAmount(payment.TotalAmount, exchangeRate),
@@ -531,6 +569,24 @@ namespace ErpSystem.Api.Services.Finance.GL
                 });
             }
 
+            if (withholdingTaxAmount > 0)
+            {
+                var taxAccountId = settings.ControlAccountTaxId;
+                if (taxAccountId == null) throw new InvalidOperationException("Tax Control Account not configured for AP withholding tax.");
+
+                transactions.Add(new CreateAccountTransactionDto
+                {
+                    AccountId = taxAccountId.Value,
+                    Description = $"Withholding Tax - {payment.PaymentNumber}",
+                    TransactionType = "Credit",
+                    Amount = ToBaseAmount(withholdingTaxAmount, exchangeRate),
+                    Reference = payment.PaymentNumber,
+                    CurrencyCode = currencyCode,
+                    ExchangeRate = exchangeRate,
+                    ForeignAmount = withholdingTaxAmount
+                });
+            }
+
             var jeDto = new CreateJournalEntryDto
             {
                 TransactionDate = payment.PaymentDate,
@@ -549,8 +605,88 @@ namespace ErpSystem.Api.Services.Finance.GL
             return await _journalEntryService.PostJournalEntryAsync(journalEntry.Id, cancellationToken);
         }
 
+        [Obsolete("AP payment discount posting must use the central finance posting engine. This legacy method is reserved for migration compatibility only.")]
+        public async Task<JournalEntryDto> PostApPaymentDiscountAdjustmentAsync(Guid allocationId, CancellationToken cancellationToken = default)
+        {
+            if (IsLegacyApPaymentPostingDisabled())
+                throw new InvalidOperationException("Legacy AP payment discount posting is disabled. Use the central finance posting engine.");
+
+            var tenantId = TenantId;
+            var allocation = await _context.Set<VendorPaymentAllocation>()
+                .Include(a => a.VendorPayment)
+                    .ThenInclude(p => p.Supplier)
+                .Include(a => a.VendorInvoice)
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == allocationId && !a.IsDeleted, cancellationToken);
+
+            if (allocation == null) throw new ArgumentException($"Vendor payment allocation {allocationId} not found.");
+            if (allocation.IsReversal || allocation.DiscountAmount <= 0)
+                throw new InvalidOperationException("Only positive, non-reversal AP payment discount allocations can be posted.");
+
+            var existingJournal = await GetExistingSourceJournalAsync(
+                tenantId,
+                null,
+                allocation.Id,
+                "VendorPaymentDiscountAdjustment",
+                allocation.VendorPayment.PaymentNumber,
+                cancellationToken);
+            if (existingJournal != null)
+            {
+                return await EnsurePostedAsync(existingJournal, cancellationToken);
+            }
+
+            var settings = await GetSettingsAsync(cancellationToken);
+            var apAccountId = allocation.VendorPayment.Supplier.DefaultApAccountId ?? settings.ControlAccountApId;
+            if (apAccountId == null) throw new InvalidOperationException("AP Control Account not configured.");
+
+            var discountReceivedAccountId = settings.DiscountReceivedAccountId;
+            if (discountReceivedAccountId == null) throw new InvalidOperationException("Purchase Discounts Received Account not configured in Finance Settings.");
+
+            var currencyCode = NormalizeCurrency(allocation.VendorPayment.CurrencyCode);
+            var exchangeRate = NormalizeExchangeRate(allocation.VendorPayment.ExchangeRate);
+            var baseAmount = ToBaseAmount(allocation.DiscountAmount, exchangeRate);
+
+            var jeDto = new CreateJournalEntryDto
+            {
+                TransactionDate = allocation.AllocationDate,
+                Description = $"Purchase Discount Taken - {allocation.VendorPayment.PaymentNumber}",
+                Reference = allocation.VendorPayment.PaymentNumber,
+                SourceModule = "AP",
+                SourceDocumentId = allocation.Id,
+                SourceDocumentType = "VendorPaymentDiscountAdjustment",
+                Transactions = new List<CreateAccountTransactionDto>
+                {
+                    new CreateAccountTransactionDto
+                    {
+                        AccountId = apAccountId.Value,
+                        Description = $"AP discount settlement - {allocation.VendorInvoice.InvoiceNumber}",
+                        TransactionType = "Debit",
+                        Amount = baseAmount,
+                        Reference = allocation.VendorPayment.PaymentNumber,
+                        CurrencyCode = currencyCode,
+                        ExchangeRate = exchangeRate,
+                        ForeignAmount = allocation.DiscountAmount
+                    },
+                    new CreateAccountTransactionDto
+                    {
+                        AccountId = discountReceivedAccountId.Value,
+                        Description = $"Purchase Discount Taken - {allocation.VendorInvoice.InvoiceNumber}",
+                        TransactionType = "Credit",
+                        Amount = baseAmount,
+                        Reference = allocation.VendorPayment.PaymentNumber,
+                        CurrencyCode = currencyCode,
+                        ExchangeRate = exchangeRate,
+                        ForeignAmount = allocation.DiscountAmount
+                    }
+                }
+            };
+
+            var journalEntry = await _journalEntryService.CreateJournalEntryAsync(jeDto, cancellationToken);
+            return await _journalEntryService.PostJournalEntryAsync(journalEntry.Id, cancellationToken);
+        }
+
         public async Task<JournalEntryDto> PostSupplierDebitNoteAsync(Guid supplierDebitNoteId, CancellationToken cancellationToken = default)
         {
+            var tenantId = TenantId;
             var debitNote = await _context.SupplierDebitNotes
                 .Include(d => d.Vendor)
                 .Include(d => d.LineItems.Where(l => !l.IsDeleted))
@@ -558,11 +694,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                     .ThenInclude(r => r!.LineItems.Where(l => !l.IsDeleted))
                 .Include(d => d.OriginalVendorInvoice)
                     .ThenInclude(i => i!.LineItems)
-                .FirstOrDefaultAsync(d => d.Id == supplierDebitNoteId && !d.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(d => d.TenantId == tenantId && d.Id == supplierDebitNoteId && !d.IsDeleted, cancellationToken);
 
             if (debitNote == null) throw new ArgumentException($"Supplier Debit Note {supplierDebitNoteId} not found.");
 
             var existingDebitNoteJournal = await GetExistingSourceJournalAsync(
+                tenantId,
                 debitNote.JournalEntryId,
                 debitNote.Id,
                 "SupplierDebitNote",
@@ -744,16 +881,21 @@ namespace ErpSystem.Api.Services.Finance.GL
             return await _journalEntryService.PostJournalEntryAsync(journalEntry.Id, cancellationToken);
         }
 
+        [Obsolete("Normal AR invoice posting uses IInvoiceService.PostAsync and IFinancePostingEngine. This legacy method is reserved for migration compatibility only.")]
         public async Task<JournalEntryDto> PostArInvoiceAsync(Guid invoiceId, CancellationToken cancellationToken = default)
         {
+            var tenantId = TenantId;
             var invoice = await _context.Set<Invoice>()
                 .Include(i => i.BusinessPartner)
                 .Include(i => i.LineItems.Where(l => !l.IsDeleted))
-                .FirstOrDefaultAsync(i => i.Id == invoiceId && !i.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.Id == invoiceId && !i.IsDeleted, cancellationToken);
 
             if (invoice == null) throw new ArgumentException($"AR Invoice {invoiceId} not found.");
+            if (!invoice.IsOpeningBalance)
+                throw new InvalidOperationException("Legacy AR invoice posting is disabled for normal invoices. Use IInvoiceService.PostAsync.");
 
             var existingInvoiceJournal = await GetExistingSourceJournalAsync(
+                tenantId,
                 invoice.JournalEntryId,
                 invoice.Id,
                 "CustomerInvoice",
@@ -961,17 +1103,34 @@ namespace ErpSystem.Api.Services.Finance.GL
             return await _journalEntryService.PostJournalEntryAsync(journalEntry.Id, cancellationToken);
         }
 
+        private static bool IsLegacyArPaymentPostingDisabled() => true;
+
         public async Task<JournalEntryDto> PostArPaymentAsync(Guid paymentId, CancellationToken cancellationToken = default)
         {
+            if (IsLegacyArPaymentPostingDisabled())
+                throw new InvalidOperationException("Legacy AR payment and credit-note posting is disabled. Use IPaymentService with IFinancePostingEngine for AR receipts and customer credit notes.");
+
+            var tenantId = TenantId;
             var payment = await _context.Set<CustomerPayment>()
-                .Include(p => p.Customer)
                 .Include(p => p.Allocations)
-                .FirstOrDefaultAsync(p => p.Id == paymentId && !p.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Id == paymentId && !p.IsDeleted, cancellationToken);
 
             if (payment == null) throw new ArgumentException($"AR Payment {paymentId} not found.");
+            if (!payment.IsCreditNote)
+                throw new InvalidOperationException("Legacy AR receipt posting is disabled. Use IPaymentService.PostAsync and IFinancePostingEngine for customer receipts.");
+
+            var customer = await _context.Set<BusinessPartner>()
+                .FirstOrDefaultAsync(p =>
+                    p.TenantId == payment.TenantId &&
+                    p.Id == payment.CustomerId &&
+                    !p.IsDeleted &&
+                    (p.PartnerType == "Customer" || p.PartnerType == "Both"),
+                    cancellationToken)
+                ?? throw new InvalidOperationException($"Customer business partner {payment.CustomerId} not found for AR payment.");
 
             var sourceDocumentType = payment.IsCreditNote ? "CustomerCreditNote" : "CustomerPayment";
             var existingPaymentJournal = await GetExistingSourceJournalAsync(
+                tenantId,
                 payment.JournalEntryId,
                 payment.Id,
                 sourceDocumentType,
@@ -986,7 +1145,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var settings = await GetSettingsAsync(cancellationToken);
 
-            var arAccountId = payment.Customer?.DefaultArAccountId ?? settings.ControlAccountArId;
+            var arAccountId = customer.DefaultArAccountId ?? settings.ControlAccountArId;
             if (arAccountId == null) throw new InvalidOperationException("AR Control Account not configured.");
 
             var currencyCode = NormalizeCurrency(payment.CurrencyCode);
@@ -1031,9 +1190,15 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var bankAccountId = payment.BankAccountId ?? settings.DefaultBankAccountId;
                 if (bankAccountId == null) throw new InvalidOperationException("Bank Account not configured for AR payment.");
 
+                var bankAccount = await _context.Set<BankAccount>()
+                    .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == bankAccountId.Value && !a.IsDeleted, cancellationToken);
+                if (bankAccount == null) throw new InvalidOperationException("Bank Account not found for AR payment.");
+                if (bankAccount.GLAccountId == null) throw new InvalidOperationException($"Bank Account '{bankAccount.AccountName}' is not linked to a GL account.");
+                payment.BankAccountId ??= bankAccount.Id;
+
                 transactions.Add(new CreateAccountTransactionDto
                 {
-                    AccountId = bankAccountId.Value,
+                    AccountId = bankAccount.GLAccountId.Value,
                     Description = $"Customer Payment {payment.PaymentNumber}",
                     TransactionType = "Debit",
                     Amount = ToBaseAmount(payment.TotalAmount, exchangeRate),
@@ -1078,8 +1243,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 TransactionDate = payment.PaymentDate,
                 Description = payment.IsCreditNote
-                    ? $"Customer Credit Note {payment.PaymentNumber}"
-                    : $"Customer Payment {payment.PaymentNumber}",
+                    ? $"Customer Credit Note {payment.PaymentNumber} - {customer.PartnerName}"
+                    : $"Customer Payment {payment.PaymentNumber} - {customer.PartnerName}",
                 Reference = payment.PaymentNumber,
                 SourceModule = "AR",
                 SourceDocumentId = payment.Id,
@@ -1094,16 +1259,102 @@ namespace ErpSystem.Api.Services.Finance.GL
             return await _journalEntryService.PostJournalEntryAsync(journalEntry.Id, cancellationToken);
         }
 
+        public async Task<JournalEntryDto> PostArPaymentDiscountAdjustmentAsync(Guid allocationId, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Legacy AR receipt discount adjustment posting is disabled. Receipt discounts must be included in the central AR receipt posting request.");
+
+#pragma warning disable CS0162
+            var tenantId = TenantId;
+            var allocation = await _context.Set<PaymentAllocation>()
+                .Include(a => a.CustomerPayment)
+                .Include(a => a.Invoice)
+                    .ThenInclude(i => i.BusinessPartner)
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == allocationId && !a.IsDeleted, cancellationToken);
+
+            if (allocation == null) throw new ArgumentException($"Customer payment allocation {allocationId} not found.");
+            if (allocation.IsReversal || allocation.DiscountAmount <= 0)
+                throw new InvalidOperationException("Only positive, non-reversal AR payment discount allocations can be posted.");
+
+            var existingJournal = await GetExistingSourceJournalAsync(
+                tenantId,
+                null,
+                allocation.Id,
+                "CustomerPaymentDiscountAdjustment",
+                allocation.CustomerPayment.PaymentNumber,
+                cancellationToken);
+            if (existingJournal != null)
+            {
+                return await EnsurePostedAsync(existingJournal, cancellationToken);
+            }
+
+            var settings = await GetSettingsAsync(cancellationToken);
+            var arAccountId = allocation.Invoice.BusinessPartner?.DefaultArAccountId ?? settings.ControlAccountArId;
+            if (arAccountId == null) throw new InvalidOperationException("AR Control Account not configured.");
+
+            var discountAllowedAccountId = settings.DiscountAllowedAccountId;
+            if (discountAllowedAccountId == null) throw new InvalidOperationException("Sales Discounts Allowed Account not configured in Finance Settings.");
+
+            var currencyCode = NormalizeCurrency(allocation.CustomerPayment.CurrencyCode);
+            var exchangeRate = NormalizeExchangeRate(allocation.CustomerPayment.ExchangeRate);
+            var baseAmount = ToBaseAmount(allocation.DiscountAmount, exchangeRate);
+
+            var jeDto = new CreateJournalEntryDto
+            {
+                TransactionDate = allocation.AllocationDate,
+                Description = $"Sales Discount Allowed - {allocation.CustomerPayment.PaymentNumber}",
+                Reference = allocation.CustomerPayment.PaymentNumber,
+                SourceModule = "AR",
+                SourceDocumentId = allocation.Id,
+                SourceDocumentType = "CustomerPaymentDiscountAdjustment",
+                Transactions = new List<CreateAccountTransactionDto>
+                {
+                    new CreateAccountTransactionDto
+                    {
+                        AccountId = discountAllowedAccountId.Value,
+                        Description = $"Sales Discount Allowed - {allocation.Invoice.InvoiceNumber}",
+                        TransactionType = "Debit",
+                        Amount = baseAmount,
+                        Reference = allocation.CustomerPayment.PaymentNumber,
+                        CurrencyCode = currencyCode,
+                        ExchangeRate = exchangeRate,
+                        ForeignAmount = allocation.DiscountAmount
+                    },
+                    new CreateAccountTransactionDto
+                    {
+                        AccountId = arAccountId.Value,
+                        Description = $"AR discount settlement - {allocation.Invoice.InvoiceNumber}",
+                        TransactionType = "Credit",
+                        Amount = baseAmount,
+                        Reference = allocation.CustomerPayment.PaymentNumber,
+                        CurrencyCode = currencyCode,
+                        ExchangeRate = exchangeRate,
+                        ForeignAmount = allocation.DiscountAmount
+                    }
+                }
+            };
+
+            var journalEntry = await _journalEntryService.CreateJournalEntryAsync(jeDto, cancellationToken);
+            return await _journalEntryService.PostJournalEntryAsync(journalEntry.Id, cancellationToken);
+#pragma warning restore CS0162
+        }
+
+        private static bool IsLegacySalesCreditNotePostingDisabled() => true;
+
         public async Task<JournalEntryDto> PostSalesCreditNoteAsync(Guid creditNoteId, CancellationToken cancellationToken = default)
         {
+            if (IsLegacySalesCreditNotePostingDisabled())
+                throw new InvalidOperationException("Legacy sales credit note posting is disabled. Use IReturnOrderService.PostCreditNoteAsync and IFinancePostingEngine.");
+
+            var tenantId = TenantId;
             var creditNote = await _context.Set<CreditNote>()
                 .Include(c => c.Customer)
                 .Include(c => c.Lines)
-                .FirstOrDefaultAsync(c => c.Id == creditNoteId && !c.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Id == creditNoteId && !c.IsDeleted, cancellationToken);
 
             if (creditNote == null) throw new ArgumentException($"Sales Credit Note {creditNoteId} not found.");
 
             var existingJournal = await GetExistingSourceJournalAsync(
+                tenantId,
                 null,
                 creditNote.Id,
                 "SalesCreditNote",
@@ -1190,6 +1441,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         }
 
         private async Task<JournalEntry?> GetExistingSourceJournalAsync(
+            Guid tenantId,
             Guid? linkedJournalEntryId,
             Guid sourceDocumentId,
             string sourceDocumentType,
@@ -1199,7 +1451,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (linkedJournalEntryId.HasValue)
             {
                 var linkedJournal = await _context.JournalEntries
-                    .FirstOrDefaultAsync(j => j.Id == linkedJournalEntryId.Value && !j.IsDeleted, cancellationToken);
+                    .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == linkedJournalEntryId.Value && !j.IsDeleted, cancellationToken);
 
                 if (linkedJournal == null)
                 {
@@ -1211,6 +1463,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             return await _context.JournalEntries
                 .FirstOrDefaultAsync(j =>
+                    j.TenantId == tenantId &&
                     j.SourceDocumentId == sourceDocumentId &&
                     j.SourceDocumentType == sourceDocumentType &&
                     !j.IsDeleted,

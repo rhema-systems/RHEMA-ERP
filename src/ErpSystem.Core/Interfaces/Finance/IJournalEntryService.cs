@@ -70,6 +70,11 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<bool> ValidateBalanceAsync(Guid id, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Validates a draft journal entry before it is submitted into the approval workflow.
+        /// </summary>
+        Task ValidateJournalEntryReadyForSubmissionAsync(Guid id, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Generates the next available journal entry number (JE-YYYY-XXXX).
         /// </summary>
         Task<string> GenerateJournalEntryNumberAsync(CancellationToken cancellationToken = default);

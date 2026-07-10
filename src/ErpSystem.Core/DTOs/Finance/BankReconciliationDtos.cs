@@ -34,6 +34,7 @@ public class StartReconciliationDto
     public DateTime ReconciliationDate { get; set; }
     public decimal StatementBalance { get; set; }
     public Guid? StatementId { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class ReconciliationMatchDto
@@ -54,6 +55,39 @@ public class CreateManualMatchDto
     public Guid CashTransactionId { get; set; }
     public Guid BankStatementLineId { get; set; }
     public string? Notes { get; set; }
+}
+
+public class CreateReconciliationAdjustmentDto
+{
+    public ReconciliationAdjustmentType AdjustmentType { get; set; }
+    public DateTime TransactionDate { get; set; }
+    public decimal Amount { get; set; }
+    public Guid OffsetAccountId { get; set; }
+    public string? ReferenceNumber { get; set; }
+    public string? Description { get; set; }
+    public string? Notes { get; set; }
+    public string? IdempotencyKey { get; set; }
+}
+
+public class ReconciliationAdjustmentDto
+{
+    public Guid ReconciliationId { get; set; }
+    public Guid CashTransactionId { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
+    public ReconciliationAdjustmentType AdjustmentType { get; set; }
+    public CashTransactionType CashTransactionType { get; set; }
+    public decimal Amount { get; set; }
+    public Guid BankAccountId { get; set; }
+    public Guid OffsetAccountId { get; set; }
+    public string? ReferenceNumber { get; set; }
+    public DateTime TransactionDate { get; set; }
+    public bool WasDuplicate { get; set; }
+}
+
+public class CancelReconciliationDto
+{
+    public string Reason { get; set; } = string.Empty;
 }
 
 public class ReconciliationSummaryDto

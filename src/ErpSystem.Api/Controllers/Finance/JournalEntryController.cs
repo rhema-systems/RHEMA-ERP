@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -27,6 +28,7 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IGeneralLedgerService _generalLedgerService;
         private readonly IWorkflowService _workflowService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IFinanceAuditService _financeAuditService;
         private readonly ApplicationDbContext _dbContext;
 
         public JournalEntryController(
@@ -34,14 +36,18 @@ namespace ErpSystem.Api.Controllers.Finance
             IGeneralLedgerService generalLedgerService,
             IWorkflowService workflowService,
             ICurrentUserService currentUserService,
+            IFinanceAuditService financeAuditService,
             ApplicationDbContext dbContext)
         {
             _journalEntryService = journalEntryService;
             _generalLedgerService = generalLedgerService;
             _workflowService = workflowService;
             _currentUserService = currentUserService;
+            _financeAuditService = financeAuditService;
             _dbContext = dbContext;
         }
+
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
         /// <summary>
         /// Gets business audit events recorded for this journal entry.
@@ -61,20 +67,18 @@ namespace ErpSystem.Api.Controllers.Finance
                         "Finance.JournalEntries.Reverse"))
                     return Forbid();
 
-                var tenantId = _currentUserService.TenantId;
+                var tenantId = TenantId;
                 var exists = await _dbContext.JournalEntries
-                    .AnyAsync(j => j.Id == id && (!tenantId.HasValue || j.TenantId == tenantId.Value));
+                    .AnyAsync(j => j.Id == id && j.TenantId == tenantId && !j.IsDeleted);
 
                 if (!exists)
                     return NotFound($"Journal entry with ID {id} not found");
 
-                var auditLogs = await _dbContext.AuditLogs
-                    .Where(a => a.Resource == "Finance.JournalEntry"
-                                && a.ResourceId == id.ToString()
-                                && (!tenantId.HasValue || a.TenantId == tenantId.Value))
-                    .OrderByDescending(a => a.Timestamp)
-                    .Take(100)
-                    .ToListAsync();
+                var auditLogs = await _financeAuditService.GetAuditTrailAsync(
+                    tenantId,
+                    "Finance.JournalEntry",
+                    id.ToString(),
+                    limit: 100);
 
                 return Ok(auditLogs.Select(MapAuditLogToDto).ToList());
             }
@@ -110,10 +114,10 @@ namespace ErpSystem.Api.Controllers.Finance
 
         private async Task<bool> HasActiveJournalWorkflowAsync(Guid journalEntryId)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             return await _dbContext.WorkflowInstances
                 .AnyAsync(i =>
-                    (!tenantId.HasValue || i.TenantId == tenantId.Value) &&
+                    i.TenantId == tenantId &&
                     i.EntityId == journalEntryId &&
                     ActiveWorkflowStatuses.Contains(i.Status) &&
                     (i.EntityType.Code == "JournalEntry" ||
@@ -131,12 +135,12 @@ namespace ErpSystem.Api.Controllers.Finance
 
         private async Task<HashSet<Guid>> GetWorkflowAssignedJournalIdsAsync(Guid userId)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var userRoles = (_currentUserService.Roles ?? Array.Empty<string>()).ToList();
 
             var assignedIds = await _dbContext.WorkflowInstances
                 .Where(i =>
-                    (!tenantId.HasValue || i.TenantId == tenantId.Value) &&
+                    i.TenantId == tenantId &&
                     ActiveWorkflowStatuses.Contains(i.Status) &&
                     (i.EntityType.Code == "JournalEntry" ||
                      i.EntityType.Name == "JournalEntry" ||
@@ -162,10 +166,10 @@ namespace ErpSystem.Api.Controllers.Finance
             if (ids.Count == 0)
                 return new HashSet<Guid>();
 
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var workflowIds = await _dbContext.WorkflowInstances
                 .Where(i =>
-                    (!tenantId.HasValue || i.TenantId == tenantId.Value) &&
+                    i.TenantId == tenantId &&
                     ids.Contains(i.EntityId) &&
                     ActiveWorkflowStatuses.Contains(i.Status) &&
                     (i.EntityType.Code == "JournalEntry" ||
@@ -447,6 +451,8 @@ namespace ErpSystem.Api.Controllers.Finance
 
                 if (entry.PostingStatus != "Draft")
                     return BadRequest($"Only draft journal entries can be submitted for approval. Current status: {entry.PostingStatus}");
+
+                await _journalEntryService.ValidateJournalEntryReadyForSubmissionAsync(id);
 
                 var workflowResult = await _workflowService.StartApprovalWorkflowAsync("JournalEntry", id);
                 if (!workflowResult.Success)

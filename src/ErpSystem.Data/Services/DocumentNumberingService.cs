@@ -278,6 +278,11 @@ public class DocumentNumberingService : IDocumentNumberingService
                 .Where(e => e.TenantId == tenantId)
                 .Select(e => e.PaymentNumber)
                 .ToListAsync(cancellationToken),
+            (DocumentNumberingModules.Finance, FinanceDocumentTypes.ARAdjustmentJournal) or
+            (DocumentNumberingModules.Finance, FinanceDocumentTypes.APAdjustmentJournal) => _context.Set<SubledgerAdjustmentJournal>()
+                .Where(e => e.TenantId == tenantId)
+                .Select(e => e.AdjustmentNumber)
+                .ToListAsync(cancellationToken),
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.APInvoice) => _context.Set<VendorInvoice>()
                 .Where(e => e.TenantId == tenantId)
                 .Select(e => e.InvoiceNumber)

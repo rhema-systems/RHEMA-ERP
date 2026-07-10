@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <inheritdoc />
+    [Microsoft.EntityFrameworkCore.Infrastructure.DbContext(typeof(ApplicationDbContext))]
+    [Migration("20260702103000_AddFixedAssetLocation")]
     public partial class AddFixedAssetLocation : Migration
     {
         /// <inheritdoc />

@@ -125,30 +125,31 @@ class CashManagementDataService {
     // ===== BANK RECONCILIATION =====
 
     async getBankReconciliations(bankAccountId?: string): Promise<BankReconciliation[]> {
-        const endpoint = bankAccountId
-            ? `/finance/bank-reconciliations?bankAccountId=${bankAccountId}`
-            : '/finance/bank-reconciliations';
-        return apiService.get<BankReconciliation[]>(endpoint);
+        if (!bankAccountId) {
+            return [];
+        }
+
+        return apiService.get<BankReconciliation[]>(`/finance/bank-reconciliation/bank-account/${bankAccountId}`);
     }
 
     async getBankReconciliationById(id: string): Promise<BankReconciliation | null> {
-        return apiService.get<BankReconciliation>(`/finance/bank-reconciliations/${id}`);
+        return apiService.get<BankReconciliation>(`/finance/bank-reconciliation/${id}`);
     }
 
     async startReconciliation(dto: StartReconciliationDto): Promise<BankReconciliation> {
-        return apiService.post<BankReconciliation>('/finance/bank-reconciliations', dto);
+        return apiService.post<BankReconciliation>('/finance/bank-reconciliation/start', dto);
     }
 
     async getReconciliationMatches(reconciliationId: string): Promise<ReconciliationMatch[]> {
-        return apiService.get<ReconciliationMatch[]>(`/finance/bank-reconciliations/${reconciliationId}/matches`);
+        return apiService.get<ReconciliationMatch[]>(`/finance/bank-reconciliation/${reconciliationId}/matches`);
     }
 
     async createReconciliationMatch(reconciliationId: string, match: Partial<ReconciliationMatch>): Promise<ReconciliationMatch> {
-        return apiService.post<ReconciliationMatch>(`/finance/bank-reconciliations/${reconciliationId}/matches`, match);
+        return apiService.post<ReconciliationMatch>(`/finance/bank-reconciliation/${reconciliationId}/manual-match`, match);
     }
 
     async completeReconciliation(id: string): Promise<BankReconciliation> {
-        return apiService.put<BankReconciliation>(`/finance/bank-reconciliations/${id}/complete`, {});
+        return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/finalize`, {});
     }
 
     // ===== CHEQUES =====

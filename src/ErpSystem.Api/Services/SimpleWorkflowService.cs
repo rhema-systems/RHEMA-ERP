@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Maintenance;
@@ -760,6 +762,84 @@ public class SimpleWorkflowService : IWorkflowService
             ["entityId"] = entityId,
             ["entityType"] = entityTypeRecord.Code ?? entityTypeRecord.Name
         };
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+
+        if (IsEntityType(entityTypeRecord, "ExchangeRate", "Exchange Rate"))
+        {
+            var rate = await _unitOfWork.Repository<ExchangeRate>()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == entityId)
+                ?? throw new InvalidOperationException("Exchange rate not found");
+            context["baseCurrencyCode"] = rate.BaseCurrencyCode;
+            context["targetCurrencyCode"] = rate.TargetCurrencyCode;
+            context["rate"] = rate.Rate;
+            context["effectiveDate"] = rate.EffectiveDate;
+            context["rateType"] = rate.RateType.ToString();
+            context["rateSource"] = rate.RateSource;
+            context["approvalStatus"] = rate.ApprovalStatus.ToString();
+            context["isManualEntry"] = rate.IsManualEntry;
+        }
+
+        if (IsEntityType(entityTypeRecord, "FixedAsset", "Fixed Asset"))
+        {
+            var asset = await _unitOfWork.Repository<FixedAsset>()
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == entityId, a => a.Category)
+                ?? throw new InvalidOperationException("Fixed asset not found");
+            context["assetCode"] = asset.AssetCode;
+            context["assetName"] = asset.Name;
+            context["assetStatus"] = asset.Status.ToString();
+            context["categoryId"] = asset.FixedAssetCategoryId;
+            context["categoryCode"] = asset.Category?.Code ?? string.Empty;
+            context["acquisitionCost"] = asset.AcquisitionCost;
+            context["netBookValue"] = asset.NetBookValue;
+            context["purchaseDate"] = asset.PurchaseDate;
+            context["capitalizationDate"] = asset.CapitalizationDate;
+        }
+
+        if (IsEntityType(entityTypeRecord, "FixedAssetDepreciationRun", "AssetDepreciationSchedule", "Asset Depreciation", "Depreciation Run"))
+        {
+            var run = await _unitOfWork.Repository<FixedAssetDepreciationRun>()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == entityId, r => r.FiscalPeriod)
+                ?? throw new InvalidOperationException("Fixed asset depreciation run not found");
+            context["status"] = run.Status;
+            context["postingDate"] = run.PostingDate;
+            context["fiscalPeriodId"] = run.FiscalPeriodId;
+            context["periodCode"] = run.FiscalPeriod?.PeriodCode ?? string.Empty;
+            context["bookClassification"] = run.BookClassification;
+            context["totalDepreciationAmount"] = run.TotalDepreciationAmount;
+            context["fixedAssetId"] = run.FixedAssetId;
+        }
+
+        if (IsEntityType(entityTypeRecord, "OpeningBalanceBatch", "Opening Balance Batch"))
+        {
+            var batch = await _unitOfWork.Repository<OpeningBalanceBatch>()
+                .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == entityId, b => b.FiscalPeriod)
+                ?? throw new InvalidOperationException("Opening balance batch not found");
+            context["status"] = batch.Status;
+            context["batchNumber"] = batch.BatchNumber;
+            context["openingDate"] = batch.OpeningDate;
+            context["fiscalPeriodId"] = batch.FiscalPeriodId;
+            context["periodCode"] = batch.FiscalPeriod?.PeriodCode ?? string.Empty;
+            context["bookClassification"] = batch.BookClassification;
+            context["totalDebit"] = batch.TotalDebit;
+            context["totalCredit"] = batch.TotalCredit;
+            context["difference"] = batch.Difference;
+        }
+
+        if (IsEntityType(entityTypeRecord, "AssetValuation", "Asset Valuation"))
+        {
+            var valuation = await _unitOfWork.Repository<AssetValuation>()
+                .FirstOrDefaultAsync(v => v.TenantId == tenantId && v.Id == entityId, v => v.FixedAsset)
+                ?? throw new InvalidOperationException("Asset valuation not found");
+            context["status"] = valuation.Status;
+            context["fixedAssetId"] = valuation.FixedAssetId;
+            context["assetCode"] = valuation.FixedAsset?.AssetCode ?? string.Empty;
+            context["valuationDate"] = valuation.ValuationDate;
+            context["valuationType"] = valuation.ValuationType.ToString();
+            context["carryingAmountBefore"] = valuation.CarryingAmountBefore;
+            context["carryingAmountAfter"] = valuation.CarryingAmountAfter;
+            context["adjustmentAmount"] = valuation.AdjustmentAmount;
+            context["reason"] = valuation.Reason ?? string.Empty;
+        }
 
         if (IsEntityType(entityTypeRecord, "JOB_CARD", "JobCard", "Job Card"))
         {

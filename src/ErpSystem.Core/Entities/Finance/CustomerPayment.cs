@@ -54,6 +54,29 @@ public class CustomerPayment : BusinessEntity
     [MaxLength(100)]
     public string? TransactionReference { get; set; }
 
+    public Guid? WithholdingTaxId { get; set; }
+    public virtual Tax? WithholdingTax { get; set; }
+
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public virtual Account? WithholdingTaxAccount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxAmount { get; set; }
+
+    public Guid? VatWithholdingTaxId { get; set; }
+    public virtual Tax? VatWithholdingTax { get; set; }
+
+    public Guid? VatWithholdingAccountId { get; set; }
+    public virtual Account? VatWithholdingAccount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VatWithholdingAmount { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingCertificateNumber { get; set; }
+
+    public DateTime? WithholdingCertificateDate { get; set; }
+
     [MaxLength(500)]
     public string? Notes { get; set; }
 

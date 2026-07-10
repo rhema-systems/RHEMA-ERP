@@ -31,6 +31,21 @@ public class CashTransactionDto
     public Guid? ChequeId { get; set; }
     public string? ChequeNumber { get; set; }
     public bool IsPosted { get; set; }
+    public CashTransactionApprovalStatus ApprovalStatus { get; set; }
+    public string ApprovalStatusName { get; set; } = string.Empty;
+    public Guid? WorkflowInstanceId { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public Guid? ApprovedById { get; set; }
+    public DateTime? RejectedAt { get; set; }
+    public Guid? RejectedById { get; set; }
+    public string? ApprovalComments { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public Guid? CancelledById { get; set; }
+    public string? CancellationReason { get; set; }
+    public Guid? JournalEntryId { get; set; }
     public DateTime? PostedDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
@@ -74,6 +89,12 @@ public class CreateBankTransferDto
     public decimal? ExchangeRate { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? Description { get; set; }
+}
+
+public class CashTransactionWorkflowActionDto
+{
+    public string? Comments { get; set; }
+    public string? Reason { get; set; }
 }
 
 #endregion

@@ -23,6 +23,16 @@ public interface IApReportsService
     Task<ApAgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Rebuilds AP settlement balances from posted supplier invoices, payments, allocations, withholding, and posting events.
+    /// </summary>
+    Task<SubledgerSettlementRebuildResultDto> RebuildSettlementReadModelAsync(DateTime? asOfDate = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reconciles AP settlement read-model outstanding amounts to the posted AP control GL balance.
+    /// </summary>
+    Task<SubledgerControlReconciliationDto> GetControlReconciliationAsync(DateTime? asOfDate = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Generates detailed aging report with invoice-level breakdown per supplier.
     /// </summary>
     Task<ApAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default);
@@ -61,7 +71,7 @@ public interface IApReportsService
     /// <summary>
     /// Exports aging report to Excel or PDF.
     /// </summary>
-    Task<byte[]> ExportAgingReportAsync(DateTime? asOfDate = null, string format = "Excel", CancellationToken cancellationToken = default);
+    Task<byte[]> ExportAgingReportAsync(DateTime? asOfDate = null, string format = "Csv", CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Exports supplier statement to PDF.

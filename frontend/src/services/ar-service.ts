@@ -143,8 +143,28 @@ class ArService {
         return apiService.post<PaymentAllocationResultDto>(`${this.baseUrl}/payments/${data.customerPaymentId}/allocate`, data);
     }
 
-    public async getOutstandingInvoices(customerId: string): Promise<{ id: string; invoiceNumber: string; balanceAmount: number; invoiceDate: string; dueDate: string }[]> {
-        return apiService.get<{ id: string; invoiceNumber: string; balanceAmount: number; invoiceDate: string; dueDate: string }[]>(`${this.baseUrl}/payments/customer/${customerId}/outstanding-invoices`);
+    public async getOutstandingInvoices(customerId: string): Promise<{
+        id: string;
+        invoiceNumber: string;
+        balanceAmount: number;
+        invoiceDate: string;
+        dueDate?: string;
+        earlyPaymentDiscountPercentage?: number;
+        earlyPaymentDiscountDueDate?: string;
+        isDiscountAvailable?: boolean;
+        discountAmount?: number;
+    }[]> {
+        return apiService.get<{
+            id: string;
+            invoiceNumber: string;
+            balanceAmount: number;
+            invoiceDate: string;
+            dueDate?: string;
+            earlyPaymentDiscountPercentage?: number;
+            earlyPaymentDiscountDueDate?: string;
+            isDiscountAvailable?: boolean;
+            discountAmount?: number;
+        }[]>(`${this.baseUrl}/payments/customer/${customerId}/outstanding-invoices`);
     }
 
     // --- Reports ---

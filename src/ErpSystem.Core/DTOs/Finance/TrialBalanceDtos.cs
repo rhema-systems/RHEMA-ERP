@@ -12,6 +12,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime AsAtDate { get; set; }
         public string BookClassification { get; set; } = "IFRS";
         public string CurrencyCode { get; set; } = "GHS";
+        public DateTime? PeriodStart { get; set; }
         
         public List<TrialBalanceLineDto> Lines { get; set; } = new();
         
@@ -34,6 +35,10 @@ namespace ErpSystem.Core.DTOs.Finance
         public string AccountNumber { get; set; } = string.Empty;
         public string AccountName { get; set; } = string.Empty;
         public string AccountType { get; set; } = string.Empty;
+        public decimal OpeningDebitBalance { get; set; }
+        public decimal OpeningCreditBalance { get; set; }
+        public decimal PeriodDebits { get; set; }
+        public decimal PeriodCredits { get; set; }
         public decimal DebitBalance { get; set; }
         public decimal CreditBalance { get; set; }
         
@@ -47,7 +52,10 @@ namespace ErpSystem.Core.DTOs.Finance
     public class TrialBalanceRequestDto
     {
         public DateTime AsAtDate { get; set; } = DateTime.UtcNow.Date;
+        public DateTime? PeriodStart { get; set; }
         public string BookClassification { get; set; } = "IFRS";
         public bool IncludeZeroBalances { get; set; } = false;
+        public List<Guid> AccountIds { get; set; } = new();
+        public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
     }
 }

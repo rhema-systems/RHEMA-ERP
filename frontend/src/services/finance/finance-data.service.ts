@@ -23,9 +23,11 @@ import type {
     UpdateCurrencyDto,
     CreateExchangeRateDto,
     CreateJournalEntryDto,
+    CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
     AddCurrencyLinkDto,
     ModuleDefinition,
+    ReverseSubledgerAdjustmentJournalDto,
     CreateFiscalYearDto,
     BalanceSheetReportDto,
     BalanceSheetRequestDto,
@@ -37,6 +39,8 @@ import type {
     IncomeStatementRequestDto,
     MultiCurrencyDetailReportDto,
     MultiCurrencyDetailRequestDto,
+    SubledgerAdjustmentJournal,
+    SubledgerModule,
     TrialBalanceReportDto,
 } from '@/types/finance';
 import type { FinanceDashboardData } from '@/types/finance-dashboard';
@@ -250,6 +254,7 @@ class FinanceDataService {
         endDate?: string;
         fiscalYearId?: string;
         fiscalPeriodId?: string;
+        sourceModule?: string;
     }): Promise<JournalEntry[]> {
         const queryParams = new URLSearchParams();
         if (filters?.status) queryParams.append('status', filters.status);
@@ -257,10 +262,16 @@ class FinanceDataService {
         if (filters?.endDate) queryParams.append('endDate', filters.endDate);
         if (filters?.fiscalYearId) queryParams.append('fiscalYearId', filters.fiscalYearId);
         if (filters?.fiscalPeriodId) queryParams.append('fiscalPeriodId', filters.fiscalPeriodId);
+        if (filters?.sourceModule) queryParams.append('sourceModule', filters.sourceModule);
 
         const endpoint = `/finance/journal-entries${queryParams.toString() ? `?${queryParams}` : ''}`;
         const raw = await apiService.get<any[]>(endpoint);
-        return normalizeJournalEntries(raw);
+        const entries = normalizeJournalEntries(raw);
+        if (!filters?.sourceModule) return entries;
+
+        return entries.filter((entry) =>
+            (entry.sourceModule || '').toUpperCase() === filters.sourceModule?.toUpperCase()
+        );
     }
 
     async getPendingJournalApprovals(): Promise<JournalEntry[]> {
@@ -306,6 +317,27 @@ class FinanceDataService {
     async getNextJournalNumber(): Promise<string> {
         const response = await apiService.get<{ number: string }>('/finance/journal-entries/next-number');
         return response.number;
+    }
+
+    // ===== SUBLEDGER ADJUSTMENT JOURNALS =====
+
+    async getSubledgerAdjustmentJournals(module?: SubledgerModule): Promise<SubledgerAdjustmentJournal[]> {
+        const queryParams = new URLSearchParams();
+        if (module) queryParams.append('module', module);
+
+        const endpoint = `/finance/subledger-adjustment-journals${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<SubledgerAdjustmentJournal[]>(endpoint);
+    }
+
+    async createSubledgerAdjustmentJournal(dto: CreateSubledgerAdjustmentJournalDto): Promise<SubledgerAdjustmentJournal> {
+        return apiService.post<SubledgerAdjustmentJournal>('/finance/subledger-adjustment-journals', dto);
+    }
+
+    async reverseSubledgerAdjustmentJournal(
+        id: string,
+        dto: ReverseSubledgerAdjustmentJournalDto
+    ): Promise<SubledgerAdjustmentJournal> {
+        return apiService.post<SubledgerAdjustmentJournal>(`/finance/subledger-adjustment-journals/${id}/reverse`, dto);
     }
 
     // ===== JOURNAL ENTRY APPROVAL WORKFLOW =====

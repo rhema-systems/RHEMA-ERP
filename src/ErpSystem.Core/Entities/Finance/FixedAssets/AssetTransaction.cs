@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.Finance;
 
 namespace ErpSystem.Core.Entities.Finance.FixedAssets
 {
@@ -13,6 +14,12 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Required]
         public Guid FixedAssetId { get; set; }
         public virtual FixedAsset FixedAsset { get; set; } = null!;
+
+        public Guid? AccountingBookId { get; set; }
+        public virtual AccountingBook? AccountingBook { get; set; }
+
+        [MaxLength(20)]
+        public string BookClassification { get; set; } = "IFRS";
 
         [Required]
         public DateTime TransactionDate { get; set; } // Date the event occurred

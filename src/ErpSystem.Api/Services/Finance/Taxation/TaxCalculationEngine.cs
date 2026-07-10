@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 
 namespace ErpSystem.Api.Services.Finance.Taxation
@@ -34,12 +35,17 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             _logger = logger;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
         public async Task<TaxCalculationResultDto> CalculateTaxesAsync(
             TaxCalculationRequestDto request,
             CancellationToken cancellationToken = default)
         {
+            if (request.BaseAmount < 0)
+            {
+                throw new InvalidOperationException("Tax calculation base amount cannot be negative.");
+            }
+
             _logger.LogInformation("Calculating taxes for {TransactionType}, Base: {Amount}", 
                 request.TransactionType, request.BaseAmount);
 
@@ -62,6 +68,11 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             {
                 // Specific group
                 taxGroup = await GetTaxGroupWithComponentsAsync(request.TaxGroupId.Value, cancellationToken);
+                if (taxGroup == null)
+                {
+                    throw new InvalidOperationException("Tax group was not found for this tenant.");
+                }
+
                 components = taxGroup?.Components.ToList();
                 result.TaxGroupId = taxGroup?.Id;
                 result.TaxGroupName = taxGroup?.Name;
@@ -108,7 +119,20 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             foreach (var component in components.OrderBy(c => c.CalculationOrder))
             {
                 var tax = component.Tax;
-                if (tax == null || !tax.IsActive) continue;
+                if (tax == null)
+                {
+                    continue;
+                }
+
+                var effectiveRate = await ResolveEffectiveRateAsync(tax, request.TransactionDate.Date, cancellationToken);
+                if (!effectiveRate.HasValue)
+                {
+                    _logger.LogInformation(
+                        "Tax {TaxCode} is not active/effective for {TransactionDate}; skipping.",
+                        tax.Code,
+                        request.TransactionDate.Date);
+                    continue;
+                }
 
                 // Check threshold for withholding taxes
                 if (tax.Category == TaxCategory.Withholding && tax.ThresholdAmount.HasValue)
@@ -141,7 +165,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     component.AppliesOnTaxCodes);
 
                 // Calculate tax amount
-                decimal taxAmount = Math.Round(taxableAmount * (tax.Rate / 100), 2);
+                decimal taxAmount = Math.Round(taxableAmount * (effectiveRate.Value / 100), 2, MidpointRounding.AwayFromZero);
 
                 // Store calculated tax
                 calculatedTaxes[tax.Code] = taxAmount;
@@ -153,8 +177,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     TaxCode = tax.Code,
                     TaxName = tax.Name,
                     TaxCategory = tax.Category,
+                    TaxGroupComponentId = component.Id,
+                    TaxPayableAccountId = tax.TaxPayableAccountId,
+                    TaxReceivableAccountId = tax.TaxReceivableAccountId,
+                    EffectiveFrom = tax.EffectiveFrom,
                     TaxableAmount = taxableAmount,
-                    TaxRate = tax.Rate,
+                    TaxRate = effectiveRate.Value,
                     TaxAmount = taxAmount,
                     CompoundBasis = component.CompoundBasis,
                     CalculationOrder = component.CalculationOrder,
@@ -164,7 +192,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 });
 
                 _logger.LogDebug("Calculated {TaxCode}: {Amount} on {Taxable} @ {Rate}%", 
-                    tax.Code, taxAmount, taxableAmount, tax.Rate);
+                    tax.Code, taxAmount, taxableAmount, effectiveRate.Value);
             }
 
             // Calculate totals
@@ -453,11 +481,44 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 .FirstOrDefaultAsync(cancellationToken);
         }
 
+        private async Task<decimal?> ResolveEffectiveRateAsync(
+            Tax tax,
+            DateTime transactionDate,
+            CancellationToken cancellationToken)
+        {
+            if (!tax.IsActive || tax.IsDeleted || tax.TenantId != TenantId)
+            {
+                return null;
+            }
+
+            if (tax.EffectiveFrom.Date <= transactionDate.Date)
+            {
+                return tax.Rate;
+            }
+
+            var historicalRate = await _context.Set<TaxRateHistory>()
+                .Where(h => h.TenantId == TenantId
+                    && h.TaxId == tax.Id
+                    && !h.IsDeleted
+                    && h.EffectiveFrom.Date <= transactionDate.Date
+                    && (!h.EffectiveTo.HasValue || h.EffectiveTo.Value.Date >= transactionDate.Date))
+                .OrderByDescending(h => h.EffectiveFrom)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return historicalRate?.Rate;
+        }
+
         private async Task<List<TaxGroupComponent>> CreateVirtualComponentsAsync(List<Guid> taxIds, CancellationToken cancellationToken)
         {
+            var requestedIds = taxIds.Where(id => id != Guid.Empty).Distinct().ToList();
             var taxes = await _context.Set<Tax>()
-                .Where(t => taxIds.Contains(t.Id) && t.TenantId == TenantId && t.IsActive && !t.IsDeleted)
+                .Where(t => requestedIds.Contains(t.Id) && t.TenantId == TenantId && t.IsActive && !t.IsDeleted)
                 .ToListAsync(cancellationToken);
+
+            if (taxes.Count != requestedIds.Count)
+            {
+                throw new InvalidOperationException("One or more selected taxes were not found for this tenant.");
+            }
 
             return taxes.Select((tax, index) => new TaxGroupComponent
             {

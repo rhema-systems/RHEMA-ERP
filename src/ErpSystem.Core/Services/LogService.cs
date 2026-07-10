@@ -52,9 +52,11 @@ public class AuditLogService : IAuditLogService
     {
         try
         {
+            var tenantId = GetRequiredAuditTenantId();
             return await _unitOfWork.Repository<AuditLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
+                a => a.TenantId == tenantId,
                 a => a.Timestamp,
                 descending: true);
         }
@@ -69,10 +71,11 @@ public class AuditLogService : IAuditLogService
     {
         try
         {
+            var tenantId = GetRequiredAuditTenantId();
             return await _unitOfWork.Repository<AuditLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
-                a => a.UserId == userId,
+                a => a.TenantId == tenantId && a.UserId == userId,
                 a => a.Timestamp,
                 descending: true);
         }
@@ -87,10 +90,11 @@ public class AuditLogService : IAuditLogService
     {
         try
         {
+            var tenantId = GetRequiredAuditTenantId();
             return await _unitOfWork.Repository<AuditLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
-                a => a.Resource == resource,
+                a => a.TenantId == tenantId && a.Resource == resource,
                 a => a.Timestamp,
                 descending: true);
         }
@@ -105,10 +109,11 @@ public class AuditLogService : IAuditLogService
     {
         try
         {
+            var tenantId = GetRequiredAuditTenantId();
             return await _unitOfWork.Repository<AuditLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
-                a => a.Timestamp >= from && a.Timestamp <= to,
+                a => a.TenantId == tenantId && a.Timestamp >= from && a.Timestamp <= to,
                 a => a.Timestamp,
                 descending: true);
         }
@@ -123,7 +128,9 @@ public class AuditLogService : IAuditLogService
     {
         try
         {
-            return await _unitOfWork.Repository<AuditLog>().GetByIdAsync(id);
+            var tenantId = GetRequiredAuditTenantId();
+            return await _unitOfWork.Repository<AuditLog>()
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id);
         }
         catch (Exception ex)
         {
@@ -207,7 +214,9 @@ public class AuditLogService : IAuditLogService
     {
         try
         {
-            var oldLogs = await _unitOfWork.Repository<AuditLog>().FindAsync(a => a.CreatedAt < beforeDate);
+            var tenantId = GetRequiredAuditTenantId();
+            var oldLogs = await _unitOfWork.Repository<AuditLog>()
+                .FindAsync(a => a.TenantId == tenantId && a.CreatedAt < beforeDate);
             foreach (var log in oldLogs)
             {
                 await _unitOfWork.Repository<AuditLog>().DeleteAsync(log.Id);
@@ -221,6 +230,17 @@ public class AuditLogService : IAuditLogService
             _logger.LogError(ex, "Error deleting old audit logs");
             throw;
         }
+    }
+
+    private Guid GetRequiredAuditTenantId()
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant context is required for audit log access.");
+        }
+
+        return tenantId.Value;
     }
 }
 

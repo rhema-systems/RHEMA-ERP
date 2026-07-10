@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, ArrowLeft, Building, FileText, Wallet } from 'lucide-react';
+import { CalendarIcon, Loader2, ArrowLeft, Building, FileText } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,7 +36,6 @@ import {
 import { Calendar } from '@/components/ui/calendar';
 import {
     Tabs,
-    TabsContent,
     TabsList,
     TabsTrigger,
 } from "@/components/ui/tabs"
@@ -60,8 +59,6 @@ const paymentSchema = z.object({
     // Specific fields
     payeeName: z.string().optional(),
     glAccountId: z.string().optional(),
-    // Vendor specific (placeholder)
-    vendorName: z.string().optional(),
 });
 
 type PaymentFormValues = z.infer<typeof paymentSchema>;
@@ -70,7 +67,6 @@ export default function RecordPaymentPage() {
     const router = useRouter();
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [transactionType, setTransactionType] = useState<"direct" | "vendor">("direct");
 
     // Fetch data
     const { data: bankAccounts } = useQuery({
@@ -99,6 +95,20 @@ export default function RecordPaymentPage() {
     });
 
     const selectedBankAccountId = form.watch('bankAccountId');
+
+    const openVendorPaymentFlow = () => {
+        const values = form.getValues();
+        const params = new URLSearchParams();
+
+        if (values.bankAccountId) params.set('bankAccountId', values.bankAccountId);
+        if (values.amount > 0) params.set('amount', String(values.amount));
+        if (values.referenceNumber) params.set('referenceNumber', values.referenceNumber);
+        if (values.description) params.set('description', values.description);
+        if (values.transactionDate) params.set('paymentDate', values.transactionDate.toISOString());
+
+        const queryString = params.toString();
+        router.push(`/finance/ap/payments/create${queryString ? `?${queryString}` : ''}`);
+    };
 
     useEffect(() => {
         if (selectedBankAccountId && bankAccounts) {
@@ -130,28 +140,13 @@ export default function RecordPaymentPage() {
                 description: data.description,
             };
 
-            if (transactionType === 'direct') {
-                if (!data.glAccountId) {
-                    form.setError('glAccountId', { type: 'manual', message: 'GL Account is required for Direct Payments' });
-                    setIsSubmitting(false);
-                    return;
-                }
-                payload.glAccountId = data.glAccountId;
-                payload.payeeName = data.payeeName || 'Miscellaneous';
-            } else {
-                // Vendor Payment Logic (Placeholder)
-                if (!data.vendorName) {
-                    form.setError('vendorName', { type: 'manual', message: 'Vendor Name is required' });
-                    setIsSubmitting(false);
-                    return;
-                }
-                payload.payeeName = data.vendorName;
-                payload.description = `Vendor Payment: ${data.vendorName} - ${data.description || ''}`;
-                // linking to AP control account?
-                // For now, we'll let the backend or future logic handle GL mapping if not provided, 
-                // or user can select AP Account if they know it in Direct mode. 
-                // But for "Vendor" mode, we primarily capture the name.
+            if (!data.glAccountId) {
+                form.setError('glAccountId', { type: 'manual', message: 'GL Account is required for Direct Payments' });
+                setIsSubmitting(false);
+                return;
             }
+            payload.glAccountId = data.glAccountId;
+            payload.payeeName = data.payeeName || 'Miscellaneous';
 
             await cashManagementDataService.createCashPayment(payload);
 
@@ -198,7 +193,15 @@ export default function RecordPaymentPage() {
                             </CardHeader>
                             <CardContent className="space-y-4">
 
-                                <Tabs value={transactionType} onValueChange={(v) => setTransactionType(v as any)} className="w-full">
+                                <Tabs
+                                    value="direct"
+                                    onValueChange={(value) => {
+                                        if (value === 'vendor') {
+                                            openVendorPaymentFlow();
+                                        }
+                                    }}
+                                    className="w-full"
+                                >
                                     <TabsList className="grid w-full grid-cols-2">
                                         <TabsTrigger value="direct">Direct Payment (GL)</TabsTrigger>
                                         <TabsTrigger value="vendor">Vendor Payment (AP)</TabsTrigger>
@@ -309,40 +312,29 @@ export default function RecordPaymentPage() {
                                     </div>
                                 </div>
 
-                                {transactionType === 'direct' ? (
-                                    <>
-                                        <div className="space-y-2">
-                                            <Label>Payee Name</Label>
-                                            <Input {...form.register('payeeName')} placeholder="To whom was paid?" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>GL Account (Expense/Liability)</Label>
-                                            <Select
-                                                onValueChange={(val) => form.setValue('glAccountId', val)}
-                                                defaultValue={form.watch('glAccountId')}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select GL account" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {glAccounts?.map((account) => (
-                                                        <SelectItem key={account.id} value={account.id}>
-                                                            {account.accountCode} - {account.accountName}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            {form.formState.errors.glAccountId && <p className="text-sm text-red-500">{form.formState.errors.glAccountId.message}</p>}
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="space-y-2">
-                                        <Label>Vendor Name</Label>
-                                        <Input {...form.register('vendorName')} placeholder="Enter vendor name" />
-                                        <p className="text-xs text-muted-foreground">Select the vendor (AP) being paid.</p>
-                                        {form.formState.errors.vendorName && <p className="text-sm text-red-500">{form.formState.errors.vendorName.message}</p>}
-                                    </div>
-                                )}
+                                <div className="space-y-2">
+                                    <Label>Payee Name</Label>
+                                    <Input {...form.register('payeeName')} placeholder="To whom was paid?" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>GL Account (Expense/Liability)</Label>
+                                    <Select
+                                        onValueChange={(val) => form.setValue('glAccountId', val)}
+                                        defaultValue={form.watch('glAccountId')}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select GL account" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {glAccounts?.map((account) => (
+                                                <SelectItem key={account.id} value={account.id}>
+                                                    {account.accountCode} - {account.accountName}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {form.formState.errors.glAccountId && <p className="text-sm text-red-500">{form.formState.errors.glAccountId.message}</p>}
+                                </div>
 
                                 <div className="space-y-2">
                                     <Label>Description</Label>
@@ -378,7 +370,7 @@ export default function RecordPaymentPage() {
                                 <Building className="h-4 w-4 text-orange-500 flex-shrink-0" />
                                 <div>
                                     <p className="font-medium">Vendor Payment (AP)</p>
-                                    <p className="text-muted-foreground">Use to pay registered vendors. Future Update: This will link to Accounts Payable.</p>
+                                    <p className="text-muted-foreground">Opens the Accounts Payable payment flow for supplier balances and bill allocation.</p>
                                 </div>
                             </div>
                         </CardContent>
