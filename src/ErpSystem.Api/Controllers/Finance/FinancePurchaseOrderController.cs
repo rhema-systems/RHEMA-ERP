@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -818,6 +819,20 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             return BadRequest("At least one receipt line is required.");
         }
 
+        var receiptNumber = string.IsNullOrWhiteSpace(dto.ReceiptNumber)
+            ? await GenerateReceiptNumberAsync(tenantId, cancellationToken)
+            : dto.ReceiptNumber.Trim();
+
+        // Re-read the PO and update received quantities under serializable isolation so concurrent receipts cannot over-receive the same line.
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+        var receiptNumberExists = await _dbContext.FinancePurchaseOrderReceipts
+            .AnyAsync(r => r.TenantId == tenantId && !r.IsDeleted && r.ReceiptNumber == receiptNumber, cancellationToken);
+        if (receiptNumberExists)
+        {
+            return BadRequest($"Finance purchase receipt '{receiptNumber}' already exists.");
+        }
+
         var purchaseOrder = await _dbContext.FinancePurchaseOrders
             .Include(po => po.Items.Where(i => !i.IsDeleted))
             .FirstOrDefaultAsync(po => po.Id == dto.FinancePurchaseOrderId && po.TenantId == tenantId && !po.IsDeleted, cancellationToken);
@@ -830,18 +845,6 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         if (purchaseOrder.Status != Approved && purchaseOrder.Status != PartiallyReceived)
         {
             return BadRequest("Only approved or partially received finance purchase orders can be received.");
-        }
-
-        var receiptNumber = string.IsNullOrWhiteSpace(dto.ReceiptNumber)
-            ? await GenerateReceiptNumberAsync(tenantId, cancellationToken)
-            : dto.ReceiptNumber.Trim();
-
-        var receiptNumberExists = await _dbContext.FinancePurchaseOrderReceipts
-            .AnyAsync(r => r.TenantId == tenantId && !r.IsDeleted && r.ReceiptNumber == receiptNumber, cancellationToken);
-
-        if (receiptNumberExists)
-        {
-            return BadRequest($"Finance purchase receipt '{receiptNumber}' already exists.");
         }
 
         var receipt = new FinancePurchaseOrderReceipt
@@ -895,8 +898,6 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             : PartiallyReceived;
         purchaseOrder.UpdatedAt = DateTime.UtcNow;
         purchaseOrder.UpdatedBy = _currentUserService.UserName;
-
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         _dbContext.FinancePurchaseOrderReceipts.Add(receipt);
         await _dbContext.SaveChangesAsync(cancellationToken);

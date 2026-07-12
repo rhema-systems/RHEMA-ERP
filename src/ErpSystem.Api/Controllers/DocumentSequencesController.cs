@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Numbering;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -23,6 +24,7 @@ public class DocumentSequencesController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IReadOnlyList<DocumentSequenceDefinitionDto>>> GetDefinitions(
         [FromQuery] string? module,
         CancellationToken cancellationToken)
@@ -32,6 +34,7 @@ public class DocumentSequencesController : ControllerBase
     }
 
     [HttpPost("ensure-defaults")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<IActionResult> EnsureDefaults(CancellationToken cancellationToken)
     {
         if (_currentUserService.TenantId == null)
@@ -44,6 +47,7 @@ public class DocumentSequencesController : ControllerBase
     }
 
     [HttpPost("generate")]
+    [Authorize(Policy = FinancePermissions.MaintainFinance)]
     public async Task<ActionResult<GeneratedDocumentNumberDto>> Generate(
         GenerateDocumentNumberRequestDto request,
         CancellationToken cancellationToken)
@@ -67,6 +71,7 @@ public class DocumentSequencesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<DocumentSequenceDefinitionDto>> Update(
         Guid id,
         UpdateDocumentSequenceDefinitionDto request,

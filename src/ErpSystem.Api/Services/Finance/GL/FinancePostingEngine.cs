@@ -50,62 +50,20 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             return ToResult(existingPosting, wasDuplicate: true);
         }
 
+        if (_context.Database.CurrentTransaction != null)
+        {
+            return await ExecutePostingAsync(tenantId, validation, request, cancellationToken);
+        }
+
         var strategy = _context.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
             try
             {
-                var duplicateInsideTransaction = await FindExistingPostingAsync(tenantId, validation, cancellationToken);
-                if (duplicateInsideTransaction != null)
-                {
-                    if (!request.ReturnExistingOnDuplicate)
-                    {
-                        throw new InvalidOperationException("This source document/action has already been posted.");
-                    }
-
-                    await RecordDuplicatePostingAuditAsync(tenantId, validation, duplicateInsideTransaction, cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
-                    return ToResult(duplicateInsideTransaction, wasDuplicate: true);
-                }
-
-                var now = DateTime.UtcNow;
-                var postedByUserId = GetCurrentUserGuid();
-                var journalEntry = validation.ExistingJournalEntryId.HasValue
-                    ? await ApplyExistingJournalPostingAsync(tenantId, validation, now, postedByUserId, cancellationToken)
-                    : await CreatePostedJournalEntryAsync(tenantId, validation, now, postedByUserId, cancellationToken);
-
-                var postingEvent = BuildPostingEvent(tenantId, validation, journalEntry.Id, now, postedByUserId);
-                await MarkExchangeRatesUsedAsync(tenantId, validation, postingEvent.Id, now, cancellationToken);
-
-                if (!validation.ExistingJournalEntryId.HasValue)
-                {
-                    _context.JournalEntries.Add(journalEntry);
-                }
-
-                // Account.Balance is a read-side snapshot used by existing balance APIs; posted journals remain the accounting source of truth.
-                await ApplyAccountBalanceMovementsAsync(
-                    tenantId,
-                    journalEntry.Transactions,
-                    cancellationToken);
-
-                _context.FinancePostingEvents.Add(postingEvent);
-                await _context.SaveChangesAsync(cancellationToken);
-                await RecordPostingEventCreatedAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
-                await RecordCurrencySnapshotAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
+                var result = await ExecutePostingAsync(tenantId, validation, request, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
-
-                _logger.LogInformation(
-                    "Finance posting completed for tenant {TenantId}, source {SourceModule}/{SourceDocumentType}/{SourceDocumentId}, action {PostingAction}, journal {JournalEntryId}.",
-                    tenantId,
-                    validation.SourceModule,
-                    validation.SourceDocumentType,
-                    validation.SourceDocumentId,
-                    validation.PostingAction,
-                    journalEntry.Id);
-
-                postingEvent.JournalEntry = journalEntry;
-                return ToResult(postingEvent, wasDuplicate: false);
+                return result;
             }
             catch (DbUpdateException ex)
             {
@@ -124,6 +82,62 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                     ex);
             }
         });
+    }
+
+    private async Task<FinancePostingResultDto> ExecutePostingAsync(
+        Guid tenantId,
+        ValidatedPosting validation,
+        FinancePostingRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var duplicateInsideTransaction = await FindExistingPostingAsync(tenantId, validation, cancellationToken);
+        if (duplicateInsideTransaction != null)
+        {
+            if (!request.ReturnExistingOnDuplicate)
+            {
+                throw new InvalidOperationException("This source document/action has already been posted.");
+            }
+
+            await RecordDuplicatePostingAuditAsync(tenantId, validation, duplicateInsideTransaction, cancellationToken);
+            return ToResult(duplicateInsideTransaction, wasDuplicate: true);
+        }
+
+        var now = DateTime.UtcNow;
+        var postedByUserId = GetCurrentUserGuid();
+        var journalEntry = validation.ExistingJournalEntryId.HasValue
+            ? await ApplyExistingJournalPostingAsync(tenantId, validation, now, postedByUserId, cancellationToken)
+            : await CreatePostedJournalEntryAsync(tenantId, validation, now, postedByUserId, cancellationToken);
+
+        var postingEvent = BuildPostingEvent(tenantId, validation, journalEntry.Id, now, postedByUserId);
+        await MarkExchangeRatesUsedAsync(tenantId, validation, postingEvent.Id, now, cancellationToken);
+
+        if (!validation.ExistingJournalEntryId.HasValue)
+        {
+            _context.JournalEntries.Add(journalEntry);
+        }
+
+        // Account.Balance is a read-side snapshot used by existing balance APIs; posted journals remain the accounting source of truth.
+        await ApplyAccountBalanceMovementsAsync(
+            tenantId,
+            journalEntry.Transactions,
+            cancellationToken);
+
+        _context.FinancePostingEvents.Add(postingEvent);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordPostingEventCreatedAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
+        await RecordCurrencySnapshotAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
+
+        _logger.LogInformation(
+            "Finance posting completed for tenant {TenantId}, source {SourceModule}/{SourceDocumentType}/{SourceDocumentId}, action {PostingAction}, journal {JournalEntryId}.",
+            tenantId,
+            validation.SourceModule,
+            validation.SourceDocumentType,
+            validation.SourceDocumentId,
+            validation.PostingAction,
+            journalEntry.Id);
+
+        postingEvent.JournalEntry = journalEntry;
+        return ToResult(postingEvent, wasDuplicate: false);
     }
 
     public async Task<FinanceReversalPlanDto> GetReversalPlanAsync(
@@ -524,46 +538,123 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             .Distinct()
             .ToList();
 
-        var accounts = await _context.Accounts
+        var accountTypes = await _context.Accounts
             .Where(a => a.TenantId == tenantId && accountIds.Contains(a.Id) && !a.IsDeleted)
-            .ToDictionaryAsync(a => a.Id, cancellationToken);
+            .Select(a => new { a.Id, a.AccountType })
+            .ToDictionaryAsync(a => a.Id, a => a.AccountType, cancellationToken);
 
-        if (accounts.Count != accountIds.Count)
+        if (accountTypes.Count != accountIds.Count)
         {
             throw new InvalidOperationException("One or more posting accounts were not found for this tenant.");
         }
 
-        foreach (var transaction in transactionList)
-        {
-            ApplyAccountBalanceMovement(accounts[transaction.AccountId], transaction);
-        }
-    }
+        var balanceDeltas = transactionList
+            .GroupBy(transaction => transaction.AccountId)
+            .Select(group => new AccountBalanceDelta(
+                group.Key,
+                group.Sum(transaction => GetAccountBalanceDelta(accountTypes[transaction.AccountId], transaction))))
+            .Where(delta => delta.Amount != 0m)
+            .ToArray();
 
-    private static void ApplyAccountBalanceMovement(Account account, AccountTransaction transaction)
-    {
-        if (transaction.DebitAmount > 0)
+        if (balanceDeltas.Length == 0)
         {
-            if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-            {
-                account.Balance += transaction.DebitAmount;
-            }
-            else
-            {
-                account.Balance -= transaction.DebitAmount;
-            }
-
             return;
         }
 
-        if (account.AccountType == AccountType.Liability || account.AccountType == AccountType.Equity || account.AccountType == AccountType.Revenue)
+        if (_context.Database.IsRelational())
         {
-            account.Balance += transaction.CreditAmount;
+            await ApplyRelationalAccountBalanceDeltasAsync(tenantId, balanceDeltas, cancellationToken);
+            return;
         }
-        else
+
+        await ApplyTrackedAccountBalanceDeltasAsync(tenantId, balanceDeltas, cancellationToken);
+    }
+
+    private async Task ApplyRelationalAccountBalanceDeltasAsync(
+        Guid tenantId,
+        IReadOnlyCollection<AccountBalanceDelta> balanceDeltas,
+        CancellationToken cancellationToken)
+    {
+        foreach (var delta in balanceDeltas)
         {
-            account.Balance -= transaction.CreditAmount;
+            // UPDLOCK serializes concurrent snapshot increments for the same account while the surrounding posting transaction is active.
+            var rows = await _context.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE [Accounts] WITH (UPDLOCK, ROWLOCK)
+SET [Balance] = [Balance] + {delta.Amount}
+WHERE [Id] = {delta.AccountId}
+  AND [TenantId] = {tenantId}
+  AND [IsDeleted] = CAST(0 AS bit);", cancellationToken);
+
+            if (rows != 1)
+            {
+                throw new InvalidOperationException("One or more posting accounts were not found for this tenant.");
+            }
+
+            SyncTrackedAccountBalanceSnapshot(tenantId, delta);
         }
     }
+
+    private async Task ApplyTrackedAccountBalanceDeltasAsync(
+        Guid tenantId,
+        IReadOnlyCollection<AccountBalanceDelta> balanceDeltas,
+        CancellationToken cancellationToken)
+    {
+        var accountIds = balanceDeltas.Select(delta => delta.AccountId).ToArray();
+        await _context.Accounts
+            .Where(account => account.TenantId == tenantId && accountIds.Contains(account.Id) && !account.IsDeleted)
+            .LoadAsync(cancellationToken);
+
+        var deltasByAccountId = balanceDeltas.ToDictionary(delta => delta.AccountId, delta => delta.Amount);
+        foreach (var entry in _context.ChangeTracker.Entries<Account>())
+        {
+            if (entry.Entity.TenantId == tenantId &&
+                !entry.Entity.IsDeleted &&
+                deltasByAccountId.TryGetValue(entry.Entity.Id, out var delta))
+            {
+                entry.Entity.Balance += delta;
+            }
+        }
+    }
+
+    private void SyncTrackedAccountBalanceSnapshot(Guid tenantId, AccountBalanceDelta delta)
+    {
+        foreach (var entry in _context.ChangeTracker.Entries<Account>())
+        {
+            if (entry.Entity.TenantId != tenantId ||
+                entry.Entity.Id != delta.AccountId ||
+                entry.Entity.IsDeleted)
+            {
+                continue;
+            }
+
+            var balanceProperty = entry.Property(account => account.Balance);
+            balanceProperty.CurrentValue += delta.Amount;
+            balanceProperty.OriginalValue = balanceProperty.CurrentValue;
+            balanceProperty.IsModified = false;
+        }
+    }
+
+    private static decimal GetAccountBalanceDelta(AccountType accountType, AccountTransaction transaction)
+    {
+        if (transaction.DebitAmount > 0)
+        {
+            if (accountType == AccountType.Asset || accountType == AccountType.Expense)
+            {
+                return transaction.DebitAmount;
+            }
+
+            return -transaction.DebitAmount;
+        }
+
+        if (accountType == AccountType.Liability || accountType == AccountType.Equity || accountType == AccountType.Revenue)
+        {
+            return transaction.CreditAmount;
+        }
+
+        return -transaction.CreditAmount;
+    }
+
+    private sealed record AccountBalanceDelta(Guid AccountId, decimal Amount);
 
     private async Task<ValidatedPosting> ValidatePostingRequestAsync(
         Guid tenantId,

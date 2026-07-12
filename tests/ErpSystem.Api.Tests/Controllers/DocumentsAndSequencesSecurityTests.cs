@@ -29,6 +29,25 @@ public sealed class DocumentsAndSequencesSecurityTests
             .NotBeEmpty("document sequence generation advances tenant numbering state");
     }
 
+    [Theory]
+    [InlineData(nameof(DocumentSequencesController.GetDefinitions), FinancePermissions.ViewFinance)]
+    [InlineData(nameof(DocumentSequencesController.Generate), FinancePermissions.MaintainFinance)]
+    [InlineData(nameof(DocumentSequencesController.EnsureDefaults), FinancePermissions.AdministerFinance)]
+    [InlineData(nameof(DocumentSequencesController.Update), FinancePermissions.AdministerFinance)]
+    [Trait("Category", "FinanceSecurity")]
+    public void DocumentSequencesController_Actions_ShouldRequireExplicitFinancePolicies(string actionName, string expectedPolicy)
+    {
+        var action = typeof(DocumentSequencesController)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .Single(method => method.Name == actionName);
+
+        action
+            .GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+            .Select(attribute => attribute.Policy)
+            .Should()
+            .Contain(expectedPolicy, "document sequence endpoints mutate or expose tenant numbering state outside the Finance controller convention");
+    }
+
     [Fact]
     [Trait("Category", "TenantIsolation")]
     public async Task GenerateDocumentNumber_ShouldIgnoreClientTenantAndUseCurrentTenant()
