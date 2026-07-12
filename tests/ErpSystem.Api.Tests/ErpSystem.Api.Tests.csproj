@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ErpSystem.Api\ErpSystem.Api.csproj" />
     <ProjectReference Include="..\..\src\ErpSystem.Core\ErpSystem.Core.csproj" />
+    <ProjectReference Include="..\..\src\ErpSystem.Data\ErpSystem.Data.csproj" />
   </ItemGroup>
 
   <ItemGroup>

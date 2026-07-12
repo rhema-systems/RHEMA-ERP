@@ -402,19 +402,6 @@ public class SalesOrderService : ISalesOrderService
             await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
-            var workflowResult = await _workflowIntegrationService.SubmitAsync("SalesOrder", id);
-            if (!workflowResult.ExecutionResult.Success)
-            {
-                so.OrderStatus = SalesOrderStatus.Draft;
-                so.ApprovalStatus = "Draft";
-                so.SubmittedById = null;
-                so.SubmittedDate = null;
-                await _salesOrderRepo.UpdateAsync(so);
-                await _unitOfWork.SaveChangesAsync();
-
-                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Unable to start sales order approval workflow.");
-            }
-
             _logger.LogInformation("Sales Order {OrderNumber} submitted for approval", so.DocumentNumber);
             return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
         }

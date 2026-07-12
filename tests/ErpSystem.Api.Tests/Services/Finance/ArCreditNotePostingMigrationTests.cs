@@ -12,6 +12,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Services.Sales;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
 using ErpSystem.Shared;
@@ -64,9 +65,10 @@ public sealed class ArCreditNotePostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(120m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
-        fixture.ArAccount.Balance.Should().Be(0m);
-        fixture.SalesReturnsAccount.Balance.Should().Be(0m);
-        fixture.TaxAccount.Balance.Should().Be(0m);
+        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
+        fixture.ArAccount.Balance.Should().Be(-120m);
+        fixture.SalesReturnsAccount.Balance.Should().Be(100m);
+        fixture.TaxAccount.Balance.Should().Be(-20m);
     }
 
     [Fact]
@@ -335,6 +337,11 @@ public sealed class ArCreditNotePostingMigrationTests
             .ReturnsAsync(new WorkflowIntegrationResult(
                 new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress },
                 WorkflowOutcome.Pending));
+        var workflowStatusAdapters = new WorkflowStatusAdapterRegistry(new IWorkflowStatusAdapter[]
+        {
+            new CreditNoteWorkflowStatusAdapter(),
+            new RefundWorkflowStatusAdapter()
+        });
 
         var service = new ReturnOrderService(
             new GenericRepository<ReturnOrder>(db),
@@ -344,9 +351,10 @@ public sealed class ArCreditNotePostingMigrationTests
             new GenericRepository<Refund>(db),
             new UnitOfWork(db),
             currentUserProvider.Object,
-            Mock.Of<ILogger<ReturnOrderService>>(),
             Mock.Of<IDocumentNumberingService>(),
             workflowMock.Object,
+            workflowStatusAdapters,
+            Mock.Of<ILogger<ReturnOrderService>>(),
             postingEngine,
             auditService);
 

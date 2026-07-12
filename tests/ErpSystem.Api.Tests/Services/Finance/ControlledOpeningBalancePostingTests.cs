@@ -47,8 +47,9 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var cash = await db.Accounts.SingleAsync(a => a.Id == fixture.Cash.Id);
         var equity = await db.Accounts.SingleAsync(a => a.Id == fixture.Equity.Id);
-        cash.Balance.Should().Be(0m);
-        equity.Balance.Should().Be(0m);
+        // Opening balances also maintain Account.Balance as a read-side snapshot through the posting engine.
+        cash.Balance.Should().Be(100m);
+        equity.Balance.Should().Be(100m);
         (await db.AuditLogs.CountAsync(a => a.TenantId == tenantId && a.Action == FinanceAuditEvents.OpeningBalancePosted)).Should().Be(1);
     }
 

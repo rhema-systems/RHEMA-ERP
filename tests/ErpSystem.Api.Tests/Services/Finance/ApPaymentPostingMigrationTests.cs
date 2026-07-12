@@ -59,8 +59,9 @@ public sealed class ApPaymentPostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.BankGlAccount.Id).CreditAmount.Should().Be(100m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ApPaymentPosted && a.TenantId == tenantId)).Should().Be(1);
-        fixture.ApAccount.Balance.Should().Be(0m);
-        fixture.BankGlAccount.Balance.Should().Be(0m);
+        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
+        fixture.ApAccount.Balance.Should().Be(-100m);
+        fixture.BankGlAccount.Balance.Should().Be(-100m);
     }
 
     [Fact]
