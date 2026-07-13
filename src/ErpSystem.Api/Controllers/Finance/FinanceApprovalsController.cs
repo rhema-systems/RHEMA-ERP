@@ -1199,7 +1199,9 @@ public class FinanceApprovalsController : ControllerBase
         invoice.UpdatedAt = DateTime.UtcNow;
         invoice.UpdatedBy = _currentUserService.UserName ?? "system";
 
-        foreach (var line in invoice.LineItems.Where(l => l.LineItemType == "Inventory"))
+        // Opening-balance AP invoices are migration source records; they must not
+        // create inventory receipts or use the normal AP invoice posting path.
+        foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
         {
             if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
             {
@@ -1237,6 +1239,11 @@ public class FinanceApprovalsController : ControllerBase
         if (_vendorInvoiceService == null)
         {
             throw new InvalidOperationException("Vendor invoice posting service is not configured.");
+        }
+
+        if (invoice.IsOpeningBalance)
+        {
+            return;
         }
 
         await _vendorInvoiceService.PostAsync(invoice.Id, cancellationToken);

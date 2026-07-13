@@ -570,7 +570,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
-            // Process Inventory Receivals for Inventory lines
+            // Opening-balance AP invoices are migration source records; they must not
+            // create inventory receipts or use the normal AP invoice posting path.
             foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
             {
                 if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
@@ -608,9 +609,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 comment: comments,
                 cancellationToken: cancellationToken);
 
-            await PostAsync(invoice.Id, cancellationToken);
+            if (!invoice.IsOpeningBalance)
+            {
+                await PostAsync(invoice.Id, cancellationToken);
 
-            _logger.LogInformation("Approved vendor invoice {InvoiceNumber} and posted to GL through the finance posting engine", invoice.InvoiceNumber);
+                _logger.LogInformation("Approved vendor invoice {InvoiceNumber} and posted to GL through the finance posting engine", invoice.InvoiceNumber);
+            }
+            else
+            {
+                _logger.LogInformation("Approved opening-balance vendor invoice {InvoiceNumber}; GL posting remains deferred to the controlled opening-balance flow", invoice.InvoiceNumber);
+            }
 
             return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
         }

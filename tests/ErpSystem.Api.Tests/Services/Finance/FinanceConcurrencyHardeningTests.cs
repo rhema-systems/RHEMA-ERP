@@ -100,6 +100,56 @@ public sealed class FinanceConcurrencyHardeningTests
         tenantFilterIndex.Should().BeLessThan(selectIndex, "tenant filtering must happen before reading cash transaction numbers");
     }
 
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void ApApprovalPaths_ShouldNotReceiptOrPostOpeningBalanceInvoices()
+    {
+        var root = FindRepositoryRoot();
+        var approvalsSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinanceApprovalsController.cs"));
+        var serviceSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "VendorInvoiceService.cs"));
+
+        var approvalsMethod = ExtractMember(approvalsSource, "private async Task FinalizeVendorInvoiceApprovalAsync", "private async Task RecordFinanceWorkflowAuditAsync");
+        var serviceMethod = ExtractMember(serviceSource, "public async Task<VendorInvoiceDto> ApproveAsync", "public async Task<VendorInvoiceDto> PostAsync");
+
+        approvalsMethod.Should().Contain("!invoice.IsOpeningBalance && l.LineItemType == \"Inventory\"", "the workbench approval path must not create inventory receipts for opening-balance AP invoices");
+        approvalsMethod.Should().Contain("if (invoice.IsOpeningBalance)", "the workbench approval path must skip normal AP posting for opening-balance invoices");
+        approvalsMethod.IndexOf("if (invoice.IsOpeningBalance)", StringComparison.Ordinal)
+            .Should().BeLessThan(approvalsMethod.IndexOf("_vendorInvoiceService.PostAsync", StringComparison.Ordinal), "opening-balance AP invoices must return before normal posting");
+
+        serviceMethod.Should().Contain("!invoice.IsOpeningBalance && l.LineItemType == \"Inventory\"", "the service approval path must not create inventory receipts for opening-balance AP invoices");
+        serviceMethod.Should().Contain("if (!invoice.IsOpeningBalance)", "the service approval path must post only normal AP invoices");
+        serviceMethod.IndexOf("if (!invoice.IsOpeningBalance)", StringComparison.Ordinal)
+            .Should().BeLessThan(serviceMethod.IndexOf("await PostAsync(invoice.Id", StringComparison.Ordinal), "normal AP posting must be guarded by the opening-balance check");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinancePurchaseOrders_ShouldUseDocumentNumberReservationsForGeneratedNumbers()
+    {
+        var root = FindRepositoryRoot();
+        var controllerSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinancePurchaseOrderController.cs"));
+        var numberingContracts = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Interfaces", "Numbering", "IDocumentNumberingService.cs"));
+        var numberingService = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Services", "DocumentNumberingService.cs"));
+
+        var generator = ExtractMember(controllerSource, "private async Task<string> GeneratePurchaseOrderNumberAsync", "private static int NormalizeLineType");
+
+        controllerSource.Should().Contain("IDocumentNumberingService", "finance PO number generation should use central document numbering");
+        generator.Should().Contain("_documentNumberingService.GenerateAsync", "generated finance PO numbers must be reserved transactionally");
+        generator.Should().Contain("FinanceDocumentTypes.FinancePurchaseOrder", "finance POs need a dedicated numbering sequence");
+        generator.Should().NotContain("CountAsync", "generated finance PO numbers must not be derived from visible row counts");
+        numberingContracts.Should().Contain("public const string FinancePurchaseOrder", "the document type should be explicit for other finance callers");
+        numberingContracts.Should().Contain("\"FPO-{YYYY}-{######}\"", "the default sequence should preserve the existing FPO year format");
+        var financePoFallbackIndex = numberingService.IndexOf("FinanceDocumentTypes.FinancePurchaseOrder) => _context.Set<FinancePurchaseOrder>()", StringComparison.Ordinal);
+        var financePoTenantFilterIndex = numberingService.IndexOf(".Where(e => e.TenantId == tenantId)", financePoFallbackIndex, StringComparison.Ordinal);
+        var financePoSelectIndex = numberingService.IndexOf(".Select(e => e.OrderNumber)", financePoFallbackIndex, StringComparison.Ordinal);
+
+        financePoFallbackIndex.Should().BeGreaterThan(-1, "legacy/manual finance PO numbers should be included in fallback scans");
+        financePoTenantFilterIndex.Should().BeGreaterThan(financePoFallbackIndex, "finance PO fallback scans must remain tenant-scoped");
+        financePoTenantFilterIndex.Should().BeLessThan(financePoSelectIndex, "tenant filtering must happen before reading finance PO order numbers");
+    }
+
     private static string ExtractMember(string source, string startMarker, string endMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);

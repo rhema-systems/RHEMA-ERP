@@ -313,6 +313,10 @@ public class DocumentNumberingService : IDocumentNumberingService
                 .Where(e => e.TenantId == tenantId && e.ReferenceNumber != null)
                 .Select(e => e.ReferenceNumber!)
                 .ToListAsync(cancellationToken),
+            (DocumentNumberingModules.Finance, FinanceDocumentTypes.FinancePurchaseOrder) => _context.Set<FinancePurchaseOrder>()
+                .Where(e => e.TenantId == tenantId)
+                .Select(e => e.OrderNumber)
+                .ToListAsync(cancellationToken),
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.FixedAssetJournal) or
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.LeaseJournal) or
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.CurrencyRevaluation) or

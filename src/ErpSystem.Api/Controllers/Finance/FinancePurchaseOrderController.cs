@@ -41,6 +41,7 @@ public class FinancePurchaseOrderController : ControllerBase
     private readonly ICurrentUserService _currentUserService;
     private readonly INotificationService _notificationService;
     private readonly IWorkflowService _workflowService;
+    private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ILogger<FinancePurchaseOrderController> _logger;
 
     public FinancePurchaseOrderController(
@@ -48,12 +49,14 @@ public class FinancePurchaseOrderController : ControllerBase
         ICurrentUserService currentUserService,
         INotificationService notificationService,
         IWorkflowService workflowService,
+        IDocumentNumberingService documentNumberingService,
         ILogger<FinancePurchaseOrderController> logger)
     {
         _dbContext = dbContext;
         _currentUserService = currentUserService;
         _notificationService = notificationService;
         _workflowService = workflowService;
+        _documentNumberingService = documentNumberingService;
         _logger = logger;
     }
 
@@ -156,8 +159,9 @@ public class FinancePurchaseOrderController : ControllerBase
             return BadRequest($"Vendor with ID {dto.VendorId} was not found.");
         }
 
+        var orderDate = dto.OrderDate ?? DateTime.UtcNow;
         var orderNumber = string.IsNullOrWhiteSpace(dto.OrderNumber)
-            ? await GeneratePurchaseOrderNumberAsync(tenantId, cancellationToken)
+            ? await GeneratePurchaseOrderNumberAsync(tenantId, orderDate, cancellationToken)
             : dto.OrderNumber.Trim();
 
         var orderNumberExists = await _dbContext.FinancePurchaseOrders
@@ -191,7 +195,7 @@ public class FinancePurchaseOrderController : ControllerBase
             TenantId = tenantId,
             OrderNumber = orderNumber,
             VendorId = dto.VendorId,
-            OrderDate = dto.OrderDate ?? DateTime.UtcNow,
+            OrderDate = orderDate,
             ExpectedDeliveryDate = dto.ExpectedDeliveryDate,
             PaymentTermId = paymentTerm?.Id,
             Status = Draft,
@@ -584,14 +588,17 @@ public class FinancePurchaseOrderController : ControllerBase
         return accountExists ? null : $"GL account with ID {glAccountId.Value} was not found.";
     }
 
-    private async Task<string> GeneratePurchaseOrderNumberAsync(Guid tenantId, CancellationToken cancellationToken)
+    private async Task<string> GeneratePurchaseOrderNumberAsync(Guid tenantId, DateTime orderDate, CancellationToken cancellationToken)
     {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"FPO-{year}-";
-        var count = await _dbContext.FinancePurchaseOrders
-            .CountAsync(po => po.TenantId == tenantId && po.OrderNumber.StartsWith(prefix), cancellationToken);
-
-        return $"{prefix}{count + 1:000000}";
+        // Generated finance PO numbers use the central reservation service so
+        // concurrent creates cannot both derive the same number from row counts.
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Finance,
+            FinanceDocumentTypes.FinancePurchaseOrder,
+            tenantId,
+            orderDate,
+            nameof(FinancePurchaseOrder),
+            cancellationToken: cancellationToken);
     }
 
     private static int NormalizeLineType(int lineType) => lineType == 2 ? 2 : 1;
