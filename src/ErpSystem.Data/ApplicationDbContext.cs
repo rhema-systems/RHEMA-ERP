@@ -24,6 +24,7 @@ using ErpSystem.Data.Configuration.Sales;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using FinancePaymentMethod = ErpSystem.Core.Entities.Finance.PaymentMethod;
 
 namespace ErpSystem.Data;
 
@@ -133,6 +134,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<BudgetEntry> BudgetEntries { get; set; }
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
     public DbSet<BankAccount> BankAccounts { get; set; }
+    public DbSet<FinancePaymentMethod> PaymentMethods { get; set; }
     public DbSet<TaxRule> TaxRules { get; set; }
     public DbSet<Invoice> Invoices { get; set; }
     public DbSet<VendorInvoice> VendorInvoices { get; set; }
@@ -2697,6 +2699,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => new { e.TenantId, e.AccountNumber }).IsUnique();
+        });
+
+        builder.Entity<FinancePaymentMethod>(entity =>
+        {
+            entity.ToTable("PaymentMethod");
         });
 
         builder.Entity<BankStatement>(entity =>

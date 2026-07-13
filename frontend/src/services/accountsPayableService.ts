@@ -9,6 +9,7 @@ import type {
     PaymentBatch,
     PaymentBatchCreateRequest,
     ApAgingReport,
+    SupplierDetailedLedgerReport,
     CashRequirementForecast,
     ApSummaryStats,
     OutstandingVendorInvoice
@@ -198,7 +199,7 @@ class AccountsPayableService {
     public async getCashRequirementForecast(asOfDate?: string): Promise<CashRequirementForecast> {
         const params = new URLSearchParams();
         if (asOfDate) params.append('AsOfDate', asOfDate);
-        return apiService.get<CashRequirementForecast>(`${this.baseUrl}/reports/cash-requirement?${params.toString()}`);
+        return apiService.get<CashRequirementForecast>(`${this.baseUrl}/reports/cash-forecast?${params.toString()}`);
     }
 
     public async getSupplierStatement(supplierId: string, fromDate: string, toDate: string): Promise<any> {
@@ -209,8 +210,25 @@ class AccountsPayableService {
         return apiService.get<any>(`${this.baseUrl}/reports/supplier-statement?${params.toString()}`);
     }
 
+    public async getSupplierDetailedLedger(query: {
+        fromDate: string;
+        toDate: string;
+        supplierIds?: string[];
+        showSupplierCurrency?: boolean;
+    }): Promise<SupplierDetailedLedgerReport> {
+        const params = new URLSearchParams();
+        params.append('fromDate', query.fromDate);
+        params.append('toDate', query.toDate);
+        query.supplierIds?.forEach((supplierId) => params.append('supplierIds', supplierId));
+        if (query.showSupplierCurrency !== undefined) {
+            params.append('showSupplierCurrency', query.showSupplierCurrency.toString());
+        }
+
+        return apiService.get<SupplierDetailedLedgerReport>(`${this.baseUrl}/reports/supplier-detailed-ledger?${params.toString()}`);
+    }
+
     public async getApSummary(): Promise<ApSummaryStats> {
-        return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/ap-summary`);
+        return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/summary`);
     }
 
     // --- Supplier Returns & Debit Notes ---

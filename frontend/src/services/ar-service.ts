@@ -9,6 +9,7 @@ import type {
     PaymentCreateRequest,
     PaymentAllocationRequest,
     AgingReport,
+    CustomerDetailedLedgerReport,
     CollectionsDashboardStats,
     PaymentAllocation,
     PaymentAllocationResultDto
@@ -180,6 +181,23 @@ class ArService {
         params.append('fromDate', startDate);
         params.append('toDate', endDate);
         return apiService.get<any>(`${this.baseUrl}/reports/customer-statement/${customerId}?${params.toString()}`);
+    }
+
+    public async getCustomerDetailedLedger(query: {
+        fromDate: string;
+        toDate: string;
+        customerIds?: string[];
+        showCustomerCurrency?: boolean;
+    }): Promise<CustomerDetailedLedgerReport> {
+        const params = new URLSearchParams();
+        params.append('fromDate', query.fromDate);
+        params.append('toDate', query.toDate);
+        query.customerIds?.forEach((customerId) => params.append('customerIds', customerId));
+        if (query.showCustomerCurrency !== undefined) {
+            params.append('showCustomerCurrency', query.showCustomerCurrency.toString());
+        }
+
+        return apiService.get<CustomerDetailedLedgerReport>(`${this.baseUrl}/reports/customer-detailed-ledger?${params.toString()}`);
     }
 
     public async getCollectionsDashboard(): Promise<CollectionsDashboardStats> {

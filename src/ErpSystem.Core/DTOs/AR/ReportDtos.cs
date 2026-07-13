@@ -108,6 +108,48 @@ public class StatementTransactionDto
     public decimal Balance { get; set; }
 }
 
+public class CustomerDetailedLedgerReportDto
+{
+    public DateTime FromDate { get; set; }
+    public DateTime ToDate { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public bool ShowCustomerCurrency { get; set; }
+    public decimal TotalOpeningBalance { get; set; }
+    public decimal TotalDebits { get; set; }
+    public decimal TotalCredits { get; set; }
+    public decimal TotalClosingBalance { get; set; }
+    public List<string> Warnings { get; set; } = new();
+    public List<CustomerDetailedLedgerAccountDto> Customers { get; set; } = new();
+}
+
+public class CustomerDetailedLedgerAccountDto
+{
+    public Guid CustomerId { get; set; }
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal OpeningBalance { get; set; }
+    public decimal TotalDebits { get; set; }
+    public decimal TotalCredits { get; set; }
+    public decimal ClosingBalance { get; set; }
+    public List<CustomerDetailedLedgerLineDto> Lines { get; set; } = new();
+}
+
+public class CustomerDetailedLedgerLineDto
+{
+    public Guid SourceDocumentId { get; set; }
+    public DateTime TransactionDate { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
+    public string DocumentNumber { get; set; } = string.Empty;
+    public string? Reference { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string TransactionCurrencyCode { get; set; } = "GHS";
+    public decimal ExchangeRate { get; set; } = 1m;
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public decimal RunningBalance { get; set; }
+}
+
 // ============= Collections Dashboard DTOs =============
 
 public class CollectionsDashboardDto

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
     Calendar as CalendarIcon,
@@ -60,7 +61,7 @@ export default function ApReportsPage() {
                 </p>
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'aging' | 'cash' | 'statements')} className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="aging">AP Aging Analysis</TabsTrigger>
                     <TabsTrigger value="cash">Cash Requirements</TabsTrigger>
@@ -343,6 +344,11 @@ function SupplierStatementsView() {
             <CardContent className="text-center py-12 text-muted-foreground">
                 <FileText className="h-12 w-12 mx-auto mb-4 opacity-20" />
                 <p>Select a supplier and date range to generate a statement.</p>
+                <Button asChild className="mt-6">
+                    <Link href="/finance/ap/reports/supplier-detailed-ledger">
+                        Open Supplier Detailed Ledger
+                    </Link>
+                </Button>
                 <div className="max-w-md mx-auto mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900 rounded-lg text-sm text-yellow-800 dark:text-yellow-200">
                     PDF Generation coming soon. Please use individual Supplier Details page to view billing history.
                 </div>

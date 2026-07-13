@@ -267,6 +267,46 @@ export interface ApAgingInvoice {
     agingBucket: string;
 }
 
+export interface SupplierDetailedLedgerReport {
+    fromDate: string;
+    toDate: string;
+    currencyCode: string;
+    showSupplierCurrency: boolean;
+    totalOpeningBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    totalClosingBalance: number;
+    warnings: string[];
+    suppliers: SupplierDetailedLedgerAccount[];
+}
+
+export interface SupplierDetailedLedgerAccount {
+    supplierId: string;
+    businessPartnerId?: string;
+    supplierCode: string;
+    supplierName: string;
+    currencyCode: string;
+    openingBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
+    lines: SupplierDetailedLedgerLine[];
+}
+
+export interface SupplierDetailedLedgerLine {
+    sourceDocumentId: string;
+    transactionDate: string;
+    transactionType: string;
+    documentNumber: string;
+    reference?: string;
+    description: string;
+    transactionCurrencyCode: string;
+    exchangeRate: number;
+    debit: number;
+    credit: number;
+    runningBalance: number;
+}
+
 export interface CashRequirementForecast {
     asOfDate: string;
     currencyCode: string;

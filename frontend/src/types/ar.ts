@@ -204,6 +204,45 @@ export interface AgingReport {
     customerDetails?: any[]; // Simplified for summary view
 }
 
+export interface CustomerDetailedLedgerReport {
+    fromDate: string;
+    toDate: string;
+    currencyCode: string;
+    showCustomerCurrency: boolean;
+    totalOpeningBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    totalClosingBalance: number;
+    warnings: string[];
+    customers: CustomerDetailedLedgerAccount[];
+}
+
+export interface CustomerDetailedLedgerAccount {
+    customerId: string;
+    customerCode: string;
+    customerName: string;
+    currencyCode: string;
+    openingBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
+    lines: CustomerDetailedLedgerLine[];
+}
+
+export interface CustomerDetailedLedgerLine {
+    sourceDocumentId: string;
+    transactionDate: string;
+    transactionType: string;
+    documentNumber: string;
+    reference?: string;
+    description: string;
+    transactionCurrencyCode: string;
+    exchangeRate: number;
+    debit: number;
+    credit: number;
+    runningBalance: number;
+}
+
 export interface CollectionsDashboardStats {
     totalOutstanding: number;
     overdueAmount: number;

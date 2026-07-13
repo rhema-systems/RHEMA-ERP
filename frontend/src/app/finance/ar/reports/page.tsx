@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
     BarChart3,
@@ -70,7 +71,7 @@ export default function ArReportsPage() {
                 </p>
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'aging' | 'statements')} className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="aging">Aging Analysis</TabsTrigger>
                     <TabsTrigger value="statements">Customer Statements</TabsTrigger>
@@ -200,6 +201,11 @@ function CustomerStatementsView() {
             <CardContent className="text-center py-12 text-muted-foreground">
                 <FileText className="h-12 w-12 mx-auto mb-4 opacity-20" />
                 <p>Select a customer and date range to generate a statement.</p>
+                <Button asChild className="mt-6">
+                    <Link href="/finance/ar/reports/customer-detailed-ledger">
+                        Open Customer Detailed Ledger
+                    </Link>
+                </Button>
                 <div className="max-w-md mx-auto mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900 rounded-lg text-sm text-yellow-800 dark:text-yellow-200">
                     Feature coming soon. Please use individual Customer Details page to view history.
                 </div>

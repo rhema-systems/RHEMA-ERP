@@ -601,6 +601,108 @@ namespace ErpSystem.Api.Services.Finance.AP
             return statement;
         }
 
+        public async Task<SupplierDetailedLedgerReportDto> GetSupplierDetailedLedgerAsync(
+            DateTime fromDate,
+            DateTime toDate,
+            IReadOnlyCollection<Guid>? supplierIds = null,
+            bool showSupplierCurrency = false,
+            CancellationToken cancellationToken = default)
+        {
+            var startDate = fromDate.Date;
+            var endDate = toDate.Date;
+            if (endDate < startDate)
+                throw new ArgumentException("The end date must be on or after the start date.");
+
+            var endExclusive = endDate.AddDays(1);
+            var baseCurrencyCode = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync(), "GHS");
+            var requestedSupplierIds = supplierIds?
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToList() ?? new List<Guid>();
+
+            var selections = await GetSupplierLedgerSelectionsAsync(requestedSupplierIds, endExclusive, cancellationToken);
+            var report = new SupplierDetailedLedgerReportDto
+            {
+                FromDate = startDate,
+                ToDate = endDate,
+                CurrencyCode = showSupplierCurrency ? "Supplier Currency" : baseCurrencyCode,
+                ShowSupplierCurrency = showSupplierCurrency
+            };
+
+            foreach (var selection in selections.OrderBy(s => s.SupplierName).ThenBy(s => s.SupplierCode))
+            {
+                var reportCurrencyCode = showSupplierCurrency
+                    ? NormalizeCurrency(selection.CurrencyCode, baseCurrencyCode)
+                    : baseCurrencyCode;
+
+                var transactions = selection.SupplierId.HasValue
+                    ? await GetSupplierLedgerTransactionsAsync(selection, startDate, endExclusive, reportCurrencyCode, baseCurrencyCode, report.Warnings, cancellationToken)
+                    : new List<SupplierLedgerTransaction>();
+
+                var openingBalance = transactions
+                    .Where(t => t.TransactionDate.Date < startDate)
+                    .Sum(t => t.Credit - t.Debit);
+
+                var periodTransactions = transactions
+                    .Where(t => t.TransactionDate.Date >= startDate && t.TransactionDate < endExclusive)
+                    .OrderBy(t => t.TransactionDate)
+                    .ThenBy(t => t.TransactionType)
+                    .ThenBy(t => t.DocumentNumber)
+                    .ToList();
+
+                var runningBalance = openingBalance;
+                var lines = new List<SupplierDetailedLedgerLineDto>();
+
+                foreach (var transaction in periodTransactions)
+                {
+                    runningBalance += transaction.Credit - transaction.Debit;
+                    lines.Add(new SupplierDetailedLedgerLineDto
+                    {
+                        SourceDocumentId = transaction.SourceDocumentId,
+                        TransactionDate = transaction.TransactionDate,
+                        TransactionType = transaction.TransactionType,
+                        DocumentNumber = transaction.DocumentNumber,
+                        Reference = transaction.Reference,
+                        Description = transaction.Description,
+                        TransactionCurrencyCode = transaction.TransactionCurrencyCode,
+                        ExchangeRate = transaction.ExchangeRate,
+                        Debit = transaction.Debit,
+                        Credit = transaction.Credit,
+                        RunningBalance = runningBalance
+                    });
+                }
+
+                var totalDebits = lines.Sum(l => l.Debit);
+                var totalCredits = lines.Sum(l => l.Credit);
+                var closingBalance = openingBalance + totalCredits - totalDebits;
+
+                if (requestedSupplierIds.Count == 0 && openingBalance == 0m && closingBalance == 0m && lines.Count == 0)
+                    continue;
+
+                report.Suppliers.Add(new SupplierDetailedLedgerAccountDto
+                {
+                    SupplierId = selection.SupplierId ?? selection.BusinessPartnerId ?? Guid.Empty,
+                    BusinessPartnerId = selection.BusinessPartnerId,
+                    SupplierCode = selection.SupplierCode,
+                    SupplierName = selection.SupplierName,
+                    CurrencyCode = reportCurrencyCode,
+                    OpeningBalance = RoundMoney(openingBalance),
+                    TotalDebits = RoundMoney(totalDebits),
+                    TotalCredits = RoundMoney(totalCredits),
+                    ClosingBalance = RoundMoney(closingBalance),
+                    Lines = lines
+                });
+            }
+
+            report.TotalOpeningBalance = RoundMoney(report.Suppliers.Sum(s => s.OpeningBalance));
+            report.TotalDebits = RoundMoney(report.Suppliers.Sum(s => s.TotalDebits));
+            report.TotalCredits = RoundMoney(report.Suppliers.Sum(s => s.TotalCredits));
+            report.TotalClosingBalance = RoundMoney(report.Suppliers.Sum(s => s.ClosingBalance));
+            report.Warnings = report.Warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            return report;
+        }
+
         // ═════════════════════════════════════════════════════════════════
         //  WITHHOLDING TAX SUMMARY
         // ═════════════════════════════════════════════════════════════════
@@ -892,6 +994,371 @@ namespace ErpSystem.Api.Services.Finance.AP
                 SettlementStatus = "PostedAdjustment"
             };
         }
+
+        private async Task<List<SupplierLedgerSelection>> GetSupplierLedgerSelectionsAsync(
+            IReadOnlyCollection<Guid> requestedSupplierIds,
+            DateTime endExclusive,
+            CancellationToken cancellationToken)
+        {
+            var suppliers = await _unitOfWork.Repository<Supplier>()
+                .GetQueryable(s => s.TenantId == TenantId)
+                .ToListAsync(cancellationToken);
+
+            var partners = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    (p.PartnerType == "Supplier" || p.PartnerType == "Contractor" || p.PartnerType == "Both"))
+                .ToListAsync(cancellationToken);
+
+            var selectedIds = requestedSupplierIds.Count > 0
+                ? requestedSupplierIds.ToHashSet()
+                : await GetSupplierIdsWithLedgerActivityAsync(endExclusive, cancellationToken);
+
+            var selections = new List<SupplierLedgerSelection>();
+            foreach (var id in selectedIds)
+            {
+                var supplier = suppliers.FirstOrDefault(s => s.Id == id);
+                var partner = partners.FirstOrDefault(p => p.Id == id);
+
+                if (supplier == null && partner != null)
+                    supplier = FindMatchingSupplier(partner, suppliers);
+
+                if (partner == null && supplier != null)
+                    partner = FindMatchingSupplierPartner(supplier, partners);
+
+                if (supplier == null && partner == null)
+                    continue;
+
+                selections.Add(new SupplierLedgerSelection(
+                    supplier?.Id,
+                    partner?.Id,
+                    partner?.PartnerCode ?? supplier?.SupplierCode ?? string.Empty,
+                    partner?.PartnerName ?? supplier?.Name ?? "Supplier",
+                    partner?.Currency ?? "GHS"));
+            }
+
+            return selections
+                .GroupBy(s => s.BusinessPartnerId ?? s.SupplierId ?? Guid.Empty)
+                .Select(g => g.First())
+                .ToList();
+        }
+
+        private async Task<HashSet<Guid>> GetSupplierIdsWithLedgerActivityAsync(DateTime endExclusive, CancellationToken cancellationToken)
+        {
+            var invoiceSupplierIds = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i =>
+                    i.TenantId == TenantId &&
+                    i.InvoiceDate < endExclusive &&
+                    i.Status != VendorInvoiceStatus.Draft &&
+                    i.Status != VendorInvoiceStatus.Voided &&
+                    i.Status != VendorInvoiceStatus.Rejected)
+                .Select(i => i.SupplierId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            var paymentSupplierIds = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    p.PaymentDate < endExclusive &&
+                    p.Status != VendorPaymentStatus.Draft &&
+                    p.Status != VendorPaymentStatus.Voided &&
+                    p.Status != VendorPaymentStatus.Failed)
+                .Select(p => p.SupplierId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            var adjustmentSupplierIds = await _unitOfWork.Repository<SubledgerAdjustmentJournal>()
+                .GetQueryable(a =>
+                    a.TenantId == TenantId &&
+                    a.Module == SubledgerModules.AccountsPayable &&
+                    a.Status == SubledgerAdjustmentStatuses.Posted &&
+                    a.SupplierId.HasValue &&
+                    a.AdjustmentDate < endExclusive)
+                .Select(a => a.SupplierId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            return invoiceSupplierIds
+                .Concat(paymentSupplierIds)
+                .Concat(adjustmentSupplierIds)
+                .ToHashSet();
+        }
+
+        private async Task<List<SupplierLedgerTransaction>> GetSupplierLedgerTransactionsAsync(
+            SupplierLedgerSelection selection,
+            DateTime startDate,
+            DateTime endExclusive,
+            string reportCurrencyCode,
+            string baseCurrencyCode,
+            ICollection<string> warnings,
+            CancellationToken cancellationToken)
+        {
+            if (!selection.SupplierId.HasValue)
+                return new List<SupplierLedgerTransaction>();
+
+            var supplierId = selection.SupplierId.Value;
+            var transactions = new List<SupplierLedgerTransaction>();
+
+            var invoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i =>
+                    i.TenantId == TenantId &&
+                    i.SupplierId == supplierId &&
+                    i.InvoiceDate < endExclusive &&
+                    i.Status != VendorInvoiceStatus.Draft &&
+                    i.Status != VendorInvoiceStatus.Voided &&
+                    i.Status != VendorInvoiceStatus.Rejected)
+                .ToListAsync(cancellationToken);
+
+            foreach (var invoice in invoices)
+            {
+                var amount = AmountForLedgerCurrency(
+                    invoice.TotalAmount,
+                    invoice.BaseCurrencyAmount,
+                    invoice.CurrencyCode,
+                    invoice.ExchangeRate,
+                    reportCurrencyCode,
+                    baseCurrencyCode,
+                    warnings,
+                    invoice.InvoiceNumber);
+
+                transactions.Add(new SupplierLedgerTransaction(
+                    invoice.Id,
+                    invoice.InvoiceDate,
+                    "Invoice",
+                    invoice.InvoiceNumber,
+                    invoice.SupplierInvoiceNumber ?? invoice.Reference,
+                    invoice.Notes ?? "Supplier invoice",
+                    NormalizeCurrency(invoice.CurrencyCode, baseCurrencyCode),
+                    NormalizeExchangeRate(invoice.ExchangeRate),
+                    0m,
+                    amount));
+            }
+
+            var payments = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    p.SupplierId == supplierId &&
+                    p.PaymentDate < endExclusive &&
+                    p.Status != VendorPaymentStatus.Draft &&
+                    p.Status != VendorPaymentStatus.Voided &&
+                    p.Status != VendorPaymentStatus.Failed)
+                .Include(p => p.Allocations)
+                .ToListAsync(cancellationToken);
+
+            foreach (var payment in payments)
+            {
+                var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, baseCurrencyCode);
+                var paymentExchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
+                var reference = payment.TransactionReference ?? payment.ChequeNumber;
+
+                var cashAmount = AmountForLedgerCurrency(
+                    payment.TotalAmount,
+                    null,
+                    paymentCurrency,
+                    paymentExchangeRate,
+                    reportCurrencyCode,
+                    baseCurrencyCode,
+                    warnings,
+                    payment.PaymentNumber);
+
+                transactions.Add(new SupplierLedgerTransaction(
+                    payment.Id,
+                    payment.PaymentDate,
+                    "Payment",
+                    payment.PaymentNumber,
+                    reference,
+                    $"Supplier payment - {payment.PaymentMethod}",
+                    paymentCurrency,
+                    paymentExchangeRate,
+                    cashAmount,
+                    0m));
+
+                var activeAllocations = payment.Allocations.Where(a => !a.IsReversal).ToList();
+                var discountTaken = activeAllocations.Sum(a => a.DiscountAmount);
+                if (discountTaken == 0m)
+                    discountTaken = payment.DiscountTaken;
+
+                if (discountTaken > 0m)
+                {
+                    var discountAmount = AmountForLedgerCurrency(
+                        discountTaken,
+                        null,
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        reportCurrencyCode,
+                        baseCurrencyCode,
+                        warnings,
+                        payment.PaymentNumber);
+
+                    transactions.Add(new SupplierLedgerTransaction(
+                        payment.Id,
+                        payment.PaymentDate,
+                        "Discount Taken",
+                        payment.PaymentNumber,
+                        reference,
+                        "Supplier settlement discount",
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        discountAmount,
+                        0m));
+                }
+
+                var withholdingTaxAmount = activeAllocations.Sum(a => a.WithholdingTaxAmount);
+                if (withholdingTaxAmount == 0m)
+                    withholdingTaxAmount = payment.WithholdingTaxAmount;
+
+                if (withholdingTaxAmount > 0m)
+                {
+                    var whtAmount = AmountForLedgerCurrency(
+                        withholdingTaxAmount,
+                        null,
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        reportCurrencyCode,
+                        baseCurrencyCode,
+                        warnings,
+                        payment.PaymentNumber);
+
+                    transactions.Add(new SupplierLedgerTransaction(
+                        payment.Id,
+                        payment.PaymentDate,
+                        "Withholding Tax",
+                        payment.PaymentNumber,
+                        payment.WithholdingCertificateNumber ?? reference,
+                        "Withholding tax on supplier payment",
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        whtAmount,
+                        0m));
+                }
+            }
+
+            var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
+            foreach (var adjustment in adjustments.Where(a => a.AdjustmentDate < endExclusive))
+            {
+                var signedAmount = GetSignedApSubledgerAmount(adjustment);
+                if (signedAmount == 0m)
+                    continue;
+
+                var adjustmentAmount = AmountForLedgerCurrency(
+                    Math.Abs(signedAmount),
+                    Math.Abs(adjustment.BaseCurrencyAmount),
+                    adjustment.CurrencyCode,
+                    adjustment.ExchangeRate,
+                    reportCurrencyCode,
+                    baseCurrencyCode,
+                    warnings,
+                    adjustment.AdjustmentNumber);
+
+                transactions.Add(new SupplierLedgerTransaction(
+                    adjustment.Id,
+                    adjustment.AdjustmentDate,
+                    "Adjustment",
+                    adjustment.AdjustmentNumber,
+                    adjustment.Reference,
+                    adjustment.Reason,
+                    NormalizeCurrency(adjustment.CurrencyCode, baseCurrencyCode),
+                    NormalizeExchangeRate(adjustment.ExchangeRate),
+                    signedAmount < 0m ? adjustmentAmount : 0m,
+                    signedAmount > 0m ? adjustmentAmount : 0m));
+            }
+
+            return transactions;
+        }
+
+        private static Supplier? FindMatchingSupplier(BusinessPartner partner, IEnumerable<Supplier> suppliers)
+        {
+            return suppliers.FirstOrDefault(s =>
+                s.Id == partner.Id ||
+                string.Equals(s.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(s.Name, partner.PartnerName, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(s.Email) &&
+                 !string.IsNullOrWhiteSpace(partner.PrimaryEmail) &&
+                 string.Equals(s.Email, partner.PrimaryEmail, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private static BusinessPartner? FindMatchingSupplierPartner(Supplier supplier, IEnumerable<BusinessPartner> partners)
+        {
+            return partners.FirstOrDefault(p =>
+                p.Id == supplier.Id ||
+                string.Equals(p.PartnerCode, supplier.SupplierCode, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(p.PartnerName, supplier.Name, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(p.PrimaryEmail) &&
+                 !string.IsNullOrWhiteSpace(supplier.Email) &&
+                 string.Equals(p.PrimaryEmail, supplier.Email, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private static decimal AmountForLedgerCurrency(
+            decimal transactionAmount,
+            decimal? baseCurrencyAmount,
+            string? transactionCurrencyCode,
+            decimal exchangeRate,
+            string reportCurrencyCode,
+            string baseCurrencyCode,
+            ICollection<string> warnings,
+            string documentNumber)
+        {
+            var transactionCurrency = NormalizeCurrency(transactionCurrencyCode, baseCurrencyCode);
+            var reportCurrency = NormalizeCurrency(reportCurrencyCode, baseCurrencyCode);
+            var baseCurrency = NormalizeCurrency(baseCurrencyCode, "GHS");
+
+            if (string.Equals(reportCurrency, transactionCurrency, StringComparison.OrdinalIgnoreCase))
+                return RoundMoney(transactionAmount);
+
+            var resolvedBaseAmount = baseCurrencyAmount.HasValue && baseCurrencyAmount.Value != 0m
+                ? baseCurrencyAmount.Value
+                : ToBaseCurrencyAmount(transactionAmount, transactionCurrency, baseCurrency, exchangeRate);
+
+            if (string.Equals(reportCurrency, baseCurrency, StringComparison.OrdinalIgnoreCase))
+                return RoundMoney(resolvedBaseAmount);
+
+            warnings.Add($"Document {documentNumber} is in {transactionCurrency}; shown using base currency {baseCurrency} because no direct {reportCurrency} amount is stored.");
+            return RoundMoney(resolvedBaseAmount);
+        }
+
+        private static decimal ToBaseCurrencyAmount(decimal transactionAmount, string transactionCurrencyCode, string baseCurrencyCode, decimal exchangeRate)
+        {
+            if (string.Equals(transactionCurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
+                return transactionAmount;
+
+            return transactionAmount * NormalizeExchangeRate(exchangeRate);
+        }
+
+        private static string NormalizeCurrency(string? currencyCode, string fallback)
+        {
+            return string.IsNullOrWhiteSpace(currencyCode)
+                ? fallback.Trim().ToUpperInvariant()
+                : currencyCode.Trim().ToUpperInvariant();
+        }
+
+        private static decimal NormalizeExchangeRate(decimal exchangeRate)
+        {
+            return exchangeRate <= 0m ? 1m : exchangeRate;
+        }
+
+        private static decimal RoundMoney(decimal amount)
+        {
+            return Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+        }
+
+        private sealed record SupplierLedgerSelection(
+            Guid? SupplierId,
+            Guid? BusinessPartnerId,
+            string SupplierCode,
+            string SupplierName,
+            string CurrencyCode);
+
+        private sealed record SupplierLedgerTransaction(
+            Guid SourceDocumentId,
+            DateTime TransactionDate,
+            string TransactionType,
+            string DocumentNumber,
+            string? Reference,
+            string Description,
+            string TransactionCurrencyCode,
+            decimal ExchangeRate,
+            decimal Debit,
+            decimal Credit);
 
         private async Task RecordReportAuditAsync(string eventType, object report, CancellationToken cancellationToken)
         {

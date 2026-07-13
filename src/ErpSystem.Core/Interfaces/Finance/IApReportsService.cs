@@ -54,6 +54,17 @@ public interface IApReportsService
     Task<SupplierStatementDto> GetSupplierStatementAsync(Guid supplierId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Generates supplier detailed ledger balances and period movements for one or more suppliers.
+    /// Supplier ids may be legacy Supplier ids or unified Business Partner ids.
+    /// </summary>
+    Task<SupplierDetailedLedgerReportDto> GetSupplierDetailedLedgerAsync(
+        DateTime fromDate,
+        DateTime toDate,
+        IReadOnlyCollection<Guid>? supplierIds = null,
+        bool showSupplierCurrency = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Generates withholding tax summary report grouped by supplier.
     /// Shows total WHT withheld, invoice amounts, and net payments.
     /// </summary>

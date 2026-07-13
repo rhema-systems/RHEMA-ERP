@@ -885,6 +885,26 @@ namespace ErpSystem.Api.Controllers.Finance
             => Ok(await _reportsService.GetCustomerStatementAsync(customerId, fromDate, toDate));
 
         /// <summary>
+        /// Generates a detailed customer ledger for one or more customer business partners.
+        /// </summary>
+        [HttpGet("customer-detailed-ledger")]
+        public async Task<ActionResult<CustomerDetailedLedgerReportDto>> GetCustomerDetailedLedger(
+            [FromQuery] DateTime fromDate,
+            [FromQuery] DateTime toDate,
+            [FromQuery] List<Guid>? customerIds = null,
+            [FromQuery] bool showCustomerCurrency = false)
+        {
+            try
+            {
+                return Ok(await _reportsService.GetCustomerDetailedLedgerAsync(fromDate, toDate, customerIds, showCustomerCurrency));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Retrieves the collections dashboard with real-time KPIs and overdue receivable metrics.
         /// </summary>
         /// <remarks>

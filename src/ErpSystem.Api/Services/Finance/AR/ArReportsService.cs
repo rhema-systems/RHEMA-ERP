@@ -26,19 +26,22 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly ILogger<ArReportsService> _logger;
         private readonly ISubledgerSettlementReadModelService? _settlementReadModelService;
         private readonly IFinanceAuditService? _financeAuditService;
+        private readonly ITenantSettingsService? _tenantSettingsService;
 
         public ArReportsService(
             IUnitOfWork _unitOfWork,
             ICurrentUserService currentUser,
             ILogger<ArReportsService> logger,
             ISubledgerSettlementReadModelService? settlementReadModelService = null,
-            IFinanceAuditService? financeAuditService = null)
+            IFinanceAuditService? financeAuditService = null,
+            ITenantSettingsService? tenantSettingsService = null)
         {
             this._unitOfWork = _unitOfWork;
             _currentUser = currentUser;
             _logger = logger;
             _settlementReadModelService = settlementReadModelService;
             _financeAuditService = financeAuditService;
+            _tenantSettingsService = tenantSettingsService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -603,6 +606,106 @@ namespace ErpSystem.Api.Services.Finance.AR
             return statement;
         }
 
+        public async Task<CustomerDetailedLedgerReportDto> GetCustomerDetailedLedgerAsync(
+            DateTime fromDate,
+            DateTime toDate,
+            IReadOnlyCollection<Guid>? customerIds = null,
+            bool showCustomerCurrency = false,
+            CancellationToken cancellationToken = default)
+        {
+            var startDate = fromDate.Date;
+            var endDate = toDate.Date;
+            if (endDate < startDate)
+                throw new ArgumentException("The end date must be on or after the start date.");
+
+            var endExclusive = endDate.AddDays(1);
+            var baseCurrencyCode = NormalizeCurrency(
+                _tenantSettingsService == null ? "GHS" : await _tenantSettingsService.GetBaseCurrencyAsync(),
+                "GHS");
+            var requestedCustomerIds = customerIds?
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToList() ?? new List<Guid>();
+
+            var customers = await GetCustomerLedgerSelectionsAsync(requestedCustomerIds, endExclusive, cancellationToken);
+            var report = new CustomerDetailedLedgerReportDto
+            {
+                FromDate = startDate,
+                ToDate = endDate,
+                CurrencyCode = showCustomerCurrency ? "Customer Currency" : baseCurrencyCode,
+                ShowCustomerCurrency = showCustomerCurrency
+            };
+
+            foreach (var customer in customers.OrderBy(c => c.CustomerName).ThenBy(c => c.CustomerCode))
+            {
+                var reportCurrencyCode = showCustomerCurrency
+                    ? NormalizeCurrency(customer.CurrencyCode, baseCurrencyCode)
+                    : baseCurrencyCode;
+
+                var transactions = await GetCustomerLedgerTransactionsAsync(customer, endExclusive, reportCurrencyCode, baseCurrencyCode, report.Warnings, cancellationToken);
+                var openingBalance = transactions
+                    .Where(t => t.TransactionDate.Date < startDate)
+                    .Sum(t => t.Debit - t.Credit);
+
+                var periodTransactions = transactions
+                    .Where(t => t.TransactionDate.Date >= startDate && t.TransactionDate < endExclusive)
+                    .OrderBy(t => t.TransactionDate)
+                    .ThenBy(t => t.TransactionType)
+                    .ThenBy(t => t.DocumentNumber)
+                    .ToList();
+
+                var runningBalance = openingBalance;
+                var lines = new List<CustomerDetailedLedgerLineDto>();
+
+                foreach (var transaction in periodTransactions)
+                {
+                    runningBalance += transaction.Debit - transaction.Credit;
+                    lines.Add(new CustomerDetailedLedgerLineDto
+                    {
+                        SourceDocumentId = transaction.SourceDocumentId,
+                        TransactionDate = transaction.TransactionDate,
+                        TransactionType = transaction.TransactionType,
+                        DocumentNumber = transaction.DocumentNumber,
+                        Reference = transaction.Reference,
+                        Description = transaction.Description,
+                        TransactionCurrencyCode = transaction.TransactionCurrencyCode,
+                        ExchangeRate = transaction.ExchangeRate,
+                        Debit = transaction.Debit,
+                        Credit = transaction.Credit,
+                        RunningBalance = runningBalance
+                    });
+                }
+
+                var totalDebits = lines.Sum(l => l.Debit);
+                var totalCredits = lines.Sum(l => l.Credit);
+                var closingBalance = openingBalance + totalDebits - totalCredits;
+
+                if (requestedCustomerIds.Count == 0 && openingBalance == 0m && closingBalance == 0m && lines.Count == 0)
+                    continue;
+
+                report.Customers.Add(new CustomerDetailedLedgerAccountDto
+                {
+                    CustomerId = customer.CustomerId,
+                    CustomerCode = customer.CustomerCode,
+                    CustomerName = customer.CustomerName,
+                    CurrencyCode = reportCurrencyCode,
+                    OpeningBalance = RoundMoney(openingBalance),
+                    TotalDebits = RoundMoney(totalDebits),
+                    TotalCredits = RoundMoney(totalCredits),
+                    ClosingBalance = RoundMoney(closingBalance),
+                    Lines = lines
+                });
+            }
+
+            report.TotalOpeningBalance = RoundMoney(report.Customers.Sum(c => c.OpeningBalance));
+            report.TotalDebits = RoundMoney(report.Customers.Sum(c => c.TotalDebits));
+            report.TotalCredits = RoundMoney(report.Customers.Sum(c => c.TotalCredits));
+            report.TotalClosingBalance = RoundMoney(report.Customers.Sum(c => c.ClosingBalance));
+            report.Warnings = report.Warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            return report;
+        }
+
         public async Task<CollectionsDashboardDto> GetCollectionsDashboardAsync(CancellationToken cancellationToken = default)
         {
             var now = DateTime.UtcNow;
@@ -983,6 +1086,336 @@ namespace ErpSystem.Api.Services.Finance.AR
                 SettlementStatus = "PostedAdjustment"
             };
         }
+
+        private async Task<List<CustomerLedgerSelection>> GetCustomerLedgerSelectionsAsync(
+            IReadOnlyCollection<Guid> requestedCustomerIds,
+            DateTime endExclusive,
+            CancellationToken cancellationToken)
+        {
+            var selectedIds = requestedCustomerIds.Count > 0
+                ? requestedCustomerIds.ToHashSet()
+                : await GetCustomerIdsWithLedgerActivityAsync(endExclusive, cancellationToken);
+
+            var customers = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    selectedIds.Contains(p.Id) &&
+                    (p.PartnerType == "Customer" || p.PartnerType == "Both"))
+                .ToListAsync(cancellationToken);
+
+            return customers
+                .Select(c => new CustomerLedgerSelection(
+                    c.Id,
+                    c.CustomerAccountNumber ?? c.PartnerCode,
+                    c.PartnerName,
+                    c.Currency ?? "GHS"))
+                .ToList();
+        }
+
+        private async Task<HashSet<Guid>> GetCustomerIdsWithLedgerActivityAsync(DateTime endExclusive, CancellationToken cancellationToken)
+        {
+            var invoiceCustomerIds = await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i =>
+                    i.TenantId == TenantId &&
+                    i.InvoiceDate < endExclusive &&
+                    i.Status != InvoiceStatus.Draft &&
+                    i.Status != InvoiceStatus.Cancelled)
+                .Select(i => i.BusinessPartnerId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            var paymentCustomerIds = await _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    p.PaymentDate < endExclusive &&
+                    p.Status != "Pending" &&
+                    p.Status != "Cancelled" &&
+                    p.Status != "Bounced")
+                .Select(p => p.CustomerId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            var adjustmentCustomerIds = await _unitOfWork.Repository<SubledgerAdjustmentJournal>()
+                .GetQueryable(a =>
+                    a.TenantId == TenantId &&
+                    a.Module == SubledgerModules.AccountsReceivable &&
+                    a.Status == SubledgerAdjustmentStatuses.Posted &&
+                    a.CustomerId.HasValue &&
+                    a.AdjustmentDate < endExclusive)
+                .Select(a => a.CustomerId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            return invoiceCustomerIds
+                .Concat(paymentCustomerIds)
+                .Concat(adjustmentCustomerIds)
+                .ToHashSet();
+        }
+
+        private async Task<List<CustomerLedgerTransaction>> GetCustomerLedgerTransactionsAsync(
+            CustomerLedgerSelection customer,
+            DateTime endExclusive,
+            string reportCurrencyCode,
+            string baseCurrencyCode,
+            ICollection<string> warnings,
+            CancellationToken cancellationToken)
+        {
+            var transactions = new List<CustomerLedgerTransaction>();
+
+            var invoices = await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i =>
+                    i.TenantId == TenantId &&
+                    i.BusinessPartnerId == customer.CustomerId &&
+                    i.InvoiceDate < endExclusive &&
+                    i.Status != InvoiceStatus.Draft &&
+                    i.Status != InvoiceStatus.Cancelled)
+                .ToListAsync(cancellationToken);
+
+            foreach (var invoice in invoices)
+            {
+                var amount = AmountForLedgerCurrency(
+                    invoice.TotalAmount,
+                    invoice.BaseCurrencyAmount,
+                    invoice.CurrencyCode,
+                    invoice.ExchangeRate,
+                    reportCurrencyCode,
+                    baseCurrencyCode,
+                    warnings,
+                    invoice.InvoiceNumber);
+
+                transactions.Add(new CustomerLedgerTransaction(
+                    invoice.Id,
+                    invoice.InvoiceDate,
+                    invoice.IsOpeningBalance ? "Opening Invoice" : "Invoice",
+                    invoice.InvoiceNumber,
+                    invoice.Reference,
+                    invoice.Notes ?? "Customer invoice",
+                    NormalizeCurrency(invoice.CurrencyCode, baseCurrencyCode),
+                    NormalizeExchangeRate(invoice.ExchangeRate),
+                    amount,
+                    0m));
+            }
+
+            var payments = await _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    p.CustomerId == customer.CustomerId &&
+                    p.PaymentDate < endExclusive &&
+                    p.Status != "Pending" &&
+                    p.Status != "Cancelled" &&
+                    p.Status != "Bounced")
+                .Include(p => p.Allocations)
+                .ToListAsync(cancellationToken);
+
+            foreach (var payment in payments)
+            {
+                var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, baseCurrencyCode);
+                var paymentExchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
+                var reference = payment.TransactionReference ?? payment.CheckNumber;
+
+                var paymentAmount = AmountForLedgerCurrency(
+                    payment.TotalAmount,
+                    null,
+                    paymentCurrency,
+                    paymentExchangeRate,
+                    reportCurrencyCode,
+                    baseCurrencyCode,
+                    warnings,
+                    payment.PaymentNumber);
+
+                transactions.Add(new CustomerLedgerTransaction(
+                    payment.Id,
+                    payment.PaymentDate,
+                    payment.IsCreditNote ? "Credit Note" : "Payment",
+                    payment.PaymentNumber,
+                    reference,
+                    payment.Notes ?? $"Customer payment - {payment.PaymentMethod}",
+                    paymentCurrency,
+                    paymentExchangeRate,
+                    0m,
+                    paymentAmount));
+
+                var activeAllocations = payment.Allocations.Where(a => !a.IsReversal).ToList();
+                var discountAllowed = activeAllocations.Sum(a => a.DiscountAmount);
+                if (discountAllowed > 0m)
+                {
+                    var discountAmount = AmountForLedgerCurrency(
+                        discountAllowed,
+                        null,
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        reportCurrencyCode,
+                        baseCurrencyCode,
+                        warnings,
+                        payment.PaymentNumber);
+
+                    transactions.Add(new CustomerLedgerTransaction(
+                        payment.Id,
+                        payment.PaymentDate,
+                        "Discount Allowed",
+                        payment.PaymentNumber,
+                        reference,
+                        "Customer settlement discount",
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        0m,
+                        discountAmount));
+                }
+
+                if (payment.WithholdingTaxAmount > 0m)
+                {
+                    var whtAmount = AmountForLedgerCurrency(
+                        payment.WithholdingTaxAmount,
+                        null,
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        reportCurrencyCode,
+                        baseCurrencyCode,
+                        warnings,
+                        payment.PaymentNumber);
+
+                    transactions.Add(new CustomerLedgerTransaction(
+                        payment.Id,
+                        payment.PaymentDate,
+                        "Withholding Tax",
+                        payment.PaymentNumber,
+                        payment.WithholdingCertificateNumber ?? reference,
+                        "Withholding tax on customer receipt",
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        0m,
+                        whtAmount));
+                }
+
+                if (payment.VatWithholdingAmount > 0m)
+                {
+                    var vatWhtAmount = AmountForLedgerCurrency(
+                        payment.VatWithholdingAmount,
+                        null,
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        reportCurrencyCode,
+                        baseCurrencyCode,
+                        warnings,
+                        payment.PaymentNumber);
+
+                    transactions.Add(new CustomerLedgerTransaction(
+                        payment.Id,
+                        payment.PaymentDate,
+                        "VAT Withholding",
+                        payment.PaymentNumber,
+                        payment.WithholdingCertificateNumber ?? reference,
+                        "VAT withholding on customer receipt",
+                        paymentCurrency,
+                        paymentExchangeRate,
+                        0m,
+                        vatWhtAmount));
+                }
+            }
+
+            var adjustments = await GetPostedArAdjustmentsAsync(customer.CustomerId, cancellationToken);
+            foreach (var adjustment in adjustments.Where(a => a.AdjustmentDate < endExclusive))
+            {
+                var signedAmount = GetSignedSubledgerAmount(adjustment);
+                if (signedAmount == 0m)
+                    continue;
+
+                var adjustmentAmount = AmountForLedgerCurrency(
+                    Math.Abs(signedAmount),
+                    Math.Abs(adjustment.BaseCurrencyAmount),
+                    adjustment.CurrencyCode,
+                    adjustment.ExchangeRate,
+                    reportCurrencyCode,
+                    baseCurrencyCode,
+                    warnings,
+                    adjustment.AdjustmentNumber);
+
+                transactions.Add(new CustomerLedgerTransaction(
+                    adjustment.Id,
+                    adjustment.AdjustmentDate,
+                    "Adjustment",
+                    adjustment.AdjustmentNumber,
+                    adjustment.Reference,
+                    adjustment.Reason,
+                    NormalizeCurrency(adjustment.CurrencyCode, baseCurrencyCode),
+                    NormalizeExchangeRate(adjustment.ExchangeRate),
+                    signedAmount > 0m ? adjustmentAmount : 0m,
+                    signedAmount < 0m ? adjustmentAmount : 0m));
+            }
+
+            return transactions;
+        }
+
+        private static decimal AmountForLedgerCurrency(
+            decimal transactionAmount,
+            decimal? baseCurrencyAmount,
+            string? transactionCurrencyCode,
+            decimal exchangeRate,
+            string reportCurrencyCode,
+            string baseCurrencyCode,
+            ICollection<string> warnings,
+            string documentNumber)
+        {
+            var transactionCurrency = NormalizeCurrency(transactionCurrencyCode, baseCurrencyCode);
+            var reportCurrency = NormalizeCurrency(reportCurrencyCode, baseCurrencyCode);
+            var baseCurrency = NormalizeCurrency(baseCurrencyCode, "GHS");
+
+            if (string.Equals(reportCurrency, transactionCurrency, StringComparison.OrdinalIgnoreCase))
+                return RoundMoney(transactionAmount);
+
+            var resolvedBaseAmount = baseCurrencyAmount.HasValue && baseCurrencyAmount.Value != 0m
+                ? baseCurrencyAmount.Value
+                : ToBaseCurrencyAmount(transactionAmount, transactionCurrency, baseCurrency, exchangeRate);
+
+            if (string.Equals(reportCurrency, baseCurrency, StringComparison.OrdinalIgnoreCase))
+                return RoundMoney(resolvedBaseAmount);
+
+            warnings.Add($"Document {documentNumber} is in {transactionCurrency}; shown using base currency {baseCurrency} because no direct {reportCurrency} amount is stored.");
+            return RoundMoney(resolvedBaseAmount);
+        }
+
+        private static decimal ToBaseCurrencyAmount(decimal transactionAmount, string transactionCurrencyCode, string baseCurrencyCode, decimal exchangeRate)
+        {
+            if (string.Equals(transactionCurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
+                return transactionAmount;
+
+            return transactionAmount * NormalizeExchangeRate(exchangeRate);
+        }
+
+        private static string NormalizeCurrency(string? currencyCode, string fallback)
+        {
+            return string.IsNullOrWhiteSpace(currencyCode)
+                ? fallback.Trim().ToUpperInvariant()
+                : currencyCode.Trim().ToUpperInvariant();
+        }
+
+        private static decimal NormalizeExchangeRate(decimal exchangeRate)
+        {
+            return exchangeRate <= 0m ? 1m : exchangeRate;
+        }
+
+        private static decimal RoundMoney(decimal amount)
+        {
+            return Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+        }
+
+        private sealed record CustomerLedgerSelection(
+            Guid CustomerId,
+            string CustomerCode,
+            string CustomerName,
+            string CurrencyCode);
+
+        private sealed record CustomerLedgerTransaction(
+            Guid SourceDocumentId,
+            DateTime TransactionDate,
+            string TransactionType,
+            string DocumentNumber,
+            string? Reference,
+            string Description,
+            string TransactionCurrencyCode,
+            decimal ExchangeRate,
+            decimal Debit,
+            decimal Credit);
 
         private async Task RecordReportAuditAsync(string eventType, object report, CancellationToken cancellationToken)
         {

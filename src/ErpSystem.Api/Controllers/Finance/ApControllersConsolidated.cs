@@ -430,6 +430,24 @@ namespace ErpSystem.Api.Controllers.Finance
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
+        /// <summary>Generates a detailed supplier ledger for one or more suppliers/business partners.</summary>
+        [HttpGet("supplier-detailed-ledger")]
+        public async Task<ActionResult<SupplierDetailedLedgerReportDto>> GetSupplierDetailedLedger(
+            [FromQuery] DateTime fromDate,
+            [FromQuery] DateTime toDate,
+            [FromQuery] List<Guid>? supplierIds = null,
+            [FromQuery] bool showSupplierCurrency = false)
+        {
+            try
+            {
+                return Ok(await _reportsService.GetSupplierDetailedLedgerAsync(fromDate, toDate, supplierIds, showSupplierCurrency));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
         /// <summary>Generates a withholding tax summary grouped by supplier for a date range.</summary>
         [HttpGet("withholding-tax")]
         public async Task<ActionResult<WithholdingTaxSummaryDto>> GetWithholdingTaxSummary(

@@ -593,6 +593,49 @@ public class SupplierStatementLineDto
     public decimal RunningBalance { get; set; }
 }
 
+public class SupplierDetailedLedgerReportDto
+{
+    public DateTime FromDate { get; set; }
+    public DateTime ToDate { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public bool ShowSupplierCurrency { get; set; }
+    public decimal TotalOpeningBalance { get; set; }
+    public decimal TotalDebits { get; set; }
+    public decimal TotalCredits { get; set; }
+    public decimal TotalClosingBalance { get; set; }
+    public List<string> Warnings { get; set; } = new();
+    public List<SupplierDetailedLedgerAccountDto> Suppliers { get; set; } = new();
+}
+
+public class SupplierDetailedLedgerAccountDto
+{
+    public Guid SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
+    public string SupplierCode { get; set; } = string.Empty;
+    public string SupplierName { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal OpeningBalance { get; set; }
+    public decimal TotalDebits { get; set; }
+    public decimal TotalCredits { get; set; }
+    public decimal ClosingBalance { get; set; }
+    public List<SupplierDetailedLedgerLineDto> Lines { get; set; } = new();
+}
+
+public class SupplierDetailedLedgerLineDto
+{
+    public Guid SourceDocumentId { get; set; }
+    public DateTime TransactionDate { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
+    public string DocumentNumber { get; set; } = string.Empty;
+    public string? Reference { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string TransactionCurrencyCode { get; set; } = "GHS";
+    public decimal ExchangeRate { get; set; } = 1m;
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public decimal RunningBalance { get; set; }
+}
+
 public class WithholdingTaxSummaryDto
 {
     public DateTime FromDate { get; set; }

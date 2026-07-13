@@ -47,6 +47,16 @@ public interface IArReportsService
     Task<CustomerStatementDto> GetCustomerStatementAsync(Guid customerId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Generates customer detailed ledger balances and period movements for one or more customers.
+    /// </summary>
+    Task<CustomerDetailedLedgerReportDto> GetCustomerDetailedLedgerAsync(
+        DateTime fromDate,
+        DateTime toDate,
+        IReadOnlyCollection<Guid>? customerIds = null,
+        bool showCustomerCurrency = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets collections dashboard metrics.
     /// Highlights overdue accounts and prioritizes collection activities.
     /// </summary>
