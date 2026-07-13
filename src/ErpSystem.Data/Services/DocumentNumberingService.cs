@@ -298,6 +298,7 @@ public class DocumentNumberingService : IDocumentNumberingService
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.CashReceipt) or
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.CashPayment) or
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.BankTransfer) => _context.Set<CashTransaction>()
+                .Where(e => e.TenantId == tenantId)
                 .Select(e => e.TransactionNumber)
                 .ToListAsync(cancellationToken),
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.AssetTransfer) => _context.Set<AssetTransfer>()

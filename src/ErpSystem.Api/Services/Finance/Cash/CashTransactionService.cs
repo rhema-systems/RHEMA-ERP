@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
@@ -328,7 +329,9 @@ public class CashTransactionService : ICashTransactionService
         }
 
         var tenantId = TenantId;
-        await using var dbTransaction = await _context.Database.BeginTransactionAsync();
+        // Document numbering joins the ambient transaction, so the transfer creation
+        // transaction must provide the serializable boundary for concurrent numbers.
+        await using var dbTransaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
 
         var baseCurrencyCode = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync());
         var fromBankAccount = await _context.BankAccounts
@@ -684,6 +687,10 @@ public class CashTransactionService : ICashTransactionService
 
         await EnforceCashBankPostingEligibilityAsync(sourceTransaction, cancellationToken);
 
+        // Keep the posting engine, cash transaction flags, and bank read-side
+        // balance snapshots in one commit so retry/idempotency cannot strand them.
+        await using var dbTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
         try
         {
             var postingRequest = await BuildCashBankPostingRequestAsync(sourceTransaction, cancellationToken);
@@ -766,10 +773,15 @@ public class CashTransactionService : ICashTransactionService
                     cancellationToken: cancellationToken);
             }
 
+            await dbTransaction.CommitAsync(cancellationToken);
+
             return await GetByIdAsync(id) ?? await GetByIdAsync(sourceTransaction.Id) ?? throw new Exception("Failed to load posted cash/bank transaction");
         }
         catch (Exception ex)
         {
+            await dbTransaction.RollbackAsync(cancellationToken);
+            _context.ChangeTracker.Clear();
+
             await RecordCashBankAuditAsync(
                 FinanceAuditEvents.CashBankTransactionPostingFailed,
                 sourceTransaction,
