@@ -79,7 +79,7 @@ export default function CreateReturnPage() {
         );
         setInvoices(eligible);
       } else {
-        const data = await apiService.get<any[]>('/ap/purchase-receipts');
+        const data = await apiService.get<any[]>('/finance/ap/purchase-receipts');
         setGrvs(data || []);
       }
     } catch (error) {
@@ -138,7 +138,7 @@ export default function CreateReturnPage() {
 
         setLines(initialLines);
       } else {
-        const doc = await apiService.get<any>(`/ap/purchase-receipts/${id}`);
+        const doc = await apiService.get<any>(`/finance/ap/purchase-receipts/${id}`);
         setSelectedDoc(doc);
         setCurrencyCode(doc.financePurchaseOrder?.currencyCode || 'GHS');
         setExchangeRate(doc.financePurchaseOrder?.exchangeRate || 1.0);

@@ -826,12 +826,13 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             return BadRequest("At least one receipt line is required.");
         }
 
-        var receiptNumber = string.IsNullOrWhiteSpace(dto.ReceiptNumber)
-            ? await GenerateReceiptNumberAsync(tenantId, cancellationToken)
-            : dto.ReceiptNumber.Trim();
-
         // Re-read the PO and update received quantities under serializable isolation so concurrent receipts cannot over-receive the same line.
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+        var receiptDate = dto.ReceiptDate ?? DateTime.UtcNow;
+        var receiptNumber = string.IsNullOrWhiteSpace(dto.ReceiptNumber)
+            ? await GenerateReceiptNumberAsync(tenantId, receiptDate, cancellationToken)
+            : dto.ReceiptNumber.Trim();
 
         var receiptNumberExists = await _dbContext.FinancePurchaseOrderReceipts
             .AnyAsync(r => r.TenantId == tenantId && !r.IsDeleted && r.ReceiptNumber == receiptNumber, cancellationToken);
@@ -860,7 +861,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             TenantId = tenantId,
             FinancePurchaseOrderId = purchaseOrder.Id,
             ReceiptNumber = receiptNumber,
-            ReceiptDate = dto.ReceiptDate ?? DateTime.UtcNow,
+            ReceiptDate = receiptDate,
             Remarks = dto.Remarks
         };
 
@@ -1257,14 +1258,17 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         };
     }
 
-    private async Task<string> GenerateReceiptNumberAsync(Guid tenantId, CancellationToken cancellationToken)
+    private async Task<string> GenerateReceiptNumberAsync(Guid tenantId, DateTime receiptDate, CancellationToken cancellationToken)
     {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"FGRV-{year}-";
-        var count = await _dbContext.FinancePurchaseOrderReceipts
-            .CountAsync(r => r.TenantId == tenantId && r.ReceiptNumber.StartsWith(prefix), cancellationToken);
-
-        return $"{prefix}{count + 1:000000}";
+        // Receipt creation already holds a serializable transaction; document
+        // numbering joins it so the reservation and GRV insert commit together.
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Finance,
+            FinanceDocumentTypes.FinancePurchaseOrderReceipt,
+            tenantId,
+            receiptDate,
+            nameof(FinancePurchaseOrderReceipt),
+            cancellationToken: cancellationToken);
     }
 
     private static FinancePostingLineDto BuildPostingLine(

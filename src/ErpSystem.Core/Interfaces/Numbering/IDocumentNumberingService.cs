@@ -48,6 +48,7 @@ public static class FinanceDocumentTypes
     public const string APSupplierReturn = "APSupplierReturn";
     public const string APSupplierDebitNote = "APSupplierDebitNote";
     public const string FinancePurchaseOrder = "FinancePurchaseOrder";
+    public const string FinancePurchaseOrderReceipt = "FinancePurchaseOrderReceipt";
     public const string CashReceipt = "CashReceipt";
     public const string CashPayment = "CashPayment";
     public const string BankTransfer = "BankTransfer";
@@ -91,6 +92,7 @@ public static class DocumentSequenceDefaults
             Finance(tenantId, FinanceDocumentTypes.APSupplierReturn, "AP Supplier Return", "SR-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, true, "Supplier return slips and AP return workflows."),
             Finance(tenantId, FinanceDocumentTypes.APSupplierDebitNote, "AP Supplier Debit Note", "SDN-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Supplier debit notes generated from AP supplier returns."),
             Finance(tenantId, FinanceDocumentTypes.FinancePurchaseOrder, "Finance Purchase Order", "FPO-{YYYY}-{######}", 6, DocumentSequenceResetPolicies.Yearly, false, "Finance module purchase orders."),
+            Finance(tenantId, FinanceDocumentTypes.FinancePurchaseOrderReceipt, "Finance Purchase Receipt", "FGRV-{YYYY}-{######}", 6, DocumentSequenceResetPolicies.Yearly, false, "Finance module purchase receipts and GRVs."),
             Finance(tenantId, FinanceDocumentTypes.CashReceipt, "Cash Receipt", "RCT-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Cash management receipts."),
             Finance(tenantId, FinanceDocumentTypes.CashPayment, "Cash Payment", "CPY-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Cash management payments."),
             Finance(tenantId, FinanceDocumentTypes.BankTransfer, "Bank Transfer", "TRF-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Bank and cash transfers."),

@@ -108,6 +108,14 @@ public class SupplierReturnsController : ControllerBase
             }
         }
 
+        // The API repeats the UI remaining-quantity checks because debit-note
+        // posting must not rely on client-side source line validation.
+        var quantityValidationError = await ValidateSupplierReturnQuantitiesAsync(dto, tenantId, cancellationToken);
+        if (quantityValidationError != null)
+        {
+            return BadRequest(quantityValidationError);
+        }
+
         var currencyCode = NormalizeCurrency(dto.CurrencyCode);
         var exchangeRate = NormalizeExchangeRate(dto.ExchangeRate);
         var returnDate = dto.ReturnDate == default ? DateTime.UtcNow : dto.ReturnDate;
@@ -293,6 +301,211 @@ public class SupplierReturnsController : ControllerBase
             .Include(r => r.OriginalFinancePurchaseOrderReceipt)
             .Include(r => r.Vendor)
             .Where(r => r.TenantId == tenantId && !r.IsDeleted);
+
+    private async Task<string?> ValidateSupplierReturnQuantitiesAsync(
+        CreateSupplierReturnDto dto,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (dto.OriginalVendorInvoiceId.HasValue)
+        {
+            return await ValidateVendorInvoiceReturnQuantitiesAsync(
+                tenantId,
+                dto.OriginalVendorInvoiceId.Value,
+                dto.Lines,
+                cancellationToken);
+        }
+
+        if (dto.OriginalFinancePurchaseOrderReceiptId.HasValue)
+        {
+            return await ValidateFinanceGrvReturnQuantitiesAsync(
+                tenantId,
+                dto.OriginalFinancePurchaseOrderReceiptId.Value,
+                dto.Lines,
+                cancellationToken);
+        }
+
+        return "Select either an original supplier invoice or an original finance GRV.";
+    }
+
+    private async Task<string?> ValidateVendorInvoiceReturnQuantitiesAsync(
+        Guid tenantId,
+        Guid invoiceId,
+        IReadOnlyList<CreateSupplierReturnLineItemDto> lines,
+        CancellationToken cancellationToken)
+    {
+        var sourceLineRows = await _dbContext.Set<VendorInvoiceLineItem>()
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && l.VendorInvoiceId == invoiceId && !l.IsDeleted)
+            .Select(l => new { l.Id, l.Description, l.Quantity })
+            .ToListAsync(cancellationToken);
+
+        var sourceLines = sourceLineRows.ToDictionary(
+            l => l.Id,
+            l => new ReturnSourceLine(l.Description, l.Quantity));
+
+        if (sourceLines.Count == 0)
+        {
+            return "Original supplier invoice has no returnable lines.";
+        }
+
+        var submittedByLine = new Dictionary<Guid, decimal>();
+        foreach (var line in lines)
+        {
+            if (!line.OriginalVendorInvoiceLineItemId.HasValue)
+            {
+                return $"Return line '{line.Description}' must reference an original supplier invoice line.";
+            }
+
+            if (line.OriginalFinancePurchaseOrderItemId.HasValue)
+            {
+                return $"Return line '{line.Description}' cannot mix supplier invoice and finance GRV source lines.";
+            }
+
+            var sourceLineId = line.OriginalVendorInvoiceLineItemId.Value;
+            if (!sourceLines.ContainsKey(sourceLineId))
+            {
+                return $"Return line '{line.Description}' does not belong to the selected supplier invoice.";
+            }
+
+            submittedByLine[sourceLineId] = submittedByLine.GetValueOrDefault(sourceLineId) + line.QuantityReturned;
+        }
+
+        var sourceLineIds = submittedByLine.Keys.ToList();
+        var priorReturnRows = await _dbContext.Set<SupplierReturnLineItem>()
+            .AsNoTracking()
+            .Where(l =>
+                l.TenantId == tenantId &&
+                !l.IsDeleted &&
+                l.OriginalVendorInvoiceLineItemId.HasValue &&
+                sourceLineIds.Contains(l.OriginalVendorInvoiceLineItemId.Value) &&
+                l.SupplierReturn.TenantId == tenantId &&
+                !l.SupplierReturn.IsDeleted &&
+                l.SupplierReturn.OriginalVendorInvoiceId == invoiceId &&
+                l.SupplierReturn.Status != SupplierReturnStatus.Cancelled)
+            .Select(l => new
+            {
+                SourceLineId = l.OriginalVendorInvoiceLineItemId!.Value,
+                l.QuantityReturned
+            })
+            .ToListAsync(cancellationToken);
+
+        var priorReturns = priorReturnRows
+            .Select(l => new ReturnQuantity(l.SourceLineId, l.QuantityReturned))
+            .ToList();
+
+        return ValidateSubmittedReturnQuantities(sourceLines, submittedByLine, priorReturns);
+    }
+
+    private async Task<string?> ValidateFinanceGrvReturnQuantitiesAsync(
+        Guid tenantId,
+        Guid receiptId,
+        IReadOnlyList<CreateSupplierReturnLineItemDto> lines,
+        CancellationToken cancellationToken)
+    {
+        var sourceLineRows = await _dbContext.FinancePurchaseOrderReceiptItems
+            .AsNoTracking()
+            .Where(l =>
+                l.TenantId == tenantId &&
+                !l.IsDeleted &&
+                l.FinancePurchaseOrderReceiptId == receiptId &&
+                l.FinancePurchaseOrderReceipt.TenantId == tenantId &&
+                !l.FinancePurchaseOrderReceipt.IsDeleted)
+            .Select(l => new
+            {
+                l.FinancePurchaseOrderItemId,
+                Description = l.FinancePurchaseOrderItem.Description,
+                Quantity = l.QuantityReceived
+            })
+            .ToListAsync(cancellationToken);
+
+        var sourceLines = sourceLineRows
+            .GroupBy(l => l.FinancePurchaseOrderItemId)
+            .ToDictionary(
+                g => g.Key,
+                g => new ReturnSourceLine(
+                    g.First().Description,
+                    g.Sum(l => l.Quantity)));
+
+        if (sourceLines.Count == 0)
+        {
+            return "Original finance GRV has no returnable lines.";
+        }
+
+        var submittedByLine = new Dictionary<Guid, decimal>();
+        foreach (var line in lines)
+        {
+            if (!line.OriginalFinancePurchaseOrderItemId.HasValue)
+            {
+                return $"Return line '{line.Description}' must reference an original finance PO line from the selected GRV.";
+            }
+
+            if (line.OriginalVendorInvoiceLineItemId.HasValue)
+            {
+                return $"Return line '{line.Description}' cannot mix finance GRV and supplier invoice source lines.";
+            }
+
+            var sourceLineId = line.OriginalFinancePurchaseOrderItemId.Value;
+            if (!sourceLines.ContainsKey(sourceLineId))
+            {
+                return $"Return line '{line.Description}' does not belong to the selected finance GRV.";
+            }
+
+            submittedByLine[sourceLineId] = submittedByLine.GetValueOrDefault(sourceLineId) + line.QuantityReturned;
+        }
+
+        var sourceLineIds = submittedByLine.Keys.ToList();
+        var priorReturnRows = await _dbContext.Set<SupplierReturnLineItem>()
+            .AsNoTracking()
+            .Where(l =>
+                l.TenantId == tenantId &&
+                !l.IsDeleted &&
+                l.OriginalFinancePurchaseOrderItemId.HasValue &&
+                sourceLineIds.Contains(l.OriginalFinancePurchaseOrderItemId.Value) &&
+                l.SupplierReturn.TenantId == tenantId &&
+                !l.SupplierReturn.IsDeleted &&
+                l.SupplierReturn.OriginalFinancePurchaseOrderReceiptId == receiptId &&
+                l.SupplierReturn.Status != SupplierReturnStatus.Cancelled)
+            .Select(l => new
+            {
+                SourceLineId = l.OriginalFinancePurchaseOrderItemId!.Value,
+                l.QuantityReturned
+            })
+            .ToListAsync(cancellationToken);
+
+        var priorReturns = priorReturnRows
+            .Select(l => new ReturnQuantity(l.SourceLineId, l.QuantityReturned))
+            .ToList();
+
+        return ValidateSubmittedReturnQuantities(sourceLines, submittedByLine, priorReturns);
+    }
+
+    private static string? ValidateSubmittedReturnQuantities(
+        IReadOnlyDictionary<Guid, ReturnSourceLine> sourceLines,
+        IReadOnlyDictionary<Guid, decimal> submittedByLine,
+        IEnumerable<ReturnQuantity> priorReturns)
+    {
+        var priorReturnedByLine = priorReturns
+            .GroupBy(l => l.SourceLineId)
+            .ToDictionary(g => g.Key, g => g.Sum(l => l.QuantityReturned));
+
+        foreach (var (sourceLineId, submittedQuantity) in submittedByLine)
+        {
+            var sourceLine = sourceLines[sourceLineId];
+            var priorReturned = priorReturnedByLine.GetValueOrDefault(sourceLineId);
+            var remainingQuantity = sourceLine.Quantity - priorReturned;
+            if (submittedQuantity > remainingQuantity)
+            {
+                return $"Return quantity for line '{sourceLine.Description}' exceeds the remaining returnable quantity.";
+            }
+        }
+
+        return null;
+    }
+
+    private sealed record ReturnSourceLine(string Description, decimal Quantity);
+
+    private sealed record ReturnQuantity(Guid SourceLineId, decimal QuantityReturned);
 
     private async Task PostSupplierDebitNoteThroughFinancePostingEngineAsync(Guid debitNoteId, CancellationToken cancellationToken)
     {

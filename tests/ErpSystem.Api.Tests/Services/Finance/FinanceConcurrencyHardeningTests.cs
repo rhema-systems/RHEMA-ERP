@@ -150,6 +150,76 @@ public sealed class FinanceConcurrencyHardeningTests
         financePoTenantFilterIndex.Should().BeLessThan(financePoSelectIndex, "tenant filtering must happen before reading finance PO order numbers");
     }
 
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void SupplierReturns_ShouldValidateSourceLineOwnershipAndRemainingQuantities()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "SupplierReturnsController.cs"));
+        var createMethod = ExtractMember(source, "public async Task<ActionResult<SupplierReturnDto>> Create", "[HttpPost(\"{id:guid}/approve\")]");
+        var validationRegion = ExtractMember(source, "private async Task<string?> ValidateSupplierReturnQuantitiesAsync", "private async Task PostSupplierDebitNoteThroughFinancePostingEngineAsync");
+
+        createMethod.Should().Contain("ValidateSupplierReturnQuantitiesAsync(dto, tenantId, cancellationToken)", "server-side source validation must run before supplier return lines are persisted");
+        createMethod.IndexOf("ValidateSupplierReturnQuantitiesAsync(dto, tenantId, cancellationToken)", StringComparison.Ordinal)
+            .Should().BeLessThan(createMethod.IndexOf("supplierReturn.LineItems.Add", StringComparison.Ordinal), "supplier returns should not be created before source-line availability is checked");
+
+        validationRegion.Should().Contain("ValidateVendorInvoiceReturnQuantitiesAsync", "invoice-backed returns need source invoice line validation");
+        validationRegion.Should().Contain("ValidateFinanceGrvReturnQuantitiesAsync", "GRV-backed returns need source receipt line validation");
+        validationRegion.Should().Contain("does not belong to the selected supplier invoice", "source line IDs must belong to the selected invoice");
+        validationRegion.Should().Contain("does not belong to the selected finance GRV", "source line IDs must belong to the selected GRV");
+        validationRegion.Should().Contain("SupplierReturn.Status != SupplierReturnStatus.Cancelled", "previous non-cancelled returns must consume remaining quantity");
+        validationRegion.Should().Contain("submittedByLine", "duplicate submitted lines must be aggregated before checking availability");
+        validationRegion.Should().Contain("exceeds the remaining returnable quantity", "over-returns must fail at the API boundary");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinanceApReturnCreatePage_ShouldUseFinancePurchaseReceiptRoutesForGrvs()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ap", "returns", "create", "page.tsx"));
+
+        source.Should().Contain("'/finance/ap/purchase-receipts'", "GRV-backed supplier returns should call the finance purchase receipt list endpoint");
+        source.Should().Contain("`/finance/ap/purchase-receipts/${id}`", "GRV-backed supplier returns should call the finance purchase receipt detail endpoint");
+        source.Should().NotContain("'/ap/purchase-receipts'", "the AP route is not registered for finance GRV receipts");
+        source.Should().NotContain("`/ap/purchase-receipts/${id}`", "the AP route is not registered for finance GRV receipt details");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinancePurchaseReceipts_ShouldUseDocumentNumberReservationsForGeneratedNumbers()
+    {
+        var root = FindRepositoryRoot();
+        var controllerSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinancePurchaseOrderController.cs"));
+        var numberingContracts = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Interfaces", "Numbering", "IDocumentNumberingService.cs"));
+        var numberingService = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Services", "DocumentNumberingService.cs"));
+
+        var createMethod = ExtractMember(controllerSource, "public async Task<ActionResult<FinancePurchaseOrderReceiptDto>> Create", "[HttpPost(\"{id:guid}/convert-to-vendor-invoice\")]");
+        var generator = ExtractMember(controllerSource, "private async Task<string> GenerateReceiptNumberAsync", "private static FinancePostingLineDto BuildPostingLine");
+
+        var transactionIndex = createMethod.IndexOf("BeginTransactionAsync(IsolationLevel.Serializable", StringComparison.Ordinal);
+        var numberingIndex = createMethod.IndexOf("GenerateReceiptNumberAsync(tenantId, receiptDate, cancellationToken)", StringComparison.Ordinal);
+
+        transactionIndex.Should().BeGreaterThan(-1, "receipt creation should hold a serializable transaction");
+        transactionIndex.Should().BeLessThan(numberingIndex, "receipt number reservations should join the receipt transaction");
+        generator.Should().Contain("_documentNumberingService.GenerateAsync", "generated finance GRV numbers must be reserved transactionally");
+        generator.Should().Contain("FinanceDocumentTypes.FinancePurchaseOrderReceipt", "finance GRVs need a dedicated numbering sequence");
+        generator.Should().NotContain("CountAsync", "generated finance GRV numbers must not be derived from visible row counts");
+        numberingContracts.Should().Contain("public const string FinancePurchaseOrderReceipt", "the document type should be explicit for other finance callers");
+        numberingContracts.Should().Contain("\"FGRV-{YYYY}-{######}\"", "the default sequence should preserve the existing FGRV year format");
+
+        var receiptFallbackIndex = numberingService.IndexOf("FinanceDocumentTypes.FinancePurchaseOrderReceipt) => _context.Set<FinancePurchaseOrderReceipt>()", StringComparison.Ordinal);
+        var receiptTenantFilterIndex = numberingService.IndexOf(".Where(e => e.TenantId == tenantId)", receiptFallbackIndex, StringComparison.Ordinal);
+        var receiptSelectIndex = numberingService.IndexOf(".Select(e => e.ReceiptNumber)", receiptFallbackIndex, StringComparison.Ordinal);
+
+        receiptFallbackIndex.Should().BeGreaterThan(-1, "legacy/manual finance GRV numbers should be included in fallback scans");
+        receiptTenantFilterIndex.Should().BeGreaterThan(receiptFallbackIndex, "finance GRV fallback scans must remain tenant-scoped");
+        receiptTenantFilterIndex.Should().BeLessThan(receiptSelectIndex, "tenant filtering must happen before reading finance GRV receipt numbers");
+    }
+
     private static string ExtractMember(string source, string startMarker, string endMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);
