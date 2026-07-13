@@ -24,6 +24,51 @@ import type {
 } from '@/types/tax';
 import { apiService } from '@/services/api.service';
 
+// Request/response contracts for the POST /finance/tax-reports/* endpoints
+// (TaxReportRequestDto / GhanaTaxSnapshotReportDto on the backend).
+interface TaxSnapshotReportRequest {
+    fromDate?: string;
+    toDate?: string;
+}
+
+interface TaxSnapshotReportLine {
+    taxCalculationId: string;
+    sourceModule: string;
+    sourceDocumentType: string;
+    sourceDocumentId: string;
+    sourceDocumentNumber: string;
+    sourceDocumentDate: string;
+    counterpartyId?: string | null;
+    counterpartyName?: string | null;
+    taxCode: string;
+    taxName: string;
+    baseAmount: number;
+    taxableAmount: number;
+    taxRate: number;
+    taxAmount: number;
+}
+
+interface TaxSnapshotReport {
+    reportType: string;
+    fromDate: string;
+    toDate: string;
+    lines: TaxSnapshotReportLine[];
+}
+
+export interface VATReconciliationSummary {
+    period: string;
+    outputVAT: number;
+    inputVAT: number;
+    netVATPayable: number;
+    outputNHIL: number;
+    inputNHIL: number;
+    netNHILPayable: number;
+    outputGETFL: number;
+    inputGETFL: number;
+    netGETFLPayable: number;
+    totalPayable: number;
+}
+
 // =============================================================================
 // TAX DATA SERVICE
 // =============================================================================
@@ -137,28 +182,104 @@ class TaxDataService {
     }
 
     // ===== REPORTS =====
-    async getPurchaseTransactions(startDate?: string, endDate?: string): Promise<TransactionWithTax[]> {
-        const queryParams = new URLSearchParams();
-        if (startDate) queryParams.append('startDate', startDate);
-        if (endDate) queryParams.append('endDate', endDate);
+    // The Ghana tax reports controller exposes POST /finance/tax-reports/* endpoints that read
+    // posted tax snapshots; these helpers adapt snapshot lines to the shapes the report pages render.
 
-        return apiService.get<TransactionWithTax[]>(`/finance/tax/reports/input-vat${queryParams.toString() ? `?${queryParams}` : ''}`);
+    private buildTaxReportRequest(startDate?: string, endDate?: string): TaxSnapshotReportRequest {
+        return {
+            fromDate: startDate || undefined,
+            toDate: endDate || undefined,
+        };
+    }
+
+    private groupSnapshotLinesByDocument(lines: TaxSnapshotReportLine[]): TransactionWithTax[] {
+        const byDocument = new Map<string, TransactionWithTax>();
+
+        for (const line of lines) {
+            let transaction = byDocument.get(line.sourceDocumentId);
+            if (!transaction) {
+                transaction = {
+                    id: line.sourceDocumentId,
+                    date: (line.sourceDocumentDate ?? '').slice(0, 10),
+                    reference: line.sourceDocumentNumber,
+                    partnerName: line.counterpartyName ?? '',
+                    description: `${line.sourceModule} ${line.sourceDocumentType}`.trim(),
+                    baseAmount: line.baseAmount,
+                    totalTax: 0,
+                    totalAmount: 0,
+                    taxCalculations: [],
+                };
+                byDocument.set(line.sourceDocumentId, transaction);
+            }
+
+            transaction.taxCalculations.push({ taxTypeCode: line.taxCode, taxAmount: line.taxAmount });
+            transaction.totalTax += line.taxAmount;
+        }
+
+        const transactions = Array.from(byDocument.values());
+        for (const transaction of transactions) {
+            transaction.totalAmount = transaction.baseAmount + transaction.totalTax;
+        }
+
+        return transactions.sort((a, b) => a.date.localeCompare(b.date) || a.reference.localeCompare(b.reference));
+    }
+
+    private static sumTaxByCode(lines: TaxSnapshotReportLine[], code: string): number {
+        return lines
+            .filter((line) => line.taxCode.toUpperCase().includes(code))
+            .reduce((sum, line) => sum + line.taxAmount, 0);
+    }
+
+    async getPurchaseTransactions(startDate?: string, endDate?: string): Promise<TransactionWithTax[]> {
+        const report = await apiService.post<TaxSnapshotReport>(
+            '/finance/tax-reports/input-tax',
+            this.buildTaxReportRequest(startDate, endDate));
+
+        return this.groupSnapshotLinesByDocument(report.lines ?? []);
     }
 
     async getSalesTransactions(startDate?: string, endDate?: string): Promise<TransactionWithTax[]> {
-        const queryParams = new URLSearchParams();
-        if (startDate) queryParams.append('startDate', startDate);
-        if (endDate) queryParams.append('endDate', endDate);
+        const report = await apiService.post<TaxSnapshotReport>(
+            '/finance/tax-reports/output-tax',
+            this.buildTaxReportRequest(startDate, endDate));
 
-        return apiService.get<TransactionWithTax[]>(`/finance/tax/reports/output-vat${queryParams.toString() ? `?${queryParams}` : ''}`);
+        return this.groupSnapshotLinesByDocument(report.lines ?? []);
     }
 
-    async getVATReconciliation(startDate?: string, endDate?: string): Promise<any> {
-        const queryParams = new URLSearchParams();
-        if (startDate) queryParams.append('startDate', startDate);
-        if (endDate) queryParams.append('endDate', endDate);
+    async getVATReconciliation(startDate?: string, endDate?: string): Promise<VATReconciliationSummary> {
+        const request = this.buildTaxReportRequest(startDate, endDate);
+        const [outputReport, inputReport] = await Promise.all([
+            apiService.post<TaxSnapshotReport>('/finance/tax-reports/output-tax', request),
+            apiService.post<TaxSnapshotReport>('/finance/tax-reports/input-tax', request),
+        ]);
 
-        return apiService.get(`/finance/tax/reports/vat-reconciliation${queryParams.toString() ? `?${queryParams}` : ''}`);
+        const outputLines = outputReport.lines ?? [];
+        const inputLines = inputReport.lines ?? [];
+
+        const outputVAT = TaxDataService.sumTaxByCode(outputLines, 'VAT');
+        const inputVAT = TaxDataService.sumTaxByCode(inputLines, 'VAT');
+        const outputNHIL = TaxDataService.sumTaxByCode(outputLines, 'NHIL');
+        const inputNHIL = TaxDataService.sumTaxByCode(inputLines, 'NHIL');
+        const outputGETFL = TaxDataService.sumTaxByCode(outputLines, 'GETF');
+        const inputGETFL = TaxDataService.sumTaxByCode(inputLines, 'GETF');
+
+        const netVATPayable = outputVAT - inputVAT;
+        const netNHILPayable = outputNHIL - inputNHIL;
+        const netGETFLPayable = outputGETFL - inputGETFL;
+
+        return {
+            period: startDate && endDate ? `${startDate} to ${endDate}` : 'All posted activity',
+            outputVAT,
+            inputVAT,
+            netVATPayable,
+            outputNHIL,
+            inputNHIL,
+            netNHILPayable,
+            outputGETFL,
+            inputGETFL,
+            netGETFLPayable,
+            totalPayable: netVATPayable + netNHILPayable + netGETFLPayable,
+        };
     }
 
     async getWHTSummary(startDate?: string, endDate?: string): Promise<WHTSummaryEntry[]> {

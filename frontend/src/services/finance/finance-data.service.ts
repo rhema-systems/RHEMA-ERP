@@ -91,6 +91,7 @@ class FinanceDataService {
         if (filters?.accountType) queryParams.append('accountType', filters.accountType);
         if (filters?.status) queryParams.append('status', filters.status);
         if (filters?.isMultiCurrency !== undefined) queryParams.append('isMultiCurrency', String(filters.isMultiCurrency));
+        if (filters?.coaType) queryParams.append('coaType', filters.coaType);
         if (filters?.page !== undefined) queryParams.append('page', String(filters.page));
         if (filters?.pageSize !== undefined) queryParams.append('pageSize', String(filters.pageSize));
         if (filters?.take !== undefined) queryParams.append('take', String(filters.take));
@@ -221,7 +222,8 @@ class FinanceDataService {
     }
 
     async openFiscalPeriod(id: string): Promise<FiscalPeriod> {
-        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/open`, {});
+        // The backend models opening a closed period as "reopen" (FiscalPeriodController).
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, {});
     }
 
     async closeFiscalPeriod(id: string): Promise<FiscalPeriod> {
@@ -243,7 +245,7 @@ class FinanceDataService {
     }
 
     async reopenFiscalPeriod(id: string): Promise<FiscalPeriod> {
-        return apiService.put<FiscalPeriod>(`/finance/fiscal-periods/${id}/reopen`, {});
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, {});
     }
 
     // ===== JOURNAL ENTRIES =====

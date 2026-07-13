@@ -114,7 +114,7 @@ class UnitAccountsDataService {
     }
 
     async postUnitJournalEntry(id: string): Promise<UnitJournalEntry> {
-        return apiService.put<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/post`, {});
+        return apiService.post<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/post`, {});
     }
 
     async deleteUnitJournalEntry(id: string): Promise<void> {
@@ -201,6 +201,8 @@ class UnitAccountsDataService {
     }
 
     // ===== ALLOCATION RULES =====
+    // Backend routes live under /finance/allocations/rules (AllocationController);
+    // rule execution is exposed as "run".
 
     async getAllocationRules(filters?: {
         isActive?: boolean;
@@ -210,38 +212,40 @@ class UnitAccountsDataService {
         if (filters?.isActive !== undefined) queryParams.append('isActive', String(filters.isActive));
         if (filters?.allocationType) queryParams.append('allocationType', filters.allocationType);
 
-        const endpoint = `/finance/allocation-rules${queryParams.toString() ? `?${queryParams}` : ''}`;
+        const endpoint = `/finance/allocations/rules${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<AllocationRule[]>(endpoint);
     }
 
     async getAllocationRuleById(id: string): Promise<AllocationRule> {
-        return apiService.get<AllocationRule>(`/finance/allocation-rules/${id}`);
+        return apiService.get<AllocationRule>(`/finance/allocations/rules/${id}`);
     }
 
     async createAllocationRule(dto: CreateAllocationRuleDto): Promise<AllocationRule> {
-        return apiService.post<AllocationRule>('/finance/allocation-rules', dto);
+        return apiService.post<AllocationRule>('/finance/allocations/rules', dto);
     }
 
     async updateAllocationRule(id: string, dto: Partial<AllocationRule>): Promise<AllocationRule> {
-        return apiService.put<AllocationRule>(`/finance/allocation-rules/${id}`, dto);
+        return apiService.put<AllocationRule>(`/finance/allocations/rules/${id}`, dto);
     }
 
     async deleteAllocationRule(id: string): Promise<void> {
-        return apiService.delete(`/finance/allocation-rules/${id}`);
+        return apiService.delete(`/finance/allocations/rules/${id}`);
     }
 
     async executeAllocationRule(id: string): Promise<void> {
-        return apiService.post<void>(`/finance/allocation-rules/${id}/execute`, {});
+        return apiService.post<void>(`/finance/allocations/rules/${id}/run`, {});
     }
 
     // ===== ALLOCATION TARGETS =====
+    // NOTE: no backend endpoints exist for allocation targets yet; targets are managed
+    // as part of the rule payload. These remain for when a dedicated API is added.
 
     async getAllocationTargets(ruleId: string): Promise<AllocationTarget[]> {
-        return apiService.get<AllocationTarget[]>(`/finance/allocation-rules/${ruleId}/targets`);
+        return apiService.get<AllocationTarget[]>(`/finance/allocations/rules/${ruleId}/targets`);
     }
 
     async updateAllocationTargets(ruleId: string, targets: Partial<AllocationTarget>[]): Promise<AllocationTarget[]> {
-        return apiService.put<AllocationTarget[]>(`/finance/allocation-rules/${ruleId}/targets`, targets);
+        return apiService.put<AllocationTarget[]>(`/finance/allocations/rules/${ruleId}/targets`, targets);
     }
 }
 

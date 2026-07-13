@@ -93,7 +93,7 @@ class BudgetDataService {
     // ===== BUDGET ENTRIES =====
 
     async getEntries(returnId: string): Promise<BudgetEntry[]> {
-        return apiService.get<BudgetEntry[]>(`/budget/entries/return/${returnId}`);
+        return apiService.get<BudgetEntry[]>(`/budget/returns/${returnId}/entries`);
     }
 
     async bulkSaveEntries(dto: BulkSaveBudgetEntriesDto): Promise<boolean> {
