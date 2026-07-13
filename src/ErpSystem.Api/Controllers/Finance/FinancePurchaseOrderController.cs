@@ -927,6 +927,12 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
+
+        // Read the receipt's invoice link, create the draft invoice, and write the link back under serializable
+        // isolation so two concurrent conversion requests cannot both observe VendorInvoiceId as null and create
+        // duplicate vendor invoices for the same receipt lines.
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
         var receipt = await _dbContext.FinancePurchaseOrderReceipts
             .Include(r => r.FinancePurchaseOrder)
                 .ThenInclude(po => po.Vendor)
@@ -1097,6 +1103,8 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
 
         _dbContext.VendorInvoices.Add(invoice);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         var savedInvoice = await _dbContext.VendorInvoices
             .Include(i => i.Supplier)

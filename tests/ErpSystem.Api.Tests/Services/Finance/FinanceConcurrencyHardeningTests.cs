@@ -220,6 +220,65 @@ public sealed class FinanceConcurrencyHardeningTests
         receiptTenantFilterIndex.Should().BeLessThan(receiptSelectIndex, "tenant filtering must happen before reading finance GRV receipt numbers");
     }
 
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void ReceiptToInvoiceConversion_ShouldSerializeInvoiceLinkCheckAndCreation()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinancePurchaseOrderController.cs"));
+        var method = ExtractMember(source, "public async Task<ActionResult<VendorInvoiceDto>> ConvertToVendorInvoice", "private IQueryable<FinancePurchaseOrderReceipt> BaseReceiptQuery");
+
+        var transactionIndex = method.IndexOf("BeginTransactionAsync(IsolationLevel.Serializable", StringComparison.Ordinal);
+        var receiptLoadIndex = method.IndexOf("var receipt = await _dbContext.FinancePurchaseOrderReceipts", StringComparison.Ordinal);
+        var linkCheckIndex = method.IndexOf("if (receipt.VendorInvoiceId.HasValue)", StringComparison.Ordinal);
+        var invoiceAddIndex = method.IndexOf("_dbContext.VendorInvoices.Add(invoice)", StringComparison.Ordinal);
+        var saveIndex = method.IndexOf("SaveChangesAsync(cancellationToken)", invoiceAddIndex, StringComparison.Ordinal);
+        var commitIndex = method.IndexOf("CommitAsync(cancellationToken)", StringComparison.Ordinal);
+
+        transactionIndex.Should().BeGreaterThan(-1, "receipt-to-invoice conversion must serialize the invoice-link check against concurrent conversions");
+        transactionIndex.Should().BeLessThan(receiptLoadIndex, "the receipt and its invoice link must be read inside the protected transaction");
+        receiptLoadIndex.Should().BeLessThan(linkCheckIndex, "the duplicate-conversion check must run on the transactionally loaded receipt");
+        linkCheckIndex.Should().BeLessThan(invoiceAddIndex, "the draft invoice must only be created after the link check inside the same transaction");
+        saveIndex.Should().BeLessThan(commitIndex, "the receipt link and draft invoice must be committed together");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FrontendFinanceDocumentTypes_ShouldMatchBackendSequenceNames()
+    {
+        var root = FindRepositoryRoot();
+        var frontendSource = File.ReadAllText(Path.Combine(root, "frontend", "src", "types", "document-numbering.ts"));
+        var backendSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Interfaces", "Numbering", "IDocumentNumberingService.cs"));
+
+        var frontendFinanceBlock = ExtractMember(frontendSource, "export const FinanceDocumentTypes = {", "export const SalesDocumentTypes = {");
+        var frontendSalesBlock = ExtractMember(frontendSource, "export const SalesDocumentTypes = {", "export interface DocumentSequenceDefinition");
+
+        // getDefinition/GenerateAsync match documentType strings exactly, so every frontend constant must exist
+        // verbatim in the backend FinanceDocumentTypes/SalesDocumentTypes or the tenant sequence is silently ignored.
+        foreach (var value in ExtractTypeScriptDocumentTypeValues(frontendFinanceBlock))
+        {
+            backendSource.Should().Contain($"= \"{value}\";", $"frontend finance document type '{value}' must match a backend sequence name exactly");
+        }
+
+        foreach (var value in ExtractTypeScriptDocumentTypeValues(frontendSalesBlock))
+        {
+            backendSource.Should().Contain($"= \"{value}\";", $"frontend sales document type '{value}' must match a backend sequence name exactly");
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractTypeScriptDocumentTypeValues(string block)
+    {
+        var values = System.Text.RegularExpressions.Regex
+            .Matches(block, @"\w+:\s*'([^']+)'")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+
+        values.Should().NotBeEmpty("the frontend document type block should declare at least one constant");
+        return values;
+    }
+
     private static string ExtractMember(string source, string startMarker, string endMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);

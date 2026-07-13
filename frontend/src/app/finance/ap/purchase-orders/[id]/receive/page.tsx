@@ -19,7 +19,7 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
     const [receiveQtys, setReceiveQtys] = useState<Record<string, number>>({});
     const [receiptNumber, setReceiptNumber] = useState('');
     const [submitting, setSubmitting] = useState(false);
-    const receiptSequence = useDocumentSequence('Finance', FinanceDocumentTypes.APGoodsReceipt);
+    const receiptSequence = useDocumentSequence('Finance', FinanceDocumentTypes.FinancePurchaseOrderReceipt);
 
     useEffect(() => {
         loadPO();

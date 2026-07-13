@@ -5,6 +5,7 @@ using ErpSystem.Core.DTOs.Numbering;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Numbering;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -295,6 +296,10 @@ public class DocumentNumberingService : IDocumentNumberingService
                 .Where(e => e.TenantId == tenantId)
                 .Select(e => e.BatchNumber)
                 .ToListAsync(cancellationToken),
+            (DocumentNumberingModules.Finance, FinanceDocumentTypes.CustomerAccount) => _context.Set<BusinessPartner>()
+                .Where(e => e.TenantId == tenantId && e.CustomerAccountNumber != null)
+                .Select(e => e.CustomerAccountNumber!)
+                .ToListAsync(cancellationToken),
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.CashReceipt) or
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.CashPayment) or
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.BankTransfer) => _context.Set<CashTransaction>()
@@ -356,6 +361,8 @@ public class DocumentNumberingService : IDocumentNumberingService
                 .Where(e => e.TenantId == tenantId)
                 .Select(e => e.DocumentNumber)
                 .ToListAsync(cancellationToken),
+            // CommissionStatement inherits BaseEntity (no TenantId), so this scan cannot be tenant-filtered
+            // until the Sales module adds tenant ownership to commission statements.
             (DocumentNumberingModules.Sales, SalesDocumentTypes.CommissionStatement) => _context.Set<CommissionStatement>()
                 .Select(e => e.StatementNumber)
                 .ToListAsync(cancellationToken),

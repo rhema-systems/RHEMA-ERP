@@ -5,8 +5,10 @@ export type DocumentSequenceResetPolicy = 'Never' | 'Yearly' | 'Monthly';
 export const FinanceDocumentTypes = {
   JournalEntry: 'JournalEntry',
   UnitJournalEntry: 'UnitJournalEntry',
-  APFinancePurchaseOrder: 'APFinancePurchaseOrder',
-  APGoodsReceipt: 'APGoodsReceipt',
+  // These must match the backend FinanceDocumentTypes constants in IDocumentNumberingService.cs;
+  // getDefinition matches documentType exactly, so a renamed constant silently loses the tenant sequence.
+  FinancePurchaseOrder: 'FinancePurchaseOrder',
+  FinancePurchaseOrderReceipt: 'FinancePurchaseOrderReceipt',
   APSupplierReturn: 'APSupplierReturn',
   APInvoice: 'APInvoice',
   APPayment: 'APPayment',

@@ -99,7 +99,7 @@ export default function CreatePurchaseOrderPage() {
 
     const [vendorId, setVendorId] = useState('');
     const [orderNumber, setOrderNumber] = useState('');
-    const orderSequence = useDocumentSequence('Finance', FinanceDocumentTypes.APFinancePurchaseOrder);
+    const orderSequence = useDocumentSequence('Finance', FinanceDocumentTypes.FinancePurchaseOrder);
     const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
     const [currencyCode, setCurrencyCode] = useState('GHS');
     const [exchangeRate, setExchangeRate] = useState<number>(1.0);

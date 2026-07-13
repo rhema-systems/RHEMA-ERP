@@ -34,7 +34,7 @@ export default function CreateReceiptPage() {
     
     // Receipt Header
     const [receiptNumber, setReceiptNumber] = useState<string>('');
-    const receiptSequence = useDocumentSequence('Finance', FinanceDocumentTypes.APGoodsReceipt);
+    const receiptSequence = useDocumentSequence('Finance', FinanceDocumentTypes.FinancePurchaseOrderReceipt);
     const [receiptDate, setReceiptDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [remarks, setRemarks] = useState<string>('');
     

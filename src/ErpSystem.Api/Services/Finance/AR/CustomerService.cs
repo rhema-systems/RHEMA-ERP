@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Api.Services.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -14,15 +15,18 @@ public class CustomerService : ICustomerService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUser;
+    private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ILogger<CustomerService> _logger;
 
     public CustomerService(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUser,
+        IDocumentNumberingService documentNumberingService,
         ILogger<CustomerService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _documentNumberingService = documentNumberingService;
         _logger = logger;
     }
 
@@ -297,8 +301,16 @@ public class CustomerService : ICustomerService
 
     private async Task<string> GenerateCustomerCodeAsync(CancellationToken cancellationToken)
     {
-        var count = await CustomerPartners().CountAsync(cancellationToken);
-        return $"CUST-{DateTime.UtcNow:yyyy}-{count + 1:D5}";
+        // Reserve codes through central document numbering instead of counting visible rows:
+        // concurrent creates would generate the same count-based code, and soft-deleted
+        // customers shrink the count so it can reissue a code that already exists.
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Finance,
+            FinanceDocumentTypes.CustomerAccount,
+            TenantId,
+            DateTime.UtcNow,
+            nameof(BusinessPartner),
+            cancellationToken: cancellationToken);
     }
 
     private static CustomerDto MapToDto(BusinessPartner partner)
