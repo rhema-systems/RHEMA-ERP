@@ -19,6 +19,20 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
   hr: ['Employee', 'PayrollRun', 'PayrollSalaryAdvance', 'PayrollBonusSetup', 'PayrollBackpaySetup'],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],
+  planning: [
+    'PlanningLandAllocationVetting',
+    'PlanningChangeOfUseReview',
+    'PlanningSchemeLayoutPreparation',
+    'PlanningSiteReport',
+    'PlanningSitePlanPreparation',
+    'PlanningOfficialSearchData',
+    'PlanningDevelopmentPermitConformity',
+    'PlanningRegularization',
+    'PlanningLayoutReviewCorrection',
+    'PlanningComplianceInspection',
+    'PlanningDisputeComplaint',
+    'PlanningAssemblySpatialCommittee'
+  ],
   estate: [
     'LandAcquisition',
     'EstateFacilityPropertySite',

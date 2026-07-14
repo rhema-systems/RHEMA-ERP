@@ -303,6 +303,7 @@ const navigationItems: NavItem[] = [
     permissions: ['project.access'],
     children: [
       { title: 'Projects', href: '/development/projects', icon: Briefcase },
+      { title: 'Planning', href: '/development/planning', icon: MapPin },
       { title: 'Operations', href: '/development/project-operations', icon: Activity },
       { title: 'Portfolios', href: '/development/portfolios', icon: FolderTree },
       { title: 'Programs', href: '/development/programs', icon: Target },

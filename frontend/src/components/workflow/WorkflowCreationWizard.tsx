@@ -69,6 +69,7 @@ const moduleOptions = [
   { id: 'finance', name: 'Finance & Accounting', icon: Building, description: 'Financial transactions and accounting' },
   { id: 'procurement', name: 'Procurement', icon: FileText, description: 'Purchase orders and supplier management' },
   { id: 'projects', name: 'Project Management', icon: CheckCircle, description: 'Project planning and execution' },
+  { id: 'planning', name: 'Development Planning', icon: FileText, description: 'Town planning SOPs, land use reviews, and site plan workflows' },
   { id: 'estate', name: 'Estate Management', icon: Landmark, description: 'Properties, facilities, leases, and land acquisition' },
   { id: 'legal', name: 'Legal', icon: FileText, description: 'Legal procedures, instruments, court processes, and approvals' },
   { id: 'sales', name: 'Sales & CRM', icon: User, description: 'Customer relationship management' },

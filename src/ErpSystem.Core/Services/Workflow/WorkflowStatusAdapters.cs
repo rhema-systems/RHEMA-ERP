@@ -241,6 +241,67 @@ public sealed class EstateFacilitiesWorkflowStatusAdapter : IWorkflowStatusAdapt
     }
 }
 
+public sealed class PlanningProcedureWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "PlanningLandAllocationVetting",
+        "PlanningChangeOfUseReview",
+        "PlanningSchemeLayoutPreparation",
+        "PlanningSiteReport",
+        "PlanningSitePlanPreparation",
+        "PlanningOfficialSearchData",
+        "PlanningDevelopmentPermitConformity",
+        "PlanningRegularization",
+        "PlanningLayoutReviewCorrection",
+        "PlanningComplianceInspection",
+        "PlanningDisputeComplaint",
+        "PlanningAssemblySpatialCommittee"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => WorkflowStatusAdapterDefaults.ApplyDraftOutcome(entity);
+
+    private static void ApplyGenericOutcome(object entity, WorkflowOutcome outcome)
+    {
+        var status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "Pending"
+        };
+
+        TrySetStringOrEnum(entity, "Status", status);
+        TrySetStringOrEnum(entity, "ApprovalStatus", status);
+    }
+
+    private static void TrySetStringOrEnum(object entity, string propertyName, string value)
+    {
+        var property = entity.GetType().GetProperty(propertyName);
+        if (property == null || !property.CanWrite)
+        {
+            return;
+        }
+
+        if (property.PropertyType == typeof(string))
+        {
+            property.SetValue(entity, value);
+            return;
+        }
+
+        if (property.PropertyType.IsEnum && Enum.TryParse(property.PropertyType, value, ignoreCase: true, out var enumValue))
+        {
+            property.SetValue(entity, enumValue);
+        }
+    }
+}
+
 public sealed class JobCardWorkflowStatusAdapter : IWorkflowStatusAdapter
 {
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]

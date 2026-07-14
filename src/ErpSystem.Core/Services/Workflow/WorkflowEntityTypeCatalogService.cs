@@ -77,7 +77,19 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("LegalTerminationRecognition", "Legal", "Termination and recognition procedure workflows", "FileX", "#B45309", 125),
             new("LegalAssignmentSubleaseVesting", "Legal", "Assignment, sublease, and vesting procedure workflows", "FileText", "#0F766E", 126),
             new("LegalLeaseVariationRenewalSublease", "Legal", "Lease, deed of variation, renewal, and sublease procedure workflows", "FileText", "#0891B2", 127),
-            new("LegalTransfer", "Legal", "Transfer procedure review and approval workflows", "ArrowRightLeft", "#2563EB", 128)
+            new("LegalTransfer", "Legal", "Transfer procedure review and approval workflows", "ArrowRightLeft", "#2563EB", 128),
+            new("PlanningLandAllocationVetting", "Planning", "Planning land allocation and temporary license vetting workflows", "ClipboardCheck", "#0F766E", 129),
+            new("PlanningChangeOfUseReview", "Planning", "Planning change of use review workflows", "RefreshCw", "#0284C7", 130),
+            new("PlanningSchemeLayoutPreparation", "Planning", "Planning scheme and layout preparation workflows", "Map", "#4F46E5", 131),
+            new("PlanningSiteReport", "Planning", "Planning site report inspection workflows", "MapPin", "#059669", 132),
+            new("PlanningSitePlanPreparation", "Planning", "Planning site plan preparation workflows", "FileText", "#2563EB", 133),
+            new("PlanningOfficialSearchData", "Planning", "Planning official search and land use data workflows", "Search", "#0891B2", 134),
+            new("PlanningDevelopmentPermitConformity", "Planning", "Development permit conformity review workflows", "FileCheck2", "#7C3AED", 135),
+            new("PlanningRegularization", "Planning", "Planning regularization workflows for unplanned or informal occupation", "BadgeCheck", "#B45309", 136),
+            new("PlanningLayoutReviewCorrection", "Planning", "Planning layout review and correction workflows", "FilePenLine", "#EA580C", 137),
+            new("PlanningComplianceInspection", "Planning", "Planning compliance site inspection and reporting workflows", "ClipboardList", "#E11D48", 138),
+            new("PlanningDisputeComplaint", "Planning", "Planning dispute resolution and client complaint workflows", "MessageSquare", "#6D28D9", 139),
+            new("PlanningAssemblySpatialCommittee", "Planning", "District assembly spatial planning committee meeting workflows", "Users", "#334155", 140)
         };
 
         return defaults

@@ -455,6 +455,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IFacilitiesProcedureCatalogService, ErpSystem.Core.Services.Estate.FacilitiesProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateProcedureCatalogService, ErpSystem.Core.Services.Estate.EstateProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateManagedAssetService, ErpSystem.Core.Services.Estate.EstateManagedAssetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Planning.IPlanningProcedureCatalogService, ErpSystem.Core.Services.Planning.PlanningProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procedures.IProcedureCaseService, ErpSystem.Api.Services.ProcedureCaseService>();
 
             // Email template services
