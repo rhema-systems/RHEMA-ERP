@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
