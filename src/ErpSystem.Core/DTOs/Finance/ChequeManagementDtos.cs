@@ -42,6 +42,11 @@ public class UpdateChequeStatusDto
     public string? StatusReason { get; set; }
 }
 
+public class VoidChequeDto
+{
+    public string Reason { get; set; } = string.Empty;
+}
+
 #endregion
 
 #region PaymentMethod DTOs

@@ -47,5 +47,11 @@ namespace ErpSystem.Core.Interfaces
         Task<PeriodCloseResultDto> CloseFiscalYearAsync(YearEndCloseRequestDto request);
         Task<PeriodCloseResultDto> ReopenFiscalYearAsync(Guid fiscalYearId, string reason);
         #endregion
+
+        /// <summary>
+        /// Read-side dashboard aggregates (KPIs, monthly trend, expense breakdown) for the
+        /// current fiscal year, computed from posted GL activity.
+        /// </summary>
+        Task<FinanceDashboardDto> GetFinanceDashboardAsync();
     }
 }

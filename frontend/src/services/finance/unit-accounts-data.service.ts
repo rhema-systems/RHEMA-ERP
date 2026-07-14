@@ -237,14 +237,21 @@ class UnitAccountsDataService {
     }
 
     // ===== ALLOCATION TARGETS =====
-    // NOTE: no backend endpoints exist for allocation targets yet; targets are managed
-    // as part of the rule payload. These remain for when a dedicated API is added.
 
     async getAllocationTargets(ruleId: string): Promise<AllocationTarget[]> {
         return apiService.get<AllocationTarget[]>(`/finance/allocations/rules/${ruleId}/targets`);
     }
 
-    async updateAllocationTargets(ruleId: string, targets: Partial<AllocationTarget>[]): Promise<AllocationTarget[]> {
+    /** Replaces the rule's target distribution (validated as part of the rule contract). */
+    async updateAllocationTargets(
+        ruleId: string,
+        targets: {
+            targetAccountId: string;
+            fixedPercentage?: number;
+            targetDriverUnitAccountId?: string;
+            costCenterCode?: string;
+        }[]
+    ): Promise<AllocationTarget[]> {
         return apiService.put<AllocationTarget[]>(`/finance/allocations/rules/${ruleId}/targets`, targets);
     }
 }

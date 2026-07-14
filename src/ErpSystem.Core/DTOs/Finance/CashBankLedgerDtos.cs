@@ -28,6 +28,20 @@ public class CashBankLedgerReportDto
     public decimal TotalClosingBalance { get; set; }
 }
 
+/// <summary>
+/// Cash-book movement summary for a period, derived from the posted cash/bank ledger.
+/// </summary>
+public class CashFlowSummaryDto
+{
+    public string Period { get; set; } = string.Empty;
+    public decimal OpeningBalance { get; set; }
+    public decimal Receipts { get; set; }
+    public decimal Payments { get; set; }
+    public decimal Transfers { get; set; }
+    public decimal ClosingBalance { get; set; }
+    public decimal NetChange { get; set; }
+}
+
 public class CashBankLedgerAccountDto
 {
     public Guid BankAccountId { get; set; }

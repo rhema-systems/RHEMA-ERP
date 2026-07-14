@@ -2372,6 +2372,93 @@ namespace ErpSystem.Api.Services.Finance.GL
             };
         }
 
+        public async Task<FinanceDashboardDto> GetFinanceDashboardAsync()
+        {
+            var tenantId = TenantId;
+            var today = DateTime.UtcNow.Date;
+
+            var fiscalYear = await _context.FiscalYears
+                .Where(fy => fy.TenantId == tenantId && !fy.IsDeleted && fy.StartDate <= today && fy.EndDate >= today)
+                .OrderByDescending(fy => fy.StartDate)
+                .FirstOrDefaultAsync();
+
+            var startDate = fiscalYear?.StartDate.Date ?? new DateTime(today.Year, 1, 1);
+            var endDate = fiscalYear?.EndDate.Date ?? new DateTime(today.Year, 12, 31);
+
+            var activity = await _context.AccountTransactions
+                .Where(t => t.TenantId == tenantId
+                    && !t.IsDeleted
+                    && t.TransactionDate >= startDate
+                    && t.TransactionDate <= endDate
+                    && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
+                .Select(t => new
+                {
+                    t.Account.AccountType,
+                    t.Account.AccountName,
+                    t.TransactionDate,
+                    t.DebitAmount,
+                    t.CreditAmount
+                })
+                .ToListAsync();
+
+            var revenue = activity
+                .Where(t => t.AccountType == AccountType.Revenue)
+                .Sum(t => t.CreditAmount - t.DebitAmount);
+            var expenses = activity
+                .Where(t => t.AccountType == AccountType.Expense)
+                .Sum(t => t.DebitAmount - t.CreditAmount);
+
+            var monthly = new List<FinanceDashboardMonthlyPointDto>();
+            var monthCursor = new DateTime(startDate.Year, startDate.Month, 1);
+            var lastMonth = new DateTime(endDate.Year, endDate.Month, 1);
+            while (monthCursor <= lastMonth && monthly.Count < 12)
+            {
+                var monthEnd = monthCursor.AddMonths(1);
+                var monthRows = activity.Where(t => t.TransactionDate >= monthCursor && t.TransactionDate < monthEnd).ToList();
+                monthly.Add(new FinanceDashboardMonthlyPointDto
+                {
+                    Name = monthCursor.ToString("MMM"),
+                    Revenue = monthRows.Where(t => t.AccountType == AccountType.Revenue).Sum(t => t.CreditAmount - t.DebitAmount),
+                    Expenses = monthRows.Where(t => t.AccountType == AccountType.Expense).Sum(t => t.DebitAmount - t.CreditAmount)
+                });
+                monthCursor = monthEnd;
+            }
+
+            var expenseChart = activity
+                .Where(t => t.AccountType == AccountType.Expense)
+                .GroupBy(t => t.AccountName)
+                .Select(g => new FinanceDashboardBreakdownPointDto
+                {
+                    Name = g.Key,
+                    Value = g.Sum(t => t.DebitAmount - t.CreditAmount)
+                })
+                .Where(p => p.Value > 0)
+                .OrderByDescending(p => p.Value)
+                .Take(8)
+                .ToList();
+
+            // Cash on hand comes from the posted cash/bank ledger (source of truth), matching
+            // the cash position report rather than stored snapshots.
+            var cashLedger = await GenerateCashBankLedgerAsync(new CashBankLedgerRequestDto
+            {
+                StartDate = today,
+                EndDate = today
+            });
+
+            return new FinanceDashboardDto
+            {
+                Kpis = new FinanceDashboardKpisDto
+                {
+                    Revenue = revenue,
+                    Expenses = expenses,
+                    NetProfit = revenue - expenses,
+                    CashOnHand = cashLedger.TotalClosingBalance
+                },
+                Monthly = monthly,
+                ExpenseChart = expenseChart
+            };
+        }
+
         private async Task<(Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(
             FiscalYear fiscalYear,
             Guid retainedEarningsAccountId)

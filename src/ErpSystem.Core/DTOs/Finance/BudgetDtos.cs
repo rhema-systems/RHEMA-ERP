@@ -73,15 +73,41 @@ public class CreateBudgetReturnDto
 {
     [Required]
     public Guid BudgetScenarioId { get; set; }
-    
+
     public Guid? SegmentValueId { get; set; }
-    
+
     public Guid? AssignedToUserId { get; set; }
-    
+
     public Guid? ApproverUserId { get; set; }
-    
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Updates assignment metadata on a Draft/Rejected budget return. Amounts change through
+/// entry bulk-save; status changes through submit/approve/reject.
+/// </summary>
+public class UpdateBudgetReturnDto
+{
+    public Guid? AssignedToUserId { get; set; }
+
+    public Guid? ApproverUserId { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Base-currency revenue/expense totals for a budget scenario.
+/// </summary>
+public class BudgetSummaryDto
+{
+    public Guid ScenarioId { get; set; }
+    public decimal TotalRevenue { get; set; }
+    public decimal TotalExpense { get; set; }
+    public decimal NetIncome { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
 }
 
 public class BudgetEntryDto

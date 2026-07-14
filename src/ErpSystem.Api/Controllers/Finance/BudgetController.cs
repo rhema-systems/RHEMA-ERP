@@ -378,6 +378,34 @@ public class BudgetController : ControllerBase
     }
 
     /// <summary>
+    /// Updates assignment metadata (assignee, approver, notes) on a Draft or Rejected budget return.
+    /// </summary>
+    /// <remarks>
+    /// Amounts change through the entries bulk-save endpoint; status changes through the
+    /// submit/approve/reject workflow endpoints.
+    /// </remarks>
+    /// <response code="200">Budget return updated successfully.</response>
+    /// <response code="400">The return has already been submitted or approved.</response>
+    /// <response code="404">Return with the specified ID was not found.</response>
+    [HttpPut("returns/{id}")]
+    public async Task<ActionResult<BudgetReturnDto>> UpdateReturn(Guid id, UpdateBudgetReturnDto dto)
+    {
+        try
+        {
+            var result = await _budgetService.UpdateReturnAsync(id, dto);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
     /// Submits a budget return for approval, transitioning it from Draft to Submitted status.
     /// </summary>
     /// <remarks>
@@ -590,6 +618,29 @@ public class BudgetController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    // ========================================================================
+    // ANALYTICS
+    // ========================================================================
+
+    /// <summary>
+    /// Base-currency revenue/expense totals for a scenario, aggregated from approved returns.
+    /// </summary>
+    /// <response code="200">Scenario summary returned successfully.</response>
+    /// <response code="404">Scenario with the specified ID was not found.</response>
+    [HttpGet("analytics/summary/{scenarioId}")]
+    public async Task<ActionResult<BudgetSummaryDto>> GetScenarioSummary(Guid scenarioId)
+    {
+        try
+        {
+            var result = await _budgetService.GetScenarioSummaryAsync(scenarioId);
+            return Ok(result);
         }
         catch (KeyNotFoundException)
         {

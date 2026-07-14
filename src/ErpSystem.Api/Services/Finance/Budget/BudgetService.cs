@@ -196,6 +196,27 @@ public class BudgetService : IBudgetService
         return await MapToReturnDto(budgetReturn);
     }
 
+    public async Task<BudgetReturnDto> UpdateReturnAsync(Guid id, UpdateBudgetReturnDto dto)
+    {
+        var budgetReturn = await GetReturnEntityAsync(id);
+        if (budgetReturn.Status != "Draft" && budgetReturn.Status != "Rejected")
+            throw new InvalidOperationException("Only Draft or Rejected returns can be updated.");
+
+        if (dto.AssignedToUserId.HasValue)
+            budgetReturn.AssignedToUserId = dto.AssignedToUserId;
+
+        if (dto.ApproverUserId.HasValue)
+            budgetReturn.ApproverUserId = dto.ApproverUserId;
+
+        if (dto.Notes != null)
+            budgetReturn.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+
+        budgetReturn.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return await MapToReturnDto(budgetReturn);
+    }
+
     public async Task<BudgetReturnDto> GetReturnAsync(Guid id)
     {
         var budgetReturn = await GetReturnEntityAsync(id);
@@ -421,6 +442,37 @@ public class BudgetService : IBudgetService
 
         var entries = await query.ToListAsync();
         return entries.Select(MapToEntryDto).ToList();
+    }
+
+    public async Task<BudgetSummaryDto> GetScenarioSummaryAsync(Guid scenarioId)
+    {
+        var tenantId = TenantId;
+        var scenario = await _context.BudgetScenarios
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == scenarioId && !s.IsDeleted);
+        if (scenario == null)
+            throw new KeyNotFoundException("Budget scenario not found");
+
+        // Summarize approved returns only, mirroring the consolidated budget definition.
+        var rows = await _context.BudgetEntries
+            .Where(e => e.TenantId == tenantId
+                     && !e.IsDeleted
+                     && e.BudgetReturn!.TenantId == tenantId
+                     && e.BudgetReturn.BudgetScenarioId == scenarioId
+                     && e.BudgetReturn.Status == "Approved")
+            .Select(e => new { e.Account!.AccountType, e.AmountBase })
+            .ToListAsync();
+
+        var totalRevenue = rows.Where(r => r.AccountType == AccountType.Revenue).Sum(r => r.AmountBase);
+        var totalExpense = rows.Where(r => r.AccountType == AccountType.Expense).Sum(r => r.AmountBase);
+
+        return new BudgetSummaryDto
+        {
+            ScenarioId = scenarioId,
+            TotalRevenue = totalRevenue,
+            TotalExpense = totalExpense,
+            NetIncome = totalRevenue - totalExpense,
+            CurrencyCode = scenario.BaseCurrencyCode
+        };
     }
 
     //Helpers

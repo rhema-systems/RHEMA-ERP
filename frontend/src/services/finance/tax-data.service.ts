@@ -106,8 +106,10 @@ class TaxDataService {
         return apiService.delete(`/finance/tax/taxes/${id}`);
     }
 
-    async toggleTaxStatus(id: string): Promise<Tax> {
-        return apiService.patch<Tax>(`/finance/tax/taxes/${id}/toggle-status`, {});
+    async toggleTaxStatus(id: string, isActive: boolean): Promise<Tax> {
+        // Activation is part of the tax update contract (UpdateTaxDto.IsActive);
+        // there is no dedicated toggle endpoint on the backend.
+        return apiService.put<Tax>(`/finance/tax/taxes/${id}`, { isActive });
     }
 
     // ===== TAX GROUPS =====
@@ -142,8 +144,9 @@ class TaxDataService {
         return apiService.delete(`/finance/tax/groups/${id}`);
     }
 
-    async toggleTaxGroupStatus(id: string): Promise<TaxGroup> {
-        return apiService.patch<TaxGroup>(`/finance/tax/groups/${id}/toggle-status`, {});
+    async toggleTaxGroupStatus(id: string, isActive: boolean): Promise<TaxGroup> {
+        // Activation is part of the tax group update contract (UpdateTaxGroupDto.IsActive).
+        return apiService.put<TaxGroup>(`/finance/tax/groups/${id}`, { isActive });
     }
 
     // ===== TAX GROUP COMPONENTS =====

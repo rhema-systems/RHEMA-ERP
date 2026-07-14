@@ -438,5 +438,18 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Finance dashboard aggregates for the current fiscal year: revenue/expense/net-profit
+        /// KPIs, monthly trend points, and an expense breakdown, computed from posted GL
+        /// activity with cash on hand from the posted cash/bank ledger.
+        /// </summary>
+        /// <response code="200">Dashboard aggregates computed successfully</response>
+        /// <response code="401">Not authenticated</response>
+        [HttpGet("dashboard")]
+        public async Task<ActionResult<FinanceDashboardDto>> GetDashboard()
+        {
+            return Ok(await _glService.GetFinanceDashboardAsync());
+        }
+
     }
 }
