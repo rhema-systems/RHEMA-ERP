@@ -25,7 +25,7 @@ import type {
   ProjectUnitTypeTemplateDto,
 } from '@/services/projectService';
 
-type UnitActionType = 'salesAgreement' | 'leaseAgreement' | 'salesOrder' | 'release' | 'withdrawRelease' | 'delete';
+type UnitActionType = 'salesAgreement' | 'leaseAgreement' | 'salesOrder' | 'release' | 'withdrawRelease' | 'publishEstate' | 'delete';
 type RegisteredUnitSection = 'pendingRelease' | 'released' | 'allocated' | 'invoiced';
 
 type PendingUnitAction = {
@@ -59,6 +59,7 @@ type ProjectUnitsTabProps = {
   onCancelUnitEdit: () => void;
   onReleaseUnit: (unitId: string) => Promise<void> | void;
   onWithdrawUnitRelease: (unitId: string) => Promise<void> | void;
+  onPublishUnitToEstate: (unitId: string) => Promise<void> | void;
   onCreateSalesAgreement: (unitId: string) => Promise<void> | void;
   onCreateLeaseAgreement: (unitId: string) => Promise<void> | void;
   onCreateSalesOrder: (unitId: string) => Promise<void> | void;
@@ -98,6 +99,10 @@ const canWithdrawRelease = (unit: ProjectUnitDto) =>
   && !unit.salesAgreementId
   && !unit.salesOrderId;
 
+const canPublishToEstate = (unit: ProjectUnitDto) =>
+  unit.isReleasedForMarket
+  || ['handedover', 'occupied'].includes((unit.status || '').toLowerCase());
+
 const getUnitActionBusyKey = (action: UnitActionType, unitId: string) => {
   switch (action) {
     case 'salesAgreement':
@@ -110,6 +115,8 @@ const getUnitActionBusyKey = (action: UnitActionType, unitId: string) => {
       return `unit-release:${unitId}`;
     case 'withdrawRelease':
       return `unit-withdraw-release:${unitId}`;
+    case 'publishEstate':
+      return `unit-publish-estate:${unitId}`;
     default:
       return null;
   }
@@ -146,6 +153,12 @@ const getUnitActionDialogCopy = (action: UnitActionType, unitName: string) => {
         title: 'Withdraw Release',
         confirmText: 'Withdraw Release',
         description: `Withdraw ${unitName} from released inventory. This is only allowed while it is not linked to any sales agreement or sales order.`,
+      };
+    case 'publishEstate':
+      return {
+        title: 'Push to Estate',
+        confirmText: 'Push to Estate',
+        description: `Publish ${unitName} to Estate property and facilities management so it can be leased, managed, or maintained from the Estate register.`,
       };
     case 'delete':
       return {
@@ -187,6 +200,7 @@ export function ProjectUnitsTab({
   onCancelUnitEdit,
   onReleaseUnit,
   onWithdrawUnitRelease,
+  onPublishUnitToEstate,
   onCreateSalesAgreement,
   onCreateLeaseAgreement,
   onCreateSalesOrder,
@@ -341,6 +355,9 @@ export function ProjectUnitsTab({
       case 'withdrawRelease':
         await onWithdrawUnitRelease(pendingUnitAction.unitId);
         break;
+      case 'publishEstate':
+        await onPublishUnitToEstate(pendingUnitAction.unitId);
+        break;
       case 'delete':
         await onDeleteUnit(pendingUnitAction.unitId);
         break;
@@ -446,6 +463,16 @@ export function ProjectUnitsTab({
                 onClick={() => openUnitActionDialog(unit, 'salesOrder')}
               >
                 {unitActionBusyKey === `unit-sales-order:${unit.id}` ? 'Creating...' : 'Create Sales Order'}
+              </Button>
+            ) : null}
+            {showReleasedActions ? (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canPublishToEstate(unit) || unitActionBusyKey === `unit-publish-estate:${unit.id}`}
+                onClick={() => openUnitActionDialog(unit, 'publishEstate')}
+              >
+                {unitActionBusyKey === `unit-publish-estate:${unit.id}` ? 'Pushing...' : 'Push to Estate'}
               </Button>
             ) : null}
             {showReleasedActions && unit.isReleasedForMarket ? (

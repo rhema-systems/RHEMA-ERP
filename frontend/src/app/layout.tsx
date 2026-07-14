@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import "@syncfusion/ej2-react-pdfviewer/styles/material.css";
+import "leaflet/dist/leaflet.css";
 import { ReactQueryProvider } from "../lib/react-query";
 import { TenantProvider } from "../contexts/TenantContext";
 import { SessionBlacklistProvider } from "../contexts/SessionBlacklistContext";

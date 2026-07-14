@@ -1447,6 +1447,34 @@ export interface ProjectUnitDto {
   amenities: ProjectUnitAmenityDto[];
 }
 
+export interface EstateManagedAssetDto {
+  id: string;
+  assetCode: string;
+  name: string;
+  description?: string;
+  location?: string;
+  blockName?: string;
+  floorLabel?: string;
+  assetType: string;
+  status: string;
+  sourceType: string;
+  landAcquisitionId?: string;
+  projectId?: string;
+  projectUnitId?: string;
+  projectCode?: string;
+  projectTitle?: string;
+  projectUnitCode?: string;
+  unitType?: string;
+  areaSquareMeters?: number;
+  valuationAmount?: number;
+  currency: string;
+  isAvailableForLease: boolean;
+  isAvailableForSale: boolean;
+  isPublishedFromProject: boolean;
+  publishedFromProjectAt?: string;
+  notes?: string;
+}
+
 export interface ProjectUnitAmenityDto {
   id: string;
   inventoryItemId?: string;
@@ -5080,6 +5108,20 @@ class ProjectService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to withdraw project unit release');
+    }
+
+    return response.json();
+  }
+
+  async publishProjectUnitToEstate(unitId: string): Promise<EstateManagedAssetDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/publish-to-estate`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to publish project unit to Estate management');
     }
 
     return response.json();

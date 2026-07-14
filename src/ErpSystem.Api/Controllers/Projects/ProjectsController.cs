@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Interfaces;
@@ -1206,6 +1207,23 @@ public class ProjectsController : ControllerBase
         try
         {
             return Ok(await _projectService.WithdrawProjectUnitReleaseAsync(unitId));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("units/{unitId:guid}/publish-to-estate")]
+    public async Task<ActionResult<EstateManagedAssetDto>> PublishProjectUnitToEstate(Guid unitId)
+    {
+        try
+        {
+            return Ok(await _projectService.PublishProjectUnitToEstateAsync(unitId));
         }
         catch (UnauthorizedAccessException)
         {

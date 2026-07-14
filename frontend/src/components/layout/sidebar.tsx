@@ -59,6 +59,7 @@ import {
   Phone,
   Swords,
   BookTemplate,
+  Landmark,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -473,11 +474,29 @@ const navigationItems: NavItem[] = [
     href: '/estate',
     icon: Home,
     children: [
+      { title: 'Procedures', href: '/estate', icon: ClipboardList },
+      { title: 'Land Acquisition', href: '/estate/land-acquisition', icon: Landmark },
+      { title: 'Land Management', href: '/estate/land-management', icon: MapPin },
+      { title: 'Facilities', href: '/estate/facilities', icon: Building2 },
       { title: 'Properties', href: '/estate/properties', icon: Home },
       { title: 'Tenants', href: '/estate/tenants', icon: Users },
       { title: 'Leases', href: '/estate/leases', icon: FileText },
       { title: 'Maintenance', href: '/estate/maintenance', icon: Wrench },
       { title: 'Rent Collection', href: '/estate/rent-collection', icon: CreditCard },
+    ],
+  },
+  {
+    title: 'Legal',
+    href: '/legal',
+    icon: Gavel,
+    children: [
+      { title: 'Procedures', href: '/legal', icon: ClipboardList },
+      {
+        title: 'Workflow Setup',
+        href: '/administration/workflow?q=Legal',
+        icon: Workflow,
+        roles: ['admin', 'SystemAdmin', 'SuperAdmin', 'TenantAdmin', 'WorkflowAdmin'],
+      },
     ],
   },
   {
