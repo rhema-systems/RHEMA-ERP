@@ -2704,6 +2704,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<FinancePaymentMethod>(entity =>
         {
             entity.ToTable("PaymentMethod");
+            entity.HasIndex(e => e.TenantId);
+            // DB-level guard against duplicate codes within a tenant (codes are optional).
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasFilter("[Code] IS NOT NULL");
+        });
+
+        builder.Entity<Cheque>(entity =>
+        {
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => new { e.TenantId, e.BankAccountId, e.Status });
+            // A cheque number is unique within its bank account per tenant.
+            entity.HasIndex(e => new { e.TenantId, e.BankAccountId, e.ChequeNumber }).IsUnique();
         });
 
         builder.Entity<BankStatement>(entity =>

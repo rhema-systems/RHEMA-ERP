@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,9 +10,6 @@ using FinancePaymentMethod = ErpSystem.Core.Entities.Finance.PaymentMethod;
 
 namespace ErpSystem.Api.Controllers.Finance;
 
-// PaymentMethod inherits BaseEntity (no TenantId), so payment methods are a shared lookup
-// across tenants by data model. Tenant-scoping them requires an entity change plus a
-// migration/backfill decision tracked outside this controller.
 [ApiController]
 [Authorize]
 [Route("api/finance/payment-methods")]
@@ -21,7 +19,6 @@ public class PaymentMethodController : ControllerBase
     [
         new()
         {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000001"),
             Code = "CASH",
             Name = "Cash",
             Type = PaymentMethodType.Cash,
@@ -32,7 +29,6 @@ public class PaymentMethodController : ControllerBase
         },
         new()
         {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000002"),
             Code = "CHQ",
             Name = "Cheque",
             Type = PaymentMethodType.Cheque,
@@ -43,7 +39,6 @@ public class PaymentMethodController : ControllerBase
         },
         new()
         {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000003"),
             Code = "EFT",
             Name = "Electronic Funds Transfer",
             Type = PaymentMethodType.EFT,
@@ -54,7 +49,6 @@ public class PaymentMethodController : ControllerBase
         },
         new()
         {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000004"),
             Code = "MOMO",
             Name = "Mobile Money",
             Type = PaymentMethodType.MobileMoney,
@@ -65,7 +59,6 @@ public class PaymentMethodController : ControllerBase
         },
         new()
         {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000005"),
             Code = "BANK",
             Name = "Bank Transfer",
             Type = PaymentMethodType.BankTransfer,
@@ -85,14 +78,17 @@ public class PaymentMethodController : ControllerBase
         _currentUserService = currentUserService;
     }
 
+    private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<PaymentMethodDto>>> GetAll([FromQuery] bool? isActive = null)
     {
-        await EnsureDefaultPaymentMethodsAsync();
+        var tenantId = TenantId;
+        await EnsureDefaultPaymentMethodsAsync(tenantId);
 
         var query = _context.PaymentMethods
             .AsNoTracking()
-            .Where(method => !method.IsDeleted);
+            .Where(method => method.TenantId == tenantId && !method.IsDeleted);
 
         if (isActive.HasValue)
         {
@@ -115,8 +111,9 @@ public class PaymentMethodController : ControllerBase
             return BadRequest(new { message = "Payment method name is required." });
         }
 
+        var tenantId = TenantId;
         var code = NormalizeCode(dto.Code);
-        if (code != null && await CodeExistsAsync(code, excludeId: null))
+        if (code != null && await CodeExistsAsync(tenantId, code, excludeId: null))
         {
             return BadRequest(new { message = $"Payment method code '{code}' already exists." });
         }
@@ -124,6 +121,7 @@ public class PaymentMethodController : ControllerBase
         var method = new FinancePaymentMethod
         {
             Id = Guid.NewGuid(),
+            TenantId = tenantId,
             Name = dto.Name.Trim(),
             Code = code,
             Type = dto.Type,
@@ -145,8 +143,9 @@ public class PaymentMethodController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<PaymentMethodDto>> Update(Guid id, [FromBody] CreatePaymentMethodDto dto)
     {
+        var tenantId = TenantId;
         var method = await _context.PaymentMethods
-            .FirstOrDefaultAsync(item => item.Id == id && !item.IsDeleted);
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted);
         if (method == null)
         {
             return NotFound();
@@ -158,7 +157,7 @@ public class PaymentMethodController : ControllerBase
         }
 
         var code = NormalizeCode(dto.Code);
-        if (code != null && await CodeExistsAsync(code, excludeId: id))
+        if (code != null && await CodeExistsAsync(tenantId, code, excludeId: id))
         {
             return BadRequest(new { message = $"Payment method code '{code}' already exists." });
         }
@@ -177,20 +176,22 @@ public class PaymentMethodController : ControllerBase
         return Ok(ToDto(method));
     }
 
-    private Task<bool> CodeExistsAsync(string code, Guid? excludeId)
+    private Task<bool> CodeExistsAsync(Guid tenantId, string code, Guid? excludeId)
     {
         return _context.PaymentMethods
-            .AnyAsync(item => !item.IsDeleted &&
+            .AnyAsync(item => item.TenantId == tenantId &&
+                              !item.IsDeleted &&
                               item.Code == code &&
                               (excludeId == null || item.Id != excludeId.Value));
     }
 
-    private async Task EnsureDefaultPaymentMethodsAsync()
+    private async Task EnsureDefaultPaymentMethodsAsync(Guid tenantId)
     {
-        // Seed-on-first-read: two concurrent first requests can both observe an empty table.
-        // The fixed seed ids make the loser fail on the primary key instead of inserting
-        // duplicates, and that conflict is treated as "another request already seeded".
-        var hasAnyMethod = await _context.PaymentMethods.AnyAsync(method => !method.IsDeleted);
+        // Seed-on-first-read per tenant. Two concurrent first requests can both observe an
+        // empty set; the tenant-scoped unique code index makes the loser fail its insert,
+        // which is treated as "another request already seeded".
+        var hasAnyMethod = await _context.PaymentMethods
+            .AnyAsync(method => method.TenantId == tenantId && !method.IsDeleted);
         if (hasAnyMethod)
         {
             return;
@@ -198,7 +199,8 @@ public class PaymentMethodController : ControllerBase
 
         _context.PaymentMethods.AddRange(DefaultPaymentMethods.Select(method => new FinancePaymentMethod
         {
-            Id = method.Id,
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
             Code = method.Code,
             Name = method.Name,
             Type = method.Type,
