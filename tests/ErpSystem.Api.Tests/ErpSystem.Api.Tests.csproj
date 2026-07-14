@@ -32,6 +32,9 @@
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Finance\PaymentMethodControllerTests.cs" />
+    <Compile Include="Controllers\Finance\ChequesControllerTests.cs" />
+    <Compile Include="Controllers\Finance\BankStatementsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\BusinessPartnersControllerContactRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
@@ -67,6 +70,8 @@
     <Compile Include="Services\Finance\GhanaTaxReportingExportFoundationTests.cs" />
     <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
+    <Compile Include="Services\Finance\FiscalYearCloseTests.cs" />
+    <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
