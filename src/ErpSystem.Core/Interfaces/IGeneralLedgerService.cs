@@ -45,6 +45,7 @@ namespace ErpSystem.Core.Interfaces
         Task LockFiscalPeriodAsync(Guid fiscalPeriodId, string lockReason);
         Task UnlockFiscalPeriodAsync(Guid fiscalPeriodId, string unlockReason);
         Task<PeriodCloseResultDto> CloseFiscalYearAsync(YearEndCloseRequestDto request);
+        Task<PeriodCloseResultDto> ReopenFiscalYearAsync(Guid fiscalYearId, string reason);
         #endregion
     }
 }

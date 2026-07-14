@@ -48,6 +48,17 @@ import type { FinanceDashboardData } from '@/types/finance-dashboard';
 import { apiService } from '@/services/api.service';
 import { normalizeJournalEntry, normalizeJournalEntries } from '@/lib/finance/journal-entry-normalizer';
 
+// Mirrors the backend PeriodCloseResultDto returned by fiscal year close/reopen.
+export interface FiscalYearCloseResult {
+    success: boolean;
+    message: string;
+    fiscalPeriodId: string;
+    periodName: string;
+    closedDate?: string | null;
+    closedByUserName?: string | null;
+    errors: string[];
+}
+
 // =============================================================================
 // FINANCE DATA SERVICE
 // =============================================================================
@@ -192,7 +203,7 @@ class FinanceDataService {
         return apiService.post<FiscalYear>('/finance/fiscal-years', dto);
     }
 
-    async updateFiscalYear(id: string, dto: Partial<FiscalYear>): Promise<FiscalYear> {
+    async updateFiscalYear(id: string, dto: { fiscalYearName?: string; notes?: string }): Promise<FiscalYear> {
         return apiService.put<FiscalYear>(`/finance/fiscal-years/${id}`, dto);
     }
 
@@ -200,12 +211,16 @@ class FinanceDataService {
         return apiService.delete(`/finance/fiscal-years/${id}`);
     }
 
-    async closeFiscalYear(id: string): Promise<FiscalYear> {
-        return apiService.put<FiscalYear>(`/finance/fiscal-years/${id}/close`, {});
+    async closeFiscalYear(
+        id: string,
+        options?: { retainedEarningsAccountId?: string; closingNotes?: string }
+    ): Promise<FiscalYearCloseResult> {
+        // The retained earnings account defaults from Finance Settings when omitted.
+        return apiService.post<FiscalYearCloseResult>(`/finance/fiscal-years/${id}/close`, options ?? {});
     }
 
-    async reopenFiscalYear(id: string): Promise<FiscalYear> {
-        return apiService.put<FiscalYear>(`/finance/fiscal-years/${id}/reopen`, {});
+    async reopenFiscalYear(id: string, reason: string): Promise<FiscalYearCloseResult> {
+        return apiService.post<FiscalYearCloseResult>(`/finance/fiscal-years/${id}/reopen`, { reason });
     }
 
     // ===== FISCAL PERIODS =====

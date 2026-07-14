@@ -268,6 +268,25 @@ public sealed class FinanceConcurrencyHardeningTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void YearEndClose_ShouldPostThroughFinancePostingEngine()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "GL", "GeneralLedgerService.cs"));
+        var transferMethod = ExtractMember(source, "private async Task<(Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync", "#endregion");
+
+        transferMethod.Should().Contain("_financePostingEngine.PostAsync", "the year-end closing journal must post through the finance posting engine");
+        transferMethod.Should().NotContain("PostingStatus = \"Posted\"", "the closing journal must not be marked posted by direct GL writes");
+        transferMethod.Should().NotContain("_context.JournalEntries.Add", "the engine, not the GL service, owns closing journal creation");
+        transferMethod.Should().Contain("AllowPostingToClosedPeriod = true", "the closing entry posts into the year's closed final period via the explicit narrow exception");
+
+        var engineSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "GL", "FinancePostingEngine.cs"));
+        engineSource.Should().Contain("YearEndCloseReversal", "the closed-period exception must be limited to year-end close source types");
+        engineSource.Should().Contain("!fiscalPeriod.IsLocked", "locked periods must stay closed to year-end postings too");
+    }
+
     private static IReadOnlyList<string> ExtractTypeScriptDocumentTypeValues(string block)
     {
         var values = System.Text.RegularExpressions.Regex

@@ -733,8 +733,20 @@ WHERE [Id] = {delta.AccountId}
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, postingDate, request.FiscalPeriodId, cancellationToken);
         if (!fiscalPeriod.IsOpen || fiscalPeriod.IsClosed || fiscalPeriod.IsLocked)
         {
-            await RecordPostingBlockedByPeriodAuditAsync(tenantId, request, fiscalPeriod, postingDate, cancellationToken);
-            throw new InvalidOperationException("Posting period is not open.");
+            // Year-end closing entries are the one legitimate post into a closed (not locked)
+            // period: the close itself requires every period closed first. The exception is
+            // limited to the GL year-end source types so it cannot become a general bypass.
+            var isYearEndClosePosting = request.AllowPostingToClosedPeriod
+                && !fiscalPeriod.IsLocked
+                && string.Equals(request.SourceModule, "GL", StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(request.SourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(request.SourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));
+
+            if (!isYearEndClosePosting)
+            {
+                await RecordPostingBlockedByPeriodAuditAsync(tenantId, request, fiscalPeriod, postingDate, cancellationToken);
+                throw new InvalidOperationException("Posting period is not open.");
+            }
         }
 
         if (postingDate < fiscalPeriod.StartDate.Date || postingDate > fiscalPeriod.EndDate.Date)

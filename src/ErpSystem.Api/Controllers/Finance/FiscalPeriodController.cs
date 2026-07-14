@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,10 +20,17 @@ namespace ErpSystem.Api.Controllers.Finance
     public class FiscalPeriodController : ControllerBase
     {
         private readonly IFiscalPeriodService _fiscalPeriodService;
+        private readonly IGeneralLedgerService _generalLedgerService;
+        private readonly IFinanceSettingsService _financeSettingsService;
 
-        public FiscalPeriodController(IFiscalPeriodService fiscalPeriodService)
+        public FiscalPeriodController(
+            IFiscalPeriodService fiscalPeriodService,
+            IGeneralLedgerService generalLedgerService,
+            IFinanceSettingsService financeSettingsService)
         {
             _fiscalPeriodService = fiscalPeriodService;
+            _generalLedgerService = generalLedgerService;
+            _financeSettingsService = financeSettingsService;
         }
 
         #region Fiscal Years
@@ -161,6 +169,109 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 await _fiscalPeriodService.DeleteFiscalYearAsync(id);
                 return Ok(new { message = "Fiscal year deleted successfully" });
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+            catch (Exception ex) { return StatusCode(500, $"Internal server error: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Updates safe fiscal-year metadata (name/notes).
+        /// </summary>
+        /// <remarks>
+        /// Dates, period structure, and close state are intentionally excluded; those change
+        /// through dedicated create/close/reopen operations.
+        ///
+        /// **Authorization:** Requires Finance administration permission.
+        /// </remarks>
+        [HttpPut("fiscal-years/{id}")]
+        public async Task<ActionResult<FiscalYearDto>> UpdateFiscalYear(Guid id, [FromBody] UpdateFiscalYearDto dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                var year = await _fiscalPeriodService.UpdateFiscalYearAsync(id, dto);
+                return Ok(year);
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+            catch (Exception ex) { return StatusCode(500, $"Internal server error: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Performs the fiscal year-end close: zeroes revenue/expense accounts into retained
+        /// earnings and marks the year closed.
+        /// </summary>
+        /// <remarks>
+        /// **Business Rules:**
+        /// - All fiscal periods in the year must already be closed.
+        /// - The closing journal posts through the finance posting engine (posting event,
+        ///   idempotent re-run, account balance snapshots).
+        /// - The retained earnings account defaults from Finance Settings when not supplied.
+        ///
+        /// **Authorization:** Requires the close-accounting-periods permission.
+        /// </remarks>
+        /// <response code="200">Fiscal year closed; returns the close result.</response>
+        /// <response code="400">Open periods remain, or no retained earnings account is configured.</response>
+        /// <response code="404">Fiscal year not found.</response>
+        [HttpPost("fiscal-years/{id}/close")]
+        public async Task<ActionResult<PeriodCloseResultDto>> CloseFiscalYear(Guid id, [FromBody] CloseFiscalYearRequestDto? dto = null)
+        {
+            try
+            {
+                var retainedEarningsAccountId = dto?.RetainedEarningsAccountId;
+                if (retainedEarningsAccountId == null || retainedEarningsAccountId == Guid.Empty)
+                {
+                    var settings = await _financeSettingsService.GetSettingsAsync();
+                    retainedEarningsAccountId = settings.RetainedEarningsAccountId;
+                }
+
+                if (retainedEarningsAccountId == null || retainedEarningsAccountId == Guid.Empty)
+                {
+                    return BadRequest(new PeriodCloseResultDto
+                    {
+                        Success = false,
+                        Message = "No retained earnings account was supplied and none is configured in Finance Settings.",
+                        Errors = new List<string> { "Configure a retained earnings account in Finance Settings or pass retainedEarningsAccountId." }
+                    });
+                }
+
+                var result = await _generalLedgerService.CloseFiscalYearAsync(new YearEndCloseRequestDto
+                {
+                    FiscalYearId = id,
+                    RetainedEarningsAccountId = retainedEarningsAccountId.Value,
+                    ClosingNotes = dto?.ClosingNotes
+                });
+
+                return result.Success ? Ok(result) : BadRequest(result);
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+            catch (Exception ex) { return StatusCode(500, $"Internal server error: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Reopens a closed fiscal year by reversing its year-end closing entry.
+        /// </summary>
+        /// <remarks>
+        /// **Business Rules:**
+        /// - A reason is mandatory and is appended to the year's closing notes for audit.
+        /// - The closing journal is reversed through the finance posting engine.
+        ///
+        /// **Authorization:** Requires the reopen-accounting-periods permission.
+        /// </remarks>
+        [HttpPost("fiscal-years/{id}/reopen")]
+        public async Task<ActionResult<PeriodCloseResultDto>> ReopenFiscalYear(Guid id, [FromBody] FiscalYearReopenRequestDto dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                var result = await _generalLedgerService.ReopenFiscalYearAsync(id, dto.Reason);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
             catch (ArgumentException ex) { return NotFound(ex.Message); }
             catch (InvalidOperationException ex) { return BadRequest(ex.Message); }

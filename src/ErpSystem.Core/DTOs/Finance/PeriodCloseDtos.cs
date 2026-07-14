@@ -113,11 +113,46 @@ namespace ErpSystem.Core.DTOs.Finance
     {
         [Required]
         public Guid FiscalYearId { get; set; }
-        
+
         [Required]
         public Guid RetainedEarningsAccountId { get; set; }
-        
+
         [MaxLength(2000)]
         public string? ClosingNotes { get; set; }
+    }
+
+    /// <summary>
+    /// API request body for closing a fiscal year. The retained earnings account is optional
+    /// here because the controller defaults it from Finance Settings when not supplied.
+    /// </summary>
+    public class CloseFiscalYearRequestDto
+    {
+        public Guid? RetainedEarningsAccountId { get; set; }
+
+        [MaxLength(2000)]
+        public string? ClosingNotes { get; set; }
+    }
+
+    /// <summary>
+    /// API request body for reopening a closed fiscal year.
+    /// </summary>
+    public class FiscalYearReopenRequestDto
+    {
+        [Required]
+        [MaxLength(1000)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// API request body for updating safe fiscal-year metadata. Dates, period structure, and
+    /// close state are intentionally excluded; those change through dedicated operations.
+    /// </summary>
+    public class UpdateFiscalYearDto
+    {
+        [MaxLength(100)]
+        public string? FiscalYearName { get; set; }
+
+        [MaxLength(2000)]
+        public string? Notes { get; set; }
     }
 }

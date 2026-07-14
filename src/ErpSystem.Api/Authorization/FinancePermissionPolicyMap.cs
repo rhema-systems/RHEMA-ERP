@@ -322,8 +322,8 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> FiscalPeriodPolicy(string action)
         => action switch
         {
-            "ClosePeriod" or "LockPeriodForModule" => One(FinancePermissions.CloseAccountingPeriods),
-            "ReopenPeriod" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
+            "ClosePeriod" or "CloseFiscalYear" or "LockPeriodForModule" => One(FinancePermissions.CloseAccountingPeriods),
+            "ReopenPeriod" or "ReopenFiscalYear" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.AdministerFinance)
         };
 

@@ -34,6 +34,11 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// </summary>
         Task DeleteFiscalYearAsync(Guid id, CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Updates safe fiscal-year metadata (name/notes). Close state and dates are excluded.
+        /// </summary>
+        Task<FiscalYearDto> UpdateFiscalYearAsync(Guid id, UpdateFiscalYearDto dto, CancellationToken cancellationToken = default);
+
         // Fiscal Period Operations
         
         /// <summary>

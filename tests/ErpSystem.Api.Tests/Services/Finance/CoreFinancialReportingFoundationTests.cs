@@ -286,7 +286,8 @@ public sealed class CoreFinancialReportingFoundationTests
             tenantSettings.Object,
             Mock.Of<IFiscalPeriodService>(),
             Mock.Of<IDocumentNumberingService>(),
-            Mock.Of<IAccountingBookService>());
+            Mock.Of<IAccountingBookService>(),
+            Mock.Of<IFinancePostingEngine>());
     }
 
     private static ApReportsService CreateApReportsService(ApplicationDbContext db, Guid tenantId)

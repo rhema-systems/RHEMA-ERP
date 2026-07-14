@@ -20,6 +20,14 @@ public sealed class FinancePostingRequestDto
     public string FunctionalCurrencyCode { get; set; } = "GHS";
     public string? IdempotencyKey { get; set; }
     public bool ReturnExistingOnDuplicate { get; set; } = true;
+
+    /// <summary>
+    /// Year-end closing entries must post into the year's final period after every period is
+    /// closed, so the engine's open-period gate cannot apply. Honored only for the GL
+    /// year-end close/reversal source document types; all other requests are still rejected.
+    /// </summary>
+    public bool AllowPostingToClosedPeriod { get; set; }
+
     public IReadOnlyList<FinancePostingLineDto> Lines { get; set; } = Array.Empty<FinancePostingLineDto>();
     public IReadOnlyList<FinanceTaxCalculationSnapshotDto> TaxCalculationSnapshots { get; set; } = Array.Empty<FinanceTaxCalculationSnapshotDto>();
 }

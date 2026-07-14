@@ -12,7 +12,8 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Calendar, Plus, ChevronDown, ChevronRight, Lock, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import { FiscalYear, FiscalPeriod, PeriodType, CreateFiscalYearDto } from '@/types/finance';
+import { Account, FiscalYear, FiscalPeriod, PeriodType, CreateFiscalYearDto } from '@/types/finance';
+import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export default function FiscalYearsPage() {
@@ -28,10 +29,28 @@ export default function FiscalYearsPage() {
         endDate: '',
         periodType: 'Monthly' as keyof typeof PeriodType,
     });
+    const [equityAccounts, setEquityAccounts] = useState<Account[]>([]);
+    // Only one close/reopen dialog is open at a time, so shared selection state is safe.
+    const [retainedEarningsAccountId, setRetainedEarningsAccountId] = useState<string>('default');
+    const [closingNotes, setClosingNotes] = useState('');
+    const [reopenReason, setReopenReason] = useState('');
+    const [isClosingYear, setIsClosingYear] = useState(false);
+    const [isReopeningYear, setIsReopeningYear] = useState(false);
 
     useEffect(() => {
         loadData();
+        loadEquityAccounts();
     }, []);
+
+    const loadEquityAccounts = async () => {
+        try {
+            const accounts = await financeDataService.getAccounts({ accountType: 'Equity' });
+            setEquityAccounts(accounts);
+        } catch (error: any) {
+            // The close dialog falls back to the Finance Settings default account.
+            console.error('Failed to load equity accounts:', error?.message || error);
+        }
+    };
 
     const loadData = async () => {
         try {
@@ -147,20 +166,63 @@ export default function FiscalYearsPage() {
     };
 
     const handleCloseYear = async (yearId: string) => {
+        setIsClosingYear(true);
         try {
-            await financeDataService.closeFiscalYear(yearId);
+            const result = await financeDataService.closeFiscalYear(yearId, {
+                retainedEarningsAccountId: retainedEarningsAccountId === 'default' ? undefined : retainedEarningsAccountId,
+                closingNotes: closingNotes.trim() || undefined,
+            });
             toast({
                 title: 'Success',
-                description: 'Fiscal year closed successfully.',
+                description: result.message || 'Fiscal year closed successfully.',
             });
+            setClosingNotes('');
+            setRetainedEarningsAccountId('default');
             loadData();
         } catch (error: any) {
             console.error('Failed to close fiscal year:', error?.message || error);
+            // The backend returns per-period errors (e.g. open periods) in `errors`.
+            const detailErrors: string[] = error?.response?.data?.errors ?? error?.errors ?? [];
             toast({
                 title: 'Error',
-                description: error?.message || 'Failed to close fiscal year.',
+                description: detailErrors.length > 0
+                    ? detailErrors.join(' ')
+                    : (error?.message || 'Failed to close fiscal year.'),
                 variant: 'destructive',
             });
+        } finally {
+            setIsClosingYear(false);
+        }
+    };
+
+    const handleReopenYear = async (yearId: string) => {
+        if (!reopenReason.trim()) {
+            toast({
+                title: 'Validation Error',
+                description: 'A reason is required to reopen a fiscal year.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        setIsReopeningYear(true);
+        try {
+            const result = await financeDataService.reopenFiscalYear(yearId, reopenReason.trim());
+            toast({
+                title: 'Success',
+                description: result.message || 'Fiscal year reopened. The closing entry was reversed.',
+            });
+            setReopenReason('');
+            loadData();
+        } catch (error: any) {
+            console.error('Failed to reopen fiscal year:', error?.message || error);
+            toast({
+                title: 'Error',
+                description: error?.message || 'Failed to reopen fiscal year.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsReopeningYear(false);
         }
     };
 
@@ -385,23 +447,90 @@ export default function FiscalYearsPage() {
                                                         <DialogHeader>
                                                             <DialogTitle>Close Fiscal Year {year.year}?</DialogTitle>
                                                             <DialogDescription>
-                                                                This will close the fiscal year and all its periods. This action can be reversed.
+                                                                Revenue and expense balances are transferred to retained earnings and the year is marked closed. This action can be reversed.
                                                             </DialogDescription>
                                                         </DialogHeader>
-                                                        <div className="py-4">
-                                                            <p className="text-sm text-muted-foreground">
-                                                                Before closing the year, ensure:
-                                                            </p>
-                                                            <ul className="list-disc list-inside space-y-1 mt-2 text-sm">
-                                                                <li>All journal entries are posted</li>
-                                                                <li>All periods are closed</li>
-                                                                <li>Year-end adjustments are complete</li>
-                                                            </ul>
+                                                        <div className="space-y-4 py-4">
+                                                            <div>
+                                                                <p className="text-sm text-muted-foreground">
+                                                                    Before closing the year, ensure:
+                                                                </p>
+                                                                <ul className="list-disc list-inside space-y-1 mt-2 text-sm">
+                                                                    <li>All journal entries are posted</li>
+                                                                    <li>All periods are closed</li>
+                                                                    <li>Year-end adjustments are complete</li>
+                                                                </ul>
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                <Label htmlFor={`re-account-${year.id}`}>Retained Earnings Account</Label>
+                                                                <Select
+                                                                    value={retainedEarningsAccountId}
+                                                                    onValueChange={setRetainedEarningsAccountId}
+                                                                >
+                                                                    <SelectTrigger id={`re-account-${year.id}`}>
+                                                                        <SelectValue placeholder="Use Finance Settings default" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="default">Use Finance Settings default</SelectItem>
+                                                                        {equityAccounts.map((account) => (
+                                                                            <SelectItem key={account.id} value={account.id}>
+                                                                                {account.accountCode} - {account.accountName}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    Defaults to the retained earnings account configured in Finance Settings.
+                                                                </p>
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                <Label htmlFor={`closing-notes-${year.id}`}>Closing Notes (optional)</Label>
+                                                                <Textarea
+                                                                    id={`closing-notes-${year.id}`}
+                                                                    value={closingNotes}
+                                                                    onChange={(e) => setClosingNotes(e.target.value)}
+                                                                    placeholder="Year-end adjustments summary, sign-off references..."
+                                                                    rows={3}
+                                                                />
+                                                            </div>
                                                         </div>
                                                         <DialogFooter>
                                                             <Button variant="outline">Cancel</Button>
-                                                            <Button onClick={() => handleCloseYear(year.id)}>
-                                                                Close Fiscal Year
+                                                            <Button onClick={() => handleCloseYear(year.id)} disabled={isClosingYear}>
+                                                                {isClosingYear ? 'Closing...' : 'Close Fiscal Year'}
+                                                            </Button>
+                                                        </DialogFooter>
+                                                    </DialogContent>
+                                                </Dialog>
+                                            )}
+                                            {year.isClosed && (
+                                                <Dialog>
+                                                    <DialogTrigger asChild>
+                                                        <Button variant="outline" size="sm">
+                                                            Reopen Year
+                                                        </Button>
+                                                    </DialogTrigger>
+                                                    <DialogContent>
+                                                        <DialogHeader>
+                                                            <DialogTitle>Reopen Fiscal Year {year.year}?</DialogTitle>
+                                                            <DialogDescription>
+                                                                The year-end closing entry is reversed through the posting engine and the year is marked open again. A reason is required for the audit trail.
+                                                            </DialogDescription>
+                                                        </DialogHeader>
+                                                        <div className="space-y-2 py-4">
+                                                            <Label htmlFor={`reopen-reason-${year.id}`}>Reason</Label>
+                                                            <Textarea
+                                                                id={`reopen-reason-${year.id}`}
+                                                                value={reopenReason}
+                                                                onChange={(e) => setReopenReason(e.target.value)}
+                                                                placeholder="Why is this fiscal year being reopened?"
+                                                                rows={3}
+                                                            />
+                                                        </div>
+                                                        <DialogFooter>
+                                                            <Button variant="outline">Cancel</Button>
+                                                            <Button onClick={() => handleReopenYear(year.id)} disabled={isReopeningYear}>
+                                                                {isReopeningYear ? 'Reopening...' : 'Reopen Fiscal Year'}
                                                             </Button>
                                                         </DialogFooter>
                                                     </DialogContent>

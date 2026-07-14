@@ -25,6 +25,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IFiscalPeriodService _fiscalPeriodService;
         private readonly IDocumentNumberingService _documentNumberingService;
         private readonly IAccountingBookService _accountingBookService;
+        private readonly IFinancePostingEngine _financePostingEngine;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -33,7 +34,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             ITenantSettingsService tenantSettings,
             IFiscalPeriodService fiscalPeriodService,
             IDocumentNumberingService documentNumberingService,
-            IAccountingBookService accountingBookService)
+            IAccountingBookService accountingBookService,
+            IFinancePostingEngine financePostingEngine)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -42,6 +44,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _fiscalPeriodService = fiscalPeriodService;
             _documentNumberingService = documentNumberingService;
             _accountingBookService = accountingBookService;
+            _financePostingEngine = financePostingEngine;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -2223,6 +2226,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (fiscalYear == null)
                 throw new ArgumentException($"Fiscal year {request.FiscalYearId} not found");
 
+            if (fiscalYear.IsClosed)
+            {
+                return new PeriodCloseResultDto
+                {
+                    Success = false,
+                    Message = $"Fiscal year '{fiscalYear.FiscalYearName}' is already closed.",
+                    Errors = new List<string> { "Reopen the fiscal year before closing it again." }
+                };
+            }
+
             // Validate all periods are closed
             var openPeriods = fiscalYear.FiscalPeriods.Where(p => !p.IsClosed).ToList();
             if (openPeriods.Any())
@@ -2235,8 +2248,11 @@ namespace ErpSystem.Api.Services.Finance.GL
                 };
             }
 
-            // Transfer retained earnings
-            var closingEntry = await TransferRetainedEarningsAsync(request.FiscalYearId, request.RetainedEarningsAccountId);
+            // Keep the closing journal posting and the fiscal-year state flip in one commit so a
+            // failure between them cannot leave a posted closing entry on an open year.
+            await using var dbTransaction = await _context.Database.BeginTransactionAsync();
+
+            var (closingJournalEntryId, netIncome) = await TransferRetainedEarningsAsync(fiscalYear, request.RetainedEarningsAccountId);
 
             // Update fiscal year
             fiscalYear.IsClosed = true;
@@ -2246,11 +2262,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             fiscalYear.ClosedByUserId = Guid.Parse(userId);
             fiscalYear.RetainedEarningsTransferComplete = true;
             fiscalYear.RetainedEarningsTransferDate = DateTime.UtcNow;
-            fiscalYear.ClosingJournalEntryId = closingEntry.Id;
-            fiscalYear.NetIncomeTransferred = closingEntry.Transactions.Sum(t => t.CreditAmount - t.DebitAmount);
+            fiscalYear.ClosingJournalEntryId = closingJournalEntryId;
+            fiscalYear.NetIncomeTransferred = netIncome;
             fiscalYear.YearEndClosingNotes = request.ClosingNotes;
 
             await _context.SaveChangesAsync();
+            await dbTransaction.CommitAsync();
 
             return new PeriodCloseResultDto
             {
@@ -2262,8 +2279,11 @@ namespace ErpSystem.Api.Services.Finance.GL
             };
         }
 
-        private async Task<JournalEntry> TransferRetainedEarningsAsync(Guid fiscalYearId, Guid retainedEarningsAccountId)
+        public async Task<PeriodCloseResultDto> ReopenFiscalYearAsync(Guid fiscalYearId, string reason)
         {
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("A reason is required to reopen a fiscal year.");
+
             var tenantId = TenantId;
             var userId = _currentUserService.UserId;
             if (userId == null)
@@ -2271,10 +2291,92 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var fiscalYear = await _context.FiscalYears
                 .Include(fy => fy.FiscalPeriods)
-                .FirstOrDefaultAsync(fy => fy.TenantId == tenantId && fy.Id == fiscalYearId);
+                .FirstOrDefaultAsync(fy => fy.Id == fiscalYearId && fy.TenantId == tenantId);
 
             if (fiscalYear == null)
                 throw new ArgumentException($"Fiscal year {fiscalYearId} not found");
+
+            if (!fiscalYear.IsClosed)
+                throw new InvalidOperationException($"Fiscal year '{fiscalYear.FiscalYearName}' is not closed.");
+
+            await using var dbTransaction = await _context.Database.BeginTransactionAsync();
+
+            // Reverse the closing entry through the posting engine so account balance
+            // snapshots and posting-event back-references stay correct.
+            if (fiscalYear.ClosingJournalEntryId.HasValue)
+            {
+                var closingEntry = await _context.JournalEntries
+                    .Include(je => je.Transactions)
+                    .FirstOrDefaultAsync(je => je.Id == fiscalYear.ClosingJournalEntryId.Value && je.TenantId == tenantId);
+
+                if (closingEntry == null)
+                    throw new InvalidOperationException("The fiscal year's closing journal entry could not be found.");
+
+                var reversalRequest = new FinancePostingRequestDto
+                {
+                    SourceModule = "GL",
+                    SourceDocumentType = "YearEndCloseReversal",
+                    SourceDocumentId = fiscalYear.Id,
+                    SourceDocumentTenantId = tenantId,
+                    ReversalOfJournalEntryId = closingEntry.Id,
+                    ReversalReason = reason.Trim(),
+                    ReversalType = "Manual",
+                    PostingAction = "Reverse",
+                    SourceDocumentReference = fiscalYear.FiscalYearCode,
+                    Description = $"Reopen fiscal year - reversal of year-end close for {fiscalYear.FiscalYearName}",
+                    PostingDate = closingEntry.EntryDate,
+                    FiscalPeriodId = closingEntry.FiscalPeriodId,
+                    JournalType = "Year-End Close Reversal",
+                    FunctionalCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
+                    IdempotencyKey = $"GL:YearEndCloseReversal:{tenantId:N}:{fiscalYear.Id:N}:{closingEntry.Id:N}",
+                    AllowPostingToClosedPeriod = true,
+                    Lines = closingEntry.Transactions
+                        .Where(t => !t.IsDeleted)
+                        .Select(t => new FinancePostingLineDto
+                        {
+                            AccountId = t.AccountId,
+                            Description = $"Reversal: {t.Description}",
+                            DebitAmount = t.CreditAmount,
+                            CreditAmount = t.DebitAmount,
+                            Notes = reason.Trim(),
+                            TransactionTag = "YearEndCloseReversal"
+                        })
+                        .ToList()
+                };
+
+                await _financePostingEngine.PostAsync(reversalRequest);
+            }
+
+            fiscalYear.IsClosed = false;
+            fiscalYear.IsActive = true;
+            fiscalYear.Status = "Open";
+            fiscalYear.ClosedDate = null;
+            fiscalYear.ClosedByUserId = null;
+            fiscalYear.RetainedEarningsTransferComplete = false;
+            fiscalYear.RetainedEarningsTransferDate = null;
+            fiscalYear.ClosingJournalEntryId = null;
+            fiscalYear.NetIncomeTransferred = 0m;
+            fiscalYear.YearEndClosingNotes = string.IsNullOrWhiteSpace(fiscalYear.YearEndClosingNotes)
+                ? $"Reopened {DateTime.UtcNow:u}: {reason.Trim()}"
+                : $"{fiscalYear.YearEndClosingNotes}\nReopened {DateTime.UtcNow:u}: {reason.Trim()}";
+
+            await _context.SaveChangesAsync();
+            await dbTransaction.CommitAsync();
+
+            return new PeriodCloseResultDto
+            {
+                Success = true,
+                Message = $"Fiscal year '{fiscalYear.FiscalYearName}' reopened. The year-end closing entry was reversed.",
+                FiscalPeriodId = fiscalYear.Id,
+                PeriodName = fiscalYear.FiscalYearName
+            };
+        }
+
+        private async Task<(Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(
+            FiscalYear fiscalYear,
+            Guid retainedEarningsAccountId)
+        {
+            var tenantId = TenantId;
 
             var retainedEarningsAccountExists = await _context.Accounts
                 .AnyAsync(a => a.TenantId == tenantId && a.Id == retainedEarningsAccountId && !a.IsDeleted);
@@ -2306,84 +2408,62 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             decimal netIncome = accountBalances.Sum(b => b.Balance);
 
-            // Get last period of fiscal year for posting
+            // A year with no revenue/expense activity closes without a closing journal.
+            if (accountBalances.Count == 0)
+            {
+                return (null, 0m);
+            }
+
             var lastPeriod = fiscalYear.FiscalPeriods.OrderByDescending(p => p.EndDate).First();
 
-            // Create closing journal entry
-            var journalEntry = new JournalEntry
+            // Zero each account against its actual net balance rather than by account type so
+            // contra balances (e.g. negative revenue) never produce negative posting amounts.
+            var lines = new List<FinancePostingLineDto>();
+            foreach (var acctBalance in accountBalances)
             {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
-                    DocumentNumberingModules.Finance,
-                    FinanceDocumentTypes.YearEndClose,
-                    tenantId,
-                    fiscalYear.EndDate,
-                    nameof(JournalEntry)),
-                Description = $"Year-end close - Transfer to Retained Earnings for {fiscalYear.FiscalYearName}",
-                EntryDate = fiscalYear.EndDate,
-                PostingDate = DateTime.UtcNow,
-                FiscalPeriodId = lastPeriod.Id,
-                PostingStatus = "Posted"
-            };
-
-            var transactions = new List<AccountTransaction>();
-
-            // Close revenue accounts (debit to zero them out)
-            foreach (var acctBalance in accountBalances.Where(b => b.Account.AccountType == AccountType.Revenue))
-            {
-                transactions.Add(new AccountTransaction
+                lines.Add(new FinancePostingLineDto
                 {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    JournalEntryId = journalEntry.Id,
                     AccountId = acctBalance.AccountId,
-                    FiscalPeriodId = lastPeriod.Id,
-                    TransactionDate = fiscalYear.EndDate,
-                    Description = "Year-end close - Revenue account",
-                    DebitAmount = acctBalance.Balance, // Debit to close
-                    CreditAmount = 0
+                    Description = acctBalance.Account.AccountType == AccountType.Revenue
+                        ? "Year-end close - Revenue account"
+                        : "Year-end close - Expense account",
+                    DebitAmount = acctBalance.Balance > 0 ? acctBalance.Balance : 0m,
+                    CreditAmount = acctBalance.Balance < 0 ? Math.Abs(acctBalance.Balance) : 0m,
+                    TransactionTag = "YearEndClose"
                 });
             }
 
-            // Close expense accounts (credit to zero them out)
-            foreach (var acctBalance in accountBalances.Where(b => b.Account.AccountType == AccountType.Expense))
+            lines.Add(new FinancePostingLineDto
             {
-                transactions.Add(new AccountTransaction
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    JournalEntryId = journalEntry.Id,
-                    AccountId = acctBalance.AccountId,
-                    FiscalPeriodId = lastPeriod.Id,
-                    TransactionDate = fiscalYear.EndDate,
-                    Description = "Year-end close - Expense account",
-                    DebitAmount = 0,
-                    CreditAmount = Math.Abs(acctBalance.Balance) // Credit to close (balance is negative)
-                });
-            }
-
-            // Transfer to retained earnings
-            transactions.Add(new AccountTransaction
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                JournalEntryId = journalEntry.Id,
                 AccountId = retainedEarningsAccountId,
-                FiscalPeriodId = lastPeriod.Id,
-                TransactionDate = fiscalYear.EndDate,
                 Description = $"Year-end close - Net Income transfer: {netIncome:N2}",
-                DebitAmount = netIncome < 0 ? Math.Abs(netIncome) : 0, // Net loss = debit
-                CreditAmount = netIncome > 0 ? netIncome : 0 // Net income = credit
+                DebitAmount = netIncome < 0 ? Math.Abs(netIncome) : 0m, // Net loss = debit
+                CreditAmount = netIncome > 0 ? netIncome : 0m, // Net income = credit
+                TransactionTag = "YearEndClose"
             });
 
-            journalEntry.Transactions = transactions;
+            // Post through the finance posting engine so the closing entry gets a posting
+            // event, idempotency protection, and correct Account.Balance snapshot movements.
+            var postingRequest = new FinancePostingRequestDto
+            {
+                SourceModule = "GL",
+                SourceDocumentType = "YearEndClose",
+                SourceDocumentId = fiscalYear.Id,
+                SourceDocumentTenantId = tenantId,
+                SourceDocumentReference = fiscalYear.FiscalYearCode,
+                Description = $"Year-end close - Transfer to Retained Earnings for {fiscalYear.FiscalYearName}",
+                PostingDate = fiscalYear.EndDate.Date,
+                FiscalPeriodId = lastPeriod.Id,
+                JournalType = "Year-End Close",
+                FunctionalCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
+                IdempotencyKey = $"GL:YearEndClose:{tenantId:N}:{fiscalYear.Id:N}",
+                AllowPostingToClosedPeriod = true,
+                Lines = lines
+            };
 
-            _context.JournalEntries.Add(journalEntry);
-            _context.AccountTransactions.AddRange(transactions);
-            await _context.SaveChangesAsync();
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest);
 
-            return journalEntry;
+            return (postingResult.JournalEntryId, netIncome);
         }
 
         #endregion

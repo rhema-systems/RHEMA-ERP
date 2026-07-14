@@ -219,6 +219,33 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             _logger.LogInformation("Fiscal year {Code} deleted by {User}", fiscalYear.FiscalYearCode, UserName);
         }
 
+        public async Task<FiscalYearDto> UpdateFiscalYearAsync(Guid id, UpdateFiscalYearDto dto, CancellationToken cancellationToken = default)
+        {
+            var fiscalYear = await _unitOfWork.Repository<FiscalYear>()
+                .GetQueryable(fy => fy.TenantId == TenantId && fy.Id == id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (fiscalYear == null)
+                throw new ArgumentException($"Fiscal year with ID {id} not found");
+
+            if (fiscalYear.IsClosed)
+                throw new InvalidOperationException("Cannot update a closed fiscal year. Reopen it first.");
+
+            if (!string.IsNullOrWhiteSpace(dto.FiscalYearName))
+                fiscalYear.FiscalYearName = dto.FiscalYearName.Trim();
+
+            if (dto.Notes != null)
+                fiscalYear.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+
+            fiscalYear.UpdatedAt = DateTime.UtcNow;
+            fiscalYear.UpdatedBy = UserName;
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Fiscal year {Code} updated by {User}", fiscalYear.FiscalYearCode, UserName);
+            return MapFiscalYearToDto(fiscalYear);
+        }
+
         public async Task<IReadOnlyList<FiscalPeriodDto>> GetFiscalPeriodsAsync(
             Guid? fiscalYearId = null,
             string? status = null,
