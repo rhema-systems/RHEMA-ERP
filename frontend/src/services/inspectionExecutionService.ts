@@ -291,7 +291,9 @@ class InspectionExecutionService {
   async completeInspection(request: CompleteInspectionRequest): Promise<InspectionExecution> {
     try {
       if (this.useBackend) {
-        const response = await apiService.post('/api/inspections/complete', request);
+        // apiService already prefixes '/api'; the previous '/api/inspections/...' path produced
+        // '/api/api/inspections/complete' and silently fell back to mock data.
+        const response = await apiService.post('/inspections/complete', request);
         return response.data;
       }
     } catch (error) {
@@ -329,7 +331,8 @@ class InspectionExecutionService {
   async getInspectionsByWorkOrder(workOrderId: string): Promise<InspectionExecution[]> {
     try {
       if (this.useBackend) {
-        const response = await apiService.get(`/api/inspections/work-order/${workOrderId}`);
+        // apiService already prefixes '/api' (see completeInspection above).
+        const response = await apiService.get(`/inspections/work-order/${workOrderId}`);
         return response.data;
       }
     } catch (error) {
