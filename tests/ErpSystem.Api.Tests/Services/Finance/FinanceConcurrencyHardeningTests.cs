@@ -275,6 +275,28 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
+    public void CurrentArInvoiceMigration_ShouldRepairExistingLegacyCustomerIdTables()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260710100000_EnsureCurrentArInvoiceTables.cs"));
+
+        var createMissingTableIndex = source.IndexOf("IF OBJECT_ID(N'[dbo].[Invoices]', N'U') IS NULL", StringComparison.Ordinal);
+        var repairExistingTableIndex = source.IndexOf("IF COL_LENGTH(N'[dbo].[Invoices]', N'BusinessPartnerId') IS NULL", StringComparison.Ordinal);
+
+        createMissingTableIndex.Should().BeGreaterThan(-1, "the migration must still create the current AR table for clean schemas");
+        repairExistingTableIndex.Should().BeGreaterThan(createMissingTableIndex, "upgraded databases with an existing Invoices table still need BusinessPartnerId repair");
+        source.Should().Contain("ALTER TABLE [dbo].[Invoices] ADD [BusinessPartnerId] uniqueidentifier NULL", "older Invoices tables must get the current AR customer FK");
+        source.Should().Contain("INNER JOIN [dbo].[Customers] c", "legacy CustomerId rows must be mapped from the older customer table when present");
+        source.Should().Contain("LEFT(CONCAT(N'AR-CUST-', CONVERT(nvarchar(36), c.[Id])), 50)", "legacy customer partner codes must not collide with existing supplier/contractor partner codes");
+        source.Should().Contain("FK_Invoices_BusinessPartners_BusinessPartnerId", "the current AR model requires the BusinessPartner FK");
+        source.Should().Contain("CREATE INDEX [IX_Invoices_BusinessPartnerId]", "the current AR model requires the BusinessPartner lookup index");
+        source.Should().Contain("ALTER TABLE [dbo].[Invoices] ALTER COLUMN [BusinessPartnerId] uniqueidentifier NOT NULL", "BusinessPartnerId should be enforced after the backfill succeeds");
+        source.Should().Contain("THROW 51000", "the migration must fail loudly instead of leaving unmapped legacy AR rows");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
     public void YearEndClose_ShouldPostThroughFinancePostingEngine()
     {
         var root = FindRepositoryRoot();

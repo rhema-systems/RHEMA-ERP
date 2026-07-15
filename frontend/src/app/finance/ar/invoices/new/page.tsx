@@ -195,6 +195,19 @@ export default function NewInvoicePage() {
         name: 'lineItems',
     });
 
+    const watchIsOpeningBalance = form.watch('isOpeningBalance');
+
+    useEffect(() => {
+        if (!watchIsOpeningBalance) return;
+
+        // Opening invoices bring forward gross AR balances only; tax history is not reposted
+        // through the migration clearing entry created by the posting service.
+        form.setValue('taxGroupId', 'none');
+        form.getValues('lineItems').forEach((_, index) => {
+            form.setValue(`lineItems.${index}.taxGroupId`, 'none');
+        });
+    }, [form, watchIsOpeningBalance]);
+
     // Calculate totals
     const watchLineItems = form.watch('lineItems');
     const subtotal = watchLineItems.reduce((acc, item) => {
@@ -210,6 +223,14 @@ export default function NewInvoicePage() {
     const documentDiscount = Math.min(Number(form.watch('discountAmount')) || 0, subtotal);
 
     const getTaxBreakdown = () => {
+        if (watchIsOpeningBalance) {
+            return {
+                totalTaxAmount: 0,
+                grandTotal: Math.max(0, subtotal - documentDiscount),
+                taxList: []
+            };
+        }
+
         let totalTaxAmount = 0;
         const breakdowns: { [taxCode: string]: { name: string; rate: number; amount: number } } = {};
 
@@ -346,15 +367,16 @@ export default function NewInvoicePage() {
     const onSubmit = async (data: InvoiceFormValues) => {
         setIsSubmitting(true);
         try {
+            const isOpeningBalance = data.isOpeningBalance;
             await arService.createInvoice({
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
-                taxGroupId: data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
+                taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
                 paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
                 discountAmount: Number(data.discountAmount) || 0,
-                isOpeningBalance: data.isOpeningBalance,
+                isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
                     lineItemType: item.lineItemType,
                     productId: item.productId,
@@ -363,7 +385,7 @@ export default function NewInvoicePage() {
                     quantity: Number(item.quantity),
                     unitPrice: Number(item.unitPrice),
                     discountPercentage: Number(item.discountPercentage),
-                    taxGroupId: item.taxGroupId === 'none' ? null : (item.taxGroupId || null)
+                    taxGroupId: isOpeningBalance || item.taxGroupId === 'none' ? null : (item.taxGroupId || null)
                 }))
             });
 
@@ -647,8 +669,8 @@ export default function NewInvoicePage() {
                                 control={form.control}
                                 name="taxGroupId"
                                 render={({ field }) => (
-                                    <Select value={field.value || ''} onValueChange={field.onChange}>
-                                        <SelectTrigger>
+                                    <Select value={watchIsOpeningBalance ? 'none' : (field.value || 'none')} onValueChange={field.onChange} disabled={watchIsOpeningBalance}>
+                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
                                             <SelectValue placeholder="No Tax (Zero/Exempt)" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -660,7 +682,11 @@ export default function NewInvoicePage() {
                                     </Select>
                                 )}
                             />
-                            <span className="text-[11px] text-muted-foreground block mt-1">Optional. Pre-populates new lines; can be overridden on each line.</span>
+                            <span className="text-[11px] text-muted-foreground block mt-1">
+                                {watchIsOpeningBalance
+                                    ? 'Disabled for opening balances; opening invoices carry no tax reposting.'
+                                    : 'Optional. Pre-populates new lines; can be overridden on each line.'}
+                            </span>
                         </div>
 
                         <div className="space-y-2">
@@ -741,7 +767,7 @@ export default function NewInvoicePage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0 })}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: watchIsOpeningBalance ? 'none' : undefined })}>
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </CardHeader>
@@ -884,10 +910,11 @@ export default function NewInvoicePage() {
                                                 name={`lineItems.${index}.taxGroupId`}
                                                 render={({ field }) => (
                                                     <Select 
-                                                        value={field.value || 'inherit'} 
+                                                        value={watchIsOpeningBalance ? 'none' : (field.value || 'inherit')}
                                                         onValueChange={(val) => field.onChange(val === 'inherit' ? '' : val)}
+                                                        disabled={watchIsOpeningBalance}
                                                     >
-                                                        <SelectTrigger>
+                                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
                                                             <SelectValue placeholder="Inherit Default" />
                                                         </SelectTrigger>
                                                         <SelectContent>

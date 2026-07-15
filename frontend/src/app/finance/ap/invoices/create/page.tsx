@@ -220,9 +220,22 @@ export default function CreateVendorInvoicePage() {
 
     // Totals and dynamic tax calculation previews
     const watchTaxGroupId = form.watch('taxGroupId');
+    const watchIsOpeningBalance = form.watch('isOpeningBalance');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
-    const watchWithholdingTaxRate = Number(form.watch('withholdingTaxRate')) || 0;
+    const watchWithholdingTaxRate = watchIsOpeningBalance ? 0 : Number(form.watch('withholdingTaxRate')) || 0;
     const watchLineItems = form.watch('lineItems') || [];
+
+    useEffect(() => {
+        if (!watchIsOpeningBalance) return;
+
+        // Opening bills bring forward gross AP balances only; tax and WHT history is not
+        // reposted through the migration clearing entry created by the posting service.
+        form.setValue('taxGroupId', 'none');
+        form.setValue('withholdingTaxRate', 0);
+        form.getValues('lineItems').forEach((_, index) => {
+            form.setValue(`lineItems.${index}.taxGroupId`, 'none');
+        });
+    }, [form, watchIsOpeningBalance]);
 
     const subtotal = watchLineItems.reduce((acc, item) => {
         const qty = Number(item.quantity) || 0;
@@ -232,6 +245,16 @@ export default function CreateVendorInvoicePage() {
     }, 0);
 
     const getTaxBreakdown = () => {
+        if (watchIsOpeningBalance) {
+            return {
+                totalTaxAmount: 0,
+                withholdingTaxAmount: 0,
+                grandTotal: subtotal,
+                netPayable: subtotal,
+                taxList: []
+            };
+        }
+
         let totalTaxAmount = 0;
         const breakdowns: { [taxCode: string]: { name: string; rate: number; amount: number } } = {};
 
@@ -356,14 +379,15 @@ export default function CreateVendorInvoicePage() {
     const onSubmit = async (data: InvoiceFormValues) => {
         setIsSubmitting(true);
         try {
+            const isOpeningBalance = data.isOpeningBalance;
             await accountsPayableService.createInvoice({
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
-                taxGroupId: data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
+                taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
-                withholdingTaxRate: Number(data.withholdingTaxRate) || 0,
-                isOpeningBalance: data.isOpeningBalance,
+                withholdingTaxRate: isOpeningBalance ? 0 : Number(data.withholdingTaxRate) || 0,
+                isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
                     lineItemType: item.lineItemType,
                     glAccountId: item.glAccountId || null,
@@ -372,7 +396,7 @@ export default function CreateVendorInvoicePage() {
                     quantity: Number(item.quantity),
                     unitPrice: Number(item.unitPrice),
                     discountPercentage: Number(item.discountPercentage),
-                    taxGroupId: item.taxGroupId === 'none' ? null : (item.taxGroupId || null),
+                    taxGroupId: isOpeningBalance || item.taxGroupId === 'none' ? null : (item.taxGroupId || null),
                     unit: item.unit || null,
                     inventoryItemId: item.inventoryItemId || null,
                     warehouseId: item.warehouseId || null,
@@ -600,8 +624,8 @@ export default function CreateVendorInvoicePage() {
                                 control={form.control}
                                 name="taxGroupId"
                                 render={({ field }) => (
-                                    <Select value={field.value || ''} onValueChange={field.onChange}>
-                                        <SelectTrigger>
+                                    <Select value={watchIsOpeningBalance ? 'none' : (field.value || 'none')} onValueChange={field.onChange} disabled={watchIsOpeningBalance}>
+                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
                                             <SelectValue placeholder="No Tax (Zero/Exempt)" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -613,7 +637,11 @@ export default function CreateVendorInvoicePage() {
                                     </Select>
                                 )}
                             />
-                            <span className="text-[11px] text-muted-foreground block mt-1">Optional. Pre-populates new lines; can be overridden on each line.</span>
+                            <span className="text-[11px] text-muted-foreground block mt-1">
+                                {watchIsOpeningBalance
+                                    ? 'Disabled for opening balances; opening bills carry no tax reposting.'
+                                    : 'Optional. Pre-populates new lines; can be overridden on each line.'}
+                            </span>
                         </div>
 
                         {watchCurrencyCode !== 'GHS' && (
@@ -671,8 +699,8 @@ export default function CreateVendorInvoicePage() {
                                 control={form.control}
                                 name="withholdingTaxRate"
                                 render={({ field }) => (
-                                    <Select value={String(field.value || 0)} onValueChange={field.onChange}>
-                                        <SelectTrigger>
+                                    <Select value={watchIsOpeningBalance ? '0' : String(field.value || 0)} onValueChange={field.onChange} disabled={watchIsOpeningBalance}>
+                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
                                             <SelectValue placeholder="No WHT" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -880,10 +908,11 @@ export default function CreateVendorInvoicePage() {
                                                 name={`lineItems.${index}.taxGroupId`}
                                                 render={({ field }) => (
                                                     <Select 
-                                                        value={field.value || 'inherit'} 
+                                                        value={watchIsOpeningBalance ? 'none' : (field.value || 'inherit')}
                                                         onValueChange={(val) => field.onChange(val === 'inherit' ? '' : val)}
+                                                        disabled={watchIsOpeningBalance}
                                                     >
-                                                        <SelectTrigger>
+                                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
                                                             <SelectValue placeholder="Inherit Default" />
                                                         </SelectTrigger>
                                                         <SelectContent>

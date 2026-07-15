@@ -267,8 +267,8 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
                                                     PO line: {item.financePurchaseOrderItemId}
                                                 </div>
                                             </td>
-                                            <td className="p-3 text-right font-mono">{formatNumber(item.orderedQuantity)}</td>
-                                            <td className="p-3 text-right font-mono">{formatNumber(item.previouslyReceived)}</td>
+                                            <td className="p-3 text-right font-mono">{formatNumber(item.orderedQuantity ?? 0)}</td>
+                                            <td className="p-3 text-right font-mono">{formatNumber(item.previouslyReceived ?? 0)}</td>
                                             <td className="p-3 text-right font-mono font-semibold">{formatNumber(item.quantityReceived)}</td>
                                             <td className="p-3 text-right font-mono">{formatNumber(item.invoicedQuantity || 0)}</td>
                                             <td className="p-3 text-right font-mono">{formatNumber(remaining)}</td>
@@ -380,8 +380,8 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
                                     <div className="font-semibold">{item.description || poLine?.description || 'Received line'}</div>
                                     <div className="mt-1 text-xs text-slate-600">PO line: {item.financePurchaseOrderItemId}</div>
                                 </td>
-                                <td className="border border-slate-300 p-2 text-right">{formatNumber(item.orderedQuantity)}</td>
-                                <td className="border border-slate-300 p-2 text-right">{formatNumber(item.previouslyReceived)}</td>
+                                <td className="border border-slate-300 p-2 text-right">{formatNumber(item.orderedQuantity ?? 0)}</td>
+                                <td className="border border-slate-300 p-2 text-right">{formatNumber(item.previouslyReceived ?? 0)}</td>
                                 <td className="border border-slate-300 p-2 text-right">{formatNumber(item.quantityReceived)}</td>
                                 <td className="border border-slate-300 p-2 text-right">{formatNumber(item.invoicedQuantity || 0)}</td>
                                 <td className="border border-slate-300 p-2 text-right">{formatNumber(remaining)}</td>

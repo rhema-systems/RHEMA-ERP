@@ -64,6 +64,190 @@ namespace ErpSystem.Data.Migrations
                     CREATE INDEX [IX_Invoices_TenantId] ON [dbo].[Invoices] ([TenantId]);
                 END
 
+                -- Upgrade databases that already had the older AR Invoices table. The current
+                -- Invoice model ignores legacy CustomerId and uses BusinessPartnerId for AR.
+                IF OBJECT_ID(N'[dbo].[Invoices]', N'U') IS NOT NULL
+                BEGIN
+                    IF COL_LENGTH(N'[dbo].[Invoices]', N'BusinessPartnerId') IS NULL
+                    BEGIN
+                        ALTER TABLE [dbo].[Invoices] ADD [BusinessPartnerId] uniqueidentifier NULL;
+                    END
+
+                    IF COL_LENGTH(N'[dbo].[Invoices]', N'CustomerId') IS NOT NULL
+                       AND OBJECT_ID(N'[dbo].[Customers]', N'U') IS NOT NULL
+                    BEGIN
+                        UPDATE i
+                        SET [BusinessPartnerId] = bp.[Id]
+                        FROM [dbo].[Invoices] i
+                        INNER JOIN [dbo].[BusinessPartners] bp
+                            ON bp.[Id] = i.[CustomerId]
+                           AND bp.[TenantId] = i.[TenantId]
+                           AND bp.[IsDeleted] = CAST(0 AS bit)
+                        WHERE i.[BusinessPartnerId] IS NULL;
+
+                        INSERT INTO [dbo].[BusinessPartners] (
+                            [Id],
+                            [PartnerCode],
+                            [PartnerName],
+                            [PartnerType],
+                            [TaxIdentificationNumber],
+                            [PrimaryContactName],
+                            [PrimaryEmail],
+                            [PrimaryPhone],
+                            [PhysicalAddress],
+                            [PhysicalCity],
+                            [PhysicalState],
+                            [PhysicalCountry],
+                            [CustomerAccountNumber],
+                            [CustomerType],
+                            [CreditLimit],
+                            [OutstandingBalance],
+                            [PaymentTermId],
+                            [Currency],
+                            [DefaultApAccountId],
+                            [DefaultArAccountId],
+                            [DefaultExpenseAccountId],
+                            [RegistrationStatus],
+                            [IsPreferred],
+                            [IsActive],
+                            [IsBlacklisted],
+                            [IsVatWithholdingAgent],
+                            [TaxTreatment],
+                            [IsTaxExempt],
+                            [IsOnCreditHold],
+                            [Notes],
+                            [TenantId],
+                            [CreatedAt],
+                            [UpdatedAt],
+                            [CreatedBy],
+                            [UpdatedBy],
+                            [CreatedById],
+                            [LastModifiedById],
+                            [IsDeleted],
+                            [DeletedAt],
+                            [DeletedBy],
+                            [ReferenceNumber],
+                            [Status],
+                            [EffectiveDate],
+                            [ExpirationDate],
+                            [Metadata],
+                            [Tags],
+                            [Priority])
+                        SELECT DISTINCT
+                            c.[Id],
+                            -- PartnerCode is globally unique in the current BusinessPartner model.
+                            -- Keep the legacy customer code on CustomerAccountNumber and use a deterministic
+                            -- ID-based partner code so this repair cannot collide with existing suppliers.
+                            LEFT(CONCAT(N'AR-CUST-', CONVERT(nvarchar(36), c.[Id])), 50),
+                            LEFT(COALESCE(NULLIF(c.[CustomerName], N''), i.[CustomerName], N'Legacy Customer'), 200),
+                            N'Customer',
+                            c.[TaxId],
+                            c.[ContactPerson],
+                            c.[Email],
+                            c.[Phone],
+                            c.[Address],
+                            c.[City],
+                            c.[State],
+                            c.[Country],
+                            LEFT(COALESCE(NULLIF(c.[CustomerCode], N''), CONCAT(N'CUST-', CONVERT(nvarchar(36), c.[Id]))), 50),
+                            LEFT(COALESCE(NULLIF(c.[CustomerType], N''), N'Customer'), 50),
+                            c.[CreditLimit],
+                            c.[OutstandingBalance],
+                            c.[PaymentTermId],
+                            c.[CurrencyCode],
+                            c.[DefaultApAccountId],
+                            c.[DefaultArAccountId],
+                            c.[DefaultExpenseAccountId],
+                            N'Approved',
+                            CAST(0 AS bit),
+                            c.[IsActive],
+                            CAST(0 AS bit),
+                            CAST(0 AS bit),
+                            1,
+                            CAST(0 AS bit),
+                            CAST(0 AS bit),
+                            c.[Notes],
+                            c.[TenantId],
+                            COALESCE(c.[CreatedAt], SYSUTCDATETIME()),
+                            c.[UpdatedAt],
+                            c.[CreatedBy],
+                            c.[UpdatedBy],
+                            c.[CreatedById],
+                            c.[LastModifiedById],
+                            c.[IsDeleted],
+                            c.[DeletedAt],
+                            c.[DeletedBy],
+                            LEFT(COALESCE(NULLIF(c.[ReferenceNumber], N''), CONCAT(N'BP-', CONVERT(nvarchar(36), c.[Id]))), 50),
+                            COALESCE(NULLIF(c.[Status], N''), N'Active'),
+                            c.[EffectiveDate],
+                            c.[ExpirationDate],
+                            c.[Metadata],
+                            c.[Tags],
+                            c.[Priority]
+                        FROM [dbo].[Invoices] i
+                        INNER JOIN [dbo].[Customers] c
+                            ON c.[Id] = i.[CustomerId]
+                           AND c.[TenantId] = i.[TenantId]
+                        LEFT JOIN [dbo].[BusinessPartners] bp
+                            ON bp.[Id] = c.[Id]
+                        WHERE i.[BusinessPartnerId] IS NULL
+                          AND bp.[Id] IS NULL;
+
+                        UPDATE i
+                        SET [BusinessPartnerId] = c.[Id]
+                        FROM [dbo].[Invoices] i
+                        INNER JOIN [dbo].[Customers] c
+                            ON c.[Id] = i.[CustomerId]
+                           AND c.[TenantId] = i.[TenantId]
+                        WHERE i.[BusinessPartnerId] IS NULL
+                          AND EXISTS (
+                              SELECT 1
+                              FROM [dbo].[BusinessPartners] bp
+                              WHERE bp.[Id] = c.[Id]
+                                AND bp.[TenantId] = i.[TenantId]
+                                AND bp.[IsDeleted] = CAST(0 AS bit)
+                          );
+                    END
+
+                    IF EXISTS (SELECT 1 FROM [dbo].[Invoices] WHERE [BusinessPartnerId] IS NULL)
+                    BEGIN
+                        THROW 51000, 'Cannot align AR Invoices: existing rows could not be mapped to same-tenant BusinessPartners.', 1;
+                    END
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM sys.indexes
+                        WHERE [name] = N'IX_Invoices_BusinessPartnerId'
+                          AND [object_id] = OBJECT_ID(N'[dbo].[Invoices]')
+                    )
+                    BEGIN
+                        CREATE INDEX [IX_Invoices_BusinessPartnerId] ON [dbo].[Invoices] ([BusinessPartnerId]);
+                    END
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM sys.foreign_keys
+                        WHERE [name] = N'FK_Invoices_BusinessPartners_BusinessPartnerId'
+                          AND [parent_object_id] = OBJECT_ID(N'[dbo].[Invoices]')
+                    )
+                    BEGIN
+                        ALTER TABLE [dbo].[Invoices] WITH CHECK
+                        ADD CONSTRAINT [FK_Invoices_BusinessPartners_BusinessPartnerId]
+                        FOREIGN KEY ([BusinessPartnerId]) REFERENCES [dbo].[BusinessPartners] ([Id]) ON DELETE NO ACTION;
+                    END
+
+                    IF EXISTS (
+                        SELECT 1
+                        FROM sys.columns
+                        WHERE [object_id] = OBJECT_ID(N'[dbo].[Invoices]')
+                          AND [name] = N'BusinessPartnerId'
+                          AND [is_nullable] = 1
+                    )
+                    BEGIN
+                        ALTER TABLE [dbo].[Invoices] ALTER COLUMN [BusinessPartnerId] uniqueidentifier NOT NULL;
+                    END
+                END
+
                 IF OBJECT_ID(N'[dbo].[InvoiceLineItem]', N'U') IS NULL
                 BEGIN
                     CREATE TABLE [dbo].[InvoiceLineItem] (

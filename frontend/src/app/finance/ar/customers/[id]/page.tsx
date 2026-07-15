@@ -211,11 +211,11 @@ export default function CustomerDetailsPage() {
                                         <div key={inv.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => router.push(`/finance/ar/invoices/${inv.id}`)}>
                                             <div className="space-y-1">
                                                 <p className="font-medium">{inv.invoiceNumber}</p>
-                                                <p className="text-sm text-muted-foreground">Due: {format(new Date(inv.dueDate), 'MMM dd, yyyy')}</p>
+                                                <p className="text-sm text-muted-foreground">Due: {inv.dueDate ? format(new Date(inv.dueDate), 'MMM dd, yyyy') : '-'}</p>
                                             </div>
                                             <div className="text-right">
                                                 <p className="font-bold">{formatCurrency(inv.balanceAmount)}</p>
-                                                {new Date(inv.dueDate) < new Date() && (
+                                                {inv.dueDate && new Date(inv.dueDate) < new Date() && (
                                                     <Badge variant="destructive" className="mt-1 text-xs">Overdue</Badge>
                                                 )}
                                             </div>

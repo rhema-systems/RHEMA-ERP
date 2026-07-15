@@ -83,6 +83,30 @@ function normalizeDate(value?: string | null) {
     return value ? value.slice(0, 10) : '';
 }
 
+function periodStartDate(period?: FiscalPeriod) {
+    return normalizeDate(period?.startDate);
+}
+
+function periodEndDate(period?: FiscalPeriod) {
+    return normalizeDate(period?.endDate);
+}
+
+function isDateInPeriod(date: string, period?: FiscalPeriod) {
+    const start = periodStartDate(period);
+    const end = periodEndDate(period);
+    return Boolean(date && start && end && date >= start && date <= end);
+}
+
+function openingDateForPeriod(period: FiscalPeriod, currentDate: string) {
+    if (isDateInPeriod(currentDate, period)) {
+        return currentDate;
+    }
+
+    // Opening balances are beginning balances for the selected accounting period.
+    // Defaulting to period end would make them behave like period-close movements.
+    return periodStartDate(period) || currentDate;
+}
+
 function statusVariant(status?: string): 'default' | 'secondary' | 'destructive' | 'outline' {
     switch ((status || '').toLowerCase()) {
         case 'posted':
@@ -161,14 +185,28 @@ export default function OpeningBalancesPage() {
     }, [accountsQuery.data, header.bookClassification]);
 
     useEffect(() => {
-        if (!header.fiscalPeriodId && openPeriods.length > 0) {
-            const preferred = openPeriods.find(period => {
-                const date = header.openingDate;
-                return date >= normalizeDate(period.startDate) && date <= normalizeDate(period.endDate);
-            }) ?? openPeriods[0];
-            setHeader(current => ({ ...current, fiscalPeriodId: preferred.id }));
+        if (openPeriods.length === 0) {
+            return;
         }
-    }, [header.fiscalPeriodId, header.openingDate, openPeriods]);
+
+        setHeader(current => {
+            const selected = openPeriods.find(period => period.id === current.fiscalPeriodId);
+            const preferred = selected
+                ?? openPeriods.find(period => isDateInPeriod(current.openingDate, period))
+                ?? openPeriods[0];
+            const openingDate = openingDateForPeriod(preferred, current.openingDate);
+
+            if (current.fiscalPeriodId === preferred.id && current.openingDate === openingDate) {
+                return current;
+            }
+
+            return {
+                ...current,
+                fiscalPeriodId: preferred.id,
+                openingDate,
+            };
+        });
+    }, [openPeriods]);
 
     useEffect(() => {
         if (!accountingBooks.some(book => book.code === header.bookClassification)) {
@@ -181,6 +219,8 @@ export default function OpeningBalancesPage() {
     const difference = Math.round((totalDebit - totalCredit) * 100) / 100;
     const isBalanced = Math.abs(difference) < 0.01;
     const selectedPeriod = fiscalPeriods.find(period => period.id === header.fiscalPeriodId);
+    const selectedPeriodStart = periodStartDate(selectedPeriod);
+    const selectedPeriodEnd = periodEndDate(selectedPeriod);
     const migrationClearingConfigured = Boolean(settingsQuery.data?.migrationClearingAccountId);
 
     const clientErrors = useMemo(() => {
@@ -188,6 +228,11 @@ export default function OpeningBalancesPage() {
         const populatedLines = lines.filter(line => line.accountId || toAmount(line.debitAmount) > 0 || toAmount(line.creditAmount) > 0);
         if (!header.openingDate) errors.push('Opening date is required.');
         if (!header.fiscalPeriodId) errors.push('Fiscal period is required.');
+        // OpeningBalanceBatch posts one controlled cutover snapshot, so all GL lines inherit
+        // the header posting date and period. Keep those aligned before calling the API.
+        if (header.openingDate && selectedPeriod && !isDateInPeriod(header.openingDate, selectedPeriod)) {
+            errors.push(`Opening date must fall within ${selectedPeriod.periodCode} (${selectedPeriodStart} to ${selectedPeriodEnd}).`);
+        }
         if (!header.bookClassification) errors.push('Book classification is required.');
         if (populatedLines.length === 0) errors.push('At least one opening balance line is required.');
         populatedLines.forEach((line, index) => {
@@ -201,7 +246,7 @@ export default function OpeningBalancesPage() {
         });
         if (!isBalanced) errors.push('Opening balance batch must be balanced.');
         return errors;
-    }, [header, isBalanced, lines]);
+    }, [header, isBalanced, lines, selectedPeriod, selectedPeriodEnd, selectedPeriodStart]);
 
     const updateLine = (id: string, patch: Partial<OpeningLine>) => {
         setValidation(null);
@@ -426,19 +471,31 @@ export default function OpeningBalancesPage() {
                                                 id="openingDate"
                                                 type="date"
                                                 value={header.openingDate}
+                                                min={selectedPeriodStart || undefined}
+                                                max={selectedPeriodEnd || undefined}
                                                 onChange={(event) => {
                                                     setCurrentBatch(null);
                                                     setHeader(current => ({ ...current, openingDate: event.target.value }));
                                                 }}
                                             />
+                                            {selectedPeriodStart && selectedPeriodEnd && (
+                                                <p className="text-xs text-muted-foreground">
+                                                    {selectedPeriodStart} to {selectedPeriodEnd}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="space-y-2">
                                             <Label>Fiscal Period</Label>
                                             <Select
                                                 value={header.fiscalPeriodId}
                                                 onValueChange={(value) => {
+                                                    const period = openPeriods.find(item => item.id === value);
                                                     setCurrentBatch(null);
-                                                    setHeader(current => ({ ...current, fiscalPeriodId: value }));
+                                                    setHeader(current => ({
+                                                        ...current,
+                                                        fiscalPeriodId: value,
+                                                        openingDate: period ? openingDateForPeriod(period, current.openingDate) : current.openingDate,
+                                                    }));
                                                 }}
                                             >
                                                 <SelectTrigger>
