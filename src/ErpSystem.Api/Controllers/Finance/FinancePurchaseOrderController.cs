@@ -1055,7 +1055,8 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
                 VendorInvoiceId = invoice.Id,
                 LineItemType = poItem.LineType == 1 ? "Product" : "Expense",
                 GLAccountId = poItem.GlAccountId,
-                PurchaseOrderItemId = poItem.Id,
+                // Finance PO lines are not legacy PurchaseOrderItem rows; keep the legacy FK null to avoid cross-model FK violations.
+                PurchaseOrderItemId = null,
                 InventoryItemId = poItem.InventoryItemId,
                 WarehouseId = poItem.WarehouseId,
                 Description = poItem.Description,

@@ -292,6 +292,10 @@ public class VendorInvoiceLineItem : TenantEntity
 
     // ── For product-based lines (links to PO item for matching) ─────────
 
+    /// <summary>
+    /// Legacy procurement PO line link. Finance PO/GRV conversions must not store
+    /// FinancePurchaseOrderItem ids here because this FK targets PurchaseOrderItems.
+    /// </summary>
     public Guid? PurchaseOrderItemId { get; set; }
     public virtual PurchaseOrderItem? PurchaseOrderItem { get; set; }
 

@@ -23,13 +23,15 @@ import { businessPartnerService, type BusinessPartnerDto } from '@/services/busi
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
 import { cn, formatCurrency } from '@/lib/utils';
-import type { Account, Currency, SubledgerAdjustmentType, SubledgerModule } from '@/types/finance';
+import type { Account, Currency, SubledgerAdjustmentPurpose, SubledgerAdjustmentType, SubledgerModule } from '@/types/finance';
 import type { Customer } from '@/types/ar';
 
 const moduleSchema = z.enum(['AR', 'AP']);
+const purposeSchema = z.enum(['StandardAdjustment', 'OpeningBalance']);
 
 const adjustmentSchema = z.object({
     module: moduleSchema,
+    purpose: purposeSchema,
     customerId: z.string().optional(),
     supplierId: z.string().optional(),
     adjustmentDate: z.string().min(1, 'Adjustment date is required'),
@@ -56,6 +58,14 @@ const adjustmentSchema = z.object({
             code: z.ZodIssueCode.custom,
             path: ['supplierId'],
             message: 'Supplier is required',
+        });
+    }
+
+    if (value.purpose === 'OpeningBalance' && !value.contraAccountId) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['contraAccountId'],
+            message: 'Migration clearing account is required',
         });
     }
 });
@@ -106,6 +116,7 @@ export default function NewSubledgerAdjustmentPage() {
         resolver: zodResolver(adjustmentSchema),
         defaultValues: {
             module: initialModule,
+            purpose: 'StandardAdjustment',
             customerId: '',
             supplierId: '',
             adjustmentDate: todayAsInputValue(),
@@ -122,6 +133,7 @@ export default function NewSubledgerAdjustmentPage() {
     });
 
     const selectedModule = form.watch('module');
+    const selectedPurpose = form.watch('purpose');
     const adjustmentType = form.watch('adjustmentType');
     const amount = Number(form.watch('amount')) || 0;
     const currencyCode = form.watch('currencyCode') || 'GHS';
@@ -144,6 +156,11 @@ export default function NewSubledgerAdjustmentPage() {
     const { data: accounts, isLoading: accountsLoading } = useQuery({
         queryKey: ['subledger-adjustment-contra-accounts'],
         queryFn: () => financeDataService.getAccounts({ status: 'Active', pageSize: 500 }),
+    });
+
+    const { data: financeSettings, isLoading: financeSettingsLoading } = useQuery({
+        queryKey: ['subledger-adjustment-finance-settings'],
+        queryFn: () => financeDataService.getFinanceSettings(),
     });
 
     const { data: currencies, isLoading: currenciesLoading } = useQuery({
@@ -180,6 +197,12 @@ export default function NewSubledgerAdjustmentPage() {
             .sort((a, b) => `${a.accountNumber || a.accountCode}`.localeCompare(`${b.accountNumber || b.accountCode}`));
     }, [accounts]);
 
+    const migrationClearingAccountId = financeSettings?.migrationClearingAccountId ?? '';
+    const migrationClearingAccount = useMemo(() => {
+        if (!migrationClearingAccountId) return undefined;
+        return (accounts ?? []).find((account) => account.id === migrationClearingAccountId);
+    }, [accounts, migrationClearingAccountId]);
+
     const partnerOptions: SearchOption[] = selectedModule === 'AR'
         ? customers.map((customer: Customer) => ({
             id: customer.id,
@@ -197,6 +220,20 @@ export default function NewSubledgerAdjustmentPage() {
         label: account.accountName,
         secondary: account.accountNumber || account.accountCode,
     }));
+
+    const migrationClearingAccountOption: SearchOption | undefined = migrationClearingAccount
+        ? {
+            id: migrationClearingAccount.id,
+            label: migrationClearingAccount.accountName,
+            secondary: migrationClearingAccount.accountNumber || migrationClearingAccount.accountCode,
+        }
+        : migrationClearingAccountId
+            ? {
+                id: migrationClearingAccountId,
+                label: 'Configured migration clearing account',
+                secondary: migrationClearingAccountId.slice(0, 8),
+            }
+            : undefined;
 
     const currencyOptions: SearchOption[] = useMemo(() => {
         const options: SearchOption[] = activeCurrencies.map((currency) => ({
@@ -218,9 +255,14 @@ export default function NewSubledgerAdjustmentPage() {
         option.id === (selectedModule === 'AR' ? selectedCustomerId : selectedSupplierId)
     );
     const selectedCurrency = currencyOptions.find((option) => option.id === normalizeCurrencyCode(currencyCode));
-    const selectedAccount = accountOptions.find((option) => option.id === selectedAccountId);
+    const isOpeningBalance = selectedPurpose === 'OpeningBalance';
+    const selectedAccount = isOpeningBalance
+        ? migrationClearingAccountOption
+        : accountOptions.find((option) => option.id === selectedAccountId);
     const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
     const selectedSupplier = supplierOptions.find((supplier) => supplier.id === selectedSupplierId);
+    const isOpeningBalanceContraLoading = isOpeningBalance && financeSettingsLoading;
+    const isOpeningBalanceContraMissing = isOpeningBalance && !migrationClearingAccountId && !financeSettingsLoading;
 
     const applyCurrency = async (value?: string | null) => {
         const nextCurrencyCode = normalizeCurrencyCode(value) || baseCurrencyCode;
@@ -279,6 +321,19 @@ export default function NewSubledgerAdjustmentPage() {
         form.setValue('adjustmentType', selectedModule === 'AP' ? 'Credit' : 'Debit');
     }, [form, selectedModule]);
 
+    useEffect(() => {
+        if (!isOpeningBalance) return;
+
+        if (migrationClearingAccountId) {
+            form.setValue('contraAccountId', migrationClearingAccountId, { shouldValidate: true });
+            form.clearErrors('contraAccountId');
+        }
+
+        if (!form.getValues('reason')) {
+            form.setValue('reason', `${selectedModule} opening balance`, { shouldDirty: false, shouldValidate: true });
+        }
+    }, [form, isOpeningBalance, migrationClearingAccountId, selectedModule]);
+
     const signedSubledgerAmount = selectedModule === 'AR'
         ? (adjustmentType === 'Debit' ? amount : -amount)
         : (adjustmentType === 'Credit' ? amount : -amount);
@@ -310,8 +365,17 @@ export default function NewSubledgerAdjustmentPage() {
     const onSubmit = async (data: AdjustmentFormValues) => {
         setIsSubmitting(true);
         try {
+            const contraAccountId = data.purpose === 'OpeningBalance'
+                ? migrationClearingAccountId
+                : data.contraAccountId;
+
+            if (!contraAccountId) {
+                throw new Error('Configure a migration clearing account in Finance Settings before posting opening balances.');
+            }
+
             const result = await financeDataService.createSubledgerAdjustmentJournal({
                 module: data.module,
+                purpose: data.purpose,
                 customerId: data.module === 'AR' ? data.customerId : undefined,
                 supplierId: data.module === 'AP' ? data.supplierId : undefined,
                 adjustmentDate: new Date(`${data.adjustmentDate}T00:00:00`).toISOString(),
@@ -320,7 +384,7 @@ export default function NewSubledgerAdjustmentPage() {
                 amount: data.amount,
                 currencyCode: data.currencyCode.toUpperCase(),
                 exchangeRate: data.exchangeRate,
-                contraAccountId: data.contraAccountId,
+                contraAccountId,
                 reference: data.reference || undefined,
                 reason: data.reason,
                 notes: data.notes || undefined,
@@ -410,6 +474,24 @@ export default function NewSubledgerAdjustmentPage() {
                                 <SelectContent>
                                     <SelectItem value="AR">Accounts Receivable</SelectItem>
                                     <SelectItem value="AP">Accounts Payable</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Purpose</Label>
+                            <Select
+                                value={selectedPurpose}
+                                onValueChange={(value) =>
+                                    form.setValue('purpose', value as SubledgerAdjustmentPurpose, { shouldDirty: true, shouldValidate: true })
+                                }
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="StandardAdjustment">Standard adjustment</SelectItem>
+                                    <SelectItem value="OpeningBalance">Opening balance</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -523,24 +605,35 @@ export default function NewSubledgerAdjustmentPage() {
                         </div>
 
                         <div className="space-y-2 md:col-span-2">
-                            <Label>Contra GL Account</Label>
-                            {accountsLoading ? (
+                            <Label>{isOpeningBalance ? 'Migration Clearing Account' : 'Contra GL Account'}</Label>
+                            {accountsLoading || (isOpeningBalance && financeSettingsLoading) ? (
                                 <Skeleton className="h-10 w-full" />
                             ) : (
                                 <SearchSelect
                                     open={accountOpen}
                                     onOpenChange={setAccountOpen}
-                                    options={accountOptions}
-                                    value={selectedAccountId}
+                                    options={isOpeningBalance && migrationClearingAccountOption ? [migrationClearingAccountOption] : accountOptions}
+                                    value={isOpeningBalance ? migrationClearingAccountId : selectedAccountId}
                                     selectedOption={selectedAccount}
-                                    placeholder="Select contra account"
+                                    placeholder={isOpeningBalance ? 'Configured migration clearing account' : 'Select contra account'}
                                     searchPlaceholder="Search accounts..."
-                                    emptyText="No posting accounts found."
+                                    emptyText={isOpeningBalance ? 'Migration clearing account is not configured.' : 'No posting accounts found.'}
+                                    disabled={isOpeningBalance}
                                     onSelect={(id) => {
                                         form.setValue('contraAccountId', id, { shouldValidate: true });
                                         setAccountOpen(false);
                                     }}
                                 />
+                            )}
+                            {isOpeningBalanceContraMissing && (
+                                <p className="text-sm text-destructive">
+                                    Configure the Migration Clearing Account in Finance Settings before posting opening balances.
+                                </p>
+                            )}
+                            {isOpeningBalance && migrationClearingAccountId && (
+                                <p className="text-xs text-muted-foreground">
+                                    Opening-balance adjustments post against the configured migration clearing account.
+                                </p>
                             )}
                             {form.formState.errors.contraAccountId && (
                                 <p className="text-sm text-destructive">{form.formState.errors.contraAccountId.message}</p>
@@ -572,9 +665,9 @@ export default function NewSubledgerAdjustmentPage() {
                         <Button type="button" variant="outline" onClick={() => router.back()}>
                             Cancel
                         </Button>
-                        <Button type="submit" disabled={isSubmitting || isRateLoading}>
+                        <Button type="submit" disabled={isSubmitting || isRateLoading || isOpeningBalanceContraLoading || isOpeningBalanceContraMissing}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Post Adjustment
+                            {isOpeningBalance ? 'Post Opening Balance' : 'Post Adjustment'}
                         </Button>
                     </CardFooter>
                 </Card>
@@ -603,7 +696,13 @@ export default function NewSubledgerAdjustmentPage() {
                                     currencyCode={currencyCode}
                                 />
                                 <PreviewLine
-                                    label={selectedAccount ? `${selectedAccount.secondary} - ${selectedAccount.label}` : 'Contra GL account'}
+                                    label={selectedAccount
+                                        ? selectedAccount.secondary
+                                            ? `${selectedAccount.secondary} - ${selectedAccount.label}`
+                                            : selectedAccount.label
+                                        : isOpeningBalance
+                                            ? 'Migration clearing account'
+                                            : 'Contra GL account'}
                                     side={contraLineType}
                                     amount={baseAmount}
                                     currencyCode={currencyCode}

@@ -68,6 +68,50 @@ public sealed class ApInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
+    public async Task OpeningBalanceApInvoice_ShouldPostControlAgainstMigrationClearing()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.IsOpeningBalance = true;
+            var line = invoice.LineItems.Single();
+            line.LineItemType = "FixedAsset";
+            line.GLAccountId = Guid.NewGuid();
+        });
+        var clearingAccount = SeedAccount(db, tenantId, "3999", AccountType.Equity);
+        var settings = await db.FinanceSettings.SingleAsync(s => s.TenantId == tenantId);
+        settings.MigrationClearingAccountId = clearingAccount.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        result.JournalEntryId.Should().NotBeNull();
+
+        var journal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == result.JournalEntryId);
+        journal.JournalType.Should().Be("AP Opening Balance");
+        journal.SourceModule.Should().Be("AP");
+        journal.SourceDocumentType.Should().Be("VendorInvoice");
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(t => t.AccountId == clearingAccount.Id).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(t => t.AccountId == fixture.ApAccount.Id).CreditAmount.Should().Be(100m);
+        journal.Transactions.Should().NotContain(t => t.AccountId == fixture.ExpenseAccount.Id);
+
+        (await db.FinancePostingEvents.CountAsync(e =>
+            e.TenantId == tenantId &&
+            e.SourceModule == "AP" &&
+            e.SourceDocumentType == "VendorInvoice" &&
+            e.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
+        (await db.Set<TaxCalculation>().CountAsync()).Should().Be(0);
+        fixture.ExpenseAccount.Balance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
     public async Task UnapprovedApInvoice_ShouldNotPost()
     {
         var tenantId = Guid.NewGuid();

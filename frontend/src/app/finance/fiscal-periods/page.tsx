@@ -4,8 +4,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { CalendarDays, Lock, Unlock, LockKeyhole, AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
 import type { FiscalPeriod, ModuleDefinition } from '@/types/finance';
@@ -21,6 +23,7 @@ export default function FiscalPeriodsPage() {
     const [filterYear, setFilterYear] = useState('all');
     const [filterStatus, setFilterStatus] = useState('all');
     const [selectedPeriod, setSelectedPeriod] = useState<FiscalPeriod | null>(null);
+    const [reopenReason, setReopenReason] = useState('');
     const [processing, setProcessing] = useState(false);
 
     const loadData = useCallback(async () => {
@@ -82,11 +85,23 @@ export default function FiscalPeriodsPage() {
     };
 
     const handleReopenPeriod = async (periodId: string) => {
+        const reason = reopenReason.trim();
+
+        if (!reason) {
+            toast({
+                title: 'Reason required',
+                description: 'Enter a reason before reopening this fiscal period.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
         try {
             setProcessing(true);
-            await financeDataService.reopenFiscalPeriod(periodId);
+            await financeDataService.reopenFiscalPeriod(periodId, reason);
             toast({ title: "Success", description: "Fiscal period reopened successfully" });
-            loadData();
+            setReopenReason('');
+            await loadData();
         } catch (error: any) {
             toast({
                 title: 'Error',
@@ -338,7 +353,11 @@ export default function FiscalPeriodsPage() {
                                                         {status === 'Closed' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
-                                                                    <Button variant="outline" size="sm">
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => setReopenReason('')}
+                                                                    >
                                                                         <Unlock className="h-4 w-4 mr-1" />
                                                                         Reopen
                                                                     </Button>
@@ -350,7 +369,7 @@ export default function FiscalPeriodsPage() {
                                                                             This will allow new transactions to be posted to this period
                                                                         </DialogDescription>
                                                                     </DialogHeader>
-                                                                    <div className="py-4">
+                                                                    <div className="space-y-4 py-4">
                                                                         <div className="bg-yellow-50 p-3 rounded text-sm">
                                                                             <p className="font-semibold mb-1 flex items-center gap-2">
                                                                                 <AlertTriangle className="h-4 w-4" />
@@ -358,9 +377,24 @@ export default function FiscalPeriodsPage() {
                                                                             </p>
                                                                             <p>Reopening a period will allow modifications to financial data for this period. Ensure this is necessary and authorized.</p>
                                                                         </div>
+                                                                        <div className="space-y-2">
+                                                                            <Label htmlFor={`reopen-reason-${period.id}`}>Reason</Label>
+                                                                            <Textarea
+                                                                                id={`reopen-reason-${period.id}`}
+                                                                                value={reopenReason}
+                                                                                onChange={(event) => setReopenReason(event.target.value)}
+                                                                                placeholder="Why is this period being reopened?"
+                                                                                maxLength={1000}
+                                                                                rows={3}
+                                                                            />
+                                                                        </div>
                                                                     </div>
                                                                     <DialogFooter>
-                                                                        <Button variant="outline">Cancel</Button>
+                                                                        <DialogClose asChild>
+                                                                            <Button variant="outline" onClick={() => setReopenReason('')}>
+                                                                                Cancel
+                                                                            </Button>
+                                                                        </DialogClose>
                                                                         <Button onClick={() => handleReopenPeriod(period.id)} disabled={processing}>
                                                                             {processing ? 'Reopening...' : 'Reopen Period'}
                                                                         </Button>

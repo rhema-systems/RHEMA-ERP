@@ -15,8 +15,10 @@ public sealed class FinanceConcurrencyHardeningTests
 
         source.Should().Contain("CurrentTransaction", "posting must join an existing DbContext transaction when callers already opened one");
         source.Should().Contain("ExecutePostingAsync", "owned and ambient transaction paths should share one posting implementation");
+        source.Should().Contain("IsSqlServer()", "SQL Server lock hints must not run against other relational providers used in dev/test");
         source.Should().Contain("ExecuteSqlInterpolatedAsync", "account balance snapshots should be incremented atomically in the database");
         source.Should().Contain("UPDLOCK", "same-account concurrent postings must serialize balance snapshot updates");
+        source.Should().Contain("ApplyTrackedAccountBalanceDeltasAsync", "non-SQL Server providers need a provider-neutral balance update path");
         source.Should().NotContain("account.Balance += transaction", "balance snapshot updates must not use read-modify-write per transaction line");
         source.Should().NotContain("account.Balance -= transaction", "balance snapshot updates must not use read-modify-write per transaction line");
     }
@@ -241,6 +243,8 @@ public sealed class FinanceConcurrencyHardeningTests
         receiptLoadIndex.Should().BeLessThan(linkCheckIndex, "the duplicate-conversion check must run on the transactionally loaded receipt");
         linkCheckIndex.Should().BeLessThan(invoiceAddIndex, "the draft invoice must only be created after the link check inside the same transaction");
         saveIndex.Should().BeLessThan(commitIndex, "the receipt link and draft invoice must be committed together");
+        method.Should().Contain("PurchaseOrderItemId = null", "finance GRV conversion must not store finance PO line ids in the legacy procurement PO FK");
+        method.Should().NotContain("PurchaseOrderItemId = poItem.Id", "VendorInvoiceLineItem.PurchaseOrderItemId targets legacy PurchaseOrderItems, not FinancePurchaseOrderItems");
     }
 
     [Fact]

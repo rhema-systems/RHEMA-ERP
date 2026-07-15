@@ -15,6 +15,7 @@ export type PeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
 export type RevaluationFrequency = 'None' | 'Monthly' | 'Quarterly' | 'Annually';
 export type SubledgerModule = 'AR' | 'AP';
 export type SubledgerAdjustmentType = 'Debit' | 'Credit';
+export type SubledgerAdjustmentPurpose = 'StandardAdjustment' | 'OpeningBalance';
 export type SubledgerAdjustmentStatus = 'Posted' | 'Reversed';
 
 // ============================================
@@ -378,6 +379,7 @@ export interface SubledgerAdjustmentJournal {
     id: string;
     module: SubledgerModule;
     adjustmentNumber: string;
+    purpose: SubledgerAdjustmentPurpose;
     customerId?: string;
     customerName?: string;
     supplierId?: string;
@@ -409,6 +411,7 @@ export interface SubledgerAdjustmentJournal {
 
 export interface CreateSubledgerAdjustmentJournalDto {
     module: SubledgerModule;
+    purpose?: SubledgerAdjustmentPurpose;
     customerId?: string;
     supplierId?: string;
     adjustmentDate: string;
@@ -542,13 +545,13 @@ export interface TrendAnalysisDto {
     sourceCurrency: string;
     targetCurrency: string;
     rate: number;
-    previousRate: number;
-    changeAmount: number;
-    changePercentage: number;
-    movingAverage: number;
-    volatility: number;
-    minRate: number;
-    maxRate: number;
+    previousRate: number | null;
+    changeAmount: number | null;
+    changePercentage: number | null;
+    movingAverage: number | null;
+    volatility: number | null;
+    minRate: number | null;
+    maxRate: number | null;
 }
 
 // Fiscal Year
@@ -581,7 +584,7 @@ export interface PeriodCloseRequestDto {
 
 export interface PeriodReopenRequestDto {
     fiscalPeriodId: string;
-    reopenReason: string;
+    reason: string;
 }
 
 export interface PeriodLockRequestDto {
@@ -751,6 +754,98 @@ export interface CreateAccountTransactionDto {
     foreignAmount?: number;
     exchangeRate?: number;
     lineNumber?: number;
+}
+
+// Controlled Opening Balances
+export interface CreateOpeningBalanceBatchDto {
+    batchNumber?: string;
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    lines: CreateOpeningBalanceLineDto[];
+}
+
+export interface CreateOpeningBalanceLineDto {
+    accountId: string;
+    debitAmount: number;
+    creditAmount: number;
+    transactionCurrencyCode?: string;
+    functionalCurrencyCode?: string;
+    exchangeRateId?: string;
+    exchangeRateDate?: string;
+    segmentString?: string;
+    bankAccountId?: string;
+    counterpartyType?: string;
+    counterpartyId?: string;
+    sourceReference?: string;
+    notes?: string;
+}
+
+export interface OpeningBalanceBatch {
+    id: string;
+    tenantId: string;
+    batchNumber: string;
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    fiscalPeriodCode: string;
+    bookClassification: string;
+    status: string;
+    idempotencyKey: string;
+    totalDebit: number;
+    totalCredit: number;
+    difference: number;
+    journalEntryId?: string;
+    postingEventId?: string;
+    workflowInstanceId?: string;
+    validatedAt?: string;
+    submittedAt?: string;
+    approvedAt?: string;
+    postedAt?: string;
+    failureReason?: string;
+    lines: OpeningBalanceLine[];
+}
+
+export interface OpeningBalanceLine {
+    id: string;
+    lineNumber: number;
+    accountId: string;
+    accountCode: string;
+    accountName: string;
+    debitAmount: number;
+    creditAmount: number;
+    transactionCurrencyCode: string;
+    functionalCurrencyCode: string;
+    exchangeRateId?: string;
+    exchangeRateDate?: string;
+    segmentString?: string;
+    bankAccountId?: string;
+    counterpartyType?: string;
+    counterpartyId?: string;
+    sourceReference?: string;
+    notes?: string;
+}
+
+export interface OpeningBalanceValidationResult {
+    batchId: string;
+    isValid: boolean;
+    totalDebit: number;
+    totalCredit: number;
+    difference: number;
+    errors: string[];
+    warnings: string[];
+}
+
+export interface OpeningBalanceDiagnostic {
+    diagnosticCode: string;
+    severity: 'Info' | 'Warning' | 'Error' | string;
+    batchId?: string;
+    reference?: string;
+    message: string;
 }
 
 // Reports

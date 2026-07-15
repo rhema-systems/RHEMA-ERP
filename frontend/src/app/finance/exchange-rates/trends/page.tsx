@@ -49,11 +49,12 @@ export default function ExchangeRateTrendsPage() {
         });
     };
 
-    const formatCurrency = (value: number) => {
-        return value.toFixed(4);
+    const formatCurrency = (value: number | null | undefined) => {
+        return typeof value === 'number' ? value.toFixed(4) : 'N/A';
     };
 
     const latestTrend = trends.length > 0 ? trends[trends.length - 1] : null;
+    const latestChangePercentage = latestTrend?.changePercentage ?? 0;
 
     return (
         <div className="space-y-6">
@@ -174,15 +175,15 @@ export default function ExchangeRateTrendsPage() {
                             <CardContent>
                                 <div className="text-2xl font-bold">{formatCurrency(latestTrend.rate)}</div>
                                 <div className="text-sm flex items-center mt-1">
-                                    {latestTrend.changePercentage > 0 ? (
+                                    {latestChangePercentage > 0 ? (
                                         <span className="text-green-600 flex items-center">
                                             <TrendingUp className="mr-1 h-3 w-3" />
-                                            +{latestTrend.changePercentage.toFixed(2)}%
+                                            +{latestChangePercentage.toFixed(2)}%
                                         </span>
-                                    ) : latestTrend.changePercentage < 0 ? (
+                                    ) : latestChangePercentage < 0 ? (
                                         <span className="text-red-600 flex items-center">
                                             <TrendingDown className="mr-1 h-3 w-3" />
-                                            {latestTrend.changePercentage.toFixed(2)}%
+                                            {latestChangePercentage.toFixed(2)}%
                                         </span>
                                     ) : (
                                         <span className="text-muted-foreground flex items-center">
@@ -260,8 +261,8 @@ export default function ExchangeRateTrendsPage() {
                                         />
                                         <RechartsTooltip 
                                             labelFormatter={formatDate}
-                                            formatter={(value: number, name: string) => [
-                                                formatCurrency(value), 
+                                            formatter={(value, name) => [
+                                                typeof value === 'number' ? formatCurrency(value) : 'N/A',
                                                 name === 'rate' ? 'Actual Rate' : 'Moving Avg'
                                             ]}
                                             contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0' }}

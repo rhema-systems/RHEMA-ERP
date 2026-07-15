@@ -12,6 +12,8 @@ public static class FinanceReportExportTypes
     public const string CashBankLedger = "CashBankLedger";
     public const string ApAging = "ApAging";
     public const string ArAging = "ArAging";
+    public const string CustomerStatement = "CustomerStatement";
+    public const string SupplierStatement = "SupplierStatement";
     public const string ApControlReconciliation = "ApControlReconciliation";
     public const string ArControlReconciliation = "ArControlReconciliation";
     public const string FixedAssetRegister = "FixedAssetRegister";
@@ -51,6 +53,10 @@ public sealed class FinanceReportExportRequestDto
     public List<Guid> GlAccountIds { get; set; } = new();
     public Guid? SupplierId { get; set; }
     public Guid? CustomerId { get; set; }
+    public List<Guid> SupplierIds { get; set; } = new();
+    public List<Guid> CustomerIds { get; set; } = new();
+    public bool ShowSupplierCurrency { get; set; }
+    public bool ShowCustomerCurrency { get; set; }
     public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
     public FixedAssetReportQueryDto? FixedAssetQuery { get; set; }
     public TaxReportRequestDto? TaxReportQuery { get; set; }

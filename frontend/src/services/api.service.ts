@@ -497,6 +497,15 @@ class ApiService {
     return this.privateBlobRequest(this.appendQueryParams(endpoint, query), { method: 'GET' });
   }
 
+  public async postBlob(endpoint: string, data?: any): Promise<Blob> {
+    const options: RequestInit = { method: 'POST' };
+    if (data !== undefined && data !== null) {
+      options.body = JSON.stringify(data);
+    }
+
+    return this.privateBlobRequest(endpoint, options);
+  }
+
   // Rename private request method
   private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true, silent: boolean = false, retryCount: number = 0): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;

@@ -20,6 +20,7 @@ namespace ErpSystem.Data.Migrations
                         [TenantId] uniqueidentifier NOT NULL,
                         [Module] nvarchar(2) NOT NULL,
                         [AdjustmentNumber] nvarchar(50) NOT NULL,
+                        [Purpose] nvarchar(30) NOT NULL CONSTRAINT [DF_SubledgerAdjustmentJournals_Purpose] DEFAULT N'StandardAdjustment',
                         [CustomerId] uniqueidentifier NULL,
                         [SupplierId] uniqueidentifier NULL,
                         [AdjustmentDate] datetime2 NOT NULL,
@@ -65,6 +66,7 @@ namespace ErpSystem.Data.Migrations
                     CREATE INDEX [IX_SubledgerAdjustmentJournals_ReversalAdjustmentId] ON [dbo].[SubledgerAdjustmentJournals] ([ReversalAdjustmentId]);
                     CREATE INDEX [IX_SubledgerAdjustmentJournals_SupplierId] ON [dbo].[SubledgerAdjustmentJournals] ([SupplierId]);
                     CREATE INDEX [IX_SubledgerAdjustmentJournals_TenantId_Module_AdjustmentDate] ON [dbo].[SubledgerAdjustmentJournals] ([TenantId], [Module], [AdjustmentDate]);
+                    CREATE INDEX [IX_SubledgerAdjustmentJournals_TenantId_Module_Purpose_AdjustmentDate] ON [dbo].[SubledgerAdjustmentJournals] ([TenantId], [Module], [Purpose], [AdjustmentDate]);
                     CREATE UNIQUE INDEX [IX_SubledgerAdjustmentJournals_TenantId_Module_AdjustmentNumber] ON [dbo].[SubledgerAdjustmentJournals] ([TenantId], [Module], [AdjustmentNumber]);
                 END
                 """);

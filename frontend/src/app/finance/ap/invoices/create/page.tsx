@@ -95,6 +95,7 @@ export default function CreateVendorInvoicePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
+    const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -197,7 +198,7 @@ export default function CreateVendorInvoicePage() {
             exchangeRate: 1.0,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
-            isOpeningBalance: false,
+            isOpeningBalance: defaultOpeningBalance,
             notes: '',
             lineItems: [
                 { lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' }

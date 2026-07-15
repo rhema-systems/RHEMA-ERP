@@ -97,6 +97,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         var reversalDto = new CreateSubledgerAdjustmentJournalDto
         {
             Module = original.Module,
+            Purpose = original.Purpose,
             CustomerId = original.CustomerId,
             SupplierId = original.SupplierId,
             AdjustmentDate = (dto.ReversalDate ?? DateTime.UtcNow).Date,
@@ -139,6 +140,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             throw new InvalidOperationException("Tenant context is required.");
 
         var module = NormalizeModule(dto.Module, allowNull: false)!;
+        var purpose = NormalizePurpose(dto.Purpose);
         var adjustmentType = NormalizeAdjustmentType(dto.AdjustmentType);
         if (dto.Amount <= 0)
             throw new InvalidOperationException("Adjustment amount must be greater than zero.");
@@ -157,8 +159,13 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             .FirstOrDefaultAsync(a => a.Id == controlAccountId.Value && a.TenantId == tenantId && !a.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException($"{module} control account was not found.");
 
+        var contraAccountId = ResolveContraAccountId(
+            dto.ContraAccountId,
+            purpose,
+            settings,
+            originalAdjustmentId.HasValue);
         var contraAccount = await _context.Accounts
-            .FirstOrDefaultAsync(a => a.Id == dto.ContraAccountId && a.TenantId == tenantId && !a.IsDeleted, cancellationToken)
+            .FirstOrDefaultAsync(a => a.Id == contraAccountId && a.TenantId == tenantId && !a.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Contra GL account was not found.");
 
         if (contraAccount.IsControlAccount)
@@ -189,6 +196,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             TenantId = tenantId,
             Module = module,
             AdjustmentNumber = adjustmentNumber,
+            Purpose = purpose,
             CustomerId = module == SubledgerModules.AccountsReceivable ? counterparty.Customer?.Id : null,
             SupplierId = module == SubledgerModules.AccountsPayable ? counterparty.Supplier?.Id : null,
             AdjustmentDate = dto.AdjustmentDate.Date,
@@ -250,9 +258,12 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             : (isDebit ? "Debit" : "Credit");
         var contraLineType = string.Equals(controlLineType, "Debit", StringComparison.OrdinalIgnoreCase) ? "Credit" : "Debit";
 
+        var purposeLabel = string.Equals(adjustment.Purpose, SubledgerAdjustmentPurposes.OpeningBalance, StringComparison.OrdinalIgnoreCase)
+            ? "opening balance"
+            : "adjustment";
         var description = adjustment.Module == SubledgerModules.AccountsReceivable
-            ? $"AR {adjustment.AdjustmentType} adjustment {adjustment.AdjustmentNumber} - {counterpartyName}"
-            : $"AP {adjustment.AdjustmentType} adjustment {adjustment.AdjustmentNumber} - {counterpartyName}";
+            ? $"AR {adjustment.AdjustmentType} {purposeLabel} {adjustment.AdjustmentNumber} - {counterpartyName}"
+            : $"AP {adjustment.AdjustmentType} {purposeLabel} {adjustment.AdjustmentNumber} - {counterpartyName}";
 
         return await _postingEngine.PostAsync(new FinancePostingRequestDto
         {
@@ -428,6 +439,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             Id = adjustment.Id,
             Module = adjustment.Module,
             AdjustmentNumber = adjustment.AdjustmentNumber,
+            Purpose = adjustment.Purpose,
             CustomerId = adjustment.CustomerId,
             CustomerName = adjustment.Customer?.PartnerName,
             SupplierId = adjustment.SupplierId,
@@ -487,6 +499,60 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             return SubledgerAdjustmentTypes.Credit;
 
         throw new InvalidOperationException("Adjustment type must be Debit or Credit.");
+    }
+
+    private static string NormalizePurpose(string? purpose)
+    {
+        if (string.IsNullOrWhiteSpace(purpose))
+            return SubledgerAdjustmentPurposes.StandardAdjustment;
+
+        var normalized = purpose.Trim();
+        if (string.Equals(normalized, SubledgerAdjustmentPurposes.StandardAdjustment, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "Standard", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "Adjustment", StringComparison.OrdinalIgnoreCase))
+        {
+            return SubledgerAdjustmentPurposes.StandardAdjustment;
+        }
+
+        if (string.Equals(normalized, SubledgerAdjustmentPurposes.OpeningBalance, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "Opening Balance", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "OpenBalance", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "OB", StringComparison.OrdinalIgnoreCase))
+        {
+            return SubledgerAdjustmentPurposes.OpeningBalance;
+        }
+
+        throw new InvalidOperationException("Adjustment purpose must be StandardAdjustment or OpeningBalance.");
+    }
+
+    private static Guid ResolveContraAccountId(
+        Guid requestedContraAccountId,
+        string purpose,
+        FinanceSettings settings,
+        bool isReversal)
+    {
+        if (!string.Equals(purpose, SubledgerAdjustmentPurposes.OpeningBalance, StringComparison.OrdinalIgnoreCase))
+        {
+            if (requestedContraAccountId == Guid.Empty)
+                throw new InvalidOperationException("Contra GL account is required.");
+
+            return requestedContraAccountId;
+        }
+
+        if (isReversal && requestedContraAccountId != Guid.Empty)
+            return requestedContraAccountId;
+
+        if (!settings.MigrationClearingAccountId.HasValue)
+            throw new InvalidOperationException("Migration clearing account is not configured in Finance Settings.");
+
+        var clearingAccountId = settings.MigrationClearingAccountId.Value;
+        if (requestedContraAccountId != Guid.Empty && requestedContraAccountId != clearingAccountId)
+        {
+            throw new InvalidOperationException(
+                "Opening-balance subledger adjustment journals must use the configured Migration Clearing Account as the contra account.");
+        }
+
+        return clearingAccountId;
     }
 
     private static string? NormalizeCurrency(string? currencyCode)

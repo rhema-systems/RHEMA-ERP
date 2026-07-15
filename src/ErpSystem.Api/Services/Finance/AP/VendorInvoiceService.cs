@@ -570,8 +570,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
-            // Opening-balance AP invoices are migration source records; they must not
-            // create inventory receipts or use the normal AP invoice posting path.
+            // Opening-balance AP invoices preserve subledger balances but do not create
+            // inventory receipts; their GL impact is control account vs migration clearing.
             foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
             {
                 if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
@@ -609,16 +609,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                 comment: comments,
                 cancellationToken: cancellationToken);
 
+            // Opening-balance AP invoices are posted through the controlled migration flow, not normal AP posting.
             if (!invoice.IsOpeningBalance)
             {
                 await PostAsync(invoice.Id, cancellationToken);
+            }
 
-                _logger.LogInformation("Approved vendor invoice {InvoiceNumber} and posted to GL through the finance posting engine", invoice.InvoiceNumber);
-            }
-            else
-            {
-                _logger.LogInformation("Approved opening-balance vendor invoice {InvoiceNumber}; GL posting remains deferred to the controlled opening-balance flow", invoice.InvoiceNumber);
-            }
+            _logger.LogInformation(
+                "Approved vendor invoice {InvoiceNumber}. Normal GL posting executed={PostingExecuted}. OpeningBalance={IsOpeningBalance}",
+                invoice.InvoiceNumber,
+                !invoice.IsOpeningBalance,
+                invoice.IsOpeningBalance);
 
             return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
         }
@@ -630,7 +631,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
             var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
-            var hasFixedAssetLines = invoice.LineItems.Any(IsFixedAssetLine);
+            var hasFixedAssetLines = !invoice.IsOpeningBalance && invoice.LineItems.Any(IsFixedAssetLine);
             if (hasFixedAssetLines && _fixedAssetService == null)
             {
                 throw new InvalidOperationException("Fixed asset capitalization service is not configured for AP fixed asset lines.");
@@ -1141,18 +1142,25 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("Only approved AP invoices can be posted.");
             }
 
-            if (invoice.IsOpeningBalance)
-            {
-                throw new InvalidOperationException("Opening-balance AP invoice posting is deferred to the data migration/opening balance posting batch.");
-            }
-
             if (!string.Equals(invoice.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("AP invoice workflow approval is not complete.");
             }
 
-            if (invoice.LineItems.Count == 0)
+            var activeLines = invoice.LineItems
+                .Where(l => !l.IsDeleted)
+                .OrderBy(l => l.CreatedAt)
+                .ThenBy(l => l.Id)
+                .ToList();
+
+            if (activeLines.Count == 0)
                 throw new InvalidOperationException("AP invoice has no lines to post.");
+
+            foreach (var line in activeLines)
+            {
+                if (line.TenantId != tenantId || line.VendorInvoiceId != invoice.Id)
+                    throw new InvalidOperationException("AP invoice line belongs to another tenant or document.");
+            }
 
             var supplier = await ResolveInvoiceSupplierForPostingAsync(invoice, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
@@ -1166,6 +1174,19 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ?? settings.ControlAccountApId
                 ?? throw new InvalidOperationException("AP control account is not configured for this tenant.");
             await ResolvePostingAccountAsync(apAccountId, "AP control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            if (invoice.IsOpeningBalance)
+            {
+                return await BuildApOpeningBalancePostingRequestAsync(
+                    invoice,
+                    settings,
+                    apAccountId,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    accountCache,
+                    cancellationToken);
+            }
 
             var linkedFinanceReceipt = await _unitOfWork.Repository<FinancePurchaseOrderReceipt>()
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.VendorInvoiceId == invoice.Id && !r.IsDeleted);
@@ -1182,11 +1203,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             var documentDiscountAmount = 0m;
             var lineNumber = 1;
 
-            foreach (var line in invoice.LineItems.OrderBy(l => l.CreatedAt).ThenBy(l => l.Id))
+            foreach (var line in activeLines)
             {
-                if (line.TenantId != tenantId || line.VendorInvoiceId != invoice.Id)
-                    throw new InvalidOperationException("AP invoice line belongs to another tenant or document.");
-
                 var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
                 if (grossAmount <= 0m)
                 {
@@ -1368,6 +1386,80 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ReturnExistingOnDuplicate = true,
                 Lines = postingLines,
                 TaxCalculationSnapshots = taxSnapshotLines
+            };
+        }
+
+        private async Task<FinancePostingRequestDto> BuildApOpeningBalancePostingRequestAsync(
+            VendorInvoice invoice,
+            FinanceSettings settings,
+            Guid apAccountId,
+            string invoiceCurrency,
+            string functionalCurrency,
+            decimal exchangeRate,
+            Dictionary<Guid, Account> accountCache,
+            CancellationToken cancellationToken)
+        {
+            var migrationClearingAccountId = settings.MigrationClearingAccountId
+                ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AP opening balance posting.");
+            await ResolvePostingAccountAsync(
+                migrationClearingAccountId,
+                "migration clearing account",
+                accountCache,
+                allowControlAccount: false,
+                requireDirectPosting: true,
+                cancellationToken);
+
+            var openingAmount = RoundMoney(invoice.TotalAmount);
+            if (openingAmount <= 0m)
+            {
+                throw new InvalidOperationException($"Opening-balance vendor invoice {invoice.InvoiceNumber} has no positive AP amount to post.");
+            }
+
+            var postingLines = new List<FinancePostingLineDto>
+            {
+                BuildPostingLine(
+                    migrationClearingAccountId,
+                    $"Migration clearing - AP opening balance {invoice.InvoiceNumber}",
+                    debitForeignAmount: openingAmount,
+                    creditForeignAmount: 0m,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    1,
+                    "AP-MigrationClearing"),
+                BuildPostingLine(
+                    apAccountId,
+                    $"AP opening balance {invoice.InvoiceNumber}",
+                    debitForeignAmount: 0m,
+                    creditForeignAmount: openingAmount,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    2,
+                    "AP-Control")
+            };
+
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "AP",
+                SourceDocumentType = "VendorInvoice",
+                SourceDocumentId = invoice.Id,
+                SourceDocumentTenantId = invoice.TenantId,
+                PostingAction = "Post",
+                SourceDocumentReference = invoice.InvoiceNumber,
+                Description = $"AP opening balance {invoice.InvoiceNumber} - {invoice.SupplierName}",
+                PostingDate = invoice.InvoiceDate,
+                JournalType = "AP Opening Balance",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = postingLines,
+                TaxCalculationSnapshots = Array.Empty<FinanceTaxCalculationSnapshotDto>()
             };
         }
 

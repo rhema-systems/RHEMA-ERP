@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
     Calendar as CalendarIcon,
     Download,
-    FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,9 +23,15 @@ import {
 } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
+import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PartnerStatementReport } from '@/components/finance/PartnerStatementReport';
+import type {
+    DetailedLedgerReport,
+    LedgerPartnerOption,
+} from '@/components/finance/PartnerDetailedLedgerReport';
 import {
     Table,
     TableBody,
@@ -38,6 +42,10 @@ import {
 } from '@/components/ui/table';
 
 const REPORT_TABS = ['aging', 'cash', 'statements'] as const;
+const supplierPartnerTypes = new Set(['supplier', 'contractor', 'both']);
+
+const isSupplierPartner = (partner: BusinessPartnerDto) =>
+    supplierPartnerTypes.has((partner.partnerType ?? '').toLowerCase());
 
 function getReportTab(tab: string | null) {
     return REPORT_TABS.find((reportTab) => reportTab === tab) ?? 'aging';
@@ -335,24 +343,90 @@ function CashRequirementsView() {
 }
 
 function SupplierStatementsView() {
+    const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
+    const [partnersLoading, setPartnersLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPartners = async () => {
+            setPartnersLoading(true);
+            try {
+                const allPartners = await businessPartnerService.getAllPartnersForDropdown();
+                if (!isMounted) return;
+
+                setPartners(
+                    allPartners
+                        .filter(isSupplierPartner)
+                        .map((partner) => ({
+                            id: partner.id,
+                            code: partner.partnerCode,
+                            name: partner.partnerName,
+                            currencyCode: partner.currency,
+                        }))
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                );
+            } catch (error) {
+                console.error('Failed to load supplier statement partners', error);
+                if (isMounted) setPartners([]);
+            } finally {
+                if (isMounted) setPartnersLoading(false);
+            }
+        };
+
+        loadPartners();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Supplier Statements</CardTitle>
-                <CardDescription>Generate and download account statements for suppliers</CardDescription>
-            </CardHeader>
-            <CardContent className="text-center py-12 text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>Select a supplier and date range to generate a statement.</p>
-                <Button asChild className="mt-6">
-                    <Link href="/finance/ap/reports/supplier-detailed-ledger">
-                        Open Supplier Detailed Ledger
-                    </Link>
-                </Button>
-                <div className="max-w-md mx-auto mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900 rounded-lg text-sm text-yellow-800 dark:text-yellow-200">
-                    PDF Generation coming soon. Please use individual Supplier Details page to view billing history.
-                </div>
-            </CardContent>
-        </Card>
+        <PartnerStatementReport
+            title="Supplier Statements"
+            description="Generate payable statements of account with opening balance, period movements, and closing balance."
+            partnerLabel="Supplier"
+            partnerPluralLabel="Suppliers"
+            currencyToggleLabel="Show transactions in supplier currency where available"
+            exportFilePrefix="supplier-statement"
+            partners={partners}
+            partnersLoading={partnersLoading}
+            loadReport={async (params): Promise<DetailedLedgerReport> => {
+                const report = await accountsPayableService.getSupplierDetailedLedger({
+                    fromDate: params.fromDate,
+                    toDate: params.toDate,
+                    supplierIds: params.partnerIds,
+                    showSupplierCurrency: params.showPartnerCurrency,
+                });
+
+                return {
+                    fromDate: report.fromDate,
+                    toDate: report.toDate,
+                    currencyCode: report.currencyCode,
+                    totalOpeningBalance: report.totalOpeningBalance,
+                    totalDebits: report.totalDebits,
+                    totalCredits: report.totalCredits,
+                    totalClosingBalance: report.totalClosingBalance,
+                    warnings: report.warnings ?? [],
+                    accounts: report.suppliers.map((supplier) => ({
+                        id: supplier.businessPartnerId ?? supplier.supplierId,
+                        code: supplier.supplierCode,
+                        name: supplier.supplierName,
+                        currencyCode: supplier.currencyCode,
+                        openingBalance: supplier.openingBalance,
+                        totalDebits: supplier.totalDebits,
+                        totalCredits: supplier.totalCredits,
+                        closingBalance: supplier.closingBalance,
+                        lines: supplier.lines,
+                    })),
+                };
+            }}
+            downloadCsv={(params) => accountsPayableService.downloadSupplierStatementCsv({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
+            })}
+        />
     )
 }

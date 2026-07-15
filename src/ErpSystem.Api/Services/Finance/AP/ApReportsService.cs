@@ -572,7 +572,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     return new
                     {
                         Date = a.AdjustmentDate,
-                        Type = "Adjustment",
+                        Type = GetAdjustmentTransactionType(a),
                         DocumentNumber = a.AdjustmentNumber,
                         Reference = a.Reference,
                         Debit = amount > 0 ? amount : 0m,
@@ -942,6 +942,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             return isCredit ? adjustment.Amount : -adjustment.Amount;
         }
 
+        private static string GetAdjustmentTransactionType(SubledgerAdjustmentJournal adjustment)
+        {
+            return string.Equals(adjustment.Purpose, SubledgerAdjustmentPurposes.OpeningBalance, StringComparison.OrdinalIgnoreCase)
+                ? "Opening Balance"
+                : "Adjustment";
+        }
+
         private static ApAgingInvoiceDto MapApBalanceToAgingInvoice(
             SubledgerSettlementBalance balance,
             DateTime asOfDate)
@@ -1253,7 +1260,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 transactions.Add(new SupplierLedgerTransaction(
                     adjustment.Id,
                     adjustment.AdjustmentDate,
-                    "Adjustment",
+                    GetAdjustmentTransactionType(adjustment),
                     adjustment.AdjustmentNumber,
                     adjustment.Reference,
                     adjustment.Reason,

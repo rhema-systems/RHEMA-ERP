@@ -113,6 +113,94 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             return rate == null ? null : MapToDto(rate);
         }
 
+        public async Task<IReadOnlyList<TrendAnalysisDto>> GetTrendsAsync(
+            string? baseCurrencyCode,
+            string targetCurrencyCode,
+            DateTime startDate,
+            DateTime endDate,
+            string interval = "daily",
+            int movingAverageWindow = 7,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(baseCurrencyCode))
+            {
+                baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            }
+
+            baseCurrencyCode = NormalizeCurrency(baseCurrencyCode, "Base currency");
+            targetCurrencyCode = NormalizeCurrency(targetCurrencyCode, "Target currency");
+
+            var start = startDate.Date;
+            var end = endDate.Date;
+            if (end < start)
+            {
+                throw new InvalidOperationException("Trend end date cannot be before the start date.");
+            }
+
+            if (movingAverageWindow <= 0)
+            {
+                throw new InvalidOperationException("Moving average window must be greater than zero.");
+            }
+
+            var endExclusive = end.AddDays(1);
+            var rawRates = await _unitOfWork.Repository<ExchangeRate>()
+                .GetQueryable(r => r.TenantId == TenantId
+                    && r.BaseCurrencyCode == baseCurrencyCode
+                    && r.TargetCurrencyCode == targetCurrencyCode
+                    && r.Rate > 0
+                    && r.EffectiveDate >= start
+                    && r.EffectiveDate < endExclusive)
+                .OrderBy(r => r.EffectiveDate)
+                .ThenByDescending(r => r.Priority)
+                .ThenByDescending(r => r.CreatedDate)
+                .ToListAsync(cancellationToken);
+
+            var rates = rawRates
+                .GroupBy(r => r.EffectiveDate.Date)
+                .Select(g => g
+                    .OrderByDescending(r => r.Priority)
+                    .ThenByDescending(r => r.CreatedDate)
+                    .First())
+                .OrderBy(r => r.EffectiveDate)
+                .ToList();
+
+            if (rates.Count == 0)
+            {
+                return Array.Empty<TrendAnalysisDto>();
+            }
+
+            var periodMin = rates.Min(r => r.Rate);
+            var periodMax = rates.Max(r => r.Rate);
+            var result = new List<TrendAnalysisDto>(rates.Count);
+
+            for (var i = 0; i < rates.Count; i++)
+            {
+                var rate = rates[i];
+                var previousRate = i == 0 ? (decimal?)null : rates[i - 1].Rate;
+                var changeAmount = previousRate.HasValue ? rate.Rate - previousRate.Value : (decimal?)null;
+                var changePercentage = previousRate is > 0
+                    ? changeAmount / previousRate.Value * 100
+                    : null;
+
+                result.Add(new TrendAnalysisDto
+                {
+                    Date = rate.EffectiveDate.Date,
+                    SourceCurrency = baseCurrencyCode,
+                    TargetCurrency = targetCurrencyCode,
+                    Rate = rate.Rate,
+                    PreviousRate = previousRate,
+                    ChangeAmount = changeAmount,
+                    ChangePercentage = changePercentage,
+                    MovingAverage = CalculateMovingAverage(rates, i, movingAverageWindow),
+                    Volatility = CalculateVolatility(rates, i, movingAverageWindow),
+                    MinRate = periodMin,
+                    MaxRate = periodMax
+                });
+            }
+
+            return result;
+        }
+
         public async Task<ExchangeRateDto> CreateExchangeRateAsync(CreateExchangeRateDto dto, CancellationToken cancellationToken = default)
         {
             var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
@@ -355,6 +443,36 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             }
 
             return createdRates.Select(MapToDto).ToList();
+        }
+
+        private static decimal? CalculateMovingAverage(IReadOnlyList<ExchangeRate> rates, int index, int window)
+        {
+            if (index + 1 < window)
+            {
+                return null;
+            }
+
+            return rates
+                .Skip(index + 1 - window)
+                .Take(window)
+                .Average(r => r.Rate);
+        }
+
+        private static decimal? CalculateVolatility(IReadOnlyList<ExchangeRate> rates, int index, int window)
+        {
+            if (index + 1 < window)
+            {
+                return null;
+            }
+
+            var windowRates = rates
+                .Skip(index + 1 - window)
+                .Take(window)
+                .Select(r => r.Rate)
+                .ToList();
+            var average = windowRates.Average();
+            var variance = windowRates.Average(rate => Math.Pow((double)(rate - average), 2));
+            return (decimal)Math.Sqrt(variance);
         }
 
         private ExchangeRateDto MapToDto(ExchangeRate rate)

@@ -227,6 +227,22 @@ class AccountsPayableService {
         return apiService.get<SupplierDetailedLedgerReport>(`${this.baseUrl}/reports/supplier-detailed-ledger?${params.toString()}`);
     }
 
+    public async downloadSupplierStatementCsv(query: {
+        fromDate: string;
+        toDate: string;
+        supplierIds?: string[];
+        showSupplierCurrency?: boolean;
+    }): Promise<Blob> {
+        return apiService.postBlob('/finance/report-exports/export', {
+            reportType: 'SupplierStatement',
+            format: 'Csv',
+            periodStart: query.fromDate,
+            periodEnd: query.toDate,
+            supplierIds: query.supplierIds ?? [],
+            showSupplierCurrency: query.showSupplierCurrency === true,
+        });
+    }
+
     public async getApSummary(): Promise<ApSummaryStats> {
         return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/summary`);
     }

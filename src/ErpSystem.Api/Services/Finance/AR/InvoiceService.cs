@@ -754,15 +754,10 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (invoice.TenantId != tenantId)
                 throw new InvalidOperationException("AR invoice belongs to another tenant.");
 
-            if (invoice.IsOpeningBalance)
-            {
-                throw new InvalidOperationException("Opening-balance AR invoice posting is deferred to the data migration/opening balance posting batch.");
-            }
-
             if (!allowDraftTransition && invoice.Status != InvoiceStatus.Sent)
                 throw new InvalidOperationException("Only sent AR invoices can be posted.");
 
-            if (allowDraftTransition && invoice.Status != InvoiceStatus.Draft)
+            if (allowDraftTransition && invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Sent)
                 throw new InvalidOperationException("Only draft AR invoices can be sent and posted.");
 
             var activeLines = invoice.LineItems
@@ -773,6 +768,12 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (activeLines.Count == 0)
                 throw new InvalidOperationException("AR invoice has no lines to post.");
+
+            foreach (var line in activeLines)
+            {
+                if (line.TenantId != tenantId || line.InvoiceId != invoice.Id)
+                    throw new InvalidOperationException("AR invoice line belongs to another tenant or document.");
+            }
 
             var customer = await ResolveCustomerForPostingAsync(invoice, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
@@ -786,15 +787,25 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
             await ResolvePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
+            if (invoice.IsOpeningBalance)
+            {
+                return await BuildArOpeningBalancePostingRequestAsync(
+                    invoice,
+                    settings,
+                    arAccountId,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    accountCache,
+                    cancellationToken);
+            }
+
             var postingLines = new List<FinancePostingLineDto>();
             var documentDiscountAmount = RoundMoney(activeLines.Sum(l => l.DiscountAmount) + invoice.DiscountAmount);
             var lineNumber = 1;
 
             foreach (var line in activeLines)
             {
-                if (line.TenantId != tenantId || line.InvoiceId != invoice.Id)
-                    throw new InvalidOperationException("AR invoice line belongs to another tenant or document.");
-
                 if (line.DiscountAmount < 0m || line.TaxAmount < 0m)
                     throw new InvalidOperationException("AR invoice line discount and tax amounts cannot be negative.");
 
@@ -947,6 +958,80 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ReturnExistingOnDuplicate = true,
                 Lines = postingLines,
                 TaxCalculationSnapshots = taxSnapshotLines
+            };
+        }
+
+        private async Task<FinancePostingRequestDto> BuildArOpeningBalancePostingRequestAsync(
+            Invoice invoice,
+            FinanceSettings settings,
+            Guid arAccountId,
+            string invoiceCurrency,
+            string functionalCurrency,
+            decimal exchangeRate,
+            Dictionary<Guid, Account> accountCache,
+            CancellationToken cancellationToken)
+        {
+            var migrationClearingAccountId = settings.MigrationClearingAccountId
+                ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AR opening balance posting.");
+            await ResolvePostingAccountAsync(
+                migrationClearingAccountId,
+                "migration clearing account",
+                accountCache,
+                allowControlAccount: false,
+                requireDirectPosting: true,
+                cancellationToken);
+
+            var openingAmount = RoundMoney(invoice.TotalAmount);
+            if (openingAmount <= 0m)
+            {
+                throw new InvalidOperationException($"Opening-balance customer invoice {invoice.InvoiceNumber} has no positive AR amount to post.");
+            }
+
+            var postingLines = new List<FinancePostingLineDto>
+            {
+                BuildPostingLine(
+                    arAccountId,
+                    $"AR opening balance {invoice.InvoiceNumber}",
+                    debitTransactionAmount: openingAmount,
+                    creditTransactionAmount: 0m,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    1,
+                    "AR-Control"),
+                BuildPostingLine(
+                    migrationClearingAccountId,
+                    $"Migration clearing - AR opening balance {invoice.InvoiceNumber}",
+                    debitTransactionAmount: 0m,
+                    creditTransactionAmount: openingAmount,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    2,
+                    "AR-MigrationClearing")
+            };
+
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerInvoice",
+                SourceDocumentId = invoice.Id,
+                SourceDocumentTenantId = invoice.TenantId,
+                PostingAction = "Post",
+                SourceDocumentReference = invoice.InvoiceNumber,
+                Description = $"AR opening balance {invoice.InvoiceNumber} - {invoice.CustomerName}",
+                PostingDate = invoice.InvoiceDate,
+                JournalType = "AR Opening Balance",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = $"AR:CustomerInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = postingLines,
+                TaxCalculationSnapshots = Array.Empty<FinanceTaxCalculationSnapshotDto>()
             };
         }
 

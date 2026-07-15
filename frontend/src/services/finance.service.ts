@@ -116,7 +116,7 @@ export interface PeriodCloseRequestDto {
 
 export interface PeriodReopenRequestDto {
   fiscalPeriodId: string;
-  reopenReason: string;
+  reason: string;
 }
 
 export interface PeriodLockRequestDto {

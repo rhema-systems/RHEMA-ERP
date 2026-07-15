@@ -1,15 +1,13 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowLeft,
     Printer,
-    Mail,
-    Download,
+    Send,
     CreditCard,
-    Ban,
-    FileText
+    Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,16 +25,35 @@ import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
     const params = useParams();
     const id = params.id as string;
     const { hasPermission } = useAuth();
+    const { toast } = useToast();
+    const queryClient = useQueryClient();
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
         queryFn: () => arService.getInvoice(id),
+    });
+
+    const issueInvoiceMutation = useMutation({
+        mutationFn: () => arService.sendInvoice(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            toast({ title: 'Success', description: 'Invoice issued and posted successfully' });
+        },
+        onError: (error: any) => {
+            toast({
+                title: 'Error',
+                description: error.message || 'Failed to issue invoice',
+                variant: 'destructive',
+            });
+        },
     });
 
     if (isLoading) {
@@ -81,12 +98,13 @@ export default function InvoiceDetailsPage() {
                     <Button variant="outline" size="sm" onClick={() => window.print()}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
-                    {hasPermission('Finance.AR.Invoices.Send') && (
-                    <Button variant="outline" size="sm">
-                        <Mail className="mr-2 h-4 w-4" /> Email
+                    {invoice.status === 'Draft' && hasPermission('Finance.AR.Invoices.Send') && (
+                    <Button variant="outline" size="sm" onClick={() => issueInvoiceMutation.mutate()} disabled={issueInvoiceMutation.isPending}>
+                        {issueInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                        Issue / Post
                     </Button>
                     )}
-                    {invoice.status === 'Posted' && invoice.balanceAmount > 0 && (
+                    {(invoice.status === 'Sent' || invoice.status === 'Posted') && invoice.balanceAmount > 0 && (
                         <Button size="sm" onClick={() => router.push(`/finance/ar/payments/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Record Payment
                         </Button>

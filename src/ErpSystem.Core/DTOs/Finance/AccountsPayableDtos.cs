@@ -198,6 +198,9 @@ public class VendorInvoiceLineItemDto
     public Guid? CapitalizationJournalEntryId { get; set; }
     public Guid? CapitalizationPostingEventId { get; set; }
     public DateTime? CapitalizedAt { get; set; }
+    /// <summary>
+    /// Legacy procurement PO line id only; finance PO/GRV lines use their receipt/invoice linkage instead.
+    /// </summary>
     public Guid? PurchaseOrderItemId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
@@ -218,6 +221,9 @@ public class VendorInvoiceLineItemCreateDto
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
     public Guid? FixedAssetId { get; set; }
+    /// <summary>
+    /// Legacy procurement PO line id only; do not send FinancePurchaseOrderItem ids in this field.
+    /// </summary>
     public Guid? PurchaseOrderItemId { get; set; }
 
     [Required]

@@ -22,6 +22,12 @@ public static class SubledgerAdjustmentStatuses
     public const string Reversed = "Reversed";
 }
 
+public static class SubledgerAdjustmentPurposes
+{
+    public const string StandardAdjustment = "StandardAdjustment";
+    public const string OpeningBalance = "OpeningBalance";
+}
+
 public class SubledgerAdjustmentJournal : TenantEntity
 {
     [Required]
@@ -31,6 +37,10 @@ public class SubledgerAdjustmentJournal : TenantEntity
     [Required]
     [MaxLength(50)]
     public string AdjustmentNumber { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(30)]
+    public string Purpose { get; set; } = SubledgerAdjustmentPurposes.StandardAdjustment;
 
     public Guid? CustomerId { get; set; }
     public virtual BusinessPartner? Customer { get; set; }

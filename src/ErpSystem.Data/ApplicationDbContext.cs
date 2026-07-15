@@ -2300,6 +2300,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.ToTable("SubledgerAdjustmentJournals");
             entity.HasIndex(e => new { e.TenantId, e.Module, e.AdjustmentNumber }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.Module, e.AdjustmentDate });
+            entity.HasIndex(e => new { e.TenantId, e.Module, e.Purpose, e.AdjustmentDate });
+            entity.Property(e => e.Purpose).HasMaxLength(30).IsRequired();
             entity.HasIndex(e => e.CustomerId);
             entity.HasIndex(e => e.SupplierId);
             entity.HasOne(e => e.Customer)

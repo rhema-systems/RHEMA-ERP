@@ -68,6 +68,81 @@ public sealed class ArInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task OpeningBalanceArInvoice_ShouldPostControlAgainstMigrationClearing()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.IsOpeningBalance = true;
+            invoice.LineItems.Single().GLAccountId = Guid.NewGuid();
+        });
+        var clearingAccount = SeedAccount(db, tenantId, "3999", AccountType.Equity);
+        var settings = await db.FinanceSettings.SingleAsync(s => s.TenantId == tenantId);
+        settings.MigrationClearingAccountId = clearingAccount.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        result.JournalEntryId.Should().NotBeNull();
+
+        var journal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == result.JournalEntryId);
+        journal.JournalType.Should().Be("AR Opening Balance");
+        journal.SourceModule.Should().Be("AR");
+        journal.SourceDocumentType.Should().Be("CustomerInvoice");
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(t => t.AccountId == clearingAccount.Id).CreditAmount.Should().Be(100m);
+        journal.Transactions.Should().NotContain(t => t.AccountId == fixture.RevenueAccount.Id);
+
+        (await db.FinancePostingEvents.CountAsync(e =>
+            e.TenantId == tenantId &&
+            e.SourceModule == "AR" &&
+            e.SourceDocumentType == "CustomerInvoice" &&
+            e.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
+        (await db.Set<TaxCalculation>().CountAsync()).Should().Be(0);
+        fixture.RevenueAccount.Balance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task DraftOpeningBalanceArInvoice_ShouldSendAndPostControlAgainstMigrationClearing()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = InvoiceStatus.Draft;
+            invoice.IsOpeningBalance = true;
+            invoice.LineItems.Single().GLAccountId = Guid.NewGuid();
+        });
+        var clearingAccount = SeedAccount(db, tenantId, "3999", AccountType.Equity);
+        var settings = await db.FinanceSettings.SingleAsync(s => s.TenantId == tenantId);
+        settings.MigrationClearingAccountId = clearingAccount.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.SendInvoiceAsync(fixture.Invoice.Id);
+
+        result.Status.Should().Be(nameof(InvoiceStatus.Sent));
+        result.JournalEntryId.Should().NotBeNull();
+
+        var journal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == result.JournalEntryId);
+        journal.JournalType.Should().Be("AR Opening Balance");
+        journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(t => t.AccountId == clearingAccount.Id).CreditAmount.Should().Be(100m);
+        journal.Transactions.Should().NotContain(t => t.AccountId == fixture.RevenueAccount.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task DraftArInvoice_ShouldNotPost()
     {
         var tenantId = Guid.NewGuid();

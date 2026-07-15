@@ -561,23 +561,23 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             return;
         }
 
-        if (_context.Database.IsRelational())
+        if (_context.Database.IsSqlServer())
         {
-            await ApplyRelationalAccountBalanceDeltasAsync(tenantId, balanceDeltas, cancellationToken);
+            await ApplySqlServerAccountBalanceDeltasAsync(tenantId, balanceDeltas, cancellationToken);
             return;
         }
 
         await ApplyTrackedAccountBalanceDeltasAsync(tenantId, balanceDeltas, cancellationToken);
     }
 
-    private async Task ApplyRelationalAccountBalanceDeltasAsync(
+    private async Task ApplySqlServerAccountBalanceDeltasAsync(
         Guid tenantId,
         IReadOnlyCollection<AccountBalanceDelta> balanceDeltas,
         CancellationToken cancellationToken)
     {
         foreach (var delta in balanceDeltas)
         {
-            // UPDLOCK serializes concurrent snapshot increments for the same account while the surrounding posting transaction is active.
+            // SQL Server lock hints serialize concurrent snapshot increments while the posting transaction is active.
             var rows = await _context.Database.ExecuteSqlInterpolatedAsync($@"
 UPDATE [Accounts] WITH (UPDLOCK, ROWLOCK)
 SET [Balance] = [Balance] + {delta.Amount}

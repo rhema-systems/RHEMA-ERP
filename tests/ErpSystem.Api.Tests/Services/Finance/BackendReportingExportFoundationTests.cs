@@ -359,6 +359,171 @@ public sealed class BackendReportingExportFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-BackendReportingExport")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CustomerStatementExport_UsesArSubledgerDetailedLedger()
+    {
+        var fixture = CreateFixture();
+        var customerId = Guid.NewGuid();
+        fixture.ArReports
+            .Setup(service => service.GetCustomerDetailedLedgerAsync(
+                PeriodStart,
+                AsOfDate,
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(customerId)),
+                true,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CustomerDetailedLedgerReportDto
+            {
+                FromDate = PeriodStart,
+                ToDate = AsOfDate,
+                CurrencyCode = "Customer Currency",
+                ShowCustomerCurrency = true,
+                TotalOpeningBalance = 10m,
+                TotalDebits = 100m,
+                TotalCredits = 40m,
+                TotalClosingBalance = 70m,
+                Customers =
+                {
+                    new CustomerDetailedLedgerAccountDto
+                    {
+                        CustomerId = customerId,
+                        CustomerCode = "CUST-001",
+                        CustomerName = "Customer A",
+                        CurrencyCode = "GHS",
+                        OpeningBalance = 10m,
+                        TotalDebits = 100m,
+                        TotalCredits = 40m,
+                        ClosingBalance = 70m,
+                        Lines =
+                        {
+                            new CustomerDetailedLedgerLineDto
+                            {
+                                SourceDocumentId = Guid.NewGuid(),
+                                TransactionDate = new DateTime(2026, 7, 5),
+                                TransactionType = "Invoice",
+                                DocumentNumber = "AR-INV-001",
+                                Description = "Posted customer invoice",
+                                TransactionCurrencyCode = "GHS",
+                                ExchangeRate = 1m,
+                                Debit = 100m,
+                                RunningBalance = 110m
+                            },
+                            new CustomerDetailedLedgerLineDto
+                            {
+                                SourceDocumentId = Guid.NewGuid(),
+                                TransactionDate = new DateTime(2026, 7, 20),
+                                TransactionType = "Payment",
+                                DocumentNumber = "AR-PAY-001",
+                                Reference = "BANK-REF",
+                                Description = "Customer receipt",
+                                TransactionCurrencyCode = "GHS",
+                                ExchangeRate = 1m,
+                                Credit = 40m,
+                                RunningBalance = 70m
+                            }
+                        }
+                    }
+                }
+            });
+
+        var result = await fixture.Service.ExportAsync(new FinanceReportExportRequestDto
+        {
+            ReportType = "customer-statement",
+            PeriodStart = PeriodStart,
+            PeriodEnd = AsOfDate,
+            CustomerIds = new List<Guid> { customerId },
+            ShowCustomerCurrency = true
+        });
+
+        result.ReportType.Should().Be(FinanceReportExportTypes.CustomerStatement);
+        result.SourceOfTruthMode.Should().Contain("AR subledger statement");
+        result.Totals["TotalClosingBalance"].Should().Be(70m);
+        Csv(result).Should().Contain("CustomerCode").And.Contain("Opening Balance").And.Contain("AR-INV-001").And.Contain("Closing Balance");
+        fixture.Audit.EventTypes.Should().Contain(FinanceAuditEvents.CustomerStatementExported);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BackendReportingExport")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task SupplierStatementExport_UsesApSubledgerDetailedLedger()
+    {
+        var fixture = CreateFixture();
+        var supplierId = Guid.NewGuid();
+        fixture.ApReports
+            .Setup(service => service.GetSupplierDetailedLedgerAsync(
+                PeriodStart,
+                AsOfDate,
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(supplierId)),
+                false,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierDetailedLedgerReportDto
+            {
+                FromDate = PeriodStart,
+                ToDate = AsOfDate,
+                CurrencyCode = "GHS",
+                TotalOpeningBalance = 25m,
+                TotalDebits = 30m,
+                TotalCredits = 90m,
+                TotalClosingBalance = 85m,
+                Suppliers =
+                {
+                    new SupplierDetailedLedgerAccountDto
+                    {
+                        SupplierId = supplierId,
+                        SupplierCode = "SUP-001",
+                        SupplierName = "Supplier A",
+                        CurrencyCode = "GHS",
+                        OpeningBalance = 25m,
+                        TotalDebits = 30m,
+                        TotalCredits = 90m,
+                        ClosingBalance = 85m,
+                        Lines =
+                        {
+                            new SupplierDetailedLedgerLineDto
+                            {
+                                SourceDocumentId = Guid.NewGuid(),
+                                TransactionDate = new DateTime(2026, 7, 8),
+                                TransactionType = "Invoice",
+                                DocumentNumber = "AP-INV-001",
+                                Description = "Supplier invoice",
+                                TransactionCurrencyCode = "GHS",
+                                ExchangeRate = 1m,
+                                Credit = 90m,
+                                RunningBalance = 115m
+                            },
+                            new SupplierDetailedLedgerLineDto
+                            {
+                                SourceDocumentId = Guid.NewGuid(),
+                                TransactionDate = new DateTime(2026, 7, 24),
+                                TransactionType = "Payment",
+                                DocumentNumber = "AP-PAY-001",
+                                Description = "Supplier payment",
+                                TransactionCurrencyCode = "GHS",
+                                ExchangeRate = 1m,
+                                Debit = 30m,
+                                RunningBalance = 85m
+                            }
+                        }
+                    }
+                }
+            });
+
+        var result = await fixture.Service.ExportAsync(new FinanceReportExportRequestDto
+        {
+            ReportType = "supplier-statement",
+            PeriodStart = PeriodStart,
+            PeriodEnd = AsOfDate,
+            SupplierIds = new List<Guid> { supplierId }
+        });
+
+        result.ReportType.Should().Be(FinanceReportExportTypes.SupplierStatement);
+        result.SourceOfTruthMode.Should().Contain("AP subledger statement");
+        result.Totals["TotalClosingBalance"].Should().Be(85m);
+        Csv(result).Should().Contain("SupplierCode").And.Contain("Opening Balance").And.Contain("AP-INV-001").And.Contain("Closing Balance");
+        fixture.Audit.EventTypes.Should().Contain(FinanceAuditEvents.SupplierStatementExported);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BackendReportingExport")]
     [Trait("Category", "FixedAssets")]
     public async Task FixedAssetGlReconciliationExport_ExposesVarianceAndPresentationWarning()
     {

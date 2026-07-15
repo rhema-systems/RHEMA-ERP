@@ -7,6 +7,7 @@ public class SubledgerAdjustmentJournalDto
     public Guid Id { get; set; }
     public string Module { get; set; } = string.Empty;
     public string AdjustmentNumber { get; set; } = string.Empty;
+    public string Purpose { get; set; } = string.Empty;
     public Guid? CustomerId { get; set; }
     public string? CustomerName { get; set; }
     public Guid? SupplierId { get; set; }
@@ -41,6 +42,9 @@ public class CreateSubledgerAdjustmentJournalDto
     [Required]
     [MaxLength(2)]
     public string Module { get; set; } = string.Empty;
+
+    [MaxLength(30)]
+    public string? Purpose { get; set; }
 
     public Guid? CustomerId { get; set; }
 

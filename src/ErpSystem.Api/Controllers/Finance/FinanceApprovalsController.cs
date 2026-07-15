@@ -1199,8 +1199,8 @@ public class FinanceApprovalsController : ControllerBase
         invoice.UpdatedAt = DateTime.UtcNow;
         invoice.UpdatedBy = _currentUserService.UserName ?? "system";
 
-        // Opening-balance AP invoices are migration source records; they must not
-        // create inventory receipts or use the normal AP invoice posting path.
+        // Opening-balance AP invoices preserve subledger balances but do not create
+        // inventory receipts; their GL impact is control account vs migration clearing.
         foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
         {
             if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
@@ -1236,14 +1236,16 @@ public class FinanceApprovalsController : ControllerBase
             comments,
             cancellationToken);
 
+        if (invoice.IsOpeningBalance)
+        {
+            // Opening-balance AP invoices are approved as migration subledger evidence;
+            // controlled opening-balance posting, not normal AP invoice posting, owns GL impact.
+            return;
+        }
+
         if (_vendorInvoiceService == null)
         {
             throw new InvalidOperationException("Vendor invoice posting service is not configured.");
-        }
-
-        if (invoice.IsOpeningBalance)
-        {
-            return;
         }
 
         await _vendorInvoiceService.PostAsync(invoice.Id, cancellationToken);

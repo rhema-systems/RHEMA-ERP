@@ -570,7 +570,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     return new StatementTransactionDto
                     {
                         TransactionDate = adjustment.AdjustmentDate,
-                        TransactionType = "Adjustment",
+                        TransactionType = GetAdjustmentTransactionType(adjustment),
                         Reference = adjustment.AdjustmentNumber,
                         Description = adjustment.Reason,
                         Debit = amount > 0 ? amount : 0,
@@ -1333,7 +1333,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 transactions.Add(new CustomerLedgerTransaction(
                     adjustment.Id,
                     adjustment.AdjustmentDate,
-                    "Adjustment",
+                    GetAdjustmentTransactionType(adjustment),
                     adjustment.AdjustmentNumber,
                     adjustment.Reference,
                     adjustment.Reason,
@@ -1462,6 +1462,13 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var isDebit = string.Equals(adjustment.AdjustmentType, SubledgerAdjustmentTypes.Debit, StringComparison.OrdinalIgnoreCase);
             return isDebit ? adjustment.Amount : -adjustment.Amount;
+        }
+
+        private static string GetAdjustmentTransactionType(SubledgerAdjustmentJournal adjustment)
+        {
+            return string.Equals(adjustment.Purpose, SubledgerAdjustmentPurposes.OpeningBalance, StringComparison.OrdinalIgnoreCase)
+                ? "Opening Balance"
+                : "Adjustment";
         }
     }
 }

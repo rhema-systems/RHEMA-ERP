@@ -75,7 +75,7 @@ export interface Invoice {
     totalAmount: number;
     paidAmount: number;
     balanceAmount: number;
-    status: 'Draft' | 'Posted' | 'Paid' | 'Void' | 'Overdue';
+    status: 'Draft' | 'Sent' | 'Posted' | 'Paid' | 'Void' | 'Overdue';
     currencyCode: string;
     exchangeRate: number;
     paymentTermsDays: number;

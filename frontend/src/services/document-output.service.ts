@@ -1,6 +1,6 @@
 import { getStoredToken } from '@/services/api.service';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export const DOCUMENT_TYPES = {
   financeJournalVoucher: 'Finance.JournalVoucher',
@@ -29,7 +29,7 @@ class DocumentOutputService {
   ): Promise<RenderedDocumentFile> {
     const format = options.format || 'pdf';
     const copyType = options.copyType || 'Original';
-    const url = new URL(`${API_BASE_URL}/documents/${encodeURIComponent(documentType)}/${encodeURIComponent(entityId)}`);
+    const url = this.buildApiUrl(`/documents/${encodeURIComponent(documentType)}/${encodeURIComponent(entityId)}`);
     url.searchParams.set('format', format);
     url.searchParams.set('copyType', copyType);
 
@@ -60,7 +60,7 @@ class DocumentOutputService {
   ): Promise<RenderedDocumentFile> {
     const format = options.format || 'pdf';
     const copyType = options.copyType || 'Original';
-    const url = new URL(`${API_BASE_URL}/documents/${encodeURIComponent(documentType)}`);
+    const url = this.buildApiUrl(`/documents/${encodeURIComponent(documentType)}`);
     url.searchParams.set('format', format);
     url.searchParams.set('copyType', copyType);
     this.appendParameters(url, parameters);
@@ -196,6 +196,21 @@ class DocumentOutputService {
 
       url.searchParams.set(key, String(value));
     });
+  }
+
+  private buildApiUrl(path: string): URL {
+    const apiBase = API_BASE_URL.replace(/\/$/, '');
+    const requestPath = `${apiBase}${path}`;
+    if (/^https?:\/\//i.test(requestPath)) {
+      return new URL(requestPath);
+    }
+
+    if (typeof window === 'undefined') {
+      throw new Error('Document rendering requires a browser origin when NEXT_PUBLIC_API_URL is relative.');
+    }
+
+    // Keep deployed browser builds on the ERP origin instead of falling back to a developer localhost URL.
+    return new URL(requestPath, window.location.origin);
   }
 
   private async readErrorMessage(response: Response): Promise<string | null> {

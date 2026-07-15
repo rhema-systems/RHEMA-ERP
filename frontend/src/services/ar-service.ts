@@ -200,6 +200,22 @@ class ArService {
         return apiService.get<CustomerDetailedLedgerReport>(`${this.baseUrl}/reports/customer-detailed-ledger?${params.toString()}`);
     }
 
+    public async downloadCustomerStatementCsv(query: {
+        fromDate: string;
+        toDate: string;
+        customerIds?: string[];
+        showCustomerCurrency?: boolean;
+    }): Promise<Blob> {
+        return apiService.postBlob('/finance/report-exports/export', {
+            reportType: 'CustomerStatement',
+            format: 'Csv',
+            periodStart: query.fromDate,
+            periodEnd: query.toDate,
+            customerIds: query.customerIds ?? [],
+            showCustomerCurrency: query.showCustomerCurrency === true,
+        });
+    }
+
     public async getCollectionsDashboard(): Promise<CollectionsDashboardStats> {
         return apiService.get<CollectionsDashboardStats>(`${this.baseUrl}/reports/collections-dashboard`);
     }

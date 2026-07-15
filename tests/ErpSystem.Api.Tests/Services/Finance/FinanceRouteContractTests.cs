@@ -42,6 +42,29 @@ public sealed class FinanceRouteContractTests
             "fix the route/verb or implement the endpoint rather than allowlisting");
     }
 
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinanceBrowserServices_ShouldNotShipLocalhostApiFallbacks()
+    {
+        var root = FindRepositoryRoot();
+        var checkedFiles = new[]
+        {
+            Path.Combine(root, "frontend", "src", "services", "document-output.service.ts"),
+            Path.Combine(root, "frontend", "src", "services", "finance", "finance-data.service.ts"),
+            Path.Combine(root, "frontend", "src", "services", "finance", "fixed-assets-data.service.ts"),
+        };
+
+        foreach (var file in checkedFiles)
+        {
+            var source = File.ReadAllText(file);
+            source.Should().NotContain("localhost:53484", $"{Path.GetFileName(file)} should use same-origin /api unless NEXT_PUBLIC_API_URL is configured");
+        }
+
+        var documentOutput = File.ReadAllText(checkedFiles[0]);
+        documentOutput.Should().Contain("window.location.origin", "relative document render URLs should resolve against the deployed browser origin");
+    }
+
     private sealed record FrontendCall(string Verb, string Route, string File);
 
     private static bool MatchesAnyBackendRoute(FrontendCall call, IReadOnlyList<(string Verb, string[] Segments)> backendRoutes)

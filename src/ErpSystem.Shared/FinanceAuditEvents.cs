@@ -116,6 +116,8 @@ public static class FinanceAuditEvents
     public const string CashBankLedgerExported = "Finance.Report.CashBankLedgerExported";
     public const string ApAgingExported = "Finance.Report.APAgingExported";
     public const string ArAgingExported = "Finance.Report.ARAgingExported";
+    public const string CustomerStatementExported = "Finance.Report.CustomerStatementExported";
+    public const string SupplierStatementExported = "Finance.Report.SupplierStatementExported";
     public const string ApControlReconciliationExported = "Finance.Report.APControlReconciliationExported";
     public const string ArControlReconciliationExported = "Finance.Report.ARControlReconciliationExported";
     public const string FixedAssetReportExported = "Finance.Report.FixedAssetReportExported";

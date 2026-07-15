@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Plus,
     Search,
@@ -45,8 +45,10 @@ import type { WorkflowEntitySummaryDto } from '@/types/workflow';
 
 export default function VendorInvoicesPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { toast } = useToast();
     const queryClient = useQueryClient();
+    const openingBalanceOnly = searchParams.get('isOpeningBalance') === 'true';
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const [page, setPage] = useState(1);
@@ -56,12 +58,13 @@ export default function VendorInvoicesPage() {
     const [workflowSummaryMap, setWorkflowSummaryMap] = useState<Record<string, WorkflowEntitySummaryDto>>({});
 
     const { data: invoicesData, isLoading } = useQuery({
-        queryKey: ['vendor-invoices', page, pageSize, debouncedSearchTerm, statusFilter],
+        queryKey: ['vendor-invoices', page, pageSize, debouncedSearchTerm, statusFilter, openingBalanceOnly],
         queryFn: () => accountsPayableService.getInvoices({
             page,
             pageSize,
             searchTerm: debouncedSearchTerm,
-            status: statusFilter
+            status: statusFilter,
+            isOpeningBalance: openingBalanceOnly ? true : undefined,
         }),
     });
 

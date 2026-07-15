@@ -91,6 +91,7 @@ export default function NewInvoicePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const preselectedCustomerId = searchParams.get('customerId');
+    const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
@@ -169,7 +170,7 @@ export default function NewInvoicePage() {
             exchangeRateSource: 'Daily',
             paymentTermId: 'none',
             discountAmount: 0,
-            isOpeningBalance: false,
+            isOpeningBalance: defaultOpeningBalance,
             notes: '',
             lineItems: [
                 { lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0 }

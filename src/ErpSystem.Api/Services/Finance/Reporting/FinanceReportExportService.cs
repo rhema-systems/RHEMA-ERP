@@ -80,6 +80,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 FinanceReportExportTypes.CashBankLedger => await BuildCashBankLedgerExportAsync(request, cancellationToken),
                 FinanceReportExportTypes.ApAging => await BuildApAgingExportAsync(request, cancellationToken),
                 FinanceReportExportTypes.ArAging => await BuildArAgingExportAsync(request, cancellationToken),
+                FinanceReportExportTypes.CustomerStatement => await BuildCustomerStatementExportAsync(request, cancellationToken),
+                FinanceReportExportTypes.SupplierStatement => await BuildSupplierStatementExportAsync(request, cancellationToken),
                 FinanceReportExportTypes.ApControlReconciliation => await BuildApControlReconciliationExportAsync(request, cancellationToken),
                 FinanceReportExportTypes.ArControlReconciliation => await BuildArControlReconciliationExportAsync(request, cancellationToken),
                 FinanceReportExportTypes.FixedAssetRegister => await BuildFixedAssetRegisterExportAsync(request, cancellationToken),
@@ -474,6 +476,194 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             },
             report.Diagnostics.Select(diagnostic => $"{diagnostic.Code}: {diagnostic.Message}"),
             usesSettlementReadModel: true);
+    }
+
+    private async Task<FinanceReportExportResultDto> BuildCustomerStatementExportAsync(
+        FinanceReportExportRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var startDate = request.PeriodStart ?? DateTime.UtcNow.Date;
+        var endDate = request.PeriodEnd ?? request.AsOfDate ?? DateTime.UtcNow.Date;
+        var customerIds = ResolveReportIds(request.CustomerIds, request.CustomerId);
+        var report = await _arReportsService.GetCustomerDetailedLedgerAsync(
+            startDate,
+            endDate,
+            customerIds,
+            request.ShowCustomerCurrency,
+            cancellationToken);
+
+        var rows = new List<string[]>
+        {
+            new[] { "CustomerCode", "CustomerName", "StatementFrom", "StatementTo", "StatementCurrency", "LineDate", "LineType", "DocumentNumber", "Reference", "Description", "TransactionCurrency", "ExchangeRate", "Debit", "Credit", "RunningBalance" }
+        };
+
+        foreach (var customer in report.Customers)
+        {
+            rows.Add(new[]
+            {
+                customer.CustomerCode,
+                customer.CustomerName,
+                Date(report.FromDate),
+                Date(report.ToDate),
+                customer.CurrencyCode,
+                Date(report.FromDate),
+                "Opening Balance",
+                string.Empty,
+                string.Empty,
+                "Opening balance brought forward",
+                customer.CurrencyCode,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                Money(customer.OpeningBalance)
+            });
+
+            rows.AddRange(customer.Lines.Select(line => new[]
+            {
+                customer.CustomerCode,
+                customer.CustomerName,
+                Date(report.FromDate),
+                Date(report.ToDate),
+                customer.CurrencyCode,
+                Date(line.TransactionDate),
+                line.TransactionType,
+                line.DocumentNumber,
+                line.Reference ?? string.Empty,
+                line.Description,
+                line.TransactionCurrencyCode,
+                line.ExchangeRate.ToString("0.######", InvariantCulture),
+                Money(line.Debit),
+                Money(line.Credit),
+                Money(line.RunningBalance)
+            }));
+
+            rows.Add(new[]
+            {
+                customer.CustomerCode,
+                customer.CustomerName,
+                Date(report.FromDate),
+                Date(report.ToDate),
+                customer.CurrencyCode,
+                Date(report.ToDate),
+                "Closing Balance",
+                string.Empty,
+                string.Empty,
+                "Closing balance carried forward",
+                customer.CurrencyCode,
+                string.Empty,
+                Money(customer.TotalDebits),
+                Money(customer.TotalCredits),
+                Money(customer.ClosingBalance)
+            });
+        }
+
+        return BuildCsvResult(
+            FinanceReportExportTypes.CustomerStatement,
+            "AR subledger statement of account with opening balance, period movements, and closing balance",
+            rows,
+            report.Customers.Sum(customer => customer.Lines.Count + 2),
+            new Dictionary<string, decimal>
+            {
+                ["TotalOpeningBalance"] = report.TotalOpeningBalance,
+                ["TotalDebits"] = report.TotalDebits,
+                ["TotalCredits"] = report.TotalCredits,
+                ["TotalClosingBalance"] = report.TotalClosingBalance
+            },
+            report.Warnings);
+    }
+
+    private async Task<FinanceReportExportResultDto> BuildSupplierStatementExportAsync(
+        FinanceReportExportRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var startDate = request.PeriodStart ?? DateTime.UtcNow.Date;
+        var endDate = request.PeriodEnd ?? request.AsOfDate ?? DateTime.UtcNow.Date;
+        var supplierIds = ResolveReportIds(request.SupplierIds, request.SupplierId);
+        var report = await _apReportsService.GetSupplierDetailedLedgerAsync(
+            startDate,
+            endDate,
+            supplierIds,
+            request.ShowSupplierCurrency,
+            cancellationToken);
+
+        var rows = new List<string[]>
+        {
+            new[] { "SupplierCode", "SupplierName", "StatementFrom", "StatementTo", "StatementCurrency", "LineDate", "LineType", "DocumentNumber", "Reference", "Description", "TransactionCurrency", "ExchangeRate", "Debit", "Credit", "RunningBalance" }
+        };
+
+        foreach (var supplier in report.Suppliers)
+        {
+            rows.Add(new[]
+            {
+                supplier.SupplierCode,
+                supplier.SupplierName,
+                Date(report.FromDate),
+                Date(report.ToDate),
+                supplier.CurrencyCode,
+                Date(report.FromDate),
+                "Opening Balance",
+                string.Empty,
+                string.Empty,
+                "Opening balance brought forward",
+                supplier.CurrencyCode,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                Money(supplier.OpeningBalance)
+            });
+
+            rows.AddRange(supplier.Lines.Select(line => new[]
+            {
+                supplier.SupplierCode,
+                supplier.SupplierName,
+                Date(report.FromDate),
+                Date(report.ToDate),
+                supplier.CurrencyCode,
+                Date(line.TransactionDate),
+                line.TransactionType,
+                line.DocumentNumber,
+                line.Reference ?? string.Empty,
+                line.Description,
+                line.TransactionCurrencyCode,
+                line.ExchangeRate.ToString("0.######", InvariantCulture),
+                Money(line.Debit),
+                Money(line.Credit),
+                Money(line.RunningBalance)
+            }));
+
+            rows.Add(new[]
+            {
+                supplier.SupplierCode,
+                supplier.SupplierName,
+                Date(report.FromDate),
+                Date(report.ToDate),
+                supplier.CurrencyCode,
+                Date(report.ToDate),
+                "Closing Balance",
+                string.Empty,
+                string.Empty,
+                "Closing balance carried forward",
+                supplier.CurrencyCode,
+                string.Empty,
+                Money(supplier.TotalDebits),
+                Money(supplier.TotalCredits),
+                Money(supplier.ClosingBalance)
+            });
+        }
+
+        return BuildCsvResult(
+            FinanceReportExportTypes.SupplierStatement,
+            "AP subledger statement of account with opening balance, period movements, and closing balance",
+            rows,
+            report.Suppliers.Sum(supplier => supplier.Lines.Count + 2),
+            new Dictionary<string, decimal>
+            {
+                ["TotalOpeningBalance"] = report.TotalOpeningBalance,
+                ["TotalDebits"] = report.TotalDebits,
+                ["TotalCredits"] = report.TotalCredits,
+                ["TotalClosingBalance"] = report.TotalClosingBalance
+            },
+            report.Warnings);
     }
 
     private async Task<FinanceReportExportResultDto> BuildApControlReconciliationExportAsync(
@@ -1168,6 +1358,12 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             case FinanceReportExportTypes.ArAging:
                 yield return FinanceAuditEvents.ArAgingExported;
                 break;
+            case FinanceReportExportTypes.CustomerStatement:
+                yield return FinanceAuditEvents.CustomerStatementExported;
+                break;
+            case FinanceReportExportTypes.SupplierStatement:
+                yield return FinanceAuditEvents.SupplierStatementExported;
+                break;
             case FinanceReportExportTypes.ApControlReconciliation:
                 yield return FinanceAuditEvents.ApControlReconciliationExported;
                 break;
@@ -1226,6 +1422,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             "CASHBANKLEDGER" or "CASHBOOK" => FinanceReportExportTypes.CashBankLedger,
             "APAGING" or "ACCOUNTPAYABLEAGING" or "ACCOUNTSPAYABLEAGING" => FinanceReportExportTypes.ApAging,
             "ARAGING" or "ACCOUNTRECEIVABLEAGING" or "ACCOUNTSRECEIVABLEAGING" => FinanceReportExportTypes.ArAging,
+            "CUSTOMERSTATEMENT" or "ARCUSTOMERSTATEMENT" or "ARSTATEMENT" or "ACCOUNTSRECEIVABLESTATEMENT" => FinanceReportExportTypes.CustomerStatement,
+            "SUPPLIERSTATEMENT" or "APSUPPLIERSTATEMENT" or "APSTATEMENT" or "ACCOUNTSPAYABLESTATEMENT" => FinanceReportExportTypes.SupplierStatement,
             "APCONTROLRECONCILIATION" => FinanceReportExportTypes.ApControlReconciliation,
             "ARCONTROLRECONCILIATION" => FinanceReportExportTypes.ArControlReconciliation,
             "FIXEDASSETREGISTER" or "ASSETREGISTER" => FinanceReportExportTypes.FixedAssetRegister,
@@ -1264,6 +1462,20 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             : format.Trim().Equals("Csv", StringComparison.OrdinalIgnoreCase)
                 ? FinanceReportExportFormats.Csv
                 : format.Trim();
+    }
+
+    private static IReadOnlyCollection<Guid> ResolveReportIds(IReadOnlyCollection<Guid> ids, Guid? singleId)
+    {
+        var resolved = ids
+            .Where(id => id != Guid.Empty)
+            .ToList();
+
+        if (singleId.HasValue && singleId.Value != Guid.Empty && !resolved.Contains(singleId.Value))
+        {
+            resolved.Add(singleId.Value);
+        }
+
+        return resolved;
     }
 
     private static string BuildFileName(string reportType, bool isPrint)

@@ -23,10 +23,14 @@ import type {
     UpdateCurrencyDto,
     CreateExchangeRateDto,
     CreateJournalEntryDto,
+    CreateOpeningBalanceBatchDto,
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
     AddCurrencyLinkDto,
     ModuleDefinition,
+    OpeningBalanceBatch,
+    OpeningBalanceDiagnostic,
+    OpeningBalanceValidationResult,
     ReverseSubledgerAdjustmentJournalDto,
     CreateFiscalYearDto,
     BalanceSheetReportDto,
@@ -68,7 +72,8 @@ class FinanceDataService {
         if (!url) return '';
         if (/^https?:\/\//i.test(url)) return url;
 
-        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api';
+        // Use the deployed origin when NEXT_PUBLIC_API_URL is not configured.
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || '/api';
         const backendBase = apiBase.replace(/\/api\/?$/, '');
         const normalized = url.startsWith('/') ? url : `/${url}`;
         return `${backendBase}${normalized}`;
@@ -236,9 +241,9 @@ class FinanceDataService {
         return apiService.get<FiscalPeriod>(`/finance/fiscal-periods/${id}`);
     }
 
-    async openFiscalPeriod(id: string): Promise<FiscalPeriod> {
+    async openFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
         // The backend models opening a closed period as "reopen" (FiscalPeriodController).
-        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, {});
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, { reason });
     }
 
     async closeFiscalPeriod(id: string): Promise<FiscalPeriod> {
@@ -259,8 +264,8 @@ class FinanceDataService {
         return apiService.post(`/finance/periods/${periodId}/unlock-module`, { moduleCode, reason });
     }
 
-    async reopenFiscalPeriod(id: string): Promise<FiscalPeriod> {
-        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, {});
+    async reopenFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, { reason });
     }
 
     // ===== JOURNAL ENTRIES =====
@@ -379,6 +384,32 @@ class FinanceDataService {
     async rejectJournalEntry(id: string, reason: string): Promise<JournalEntry> {
         const raw = await apiService.post<any>(`/finance/journal-entries/${id}/reject`, { reason });
         return normalizeJournalEntry(raw);
+    }
+
+    // ===== CONTROLLED OPENING BALANCES =====
+
+    async createOpeningBalanceBatch(dto: CreateOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances', dto);
+    }
+
+    async getOpeningBalanceBatch(batchId: string): Promise<OpeningBalanceBatch> {
+        return apiService.get<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}`);
+    }
+
+    async validateOpeningBalanceBatch(batchId: string): Promise<OpeningBalanceValidationResult> {
+        return apiService.post<OpeningBalanceValidationResult>(`/finance/opening-balances/${batchId}/validate`, {});
+    }
+
+    async submitOpeningBalanceBatch(batchId: string, comment?: string): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}/submit`, { comment });
+    }
+
+    async postOpeningBalanceBatch(batchId: string, comment?: string): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}/post`, { comment });
+    }
+
+    async getOpeningBalanceDiagnostics(): Promise<OpeningBalanceDiagnostic[]> {
+        return apiService.get<OpeningBalanceDiagnostic[]>('/finance/opening-balances/diagnostics');
     }
 
     // ===== ATTACHMENTS =====

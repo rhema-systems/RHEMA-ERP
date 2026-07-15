@@ -103,6 +103,7 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
           { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
+          { title: 'Opening Balances', href: '/finance/opening-balances', icon: Database },
           {
             title: 'Journal Approval Queue',
             href: '/finance/journal-entries/approvals',

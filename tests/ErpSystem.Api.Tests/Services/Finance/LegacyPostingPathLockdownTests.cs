@@ -109,6 +109,33 @@ public sealed class LegacyPostingPathLockdownTests
         service.Should().NotContain("CreateOpeningBalancePostingAsync");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Architecture")]
+    public void SubledgerOpeningBalanceAdjustments_ShouldForceMigrationClearingContra()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "SubledgerAdjustmentJournalService.cs"));
+        var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Finance", "SubledgerAdjustmentJournal.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "SubledgerAdjustmentJournalDtos.cs"));
+        var page = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "subledger-adjustments", "new", "page.tsx"));
+
+        entity.Should().Contain("public static class SubledgerAdjustmentPurposes");
+        entity.Should().Contain("public string Purpose");
+        dto.Should().Contain("public string? Purpose");
+        dto.Should().Contain("public string Purpose");
+
+        service.Should().Contain("NormalizePurpose(dto.Purpose)");
+        service.Should().Contain("ResolveContraAccountId(");
+        service.Should().Contain("settings.MigrationClearingAccountId");
+        service.Should().Contain("Opening-balance subledger adjustment journals must use the configured Migration Clearing Account");
+        service.Should().Contain("Purpose = original.Purpose");
+
+        page.Should().Contain("OpeningBalance");
+        page.Should().Contain("financeDataService.getFinanceSettings()");
+        page.Should().Contain("migrationClearingAccountId");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
