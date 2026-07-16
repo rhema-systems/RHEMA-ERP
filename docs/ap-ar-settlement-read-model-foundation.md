@@ -20,9 +20,12 @@ Operational fields such as `VendorInvoice.PaidAmount`, `Invoice.PaidAmount`, and
   - Excludes unposted source documents and unposted settlement events.
   - Emits diagnostics for cross-tenant allocations, missing source journals, operational snapshot drift, and control-account variance.
 - AP and AR aging report services
-  - Use the settlement read model when the service is registered.
-  - Preserve legacy fallback behavior only when the read-model service is not injected.
+  - Require the settlement read model as a constructor dependency; missing DI configuration fails rather than returning legacy operational-field aging.
   - Add `UsesSettlementReadModel` and diagnostic payloads to response DTOs.
+- AR customer account balance and credit-limit checks
+  - Rebuild and read the AR settlement projection before calculating outstanding exposure or aging buckets.
+  - Do not use mutable `Invoice.PaidAmount`, `Invoice.CreditedAmount`, or `Invoice.BalanceAmount` snapshots as the accounting basis.
+  - Customer invoice and receipt history continue to query the current Finance AR source tables; `ICustomerService` is registered in the Finance service collection.
 - AP/AR control reconciliation
   - Compares read-model outstanding to posted GL control-account movement.
   - AP control balance is `credit - debit`.
@@ -53,6 +56,14 @@ AR applications come from posted `CustomerPayment`, `SalesCreditNote`, and compa
 - `WithheldAmount` records AR WHT/VAT withholding settlement components.
 - `CreditedAmount` includes posted Sales credit notes and compatibility customer credit-note allocations.
 - `OutstandingAmount = Invoice.TotalAmount - SettledAmount - WithheldAmount - CreditedAmount`
+
+Sales credit-note safeguards:
+
+- A Sales credit note can be applied only after its `SalesCreditNote` posting event and journal link exist.
+- A credit note with an original Finance invoice is applied only to that invoice; posted-fact limits prevent its total from exceeding the invoice after prior posted Sales credit notes.
+- Application also rejects a credit that would make posted customer receipts plus posted Sales credit notes exceed the original invoice amount.
+- Settlement rebuilds use `AppliedToInvoiceId` as the authoritative target. `OriginalInvoiceId` is used only for older rows without an explicit target, so one credit cannot reduce two invoices.
+- A standalone Sales credit note is retained as an unapplied AR credit until a supported mapping from legacy Sales customer records to Finance `BusinessPartner` records is implemented. It is not force-applied through a GL-only or ID-assumption shortcut.
 
 Compatibility customer credit notes remain visible under `FIN-LIM-0013`.
 

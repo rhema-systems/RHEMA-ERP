@@ -205,6 +205,35 @@ public sealed class SubledgerSettlementReadModelFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task SalesCreditNoteWithLegacyConflictingReferencesUsesItsAppliedInvoiceOnly()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var originalInvoice = SeedPostedArInvoice(db, fixture, "AR-005", 100m);
+        var appliedInvoice = SeedPostedArInvoice(db, fixture, "AR-006", 100m);
+        var creditNote = SeedPostedSalesCreditNote(db, fixture, originalInvoice, "CN-002", 25m);
+        creditNote.AppliedToInvoiceId = appliedInvoice.Id;
+        await db.SaveChangesAsync();
+
+        var result = await CreateSettlementService(db, tenantId)
+            .RebuildAsync(new SubledgerSettlementRebuildRequestDto
+            {
+                SourceModule = "AR",
+                AsOfDate = AsOfDate
+            });
+
+        var balances = await db.SubledgerSettlementBalances
+            .Where(b => b.SourceModule == "AR")
+            .ToListAsync();
+        balances.Single(b => b.SourceDocumentId == originalInvoice.Id).CreditedAmount.Should().Be(0m);
+        balances.Single(b => b.SourceDocumentId == appliedInvoice.Id).CreditedAmount.Should().Be(25m);
+        result.Diagnostics.Should().Contain(d => d.Code == "SalesCreditNoteTargetConflict" && d.SourceDocumentId == creditNote.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
     [Trait("Category", "MultiCurrency")]
     public async Task ForeignCurrencyApSettlementUsesPostedSnapshotsAndFxLink()
     {

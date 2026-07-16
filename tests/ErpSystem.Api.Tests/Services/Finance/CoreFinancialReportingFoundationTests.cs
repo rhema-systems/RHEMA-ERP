@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.AR;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
@@ -294,18 +295,32 @@ public sealed class CoreFinancialReportingFoundationTests
     {
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings.Setup(x => x.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        var currentUser = CreateCurrentUser(tenantId);
         return new ApReportsService(
             new UnitOfWork(db),
-            CreateCurrentUser(tenantId).Object,
+            currentUser.Object,
             tenantSettings.Object,
-            Mock.Of<ILogger<ApReportsService>>());
+            Mock.Of<ILogger<ApReportsService>>(),
+            CreateSettlementService(db, currentUser.Object));
     }
 
     private static ArReportsService CreateArReportsService(ApplicationDbContext db, Guid tenantId)
-        => new(
+    {
+        var currentUser = CreateCurrentUser(tenantId);
+        return new ArReportsService(
             new UnitOfWork(db),
-            CreateCurrentUser(tenantId).Object,
-            Mock.Of<ILogger<ArReportsService>>());
+            currentUser.Object,
+            Mock.Of<ILogger<ArReportsService>>(),
+            CreateSettlementService(db, currentUser.Object));
+    }
+
+    private static SubledgerSettlementReadModelService CreateSettlementService(
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
+        => new(
+            db,
+            currentUser,
+            Mock.Of<ILogger<SubledgerSettlementReadModelService>>());
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
     {

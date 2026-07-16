@@ -1,6 +1,7 @@
 using System.Reflection;
 using ErpSystem.Api.Authorization;
 using ErpSystem.Api.Controllers.Finance;
+using ErpSystem.Api.Controllers.Sales;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -135,6 +136,28 @@ public sealed class FinanceControllerSecurityTests
         GetMappedPolicies(controllerType, method!)
             .Should()
             .Contain(expectedPermission);
+    }
+
+    [Theory]
+    [InlineData("CreateCreditNote", FinancePermissions.ManageArInvoices)]
+    [InlineData("ApproveCreditNote", FinancePermissions.ApprovePostArInvoices)]
+    [InlineData("PostCreditNote", FinancePermissions.ApprovePostArInvoices)]
+    [InlineData("ApplyCreditNote", FinancePermissions.ReceiveCustomerPayments)]
+    [InlineData("VoidCreditNote", FinancePermissions.VoidArInvoices)]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "FinanceSecurity")]
+    public void SalesHostedArCreditNoteMutations_ShouldUseExplicitFinancePermissions(
+        string actionName,
+        string expectedPermission)
+    {
+        var method = typeof(ReturnOrderController)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(candidate => candidate.Name == actionName);
+
+        method.Should().NotBeNull();
+        method!.GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+            .Select(attribute => attribute.Policy)
+            .Should().Contain(expectedPermission);
     }
 
     [Fact]

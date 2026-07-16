@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -278,13 +279,23 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AR receipt posting.");
 
-            var payment = await LoadPaymentForPostingAsync(id, cancellationToken);
-            var wasAlreadyLinked = payment.JournalEntryId.HasValue;
+            CustomerPayment? payment = null;
+            FinancePostingResultDto? postingResult = null;
+            var wasAlreadyLinked = false;
+            var transactionStarted = false;
 
             try
             {
+                // Keep the receipt source state and the Finance-engine journal/event in one commit.
+                // Serializable isolation prevents concurrent posted credits/receipts from over-settling an invoice.
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                transactionStarted = true;
+
+                payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+                wasAlreadyLinked = payment.JournalEntryId.HasValue;
+
                 var postingRequest = await BuildArReceiptPostingRequestAsync(payment, cancellationToken);
-                var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+                postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
 
                 if (payment.JournalEntryId.HasValue && payment.JournalEntryId.Value != postingResult.JournalEntryId)
                     throw new InvalidOperationException("Customer payment is linked to a different journal entry than the posting engine result.");
@@ -298,6 +309,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                     await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
 
                 if (postingResult.WasDuplicate || wasAlreadyLinked)
                 {
@@ -349,18 +363,26 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
             catch (Exception ex)
             {
-                await RecordArReceiptAuditAsync(
-                    FinanceAuditEvents.ArReceiptPostingFailed,
-                    payment,
-                    afterValues: new
-                    {
-                        payment.JournalEntryId,
-                        error = ex.Message
-                    },
-                    reason: ex.Message,
-                    cancellationToken: cancellationToken);
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                }
 
-                _logger.LogError(ex, "Failed to post AR receipt {PaymentNumber}", payment.PaymentNumber);
+                if (payment != null)
+                {
+                    await RecordArReceiptAuditAsync(
+                        FinanceAuditEvents.ArReceiptPostingFailed,
+                        payment,
+                        afterValues: new
+                        {
+                            payment.JournalEntryId,
+                            error = ex.Message
+                        },
+                        reason: ex.Message,
+                        cancellationToken: cancellationToken);
+                }
+
+                _logger.LogError(ex, "Failed to post AR receipt {PaymentNumber}", payment?.PaymentNumber ?? id.ToString());
                 throw;
             }
         }
@@ -519,12 +541,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                     continue;
                 }
 
-                if (invoice.BalanceAmount <= 0)
-                {
-                    _logger.LogWarning("Invoice {InvoiceNumber} has no balance, skipping", invoice.InvoiceNumber);
-                    continue;
-                }
-
                 var cashAmount = Math.Max(allocationDto.AllocatedAmount, 0m);
                 var requestedDiscountAmount = Math.Max(allocationDto.DiscountAmount, 0m);
 
@@ -551,7 +567,14 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 // Cap at outstanding balance to prevent over-allocation
                 var totalApplied = cashAmount + requestedDiscountAmount;
-                var outstandingBalance = invoice.TotalAmount - invoice.PaidAmount;
+                var postedSalesCreditTotal = await GetPostedSalesCreditAmountForInvoiceAsync(invoice.Id, cancellationToken);
+                var outstandingBalance = RoundMoney(invoice.TotalAmount - invoice.PaidAmount - postedSalesCreditTotal);
+                if (outstandingBalance <= 0m)
+                {
+                    _logger.LogWarning("Invoice {InvoiceNumber} has no balance after posted credit notes, skipping", invoice.InvoiceNumber);
+                    continue;
+                }
+
                 if (totalApplied > outstandingBalance)
                 {
                     _logger.LogWarning(
@@ -573,11 +596,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 invoice.PaidAmount += totalApplied;
 
                 // Update invoice status
-                if (invoice.BalanceAmount <= 0.01m) // Account for rounding
+                var operationalOutstanding = RoundMoney(invoice.TotalAmount - invoice.PaidAmount - postedSalesCreditTotal);
+                if (operationalOutstanding <= 0.01m) // Account for rounding
                 {
                     invoice.Status = InvoiceStatus.Paid;
                 }
-                else if (invoice.PaidAmount > 0)
+                else if (invoice.PaidAmount > 0 || postedSalesCreditTotal > 0)
                 {
                     invoice.Status = InvoiceStatus.PartiallyPaid;
                 }
@@ -889,6 +913,38 @@ namespace ErpSystem.Api.Services.Finance.AR
                 cancellationToken: cancellationToken);
         }
 
+        private async Task<decimal> GetPostedSalesCreditAmountForInvoiceAsync(
+            Guid invoiceId,
+            CancellationToken cancellationToken)
+        {
+            var postedCreditNoteIds = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e =>
+                    e.TenantId == TenantId &&
+                    e.SourceModule == "AR" &&
+                    e.SourceDocumentType == "SalesCreditNote" &&
+                    e.PostingAction == "Post" &&
+                    e.PostingStatus == "Posted" &&
+                    e.JournalEntryId.HasValue &&
+                    !e.IsDeleted)
+                .Select(e => e.SourceDocumentId)
+                .ToListAsync(cancellationToken);
+
+            if (postedCreditNoteIds.Count == 0)
+                return 0m;
+
+            // Sales CreditNote carries a legacy Sales customer key, so invoice settlement is
+            // deliberately resolved from its explicit invoice references and posted event.
+            return RoundMoney(await _unitOfWork.Repository<CreditNote>()
+                .GetQueryable(c =>
+                    c.TenantId == TenantId &&
+                    c.CreditNoteStatus == CreditNoteStatus.Applied &&
+                    postedCreditNoteIds.Contains(c.Id) &&
+                    !c.IsDeleted &&
+                    (c.AppliedToInvoiceId == invoiceId ||
+                     (!c.AppliedToInvoiceId.HasValue && c.OriginalInvoiceId == invoiceId)))
+                .SumAsync(c => c.TotalAmount, cancellationToken));
+        }
+
         private async Task<CustomerPayment> LoadPaymentForPostingAsync(Guid id, CancellationToken cancellationToken)
         {
             var payment = await _unitOfWork.Repository<CustomerPayment>()
@@ -992,8 +1048,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                         !a.IsReversal &&
                         !a.IsDeleted)
                     .SumAsync(a => a.AllocatedAmount + a.DiscountAmount, cancellationToken);
+                var postedSalesCreditTotal = await GetPostedSalesCreditAmountForInvoiceAsync(
+                    allocation.InvoiceId,
+                    cancellationToken);
 
-                if (RoundMoney(totalInvoiceSettlement) > RoundMoney(allocation.Invoice.TotalAmount))
+                if (RoundMoney(totalInvoiceSettlement + postedSalesCreditTotal) > RoundMoney(allocation.Invoice.TotalAmount))
                     throw new InvalidOperationException($"AR receipt would over-settle invoice '{allocation.Invoice.InvoiceNumber}'.");
             }
 

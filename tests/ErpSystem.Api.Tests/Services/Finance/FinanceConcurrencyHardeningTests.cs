@@ -225,10 +225,10 @@ public sealed class FinanceConcurrencyHardeningTests
         var generator = ExtractMember(controllerSource, "private async Task<string> GenerateReceiptNumberAsync", "private static FinancePostingLineDto BuildPostingLine");
 
         var transactionIndex = createMethod.IndexOf("BeginTransactionAsync(IsolationLevel.Serializable", StringComparison.Ordinal);
-        var numberingIndex = createMethod.IndexOf("GenerateReceiptNumberAsync(tenantId, receiptDate, cancellationToken)", StringComparison.Ordinal);
+        var numberingIndex = createMethod.IndexOf("ResolveReceiptNumberAsync(tenantId, receiptDate, dto.ReceiptNumber, cancellationToken)", StringComparison.Ordinal);
 
         transactionIndex.Should().BeGreaterThan(-1, "receipt creation should hold a serializable transaction");
-        transactionIndex.Should().BeLessThan(numberingIndex, "receipt number reservations should join the receipt transaction");
+        transactionIndex.Should().BeLessThan(numberingIndex, "receipt number resolution and any reservation should join the receipt transaction");
         generator.Should().Contain("_documentNumberingService.GenerateAsync", "generated finance GRV numbers must be reserved transactionally");
         generator.Should().Contain("FinanceDocumentTypes.FinancePurchaseOrderReceipt", "finance GRVs need a dedicated numbering sequence");
         generator.Should().NotContain("CountAsync", "generated finance GRV numbers must not be derived from visible row counts");
@@ -328,8 +328,10 @@ public sealed class FinanceConcurrencyHardeningTests
         var invoiceMethod = ExtractMember(source, "public async Task<List<InvoiceDto>> GetCustomerInvoicesAsync", "public async Task<List<CustomerPaymentDto>> GetCustomerPaymentsAsync");
         var paymentMethod = ExtractMember(source, "public async Task<List<CustomerPaymentDto>> GetCustomerPaymentsAsync", "private IQueryable<BusinessPartner> CustomerPartners()");
 
-        balanceMethod.Should().Contain("GetOpenCustomerInvoicesQuery(customerId)", "customer balance must derive from current AR invoices, not mutable customer balance snapshots alone");
-        balanceMethod.Should().Contain("AddInvoiceToBalanceBuckets(balance, invoice)", "overdue invoice balances must be assigned to their due-date aging buckets");
+        balanceMethod.Should().Contain("_settlementReadModelService.RebuildAsync", "customer balance must rebuild from posted AR facts rather than mutable paid/credited snapshots");
+        balanceMethod.Should().Contain("SubledgerSettlementModules.AccountsReceivable", "customer balance must use the AR settlement projection");
+        balanceMethod.Should().Contain("AddSettlementBalanceToBalanceBuckets(balance, settlementBalance, asOfDate)", "overdue balances must be assigned to due-date aging buckets from the settlement projection");
+        balanceMethod.Should().NotContain("BalanceAmount", "customer balance must not use mutable invoice balance snapshots");
         source.Should().Contain("i.BusinessPartnerId == customerId", "AR invoices use BusinessPartnerId as the current customer key");
         source.Should().Contain("p.CustomerId == customerId", "AR receipts use CustomerId as the current BusinessPartner-backed customer key");
         source.Should().Contain("daysOverdue <= 30", "the 1-30 day bucket must be calculated from invoice due dates");
@@ -349,6 +351,9 @@ public sealed class FinanceConcurrencyHardeningTests
         paymentMethod.Should().Contain(".Include(p => p.Allocations)", "payment history should include allocation context for account review");
         paymentMethod.Should().Contain("MapPaymentToDto", "payment history should return the existing finance payment DTO shape");
         paymentMethod.Should().NotContain("Task.FromResult(new List<CustomerPaymentDto>())", "customer payment history must not be stubbed out");
+
+        var registrations = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Extensions", "ServiceCollectionExtensions.cs"));
+        registrations.Should().Contain("ICustomerService, ErpSystem.Api.Services.Finance.AR.CustomerService", "customer account endpoints must resolve their Finance AR service at runtime");
     }
 
     [Fact]

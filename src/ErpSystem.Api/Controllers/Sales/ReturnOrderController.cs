@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -64,12 +65,15 @@ public class ReturnOrderController : ControllerBase
         => Ok(await _service.CancelReturnOrderAsync(id, reason));
 
     [HttpPost("{id:guid}/issue-credit")]
+    // This Sales route creates a Finance AR document, so it deliberately uses the Finance permission model.
+    [Authorize(Policy = FinancePermissions.ManageArInvoices)]
     public async Task<IActionResult> IssueCreditNote(Guid id)
         => Ok(await _service.CreateCreditNoteFromReturnAsync(id));
 
     // ── Credit Notes ──
 
     [HttpGet("~/api/sales/credit-notes")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<IActionResult> GetCreditNotes(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null, [FromQuery] CreditNoteStatus? status = null,
@@ -81,6 +85,7 @@ public class ReturnOrderController : ControllerBase
     }
 
     [HttpGet("~/api/sales/credit-notes/{id:guid}")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<IActionResult> GetCreditNote(Guid id)
     {
         var cn = await _service.GetCreditNoteByIdAsync(id);
@@ -88,6 +93,7 @@ public class ReturnOrderController : ControllerBase
     }
 
     [HttpPost("~/api/sales/credit-notes")]
+    [Authorize(Policy = FinancePermissions.ManageArInvoices)]
     public async Task<IActionResult> CreateCreditNote([FromBody] CreateCreditNoteDto dto)
     {
         var cn = await _service.CreateCreditNoteAsync(dto);
@@ -95,26 +101,32 @@ public class ReturnOrderController : ControllerBase
     }
 
     [HttpPost("~/api/sales/credit-notes/{id:guid}/approve")]
+    [Authorize(Policy = FinancePermissions.ApprovePostArInvoices)]
     public async Task<IActionResult> ApproveCreditNote(Guid id) => Ok(await _service.ApproveCreditNoteAsync(id));
 
     // Credit notes keep both routes: workflow controls approval, while posting remains the Finance-engine boundary.
     [HttpPost("~/api/sales/credit-notes/{id:guid}/post")]
+    [Authorize(Policy = FinancePermissions.ApprovePostArInvoices)]
     public async Task<IActionResult> PostCreditNote(Guid id, CancellationToken cancellationToken)
         => Ok(await _service.PostCreditNoteAsync(id, cancellationToken));
 
     [HttpPost("~/api/sales/credit-notes/{id:guid}/submit")]
+    [Authorize(Policy = FinancePermissions.ManageArInvoices)]
     public async Task<IActionResult> SubmitCreditNote(Guid id)
         => Ok(await _service.SubmitCreditNoteForApprovalAsync(id));
 
     [HttpPost("~/api/sales/credit-notes/{id:guid}/workflow-approval")]
+    [Authorize(Policy = FinancePermissions.ApprovePostArInvoices)]
     public async Task<IActionResult> ProcessCreditNoteApproval(Guid id, [FromBody] CreditNoteApprovalDto dto)
         => Ok(await _service.ProcessCreditNoteApprovalAsync(id, dto));
 
     [HttpPost("~/api/sales/credit-notes/{id:guid}/apply")]
+    [Authorize(Policy = FinancePermissions.ReceiveCustomerPayments)]
     public async Task<IActionResult> ApplyCreditNote(Guid id, [FromQuery] Guid? invoiceId = null)
         => Ok(await _service.ApplyCreditNoteAsync(id, invoiceId));
 
     [HttpPost("~/api/sales/credit-notes/{id:guid}/void")]
+    [Authorize(Policy = FinancePermissions.VoidArInvoices)]
     public async Task<IActionResult> VoidCreditNote(Guid id, [FromQuery] string? reason = null)
         => Ok(await _service.VoidCreditNoteAsync(id, reason));
 

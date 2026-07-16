@@ -5,6 +5,7 @@ using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -111,6 +112,27 @@ public sealed class ArReceiptPostingMigrationTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR receipt would over-settle invoice '{fixture.Invoice.InvoiceNumber}'.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ReceiptAndPostedSalesCreditNoteCannotOverSettleAnInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId, allocationAmount: 50m);
+        SeedPostedAppliedSalesCreditNote(db, tenantId, fixture.Invoice.Id, amount: 60m);
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Payment.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"AR receipt would over-settle invoice '{fixture.Invoice.InvoiceNumber}'.");
+        (await db.FinancePostingEvents.CountAsync(e =>
+            e.SourceDocumentType == "CustomerPayment" &&
+            e.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -441,6 +463,55 @@ public sealed class ArReceiptPostingMigrationTests
         await db.SaveChangesAsync();
 
         return new ArReceiptFixture(payment, allocation, invoice, customer, arAccount, bankGlAccount, bankAccount);
+    }
+
+    private static void SeedPostedAppliedSalesCreditNote(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid invoiceId,
+        decimal amount)
+    {
+        var creditNote = new CreditNote
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CustomerId = Guid.NewGuid(),
+            OriginalInvoiceId = invoiceId,
+            AppliedToInvoiceId = invoiceId,
+            CreditNoteStatus = CreditNoteStatus.Applied,
+            DocumentNumber = "SCN-2026-00001",
+            DocumentDate = new DateTime(2026, 7, 5),
+            AppliedDate = new DateTime(2026, 7, 5),
+            TotalAmount = amount,
+            Currency = "GHS",
+            ExchangeRate = 1m,
+            JournalEntryId = Guid.NewGuid(),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.CreditNotes.Add(creditNote);
+        db.FinancePostingEvents.Add(new FinancePostingEvent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceModule = "AR",
+            SourceDocumentType = "SalesCreditNote",
+            SourceDocumentId = creditNote.Id,
+            PostingAction = "Post",
+            SourceDocumentReference = creditNote.DocumentNumber,
+            IdempotencyKey = $"AR:SalesCreditNote:{tenantId:N}:{creditNote.Id:N}:Post",
+            JournalEntryId = creditNote.JournalEntryId,
+            PostingStatus = "Posted",
+            PostingDate = creditNote.DocumentDate,
+            RequestedAt = DateTime.UtcNow,
+            PostedAt = DateTime.UtcNow,
+            TotalDebitAmount = amount,
+            TotalCreditAmount = amount,
+            FunctionalCurrencyCode = "GHS",
+            BookClassification = "IFRS",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
     }
 
     private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")

@@ -24,7 +24,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ILogger<ArReportsService> _logger;
-        private readonly ISubledgerSettlementReadModelService? _settlementReadModelService;
+        private readonly ISubledgerSettlementReadModelService _settlementReadModelService;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly ITenantSettingsService? _tenantSettingsService;
 
@@ -32,14 +32,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             IUnitOfWork _unitOfWork,
             ICurrentUserService currentUser,
             ILogger<ArReportsService> logger,
-            ISubledgerSettlementReadModelService? settlementReadModelService = null,
+            ISubledgerSettlementReadModelService settlementReadModelService,
             IFinanceAuditService? financeAuditService = null,
             ITenantSettingsService? tenantSettingsService = null)
         {
             this._unitOfWork = _unitOfWork;
             _currentUser = currentUser;
             _logger = logger;
-            _settlementReadModelService = settlementReadModelService;
+            _settlementReadModelService = settlementReadModelService ?? throw new ArgumentNullException(nameof(settlementReadModelService));
             _financeAuditService = financeAuditService;
             _tenantSettingsService = tenantSettingsService;
         }
@@ -48,10 +48,10 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<AgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default)
         {
+            // The constructor requires the projection service. This branch is deliberately
+            // retained as the only supported report path; legacy snapshots cannot be selected.
             if (_settlementReadModelService != null)
-            {
                 return await GetSettlementReadModelAgingReportAsync(asOfDate, customerId, cancellationToken);
-            }
 
             var effectiveDate = asOfDate ?? DateTime.UtcNow;
 
@@ -178,10 +178,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<DetailedAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default)
         {
+            // See GetAgingReportAsync: mandatory dependency prevents a silent legacy fallback.
             if (_settlementReadModelService != null)
-            {
                 return await GetSettlementReadModelDetailedAgingReportAsync(asOfDate, customerId, cancellationToken);
-            }
 
             var effectiveDate = asOfDate ?? DateTime.UtcNow;
 

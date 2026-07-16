@@ -124,6 +124,84 @@ public sealed class ArCreditNotePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task SecondPostedSalesCreditNote_ShouldIncludePriorPostedCreditsInTheLimit()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, amount: 80m);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        var secondCreditNote = CreateApprovedSalesCreditNote(
+            fixture,
+            "SCN-2026-00002",
+            amount: 50m);
+        db.CreditNotes.Add(secondCreditNote);
+        await db.SaveChangesAsync();
+
+        var act = () => service.PostCreditNoteAsync(secondCreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"AR credit note would exceed eligible credit amount for invoice '{fixture.Invoice.InvoiceNumber}'.");
+        (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote"))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task SalesCreditNoteCannotBeAppliedBeforeCentralPostingExists()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.ApplyCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note must be posted through the central finance posting engine before it can be applied.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task PostedSalesCreditNoteCannotBeAppliedToAnotherInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        var act = () => service.ApplyCreditNoteAsync(fixture.CreditNote.Id, Guid.NewGuid());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit notes can only be applied to their original invoice. Use a reversal or adjustment workflow to correct the target.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task SalesCreditNoteApplicationCannotOverSettleAnInvoiceAfterPostedReceipts()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, amount: 100m);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        SeedPostedCustomerReceiptSettlement(db, fixture, amount: 30m);
+        await db.SaveChangesAsync();
+
+        var act = () => service.ApplyCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"AR credit note would over-settle invoice '{fixture.Invoice.InvoiceNumber}' when combined with posted receipts and credit notes.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task CrossTenantCustomer_ShouldBeRejected()
     {
         var tenantId = Guid.NewGuid();
@@ -499,6 +577,99 @@ public sealed class ArCreditNotePostingMigrationTests
         await db.SaveChangesAsync();
 
         return new ArCreditNoteFixture(creditNote, invoice, customer, arAccount, salesReturnsAccount, taxAccount, settings);
+    }
+
+    private static CreditNote CreateApprovedSalesCreditNote(
+        ArCreditNoteFixture fixture,
+        string documentNumber,
+        decimal amount)
+    {
+        var creditNote = new CreditNote
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.CreditNote.TenantId,
+            CustomerId = fixture.Customer.Id,
+            OriginalInvoiceId = fixture.Invoice.Id,
+            DocumentNumber = documentNumber,
+            DocumentDate = fixture.CreditNote.DocumentDate,
+            Currency = "GHS",
+            ExchangeRate = 1m,
+            CreditNoteStatus = CreditNoteStatus.Approved,
+            TotalAmount = amount,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        creditNote.Lines.Add(new CreditNoteLine
+        {
+            Id = Guid.NewGuid(),
+            TenantId = creditNote.TenantId,
+            CreditNoteId = creditNote.Id,
+            Description = "Returned services",
+            Quantity = 1m,
+            UnitPrice = amount,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+
+        return creditNote;
+    }
+
+    private static void SeedPostedCustomerReceiptSettlement(
+        ApplicationDbContext db,
+        ArCreditNoteFixture fixture,
+        decimal amount)
+    {
+        var payment = new CustomerPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.CreditNote.TenantId,
+            CustomerId = fixture.Invoice.BusinessPartnerId,
+            PaymentNumber = "CP-2026-00001",
+            PaymentDate = fixture.CreditNote.DocumentDate,
+            TotalAmount = amount,
+            AllocatedAmount = amount,
+            PaymentMethod = "BankTransfer",
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            Status = "Posted",
+            JournalEntryId = Guid.NewGuid(),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.Set<CustomerPayment>().Add(payment);
+        db.Set<PaymentAllocation>().Add(new PaymentAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = payment.TenantId,
+            CustomerPaymentId = payment.Id,
+            InvoiceId = fixture.Invoice.Id,
+            AllocatedAmount = amount,
+            AllocationDate = payment.PaymentDate,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+        db.FinancePostingEvents.Add(new FinancePostingEvent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = payment.TenantId,
+            SourceModule = "AR",
+            SourceDocumentType = "CustomerPayment",
+            SourceDocumentId = payment.Id,
+            PostingAction = "Post",
+            SourceDocumentReference = payment.PaymentNumber,
+            IdempotencyKey = $"AR:CustomerPayment:{payment.TenantId:N}:{payment.Id:N}:Post",
+            JournalEntryId = payment.JournalEntryId,
+            PostingStatus = "Posted",
+            PostingDate = payment.PaymentDate,
+            RequestedAt = DateTime.UtcNow,
+            PostedAt = DateTime.UtcNow,
+            TotalDebitAmount = amount,
+            TotalCreditAmount = amount,
+            FunctionalCurrencyCode = "GHS",
+            BookClassification = "IFRS",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
     }
 
     private static async Task<CompatibilityCreditNoteFixture> SeedCompatibilityCreditNoteAsync(

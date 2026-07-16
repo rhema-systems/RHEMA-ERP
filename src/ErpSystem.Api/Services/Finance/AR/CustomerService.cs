@@ -16,17 +16,20 @@ public class CustomerService : ICustomerService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUser;
     private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly ISubledgerSettlementReadModelService _settlementReadModelService;
     private readonly ILogger<CustomerService> _logger;
 
     public CustomerService(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUser,
         IDocumentNumberingService documentNumberingService,
+        ISubledgerSettlementReadModelService settlementReadModelService,
         ILogger<CustomerService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _documentNumberingService = documentNumberingService;
+        _settlementReadModelService = settlementReadModelService;
         _logger = logger;
     }
 
@@ -243,9 +246,27 @@ public class CustomerService : ICustomerService
             throw new InvalidOperationException("Customer not found.");
         }
 
-        var openInvoices = await GetOpenCustomerInvoicesQuery(customerId)
-            .ToListAsync(cancellationToken);
-        var outstandingBalance = openInvoices.Sum(i => i.BalanceAmount);
+        var asOfDate = DateTime.UtcNow;
+
+        // PaidAmount/CreditedAmount are operational snapshots. Rebuild the AR read model from
+        // posted invoices, receipts, credit notes, withholding, and posting events before using
+        // it for customer credit exposure or aging; no posted GL/source document is changed.
+        await _settlementReadModelService.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+        {
+            SourceModule = SubledgerSettlementModules.AccountsReceivable,
+            AsOfDate = asOfDate,
+            RecordAudit = false
+        }, cancellationToken);
+
+        var settlementBalances = (await _settlementReadModelService.GetBalancesAsync(
+                SubledgerSettlementModules.AccountsReceivable,
+                asOfDate,
+                customerId,
+                cancellationToken))
+            .Where(b => b.OutstandingAmount != 0m)
+            .ToList();
+
+        var outstandingBalance = settlementBalances.Sum(b => b.OutstandingAmount);
         var creditLimit = partner.CreditLimit ?? 0m;
 
         var balance = new CustomerBalanceDto
@@ -257,9 +278,9 @@ public class CustomerService : ICustomerService
             AvailableCredit = Math.Max(0m, creditLimit - outstandingBalance)
         };
 
-        foreach (var invoice in openInvoices)
+        foreach (var settlementBalance in settlementBalances)
         {
-            AddInvoiceToBalanceBuckets(balance, invoice);
+            AddSettlementBalanceToBalanceBuckets(balance, settlementBalance, asOfDate);
         }
 
         return balance;
@@ -339,15 +360,6 @@ public class CustomerService : ICustomerService
                 i.BusinessPartnerId == customerId);
     }
 
-    private IQueryable<Invoice> GetOpenCustomerInvoicesQuery(Guid customerId)
-    {
-        return GetCustomerInvoicesQuery(customerId)
-            .Where(i =>
-                i.Status != InvoiceStatus.Draft &&
-                i.Status != InvoiceStatus.Cancelled &&
-                (i.TotalAmount - i.PaidAmount - i.CreditedAmount) > 0);
-    }
-
     private IQueryable<CustomerPayment> GetCustomerPaymentsQuery(Guid customerId)
     {
         return _unitOfWork.Repository<CustomerPayment>()
@@ -404,17 +416,19 @@ public class CustomerService : ICustomerService
         };
     }
 
-    private static void AddInvoiceToBalanceBuckets(CustomerBalanceDto balance, Invoice invoice)
+    private static void AddSettlementBalanceToBalanceBuckets(
+        CustomerBalanceDto balance,
+        SubledgerSettlementBalance settlementBalance,
+        DateTime asOfDate)
     {
-        var outstanding = Math.Max(0m, invoice.BalanceAmount);
-        if (outstanding <= 0)
+        var outstanding = settlementBalance.OutstandingAmount;
+        if (outstanding == 0)
         {
             return;
         }
 
-        var asOfDate = DateTime.UtcNow.Date;
-        var dueDate = (invoice.DueDate ?? invoice.InvoiceDate).Date;
-        var daysOverdue = (asOfDate - dueDate).Days;
+        var dueDate = (settlementBalance.DueDate ?? settlementBalance.TransactionDate).Date;
+        var daysOverdue = (asOfDate.Date - dueDate).Days;
 
         if (daysOverdue <= 0)
         {

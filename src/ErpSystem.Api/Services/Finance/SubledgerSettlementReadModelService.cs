@@ -453,8 +453,10 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 c.CreditNoteStatus == CreditNoteStatus.Applied &&
                 c.AppliedDate.HasValue &&
                 c.AppliedDate.Value.Date <= asOfDate.Date &&
+                // AppliedToInvoiceId is the settlement target. OriginalInvoiceId is used only
+                // for historical rows that predate an explicit application target.
                 ((c.AppliedToInvoiceId.HasValue && invoiceIds.Contains(c.AppliedToInvoiceId.Value)) ||
-                 (c.OriginalInvoiceId.HasValue && invoiceIds.Contains(c.OriginalInvoiceId.Value))))
+                 (!c.AppliedToInvoiceId.HasValue && c.OriginalInvoiceId.HasValue && invoiceIds.Contains(c.OriginalInvoiceId.Value))))
             .ToListAsync(cancellationToken);
 
         var crossTenantAllocationCount = await _context.Set<PaymentAllocation>()
@@ -467,6 +469,19 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             postedInvoiceEvents.Values.Select(e => e.JournalEntryId).Where(id => id.HasValue).Select(id => id!.Value),
             cancellationToken);
         var result = new ModuleRebuildResult();
+        foreach (var creditNote in creditNotes.Where(c =>
+                     c.OriginalInvoiceId.HasValue &&
+                     c.AppliedToInvoiceId.HasValue &&
+                     c.OriginalInvoiceId != c.AppliedToInvoiceId))
+        {
+            result.Diagnostics.Add(BuildDiagnostic(
+                SubledgerSettlementModules.AccountsReceivable,
+                "SalesCreditNoteTargetConflict",
+                "Posted Sales credit note has different original and applied invoice references; the read model uses the explicit applied invoice only.",
+                creditNote.Id,
+                postedSalesCreditNoteEvents.GetValueOrDefault(creditNote.Id)?.Id));
+        }
+
         if (crossTenantAllocationCount > 0)
         {
             result.Diagnostics.Add(BuildDiagnostic(
@@ -510,8 +525,8 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
 
             var salesCreditNotes = creditNotes
                 .Where(c =>
-                    (c.AppliedToInvoiceId.HasValue && c.AppliedToInvoiceId.Value == invoice.Id) ||
-                    (c.OriginalInvoiceId.HasValue && c.OriginalInvoiceId.Value == invoice.Id))
+                    c.AppliedToInvoiceId == invoice.Id ||
+                    (!c.AppliedToInvoiceId.HasValue && c.OriginalInvoiceId == invoice.Id))
                 .Where(c => postedSalesCreditNoteEvents.ContainsKey(c.Id))
                 .ToList();
 

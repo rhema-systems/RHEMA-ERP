@@ -26,7 +26,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<ApReportsService> _logger;
-        private readonly ISubledgerSettlementReadModelService? _settlementReadModelService;
+        private readonly ISubledgerSettlementReadModelService _settlementReadModelService;
         private readonly IFinanceAuditService? _financeAuditService;
 
         public ApReportsService(
@@ -34,14 +34,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             ICurrentUserService currentUser,
             ITenantSettingsService tenantSettingsService,
             ILogger<ApReportsService> logger,
-            ISubledgerSettlementReadModelService? settlementReadModelService = null,
+            ISubledgerSettlementReadModelService settlementReadModelService,
             IFinanceAuditService? financeAuditService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
             _logger = logger;
-            _settlementReadModelService = settlementReadModelService;
+            _settlementReadModelService = settlementReadModelService ?? throw new ArgumentNullException(nameof(settlementReadModelService));
             _financeAuditService = financeAuditService;
         }
 
@@ -54,10 +54,10 @@ namespace ErpSystem.Api.Services.Finance.AP
         public async Task<ApAgingReportDto> GetAgingReportAsync(
             DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default)
         {
+            // The constructor requires the projection service so production aging cannot
+            // silently regress to mutable VendorInvoice.PaidAmount snapshots.
             if (_settlementReadModelService != null)
-            {
                 return await GetSettlementReadModelAgingReportAsync(asOfDate, supplierId, includeInvoiceDetails: false, cancellationToken);
-            }
 
             var date = asOfDate ?? DateTime.UtcNow;
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
@@ -145,10 +145,9 @@ namespace ErpSystem.Api.Services.Finance.AP
         public async Task<ApAgingReportDto> GetDetailedAgingReportAsync(
             DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default)
         {
+            // See GetAgingReportAsync: mandatory dependency prevents a silent legacy fallback.
             if (_settlementReadModelService != null)
-            {
                 return await GetSettlementReadModelAgingReportAsync(asOfDate, supplierId, includeInvoiceDetails: true, cancellationToken);
-            }
 
             var report = await GetAgingReportAsync(asOfDate, supplierId, cancellationToken);
             var date = report.AsOfDate;
