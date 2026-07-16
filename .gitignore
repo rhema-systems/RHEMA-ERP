@@ -307,6 +307,9 @@ Stop-Dev.ps1
 # Local notes (ignore if personal-only)
 DEV-SERVERS.md
 
+# Locally generated management submission packs
+docs/tdc-finance-submission-pack/
+
 # AI assistant local settings
 .claude/settings.local.json
 
