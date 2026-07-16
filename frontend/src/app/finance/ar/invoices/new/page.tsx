@@ -289,6 +289,16 @@ export default function NewInvoicePage() {
     const totalTax = taxEstimate.totalTaxAmount;
     const totalAmount = Math.max(0, taxEstimate.grandTotal);
 
+    const resolveLineTaxGroupId = (
+        item: any,
+        isOpeningBalance = watchIsOpeningBalance,
+        headerTaxGroupId = watchTaxGroupId
+    ) => {
+        if (isOpeningBalance) return null;
+        const activeGroupId = item.taxGroupId || headerTaxGroupId;
+        return activeGroupId && activeGroupId !== 'none' ? activeGroupId : null;
+    };
+
     const formatAmountWithCurrency = (amount: number) => {
         if (watchCurrencyCode === 'GHS') {
             return formatCurrency(amount);
@@ -385,7 +395,7 @@ export default function NewInvoicePage() {
                     quantity: Number(item.quantity),
                     unitPrice: Number(item.unitPrice),
                     discountPercentage: Number(item.discountPercentage),
-                    taxGroupId: isOpeningBalance || item.taxGroupId === 'none' ? null : (item.taxGroupId || null)
+                    taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId)
                 }))
             });
 

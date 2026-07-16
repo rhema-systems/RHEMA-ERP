@@ -864,9 +864,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var receiptDate = dto.ReceiptDate ?? DateTime.UtcNow;
-        var receiptNumber = string.IsNullOrWhiteSpace(dto.ReceiptNumber)
-            ? await GenerateReceiptNumberAsync(tenantId, receiptDate, cancellationToken)
-            : dto.ReceiptNumber.Trim();
+        var receiptNumber = await ResolveReceiptNumberAsync(tenantId, receiptDate, dto.ReceiptNumber, cancellationToken);
 
         var receiptNumberExists = await _dbContext.FinancePurchaseOrderReceipts
             .AnyAsync(r => r.TenantId == tenantId && !r.IsDeleted && r.ReceiptNumber == receiptNumber, cancellationToken);
@@ -1312,6 +1310,42 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             receiptDate,
             nameof(FinancePurchaseOrderReceipt),
             cancellationToken: cancellationToken);
+    }
+
+    private async Task<string> ResolveReceiptNumberAsync(
+        Guid tenantId,
+        DateTime receiptDate,
+        string? requestedReceiptNumber,
+        CancellationToken cancellationToken)
+    {
+        var manualReceiptNumber = requestedReceiptNumber?.Trim();
+        if (string.IsNullOrWhiteSpace(manualReceiptNumber))
+        {
+            return await GenerateReceiptNumberAsync(tenantId, receiptDate, cancellationToken);
+        }
+
+        var definitions = await _documentNumberingService.GetDefinitionsAsync(
+            DocumentNumberingModules.Finance,
+            tenantId,
+            cancellationToken);
+
+        var definition = definitions
+            .Where(d => d.DocumentType == FinanceDocumentTypes.FinancePurchaseOrderReceipt
+                && d.IsActive
+                && d.IsDefault
+                && (d.EffectiveFrom == null || d.EffectiveFrom <= receiptDate)
+                && (d.EffectiveTo == null || d.EffectiveTo >= receiptDate))
+            .OrderByDescending(d => d.EffectiveFrom ?? DateTime.MinValue)
+            .FirstOrDefault();
+
+        if (definition?.AllowManualEntry == true)
+        {
+            return manualReceiptNumber;
+        }
+
+        // Finance GRV numbering is centrally controlled by default. Ignore client-supplied
+        // numbers unless the tenant sequence explicitly allows manual entry.
+        return await GenerateReceiptNumberAsync(tenantId, receiptDate, cancellationToken);
     }
 
     private static FinancePostingLineDto BuildPostingLine(

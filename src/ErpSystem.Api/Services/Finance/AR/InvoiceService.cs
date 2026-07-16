@@ -209,6 +209,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 PaymentTermId = paymentTerm?.Id ?? customer.PaymentTermId,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
                 EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate,
+                TaxGroupId = dto.IsOpeningBalance ? null : dto.TaxGroupId,
                 Status = InvoiceStatus.Draft,
                 CreatedAt = now,
                 CreatedBy = UserName
@@ -223,17 +224,18 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
+                var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
                 // Calculate tax for this line if tax code provided
                 decimal lineTax = 0;
                 if (lineDto.TaxTreatment == TaxTreatment.Standard &&
-                    (lineDto.TaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
+                    (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
                     {
                         TransactionType = TaxTransactionType.SaleOfGoods,
                         BaseAmount = lineNetAmount,
-                        TaxGroupId = lineDto.TaxGroupId,
+                        TaxGroupId = effectiveTaxGroupId,
                         CustomerId = dto.CustomerId
                     };
 
@@ -258,7 +260,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
                     TaxCode = lineDto.TaxCode,
-                    TaxGroupId = lineDto.TaxGroupId,
+                    TaxGroupId = effectiveTaxGroupId,
                     TaxTreatment = lineDto.TaxTreatment,
                     TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0,
                     TaxAmount = lineTax,
@@ -360,6 +362,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.Notes = dto.Notes;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
             invoice.DiscountAmount = dto.DiscountAmount;
+            invoice.TaxGroupId = dto.IsOpeningBalance ? null : dto.TaxGroupId;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
@@ -379,16 +382,17 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
+                var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
                 decimal lineTax = 0;
                 if (lineDto.TaxTreatment == TaxTreatment.Standard &&
-                    (lineDto.TaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
+                    (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
                     {
                         TransactionType = TaxTransactionType.SaleOfGoods,
                         BaseAmount = lineNetAmount,
-                        TaxGroupId = lineDto.TaxGroupId,
+                        TaxGroupId = effectiveTaxGroupId,
                         CustomerId = invoice.CustomerId
                     };
 
@@ -413,7 +417,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
                     TaxCode = lineDto.TaxCode,
-                    TaxGroupId = lineDto.TaxGroupId,
+                    TaxGroupId = effectiveTaxGroupId,
                     TaxTreatment = lineDto.TaxTreatment,
                     TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0,
                     TaxAmount = lineTax,

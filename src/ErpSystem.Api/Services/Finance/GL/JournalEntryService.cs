@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Services;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.GL
@@ -27,6 +28,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IAccountingBookService _accountingBookService;
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
+        private readonly IDocumentNumberingService? _documentNumberingService;
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -37,7 +39,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             INotificationService notificationService,
             IAccountingBookService accountingBookService,
             IFinancePostingEngine? financePostingEngine = null,
-            IFinanceAuditService? financeAuditService = null)
+            IFinanceAuditService? financeAuditService = null,
+            IDocumentNumberingService? documentNumberingService = null)
         {
             _context = context;
             _currentUserService = currentUserService;
@@ -47,6 +50,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _accountingBookService = accountingBookService;
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
+            _documentNumberingService = documentNumberingService;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -138,14 +142,19 @@ namespace ErpSystem.Api.Services.Finance.GL
                 throw new InvalidOperationException($"Journal entry is not balanced. Total Debit: {debitSum}, Total Credit: {creditSum}");
 
             var currencyMetadata = await ResolveJournalCurrencyMetadataAsync(transactions, tenantId, cancellationToken);
+            var journalEntryNumber = await ResolveJournalEntryNumberAsync(dto.JournalNumber, dto.TransactionDate, cancellationToken);
+            var journalNumberExists = await _context.JournalEntries
+                .AnyAsync(j => j.TenantId == tenantId && !j.IsDeleted && j.JournalEntryNumber == journalEntryNumber, cancellationToken);
+            if (journalNumberExists)
+            {
+                throw new InvalidOperationException($"Journal entry '{journalEntryNumber}' already exists.");
+            }
 
             // Create Entity
             var journalEntry = new JournalEntry
             {
                 Id = Guid.NewGuid(),
-                JournalEntryNumber = string.IsNullOrWhiteSpace(dto.JournalNumber)
-                    ? await _generalLedgerService.GenerateJournalEntryNumberAsync(cancellationToken)
-                    : dto.JournalNumber.Trim(),
+                JournalEntryNumber = journalEntryNumber,
                 EntryDate = dto.TransactionDate,
                 JournalType = string.IsNullOrWhiteSpace(dto.JournalType) ? "General" : dto.JournalType.Trim(),
                 Description = dto.Description ?? string.Empty,
@@ -548,6 +557,60 @@ namespace ErpSystem.Api.Services.Finance.GL
         public async Task<string> GenerateJournalEntryNumberAsync(CancellationToken cancellationToken = default)
         {
             return await _generalLedgerService.GenerateJournalEntryNumberAsync(cancellationToken);
+        }
+
+        private async Task<string> GenerateJournalEntryNumberAsync(DateTime entryDate, CancellationToken cancellationToken)
+        {
+            if (_documentNumberingService == null)
+            {
+                return await _generalLedgerService.GenerateJournalEntryNumberAsync(cancellationToken);
+            }
+
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.JournalEntry,
+                TenantId,
+                entryDate,
+                nameof(JournalEntry),
+                cancellationToken: cancellationToken);
+        }
+
+        private async Task<string> ResolveJournalEntryNumberAsync(
+            string? requestedJournalNumber,
+            DateTime entryDate,
+            CancellationToken cancellationToken)
+        {
+            var manualJournalNumber = requestedJournalNumber?.Trim();
+            if (string.IsNullOrWhiteSpace(manualJournalNumber))
+            {
+                return await GenerateJournalEntryNumberAsync(entryDate, cancellationToken);
+            }
+
+            if (_documentNumberingService == null)
+            {
+                return manualJournalNumber;
+            }
+
+            var definitions = await _documentNumberingService.GetDefinitionsAsync(
+                DocumentNumberingModules.Finance,
+                TenantId,
+                cancellationToken);
+
+            var definition = definitions
+                .Where(d => d.DocumentType == FinanceDocumentTypes.JournalEntry
+                    && d.IsActive
+                    && d.IsDefault
+                    && (d.EffectiveFrom == null || d.EffectiveFrom <= entryDate)
+                    && (d.EffectiveTo == null || d.EffectiveTo >= entryDate))
+                .OrderByDescending(d => d.EffectiveFrom ?? DateTime.MinValue)
+                .FirstOrDefault();
+
+            if (definition?.AllowManualEntry == true)
+            {
+                return manualJournalNumber;
+            }
+
+            return await GenerateJournalEntryNumberAsync(entryDate, cancellationToken);
         }
         
         // Helper to get fiscal period (Duplicated from GeneralLedgerService - should be centralized)

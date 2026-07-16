@@ -119,15 +119,14 @@ public class SupplierReturnsController : ControllerBase
         var currencyCode = NormalizeCurrency(dto.CurrencyCode);
         var exchangeRate = NormalizeExchangeRate(dto.ExchangeRate);
         var returnDate = dto.ReturnDate == default ? DateTime.UtcNow : dto.ReturnDate;
-        var returnNumber = string.IsNullOrWhiteSpace(dto.ReturnNumber)
-            ? await _documentNumberingService.GenerateAsync(
-                DocumentNumberingModules.Finance,
-                FinanceDocumentTypes.APSupplierReturn,
-                tenantId,
-                returnDate,
-                nameof(SupplierReturn),
-                cancellationToken: cancellationToken)
-            : dto.ReturnNumber.Trim();
+        var returnNumber = await ResolveReturnNumberAsync(tenantId, returnDate, dto.ReturnNumber, cancellationToken);
+
+        var returnNumberExists = await _dbContext.SupplierReturns
+            .AnyAsync(r => r.TenantId == tenantId && !r.IsDeleted && r.ReturnNumber == returnNumber, cancellationToken);
+        if (returnNumberExists)
+        {
+            return BadRequest($"Supplier return '{returnNumber}' already exists.");
+        }
 
         var supplierReturn = new SupplierReturn
         {
@@ -809,6 +808,51 @@ public class SupplierReturnsController : ControllerBase
             decimal.Round(taxAmount, 2, MidpointRounding.AwayFromZero),
             decimal.Round(calculatedDiscount, 2, MidpointRounding.AwayFromZero),
             decimal.Round(lineTotal, 2, MidpointRounding.AwayFromZero));
+    }
+
+    private async Task<string> GenerateReturnNumberAsync(Guid tenantId, DateTime returnDate, CancellationToken cancellationToken)
+    {
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Finance,
+            FinanceDocumentTypes.APSupplierReturn,
+            tenantId,
+            returnDate,
+            nameof(SupplierReturn),
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task<string> ResolveReturnNumberAsync(
+        Guid tenantId,
+        DateTime returnDate,
+        string? requestedReturnNumber,
+        CancellationToken cancellationToken)
+    {
+        var manualReturnNumber = requestedReturnNumber?.Trim();
+        if (string.IsNullOrWhiteSpace(manualReturnNumber))
+        {
+            return await GenerateReturnNumberAsync(tenantId, returnDate, cancellationToken);
+        }
+
+        var definitions = await _documentNumberingService.GetDefinitionsAsync(
+            DocumentNumberingModules.Finance,
+            tenantId,
+            cancellationToken);
+
+        var definition = definitions
+            .Where(d => d.DocumentType == FinanceDocumentTypes.APSupplierReturn
+                && d.IsActive
+                && d.IsDefault
+                && (d.EffectiveFrom == null || d.EffectiveFrom <= returnDate)
+                && (d.EffectiveTo == null || d.EffectiveTo >= returnDate))
+            .OrderByDescending(d => d.EffectiveFrom ?? DateTime.MinValue)
+            .FirstOrDefault();
+
+        if (definition?.AllowManualEntry == true)
+        {
+            return manualReturnNumber;
+        }
+
+        return await GenerateReturnNumberAsync(tenantId, returnDate, cancellationToken);
     }
 
     private static decimal ToBaseAmount(decimal foreignAmount, decimal exchangeRate)

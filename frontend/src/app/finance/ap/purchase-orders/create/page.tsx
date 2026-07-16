@@ -286,6 +286,39 @@ export default function CreatePurchaseOrderPage() {
     // Calculate interactive tax previews
     const totalAmount = lines.reduce((acc, line) => acc + (line.lineTotal || 0), 0);
 
+    const calculateLineTax = (line: any) => {
+        const lineSubtotal = Number(line.lineTotal) || 0;
+        const activeGroupId = line.taxGroupId || taxGroupId;
+        const activeGroup = taxGroups.find(tg => tg.id === activeGroupId);
+
+        if (!activeGroup || !activeGroup.components || lineSubtotal <= 0) {
+            return { taxAmount: 0, taxRate: 0 };
+        }
+
+        let lineTaxAmount = 0;
+        let cumulativeBase = lineSubtotal;
+        const sortedComponents = [...activeGroup.components].sort((a, b) => a.calculationOrder - b.calculationOrder);
+
+        sortedComponents.forEach(comp => {
+            if (comp.taxCategory === 'Withholding') return;
+
+            const taxableBasis = comp.compoundBasis === 'Cumulative'
+                ? cumulativeBase
+                : lineSubtotal;
+            const taxAmt = taxableBasis * (Number(comp.taxRate) / 100);
+            lineTaxAmount += taxAmt;
+
+            if (comp.compoundBasis === 'Cumulative' || comp.compoundBasis === 'BaseOnly') {
+                cumulativeBase += taxAmt;
+            }
+        });
+
+        return {
+            taxAmount: lineTaxAmount,
+            taxRate: (lineTaxAmount / lineSubtotal) * 100
+        };
+    };
+
     const getTaxBreakdown = () => {
         let totalTaxAmount = 0;
         const breakdowns: { [taxCode: string]: { name: string; rate: number; amount: number } } = {};
@@ -358,17 +391,22 @@ export default function CreatePurchaseOrderPage() {
                 exchangeRate: Number(exchangeRate) || 1.0,
                 taxGroupId: taxGroupId === 'none' ? null : (taxGroupId || null),
                 totalAmount: grandTotal,
-                items: lines.map(l => ({
-                    lineType: l.lineType,
-                    inventoryItemId: (l.lineType === 1 && l.inventoryItemId) ? l.inventoryItemId : null,
-                    glAccountId: (l.lineType === 2 && l.glAccountId) ? l.glAccountId : null,
-                    warehouseId: (l.lineType === 1 && l.warehouseId) ? l.warehouseId : null,
-                    description: l.description,
-                    orderedQuantity: Number(l.orderedQuantity),
-                    unitPrice: Number(l.unitPrice),
-                    lineTotal: Number(l.lineTotal),
-                    taxGroupId: l.taxGroupId === 'none' ? null : (l.taxGroupId || null)
-                }))
+                items: lines.map(l => {
+                    const lineTax = calculateLineTax(l);
+                    return {
+                        lineType: l.lineType,
+                        inventoryItemId: (l.lineType === 1 && l.inventoryItemId) ? l.inventoryItemId : null,
+                        glAccountId: (l.lineType === 2 && l.glAccountId) ? l.glAccountId : null,
+                        warehouseId: (l.lineType === 1 && l.warehouseId) ? l.warehouseId : null,
+                        description: l.description,
+                        orderedQuantity: Number(l.orderedQuantity),
+                        unitPrice: Number(l.unitPrice),
+                        lineTotal: Number(l.lineTotal),
+                        taxRate: lineTax.taxRate,
+                        taxAmount: lineTax.taxAmount,
+                        taxGroupId: l.taxGroupId === 'none' ? null : (l.taxGroupId || null)
+                    };
+                })
             };
             const result = await financePurchaseOrderService.createPurchaseOrder(newPo);
             toast({ title: 'Success', description: 'PO Created successfully' });

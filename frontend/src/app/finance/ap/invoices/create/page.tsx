@@ -244,6 +244,60 @@ export default function CreateVendorInvoicePage() {
         return acc + (qty * price * (1 - discount / 100));
     }, 0);
 
+    const resolveLineTaxGroupId = (
+        item: any,
+        isOpeningBalance = watchIsOpeningBalance,
+        headerTaxGroupId = watchTaxGroupId
+    ) => {
+        if (isOpeningBalance) return null;
+        const activeGroupId = item.taxGroupId || headerTaxGroupId;
+        return activeGroupId && activeGroupId !== 'none' ? activeGroupId : null;
+    };
+
+    const calculateLineTax = (
+        item: any,
+        isOpeningBalance = watchIsOpeningBalance,
+        headerTaxGroupId = watchTaxGroupId
+    ) => {
+        if (isOpeningBalance) {
+            return { taxAmount: 0, taxRate: 0 };
+        }
+
+        const qty = Number(item.quantity) || 0;
+        const price = Number(item.unitPrice) || 0;
+        const discount = Number(item.discountPercentage) || 0;
+        const lineSubtotal = qty * price * (1 - discount / 100);
+        const activeGroupId = resolveLineTaxGroupId(item, isOpeningBalance, headerTaxGroupId);
+        const activeGroup = taxGroupsData?.find(tg => tg.id === activeGroupId);
+
+        if (!activeGroup || !activeGroup.components || lineSubtotal <= 0) {
+            return { taxAmount: 0, taxRate: 0 };
+        }
+
+        let lineTaxAmount = 0;
+        let cumulativeBase = lineSubtotal;
+        const sortedComponents = [...activeGroup.components].sort((a, b) => a.calculationOrder - b.calculationOrder);
+
+        sortedComponents.forEach(comp => {
+            if (comp.taxCategory === 'Withholding') return;
+
+            const taxableBasis = comp.compoundBasis === 'Cumulative'
+                ? cumulativeBase
+                : lineSubtotal;
+            const taxAmt = taxableBasis * (Number(comp.taxRate) / 100);
+            lineTaxAmount += taxAmt;
+
+            if (comp.compoundBasis === 'Cumulative' || comp.compoundBasis === 'BaseOnly') {
+                cumulativeBase += taxAmt;
+            }
+        });
+
+        return {
+            taxAmount: lineTaxAmount,
+            taxRate: (lineTaxAmount / lineSubtotal) * 100
+        };
+    };
+
     const getTaxBreakdown = () => {
         if (watchIsOpeningBalance) {
             return {
@@ -388,19 +442,23 @@ export default function CreateVendorInvoicePage() {
                 exchangeRate: Number(data.exchangeRate) || 1.0,
                 withholdingTaxRate: isOpeningBalance ? 0 : Number(data.withholdingTaxRate) || 0,
                 isOpeningBalance,
-                lineItems: data.lineItems.map(item => ({
-                    lineItemType: item.lineItemType,
-                    glAccountId: item.glAccountId || null,
-                    purchaseOrderItemId: item.purchaseOrderItemId || null,
-                    description: item.description,
-                    quantity: Number(item.quantity),
-                    unitPrice: Number(item.unitPrice),
-                    discountPercentage: Number(item.discountPercentage),
-                    taxGroupId: isOpeningBalance || item.taxGroupId === 'none' ? null : (item.taxGroupId || null),
-                    unit: item.unit || null,
-                    inventoryItemId: item.inventoryItemId || null,
-                    warehouseId: item.warehouseId || null,
-                } as any))
+                lineItems: data.lineItems.map(item => {
+                    const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
+                    return {
+                        lineItemType: item.lineItemType,
+                        glAccountId: item.glAccountId || null,
+                        purchaseOrderItemId: item.purchaseOrderItemId || null,
+                        description: item.description,
+                        quantity: Number(item.quantity),
+                        unitPrice: Number(item.unitPrice),
+                        discountPercentage: Number(item.discountPercentage),
+                        taxRate: lineTax.taxRate,
+                        taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId),
+                        unit: item.unit || null,
+                        inventoryItemId: item.inventoryItemId || null,
+                        warehouseId: item.warehouseId || null,
+                    } as any;
+                })
             });
 
             toast({

@@ -74,6 +74,8 @@ namespace ErpSystem.Core.DTOs.Finance
 
         public decimal ExchangeRate { get; set; } = 1.0m;
 
+        public Guid? TaxGroupId { get; set; }
+
         public List<CreateInvoiceLineItemDto> LineItems { get; set; } = new();
     }
 
@@ -89,6 +91,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Notes { get; set; }
         public string? Reference { get; set; }
         public bool IsOpeningBalance { get; set; }
+        public Guid? TaxGroupId { get; set; }
         public List<UpdateInvoiceLineItemDto> LineItems { get; set; } = new();
     }
 

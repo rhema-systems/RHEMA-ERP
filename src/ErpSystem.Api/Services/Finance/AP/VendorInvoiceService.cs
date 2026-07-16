@@ -256,10 +256,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var lineGross = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineGross * (lineDto.DiscountPercentage / 100);
                 var lineNet = lineGross - lineDiscount;
-                var lineTaxRate = lineDto.TaxTreatment == TaxTreatment.Standard ? lineDto.TaxRate : 0m;
-                var lineTax = lineDto.TaxTreatment == TaxTreatment.Standard
-                    ? lineNet * (lineTaxRate / 100)
-                    : 0m;
+                var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, supplier.Id, dto.IsOpeningBalance, cancellationToken);
 
                 var lineItem = new VendorInvoiceLineItem
                 {
@@ -273,10 +270,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Description = lineDto.Description,
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
-                    TaxGroupId = lineDto.TaxGroupId,
+                    TaxGroupId = dto.IsOpeningBalance ? null : lineDto.TaxGroupId,
                     TaxTreatment = lineDto.TaxTreatment,
-                    TaxRate = lineTaxRate,
-                    TaxAmount = lineTax,
+                    TaxRate = lineTax.TaxRate,
+                    TaxAmount = lineTax.TaxAmount,
                     TaxCode = lineDto.TaxCode,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -287,7 +284,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 invoice.LineItems.Add(lineItem);
                 subtotal += lineNet;
-                totalTax += lineTax;
+                totalTax += lineTax.TaxAmount;
                 totalDiscount += lineDiscount;
             }
 
@@ -392,10 +389,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var lineGross = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineGross * (lineDto.DiscountPercentage / 100);
                 var lineNet = lineGross - lineDiscount;
-                var lineTaxRate = lineDto.TaxTreatment == TaxTreatment.Standard ? lineDto.TaxRate : 0m;
-                var lineTax = lineDto.TaxTreatment == TaxTreatment.Standard
-                    ? lineNet * (lineTaxRate / 100)
-                    : 0m;
+                var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, invoice.SupplierId, dto.IsOpeningBalance, cancellationToken);
 
                 var lineItem = new VendorInvoiceLineItem
                 {
@@ -409,10 +403,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Description = lineDto.Description,
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
-                    TaxGroupId = lineDto.TaxGroupId,
+                    TaxGroupId = dto.IsOpeningBalance ? null : lineDto.TaxGroupId,
                     TaxTreatment = lineDto.TaxTreatment,
-                    TaxRate = lineTaxRate,
-                    TaxAmount = lineTax,
+                    TaxRate = lineTax.TaxRate,
+                    TaxAmount = lineTax.TaxAmount,
                     TaxCode = lineDto.TaxCode,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -423,7 +417,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 invoice.LineItems.Add(lineItem);
                 subtotal += lineNet;
-                totalTax += lineTax;
+                totalTax += lineTax.TaxAmount;
                 totalDiscount += lineDiscount;
             }
 
@@ -1714,8 +1708,44 @@ namespace ErpSystem.Api.Services.Finance.AP
             throw new InvalidOperationException("AP invoice configured tax calculation does not reconcile to the invoice tax total.");
         }
 
+        private async Task<(decimal TaxRate, decimal TaxAmount)> ResolveApLineTaxAsync(
+            VendorInvoiceLineItemCreateDto lineDto,
+            decimal lineNet,
+            DateTime invoiceDate,
+            Guid supplierId,
+            bool isOpeningBalance,
+            CancellationToken cancellationToken)
+        {
+            if (isOpeningBalance || lineDto.TaxTreatment != TaxTreatment.Standard || lineNet <= 0m)
+            {
+                return (0m, 0m);
+            }
+
+            if (_taxEngine != null && lineDto.TaxGroupId.HasValue)
+            {
+                var taxResult = await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+                {
+                    BaseAmount = lineNet,
+                    TaxGroupId = lineDto.TaxGroupId,
+                    TransactionDate = invoiceDate,
+                    TransactionType = ResolveApTaxTransactionType(lineDto.LineItemType),
+                    SupplierId = supplierId
+                }, cancellationToken);
+
+                return (
+                    taxResult.TotalTaxAmount > 0m ? taxResult.TotalTaxAmount / lineNet * 100m : 0m,
+                    taxResult.TotalTaxAmount);
+            }
+
+            var lineTaxRate = lineDto.TaxRate;
+            return (lineTaxRate, lineNet * (lineTaxRate / 100m));
+        }
+
         private static TaxTransactionType ResolveApTaxTransactionType(VendorInvoiceLineItem line)
-            => string.Equals(line.LineItemType, "Service", StringComparison.OrdinalIgnoreCase)
+            => ResolveApTaxTransactionType(line.LineItemType);
+
+        private static TaxTransactionType ResolveApTaxTransactionType(string? lineItemType)
+            => string.Equals(lineItemType, "Service", StringComparison.OrdinalIgnoreCase)
                 ? TaxTransactionType.PurchaseOfServices
                 : TaxTransactionType.PurchaseOfGoods;
 
