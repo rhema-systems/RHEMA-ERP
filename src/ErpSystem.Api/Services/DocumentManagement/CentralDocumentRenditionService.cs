@@ -20,6 +20,10 @@ public interface ICentralDocumentRenditionService
         CentralDocumentRenditionRequest request,
         CancellationToken cancellationToken);
 
+    Task<CentralDocumentPdfPreviewResult> CreatePdfPreviewAsync(
+        CentralDocumentPdfPreviewRequest request,
+        CancellationToken cancellationToken);
+
     Task<CentralDocumentWordCopyResult> CreateEditableWordCopyFromPdfAsync(
         CentralDocumentWordCopyRequest request,
         CancellationToken cancellationToken);
@@ -38,6 +42,18 @@ public sealed record CentralDocumentRenditionResult(
     bool Success,
     bool IsSupported,
     string? RenditionPath,
+    string? ErrorMessage);
+
+public sealed record CentralDocumentPdfPreviewRequest(
+    Stream SourceStream,
+    string FileName,
+    string ContentType);
+
+public sealed record CentralDocumentPdfPreviewResult(
+    bool Success,
+    bool IsSupported,
+    MemoryStream? PdfStream,
+    string? FileName,
     string? ErrorMessage);
 
 public sealed record CentralDocumentWordCopyRequest(
@@ -120,6 +136,37 @@ public sealed class CentralDocumentRenditionService : ICentralDocumentRenditionS
         {
             _logger.LogWarning(ex, "Unable to create Central DMS PDF rendition for {FileName}", request.FileName);
             return new CentralDocumentRenditionResult(false, true, null, ex.Message);
+        }
+    }
+
+    public Task<CentralDocumentPdfPreviewResult> CreatePdfPreviewAsync(
+        CentralDocumentPdfPreviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(request.FileName).ToLowerInvariant();
+        if (!CanConvert(extension))
+        {
+            return Task.FromResult(new CentralDocumentPdfPreviewResult(false, false, null, null, "File type is not supported for PDF preview."));
+        }
+
+        try
+        {
+            var pdfStream = new MemoryStream();
+            ConvertToPdf(request.SourceStream, extension, pdfStream);
+            pdfStream.Position = 0;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var pdfFileName = $"{Path.GetFileNameWithoutExtension(request.FileName)}.pdf";
+            return Task.FromResult(new CentralDocumentPdfPreviewResult(true, true, pdfStream, pdfFileName, null));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to create Central DMS PDF preview for {FileName}", request.FileName);
+            return Task.FromResult(new CentralDocumentPdfPreviewResult(false, true, null, null, ex.Message));
         }
     }
 

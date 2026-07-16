@@ -707,6 +707,10 @@ export class EstateAcquisitionService {
     return rawApiService.downloadBlob(`/estate/land-acquisitions/${acquisitionId}/documents/${documentId}/download`);
   }
 
+  async viewDocumentPdf(acquisitionId: string, documentId: string): Promise<Blob> {
+    return rawApiService.downloadBlob(`/estate/land-acquisitions/${acquisitionId}/documents/${documentId}/viewer-pdf`);
+  }
+
   async markReadyForProjectManagement(acquisitionId: string): Promise<{ success: boolean; message?: string; asset?: EstateManagedAsset }> {
     const response = await apiService.post<MaybeApiResponse<EstateManagedAsset>>(
       `/estate/land-acquisitions/${acquisitionId}/ready-for-project-management`,

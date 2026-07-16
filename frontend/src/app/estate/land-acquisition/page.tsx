@@ -13,6 +13,7 @@ import {
   ClipboardCheck,
   Clock3,
   Download,
+  Eye,
   FileArchive,
   FileClock,
   FileCheck2,
@@ -84,6 +85,11 @@ import {
 const CadastralMapPanel = dynamic(() => import('./CadastralMapPanel'), {
   ssr: false,
 });
+
+const ProcedurePdfViewer = dynamic(
+  () => import('@/components/procedures/ProcedurePdfViewer'),
+  { ssr: false }
+);
 
 type FieldType = 'text' | 'date' | 'textarea' | 'select' | 'check';
 
@@ -1358,11 +1364,11 @@ export default function LandAcquisitionPage() {
       setPublishingReady(item.id);
       const result =
         await estateAcquisitionService.markReadyForProjectManagement(item.id);
-      result.success
-        ? toast.success(
-            result.message || 'Land is ready for project management.'
-          )
-        : toast.error(result.message || 'Unable to publish land.');
+      if (result.success) {
+        toast.success(result.message || 'Land is ready for project management.');
+      } else {
+        toast.error(result.message || 'Unable to publish land.');
+      }
       await reload();
     } catch (error) {
       console.error(error);
@@ -1553,7 +1559,7 @@ export default function LandAcquisitionPage() {
             setWorkspaceOpen(open);
             if (!open) setDraftItem(null);
           }}
-          item={draftItem || selectedItem!}
+          item={(draftItem || selectedItem) as LandAcquisitionItem}
           stage={selectedStage}
           values={workspaceValues}
           onChange={setWorkspaceValues}
@@ -2067,6 +2073,10 @@ function WorkspaceDialog({
   const [vendors, setVendors] = React.useState<BusinessPartnerDto[]>([]);
   const [vendorsLoading, setVendorsLoading] = React.useState(false);
   const [vendorsError, setVendorsError] = React.useState<string | null>(null);
+  const [preview, setPreview] = React.useState<{
+    url: string;
+    name: string;
+  } | null>(null);
 
   React.useEffect(() => {
     if (!open || stage.workspaceKind !== 'parcel-identification') return;
@@ -2112,6 +2122,10 @@ function WorkspaceDialog({
 
   React.useEffect(() => {
     setPendingDocuments([]);
+    setPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
     if (!open || !item.id) {
       setDocuments([]);
       return;
@@ -2139,23 +2153,45 @@ function WorkspaceDialog({
     };
   }, [item.id, open, stage.id]);
 
-  const openDocument = async (document: LandAcquisitionDocument) => {
+  React.useEffect(
+    () => () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+    },
+    [preview?.url]
+  );
+
+  const openDocument = async (
+    document: LandAcquisitionDocument,
+    view: boolean
+  ) => {
     if (!item.id) return;
     try {
-      const blob = await estateAcquisitionService.downloadDocument(
-        item.id,
-        document.id
-      );
+      const blob = view
+        ? await estateAcquisitionService.viewDocumentPdf(item.id, document.id)
+        : await estateAcquisitionService.downloadDocument(item.id, document.id);
       const url = URL.createObjectURL(blob);
-      const link = window.document.createElement('a');
-      link.href = url;
-      link.download = document.fileName;
-      window.document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+
+      if (view) {
+        setPreview((current) => {
+          if (current?.url) URL.revokeObjectURL(current.url);
+          return {
+            url,
+            name: document.fileName.toLowerCase().endsWith('.pdf')
+              ? document.fileName
+              : `${document.fileName.replace(/\.[^.]+$/, '')}.pdf`,
+          };
+        });
+      } else {
+        const link = window.document.createElement('a');
+        link.href = url;
+        link.download = document.fileName;
+        window.document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
     } catch (error: any) {
-      toast.error(error?.message || 'Unable to download acquisition document.');
+      toast.error(error?.message || 'Unable to open acquisition document.');
     }
   };
 
@@ -2252,15 +2288,26 @@ function WorkspaceDialog({
                         </p>
                       </div>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void openDocument(document)}
-                    >
-                      <Download className="mr-1 h-4 w-4" />
-                      Download
-                    </Button>
+                    <div className="flex flex-wrap gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void openDocument(document, true)}
+                      >
+                        <Eye className="mr-1 h-4 w-4" />
+                        View
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void openDocument(document, false)}
+                      >
+                        <Download className="mr-1 h-4 w-4" />
+                        Download
+                      </Button>
+                    </div>
                   </div>
                 ))}
                 {pendingDocuments.map((document, index) => (
@@ -2433,6 +2480,24 @@ function WorkspaceDialog({
             ))}
           </div>
         </ScrollArea>
+
+        <Dialog
+          open={Boolean(preview)}
+          onOpenChange={(open) => !open && setPreview(null)}
+        >
+          <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{preview?.name}</DialogTitle>
+            </DialogHeader>
+            {preview ? (
+              <ProcedurePdfViewer
+                fileUrl={preview.url}
+                fileName={preview.name}
+              />
+            ) : null}
+          </DialogContent>
+        </Dialog>
+
         <DialogFooter className="border-t px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             <Ban className="mr-2 h-4 w-4" />

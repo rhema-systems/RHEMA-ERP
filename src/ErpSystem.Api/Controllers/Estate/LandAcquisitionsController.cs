@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Estate;
@@ -44,6 +45,7 @@ public class LandAcquisitionsController : ControllerBase
     private readonly IWorkflowService _workflowService;
     private readonly IEstateManagedAssetService _managedAssetService;
     private readonly IFileStorageService _fileStorageService;
+    private readonly ICentralDocumentRenditionService _renditionService;
     private readonly ILogger<LandAcquisitionsController> _logger;
 
     public LandAcquisitionsController(
@@ -53,6 +55,7 @@ public class LandAcquisitionsController : ControllerBase
         IWorkflowService workflowService,
         IEstateManagedAssetService managedAssetService,
         IFileStorageService fileStorageService,
+        ICentralDocumentRenditionService renditionService,
         ILogger<LandAcquisitionsController> logger)
     {
         _context = context;
@@ -61,6 +64,7 @@ public class LandAcquisitionsController : ControllerBase
         _workflowService = workflowService;
         _managedAssetService = managedAssetService;
         _fileStorageService = fileStorageService;
+        _renditionService = renditionService;
         _logger = logger;
     }
 
@@ -373,6 +377,59 @@ public class LandAcquisitionsController : ControllerBase
 
         var stream = await _fileStorageService.DownloadFileAsync(document.FilePath, document.Id);
         return File(stream, ContentTypeFor(document.FileName), document.FileName);
+    }
+
+    [HttpGet("{id:guid}/documents/{documentId:guid}/viewer-pdf")]
+    public async Task<IActionResult> ViewDocumentPdf(
+        Guid id,
+        Guid documentId,
+        CancellationToken cancellationToken)
+    {
+        var acquisition = await BaseQuery(GetTenantId())
+            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (acquisition == null)
+        {
+            return NotFound("Land acquisition was not found.");
+        }
+
+        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
+        {
+            return Forbid();
+        }
+
+        var document = acquisition.Documents.FirstOrDefault(item => item.Id == documentId && !item.IsDeleted);
+        if (document == null)
+        {
+            return NotFound(new { success = false, message = "Land acquisition document was not found." });
+        }
+
+        var contentType = ContentTypeFor(document.FileName);
+        var sourceStream = await _fileStorageService.DownloadFileAsync(document.FilePath, document.Id);
+        if (IsPdfFile(document.FileName, contentType))
+        {
+            return File(sourceStream, "application/pdf", enableRangeProcessing: true);
+        }
+
+        await using (sourceStream)
+        {
+            var preview = await _renditionService.CreatePdfPreviewAsync(
+                new CentralDocumentPdfPreviewRequest(
+                    sourceStream,
+                    document.FileName,
+                    contentType),
+                cancellationToken);
+
+            if (!preview.Success || preview.PdfStream is null)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = preview.ErrorMessage ?? "This document cannot be previewed in the PDF viewer."
+                });
+            }
+
+            return File(preview.PdfStream, "application/pdf", preview.FileName ?? $"{Path.GetFileNameWithoutExtension(document.FileName)}.pdf", enableRangeProcessing: true);
+        }
     }
 
     [HttpPost("workflow-action")]
@@ -1156,6 +1213,11 @@ public class LandAcquisitionsController : ControllerBase
             ".txt" => "text/plain",
             _ => "application/octet-stream"
         };
+
+    private static bool IsPdfFile(string fileName, string? contentType)
+        => (!string.IsNullOrWhiteSpace(contentType)
+                && contentType.Contains("pdf", StringComparison.OrdinalIgnoreCase))
+            || fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeDocumentFileName(string fileName, string? documentName)
     {
