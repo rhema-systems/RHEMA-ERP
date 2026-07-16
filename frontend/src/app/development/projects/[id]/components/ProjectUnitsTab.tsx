@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { ArrowRight, Building2, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -158,7 +158,7 @@ const getUnitActionDialogCopy = (action: UnitActionType, unitName: string) => {
       return {
         title: 'Push to Estate',
         confirmText: 'Push to Estate',
-        description: `Publish ${unitName} to Estate property and facilities management so it can be leased, managed, or maintained from the Estate register.`,
+        description: `Publish ${unitName} to Estate / Property Management receiving and notify Estate users that the Project unit is ready for property, leasing, occupancy, facilities, maintenance, and records operations.`,
       };
     case 'delete':
       return {
@@ -512,6 +512,56 @@ export function ProjectUnitsTab({
           <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Cost</div><div className="text-xl font-semibold">{formatMoney(totals.value, project.units[0]?.currency)}</div></div>
           <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Commercial</div><div className="text-2xl font-semibold">{totals.soldOrLeased}</div><div className="text-sm text-muted-foreground">{totals.reserved} reserved, {totals.available} available</div></div>
           <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Hierarchy</div><div className="text-xl font-semibold">{project.buildings.length} / {project.floors.length} / {project.unitReleaseBatches.length}</div><div className="text-sm text-muted-foreground">Buildings, floors, release batches</div></div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted">
+                <Building2 className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>Estate Callback</CardTitle>
+                <Badge variant="outline" className="mt-3 w-fit">
+                  Source: Estate Land Bank - Project Management - Estate / Property Management
+                </Badge>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/estate/land-management">
+                  Estate Land Bank
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+              <Button asChild size="sm">
+                <Link href="/estate/property-management/EstatePropertyManagementPropertyUnit">
+                  Property Receiving
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-md border p-4">
+            <div className="text-sm text-muted-foreground">Ready to push</div>
+            <div className="text-2xl font-semibold">{releasedInventoryUnits.length}</div>
+          </div>
+          <div className="rounded-md border p-4">
+            <div className="text-sm text-muted-foreground">Pending release</div>
+            <div className="text-2xl font-semibold">{pendingReleaseUnits.length}</div>
+          </div>
+          <div className="rounded-md border p-4">
+            <div className="text-sm text-muted-foreground">Allocated</div>
+            <div className="text-2xl font-semibold">{allocatedInventoryUnits.length}</div>
+          </div>
+          <div className="rounded-md border p-4">
+            <div className="text-sm text-muted-foreground">Invoiced</div>
+            <div className="text-2xl font-semibold">{invoicedInventoryUnits.length}</div>
+          </div>
         </CardContent>
       </Card>
 

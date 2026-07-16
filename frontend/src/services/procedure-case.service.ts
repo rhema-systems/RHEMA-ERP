@@ -125,6 +125,14 @@ class ProcedureCaseService {
     return response.data || [];
   }
 
+  async listModuleCases(module: string, mineOnly = false): Promise<ProcedureCaseSummary[]> {
+    const response = await apiService.get<ApiResponse<ProcedureCaseSummary[]>>('/procedure-cases', {
+      module,
+      mineOnly,
+    });
+    return response.data || [];
+  }
+
   async getCase(id: string): Promise<ProcedureCaseDetail | null> {
     const response = await apiService.get<ApiResponse<ProcedureCaseDetail>>(`/procedure-cases/${id}`);
     return response.data || null;

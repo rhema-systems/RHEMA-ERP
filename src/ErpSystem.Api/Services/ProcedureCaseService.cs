@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
 using ErpSystem.Core.Interfaces.Legal;
+using ErpSystem.Core.Interfaces.Planning;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Workflow;
@@ -19,20 +20,29 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly ILegalProcedureCatalogService _legalCatalog;
+    private readonly IEstateProcedureCatalogService _estateCatalog;
     private readonly IFacilitiesProcedureCatalogService _facilitiesCatalog;
+    private readonly IPropertyManagementProcedureCatalogService _propertyManagementCatalog;
+    private readonly IPlanningProcedureCatalogService _planningCatalog;
     private readonly IWorkflowEngine _workflowEngine;
 
     public ProcedureCaseService(
         ApplicationDbContext db,
         ICurrentUserService currentUser,
         ILegalProcedureCatalogService legalCatalog,
+        IEstateProcedureCatalogService estateCatalog,
         IFacilitiesProcedureCatalogService facilitiesCatalog,
+        IPropertyManagementProcedureCatalogService propertyManagementCatalog,
+        IPlanningProcedureCatalogService planningCatalog,
         IWorkflowEngine workflowEngine)
     {
         _db = db;
         _currentUser = currentUser;
         _legalCatalog = legalCatalog;
+        _estateCatalog = estateCatalog;
         _facilitiesCatalog = facilitiesCatalog;
+        _propertyManagementCatalog = propertyManagementCatalog;
+        _planningCatalog = planningCatalog;
         _workflowEngine = workflowEngine;
     }
 
@@ -450,7 +460,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var (title, fields, documents) = module switch
         {
             "Legal" => BuildLegalSeed(entityType),
+            "Estate" => BuildEstateSeed(entityType),
+            "PropertyManagement" => BuildPropertyManagementSeed(entityType),
             "Facilities" => BuildFacilitiesSeed(entityType),
+            "Planning" => BuildPlanningSeed(entityType),
             _ => throw new InvalidOperationException($"Procedure module '{module}' is not supported.")
         };
 
@@ -506,7 +519,14 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "Legal" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages
                 .Select((stage, index) => new StageSeed(index, stage.Name, stage.Owner, stage.Owner, null, stage.Checklist))
                 .ToList() ?? [],
+            "Estate" => BuildEstateStageSeeds(entityType),
+            "PropertyManagement" => _propertyManagementCatalog.GetProcedureWorkspace(entityType)?.Stages
+                .Select((stage, index) => new StageSeed(index, stage.Name, stage.Owner, stage.Owner, null, stage.Checklist))
+                .ToList() ?? [],
             "Facilities" => _facilitiesCatalog.GetProcedureWorkspace(entityType)?.Stages
+                .Select((stage, index) => new StageSeed(index, stage.Name, stage.Owner, stage.Owner, null, stage.Checklist))
+                .ToList() ?? [],
+            "Planning" => _planningCatalog.GetProcedureWorkspace(entityType)?.Stages
                 .Select((stage, index) => new StageSeed(index, stage.Name, stage.Owner, stage.Owner, null, stage.Checklist))
                 .ToList() ?? [],
             _ => []
@@ -535,6 +555,160 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             workspace.RequiredDocuments.Select(item => new DocumentSeed(item.Name, item.RequiredFrom, item.IsMandatory)).ToList());
     }
 
+    private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildEstateSeed(string entityType)
+    {
+        var procedure = GetEstateProcedure(entityType);
+
+        return (
+            procedure.Title,
+            BuildEstateFieldSeeds(procedure),
+            BuildEstateDocumentSeeds(procedure));
+    }
+
+    private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildPropertyManagementSeed(string entityType)
+    {
+        var workspace = _propertyManagementCatalog.GetProcedureWorkspace(entityType)
+            ?? throw new InvalidOperationException($"Property Management procedure workspace '{entityType}' was not found.");
+
+        return (
+            workspace.Procedure.Title,
+            workspace.IntakeFields.Select(item => new FieldSeed(item.Key, item.Label, item.Type, item.Options)).ToList(),
+            workspace.RequiredDocuments.Select(item => new DocumentSeed(item.Name, item.RequiredFrom, item.IsMandatory)).ToList());
+    }
+
+    private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildPlanningSeed(string entityType)
+    {
+        var workspace = _planningCatalog.GetProcedureWorkspace(entityType)
+            ?? throw new InvalidOperationException($"Planning procedure workspace '{entityType}' was not found.");
+
+        return (
+            workspace.Procedure.Title,
+            workspace.IntakeFields.Select(item => new FieldSeed(item.Key, item.Label, item.Type, item.Options)).ToList(),
+            workspace.RequiredDocuments.Select(item => new DocumentSeed(item.Name, item.RequiredFrom, item.IsMandatory)).ToList());
+    }
+
+    private EstateProcedureCatalogItem GetEstateProcedure(string entityType) =>
+        _estateCatalog.GetProcedures().FirstOrDefault(item =>
+            string.Equals(item.EntityType, entityType, StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidOperationException($"Estate procedure workspace '{entityType}' was not found.");
+
+    private List<StageSeed> BuildEstateStageSeeds(string entityType)
+    {
+        var procedure = GetEstateProcedure(entityType);
+        var stageNames = EstateStageNames(procedure.EntityType);
+
+        return stageNames
+            .Take(procedure.StageCount)
+            .Select((name, index) => new StageSeed(
+                index,
+                name,
+                EstateStageOwner(name),
+                EstateStageOwner(name),
+                null,
+                EstateStageChecklist(procedure.EntityType, name)))
+            .ToList();
+    }
+
+    private static IReadOnlyList<FieldSeed> BuildEstateFieldSeeds(EstateProcedureCatalogItem procedure) =>
+    [
+        new("referenceNumber", "Reference number", "text", null),
+        new("procedureType", "Procedure", "text", [procedure.Title]),
+        new("applicantName", "Applicant / lessee / client name", "text", null),
+        new("propertyNumber", "Property / plot / house number", "text", null),
+        new("fileReference", "Estate file reference", "text", null),
+        new("schedule", "Estate schedule", "select", ["Registry", "Records", "Serviced Plots", "Lands / Partially Serviced", "Housing", "Traditional Lands", "Regularisation", "Facilities"]),
+        new("location", "Location / community", "text", null),
+        new("sourceDepartment", "Source department", "text", null),
+        new("receivedDate", "Received date", "date", null),
+        new("assignedOfficer", "Assigned Estate officer", "text", null),
+        new("arrearsStatus", "Arrears status", "select", ["Not checked", "No arrears", "Arrears exist", "Waiver / exception approved"]),
+        new("feeReference", "Fee / invoice / receipt reference", "text", null),
+        new("legalReference", "Legal reference", "text", null),
+        new("financeReference", "Finance reference", "text", null),
+        new("planningReference", "Planning / site plan reference", "text", null),
+        new("dmsFolderReference", "DMS folder reference", "text", null)
+    ];
+
+    private static IReadOnlyList<DocumentSeed> BuildEstateDocumentSeeds(EstateProcedureCatalogItem procedure) =>
+    [
+        new("Application letter / request form", "Applicant / Registry", true),
+        new("Property file extract", "Estate Registry / Records", true),
+        new("Ownership, tenancy, lease, or allocation evidence", "Applicant / Estate Records", true),
+        new("Revenue / arrears / payment confirmation", "Finance / Revenue", false),
+        new("Site plan, cadastral plan, layout, or inspection evidence", "Planning / Development / Estate", false),
+        new("Approval, recommendation, or routing note", "HOE / EM / EO", true),
+        new($"{procedure.Title} output", "Estate Department", true),
+        new("Central DMS reference", "Document Mngt", false)
+    ];
+
+    private static IReadOnlyList<string> EstateStageNames(string entityType) =>
+        entityType switch
+        {
+            "EstateRegistrySecretariat" => ["Receive and log intake", "Classify file or letter", "Route to responsible officer", "Track movement", "Prepare typing or dispatch action", "Update client", "Close registry action"],
+            "EstateRecordsManagement" => ["Receive record request", "Verify estate register or ledger", "Check Revenue and Development consistency", "Prepare amendment or notification", "Review and sign", "Update records", "Notify agencies", "Close records action"],
+            "EstateInspection" => ["Receive inspection request", "Assign inspection officer", "Conduct site visit", "Prepare site report", "Submit report"],
+            "EstateSearchApplication" => ["Receive search application", "Check arrears and file status", "Review property records", "Prepare search report", "Dispatch search response"],
+            "EstateRecordAmendment" => ["Receive amendment request", "Validate supporting declaration", "Check arrears and ownership", "Update Revenue and Estate Records", "Dispatch confirmation"],
+            "EstateCertifiedTrueCopy" => ["Receive certified copy request", "Verify file and arrears", "Confirm payment", "Prepare certified copy", "Approve and dispatch"],
+            "EstateJointOwnership" => ["Receive addition request", "Verify lease and ownership", "Check arrears and consent", "Route cadastral or legal action", "Prepare deed or variation", "Update records", "Dispatch confirmation"],
+            "EstateTransfer" => ["Receive transfer request", "Verify parties and property", "Calculate fees and arrears", "Approve transfer instruction", "Route Legal execution", "Update records", "Dispatch completion"],
+            "EstateAssignment" => ["Receive assignment request", "Check consent and draft deed", "Verify arrears and development status", "Approve assignment instruction", "Route Legal registration", "Detach and update records", "Dispatch completion"],
+            "EstateLeasePreparation" => ["Receive lease request", "Verify development and property status", "Confirm cadastral requirements", "Prepare invoice instruction", "Confirm payment", "Route Legal preparation", "Update records", "Dispatch lease"],
+            "EstateLeaseRenewal" => ["Receive renewal request", "Verify renewal requirements", "Check arrears and term threshold", "Route committee review", "Prepare invoice instruction", "Approve renewal", "Route Legal renewal", "Close renewal"],
+            "EstateServicedPlotAllocation" => ["Receive allocation request", "Compile allocation list", "Approve allocation", "Update payment book", "Prepare offer letter", "Prepare right of entry", "Dispatch documents", "Report allocation"],
+            "EstateLandsPartiallyServiced" => ["Receive application", "Assess land use and plot details", "Calculate LMF and ground rent", "Prepare proposal letter", "Confirm acceptance and payment", "Prepare offer and right of entry", "Report schedule"],
+            "EstateHousingHomeOwnership" => ["Receive housing request", "Verify tenancy and rent position", "Confirm HOS or recognition path", "Route legal or records action", "Confirm payment or conversion", "Prepare offer or rent card", "Update records"],
+            "EstateTraditionalLands" => ["Receive stool allocation", "Open file and check prior allocation", "Conduct site visit", "Request site plan", "Prepare proposal letter", "Prepare offer and right of entry"],
+            "EstateTenancyRegularisation" => ["Receive regularisation request", "Validate documents and plot number", "Interview applicant", "Check Revenue and Estate Records", "Route committee vetting", "Prepare proposal and fees", "Prepare offer and right of entry"],
+            "EstateReportingControls" => ["Collect schedule data", "Validate control checks", "Compile report", "Review exceptions", "Approve report", "Publish controls"],
+            _ => ["Receive request", "Validate records", "Check fees and approvals", "Route linked action", "Prepare output", "Update records", "Close case"]
+        };
+
+    private static string EstateStageOwner(string stageName)
+    {
+        if (stageName.Contains("Legal", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Estate Officer / Legal";
+        }
+
+        if (stageName.Contains("payment", StringComparison.OrdinalIgnoreCase)
+            || stageName.Contains("arrears", StringComparison.OrdinalIgnoreCase)
+            || stageName.Contains("invoice", StringComparison.OrdinalIgnoreCase)
+            || stageName.Contains("fees", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Estate Officer / Finance Revenue";
+        }
+
+        if (stageName.Contains("site", StringComparison.OrdinalIgnoreCase)
+            || stageName.Contains("planning", StringComparison.OrdinalIgnoreCase)
+            || stageName.Contains("cadastral", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Estate Officer / Planning";
+        }
+
+        if (stageName.Contains("Approve", StringComparison.OrdinalIgnoreCase)
+            || stageName.Contains("Review", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HOE / Estate Manager";
+        }
+
+        if (stageName.Contains("records", StringComparison.OrdinalIgnoreCase)
+            || stageName.Contains("ledger", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Estate Records";
+        }
+
+        return "Estate Officer";
+    }
+
+    private static IReadOnlyList<string> EstateStageChecklist(string entityType, string stageName) =>
+    [
+        $"Complete {stageName.ToLowerInvariant()} for {entityType}.",
+        "Confirm Estate file reference, property number, applicant, and source department.",
+        "Attach or reference required Estate/DMS documents.",
+        "Record linked Finance, Legal, Planning, Project, Property Management, or Facilities references where applicable."
+    ];
+
     private async Task<IReadOnlyList<DocumentSeed>> BuildWorkflowDocumentSeedsAsync(Guid workflowDefinitionId)
     {
         var steps = await _db.WorkflowSteps
@@ -549,7 +723,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             var config = DeserializeStepConfiguration(step.Configuration);
             var taskConfig = config?.TaskConfig;
-            if (taskConfig?.RequiresDocument == true || string.Equals(taskConfig?.TaskActionType, "document", StringComparison.OrdinalIgnoreCase))
+            if (taskConfig is not null
+                && (taskConfig.RequiresDocument || string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase)))
             {
                 var name = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
                     ? $"{step.Name} document"
@@ -636,9 +811,29 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return "Legal";
         }
 
+        if (string.Equals(module, "Estate", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(module, "EstateManagement", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(module, "Estate Management", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Estate";
+        }
+
         if (string.Equals(module, "Facilities", StringComparison.OrdinalIgnoreCase))
         {
             return "Facilities";
+        }
+
+        if (string.Equals(module, "PropertyManagement", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(module, "Property Management", StringComparison.OrdinalIgnoreCase))
+        {
+            return "PropertyManagement";
+        }
+
+        if (string.Equals(module, "Planning", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(module, "ProjectPlanning", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(module, "Project Planning", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Planning";
         }
 
         throw new InvalidOperationException($"Procedure module '{module}' is not supported.");

@@ -30,7 +30,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { adminApiService, Role } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
-import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2 } from 'lucide-react';
+import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2, Building2, Home } from 'lucide-react';
+import { FACILITIES_PERMISSIONS } from '@/lib/facilities-permissions';
+import { PROPERTY_MANAGEMENT_PERMISSIONS } from '@/lib/property-management-permissions';
 
 const PROTECTED_SYSTEM_ROLE_NAMES = new Set([
   'superadmin',
@@ -125,6 +127,14 @@ const PERMISSION_CATEGORIES = {
       { id: 'maintenance.access', name: 'Access Maintenance Management', description: 'Access the maintenance management module' },
       { id: 'fleet.access', name: 'Access Fleet Management', description: 'Access the fleet management module' },
     ]
+  },
+  'Estate / Facilities': {
+    icon: Building2,
+    permissions: [...FACILITIES_PERMISSIONS],
+  },
+  'Estate / Property Management': {
+    icon: Home,
+    permissions: [...PROPERTY_MANAGEMENT_PERMISSIONS],
   },
   'Administration Modules': {
     icon: Wrench,

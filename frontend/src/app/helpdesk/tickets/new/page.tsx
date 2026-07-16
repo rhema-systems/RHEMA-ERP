@@ -6,8 +6,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BookOpen, Paperclip, Ticket } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,8 +30,19 @@ import {
   EXTERNAL_TICKET_SOURCES,
   getHelpdeskScopeConfig,
 } from '@/lib/helpdesk-scope';
-import { ehcInternalTicketService, type EhcAdminCategory, type EhcRelatedEntityLookupItem, type EhcKbArticleDetail, type EhcKbArticleListItem } from '@/services/ehcInternalTicketService';
-import type { CreateEhcTicketRequest, EhcTicketPriority, EhcTicketSource, EhcTicketType } from '@/services/ehcTicketService';
+import {
+  ehcInternalTicketService,
+  type EhcAdminCategory,
+  type EhcRelatedEntityLookupItem,
+  type EhcKbArticleDetail,
+  type EhcKbArticleListItem,
+} from '@/services/ehcInternalTicketService';
+import type {
+  CreateEhcTicketRequest,
+  EhcTicketPriority,
+  EhcTicketSource,
+  EhcTicketType,
+} from '@/services/ehcTicketService';
 import { fileUploadService } from '@/services/fileUploadService';
 
 const relatedEntityTypeOptions = [
@@ -47,7 +70,9 @@ const relatedLookupSupportedTypes = new Set([
 type CategoryNode = EhcAdminCategory & { children: CategoryNode[] };
 
 const buildTree = (flat: EhcAdminCategory[]): CategoryNode[] => {
-  const byId = new Map<string, CategoryNode>(flat.map((c) => [c.id, { ...c, children: [] }]));
+  const byId = new Map<string, CategoryNode>(
+    flat.map((c) => [c.id, { ...c, children: [] }])
+  );
   const roots: CategoryNode[] = [];
 
   for (const node of byId.values()) {
@@ -79,9 +104,18 @@ export default function NewInternalHelpdeskTicketPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const scopeParam = searchParams?.get('scope');
-  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
+  const sourceParam = searchParams?.get('source');
+  const isEstateFacilitiesSource = ['facilities', 'estate-facilities'].includes(
+    sourceParam ?? ''
+  );
+  const scopeConfig = useMemo(
+    () => getHelpdeskScopeConfig(scopeParam),
+    [scopeParam]
+  );
   const typeLocked = scopeConfig.allowedTicketTypes.length === 1;
-  const channelOptions = useMemo<Array<{ label: string; value: EhcTicketSource }>>(
+  const channelOptions = useMemo<
+    Array<{ label: string; value: EhcTicketSource }>
+  >(
     () =>
       scopeConfig.internalOnly
         ? [{ label: 'Internal', value: 'Internal' }]
@@ -93,16 +127,20 @@ export default function NewInternalHelpdeskTicketPage() {
             { label: 'SMS', value: 'Sms' },
             { label: 'WhatsApp', value: 'WhatsApp' },
           ],
-    [scopeConfig.internalOnly],
+    [scopeConfig.internalOnly]
   );
 
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentInternalOnly, setAttachmentInternalOnly] = useState(true);
   const [relatedLookupOpen, setRelatedLookupOpen] = useState(false);
   const [relatedLookupQ, setRelatedLookupQ] = useState('');
-  const [relatedLookupResults, setRelatedLookupResults] = useState<EhcRelatedEntityLookupItem[]>([]);
+  const [relatedLookupResults, setRelatedLookupResults] = useState<
+    EhcRelatedEntityLookupItem[]
+  >([]);
   const [relatedLookupLoading, setRelatedLookupLoading] = useState(false);
-  const [relatedLookupError, setRelatedLookupError] = useState<string | null>(null);
+  const [relatedLookupError, setRelatedLookupError] = useState<string | null>(
+    null
+  );
   const [kbArticleOpen, setKbArticleOpen] = useState(false);
   const [kbArticleId, setKbArticleId] = useState<string | null>(null);
 
@@ -118,7 +156,12 @@ export default function NewInternalHelpdeskTicketPage() {
     relatedEntityReference: undefined,
   });
 
-  const { data: categories, isLoading: categoriesLoading, error: categoriesError, refetch: refetchCategories } = useQuery({
+  const {
+    data: categories,
+    isLoading: categoriesLoading,
+    error: categoriesError,
+    refetch: refetchCategories,
+  } = useQuery({
     queryKey: ['ehc', 'admin', 'categories'],
     queryFn: () => ehcInternalTicketService.listCategories(),
   });
@@ -146,8 +189,18 @@ export default function NewInternalHelpdeskTicketPage() {
 
   const tree = useMemo(() => buildTree(categories || []), [categories]);
 
-  const flatten = (nodes: CategoryNode[], rootId: string | null = null, depth = 0) => {
-    const out: Array<{ label: string; categoryId: string; subcategoryId?: string; appliesToType?: EhcTicketType | null; depth: number }> = [];
+  const flatten = (
+    nodes: CategoryNode[],
+    rootId: string | null = null,
+    depth = 0
+  ) => {
+    const out: Array<{
+      label: string;
+      categoryId: string;
+      subcategoryId?: string;
+      appliesToType?: EhcTicketType | null;
+      depth: number;
+    }> = [];
     for (const n of nodes) {
       const effectiveRootId = rootId ?? n.id;
       out.push({
@@ -177,17 +230,23 @@ export default function NewInternalHelpdeskTicketPage() {
     setForm((f) => ({
       ...f,
       ticketType: scopeConfig.defaultTicketType,
-      source:
-        scopeConfig.internalOnly
-          ? 'Internal'
-          : (() => {
-              const currentSource = (f.source as EhcTicketSource | undefined) ?? 'Web';
-              return EXTERNAL_TICKET_SOURCES.includes(currentSource) ? currentSource : 'Web';
-            })(),
+      source: scopeConfig.internalOnly
+        ? 'Internal'
+        : (() => {
+            const currentSource =
+              (f.source as EhcTicketSource | undefined) ?? 'Web';
+            return EXTERNAL_TICKET_SOURCES.includes(currentSource)
+              ? currentSource
+              : 'Web';
+          })(),
       categoryId: undefined,
       subcategoryId: undefined,
     }));
-  }, [scopeConfig.defaultTicketType, scopeConfig.internalOnly, scopeConfig.scope]);
+  }, [
+    scopeConfig.defaultTicketType,
+    scopeConfig.internalOnly,
+    scopeConfig.scope,
+  ]);
 
   useEffect(() => {
     if (!myDepartment?.id) return;
@@ -200,16 +259,40 @@ export default function NewInternalHelpdeskTicketPage() {
   useEffect(() => {
     if (!activePriorityLevels.length) return;
     setForm((f) => {
-      const exists = activePriorityLevels.some((p) => p.priority === (f.priority as any));
+      const exists = activePriorityLevels.some(
+        (p) => p.priority === (f.priority as any)
+      );
       if (exists) return f;
-      return { ...f, priority: activePriorityLevels[0].priority as EhcTicketPriority };
+      return {
+        ...f,
+        priority: activePriorityLevels[0].priority as EhcTicketPriority,
+      };
     });
   }, [activePriorityLevels]);
 
-  const canSubmit = Boolean(form.assignedDepartmentId) && Boolean(form.categoryId) && form.description.trim().length > 0;
+  useEffect(() => {
+    if (!isEstateFacilitiesSource) return;
+
+    setForm((f) => ({
+      ...f,
+      subject: f.subject || 'Estate / Facilities complaint',
+      description:
+        f.description ||
+        'Source: Estate / Facilities. Add the Facilities case reference, property/unit, complainant, SLA expectation, and issue details.',
+      relatedEntityType: f.relatedEntityType || 'Other',
+      relatedEntityReference: f.relatedEntityReference || 'Estate / Facilities',
+    }));
+  }, [isEstateFacilitiesSource]);
+
+  const canSubmit =
+    Boolean(form.assignedDepartmentId) &&
+    Boolean(form.categoryId) &&
+    form.description.trim().length > 0;
 
   const kbQuery = useMemo(() => {
-    const s = `${form.subject || ''} ${form.description || ''}`.trim().replace(/\s+/g, ' ');
+    const s = `${form.subject || ''} ${form.description || ''}`
+      .trim()
+      .replace(/\s+/g, ' ');
     if (s.length < 3) return '';
     return s.slice(0, 120);
   }, [form.subject, form.description]);
@@ -222,7 +305,10 @@ export default function NewInternalHelpdeskTicketPage() {
 
   const { data: kbArticle } = useQuery({
     queryKey: ['ehc', 'kb', 'article', kbArticleId],
-    queryFn: () => (kbArticleId ? ehcInternalTicketService.kbGetArticle(kbArticleId) : Promise.resolve(null)),
+    queryFn: () =>
+      kbArticleId
+        ? ehcInternalTicketService.kbGetArticle(kbArticleId)
+        : Promise.resolve(null),
     enabled: Boolean(kbArticleId),
   });
 
@@ -236,7 +322,11 @@ export default function NewInternalHelpdeskTicketPage() {
 
       if (files.length) {
         for (const f of files) {
-          const uploaded = await fileUploadService.uploadFile(f, 'ehc-ticket', ticket.id);
+          const uploaded = await fileUploadService.uploadFile(
+            f,
+            'ehc-ticket',
+            ticket.id
+          );
           if (uploaded.filePath) {
             await ehcInternalTicketService.addAttachment(ticket.id, {
               filePath: uploaded.filePath,
@@ -253,11 +343,20 @@ export default function NewInternalHelpdeskTicketPage() {
     },
     onSuccess: async (ticket) => {
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'tickets'] });
-      toast({ title: 'Created', description: `Ticket ${ticket.ticketNumber} created.`, variant: 'success' });
+      toast({
+        title: 'Created',
+        description: `Ticket ${ticket.ticketNumber} created.`,
+        variant: 'success',
+      });
       router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, ticket.id));
     },
     onError: (err) => {
-      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create ticket', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description:
+          err instanceof Error ? err.message : 'Failed to create ticket',
+        variant: 'destructive',
+      });
     },
   });
 
@@ -269,7 +368,11 @@ export default function NewInternalHelpdeskTicketPage() {
     setRelatedLookupLoading(true);
     setRelatedLookupError(null);
     try {
-      const items = await ehcInternalTicketService.searchRelatedEntities(entityType, q, 20);
+      const items = await ehcInternalTicketService.searchRelatedEntities(
+        entityType,
+        q,
+        20
+      );
       setRelatedLookupResults(items || []);
     } catch (e) {
       setRelatedLookupError(e instanceof Error ? e.message : 'Lookup failed');
@@ -283,7 +386,12 @@ export default function NewInternalHelpdeskTicketPage() {
     <div className="max-w-7xl mx-auto space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Button variant="outline" onClick={() => router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))}>
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))
+            }
+          >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
@@ -298,18 +406,28 @@ export default function NewInternalHelpdeskTicketPage() {
       <Card>
         <CardHeader>
           <CardTitle>Ticket details</CardTitle>
-          <CardDescription>Fields marked required drive routing, reporting, and SLAs.</CardDescription>
+          <CardDescription>
+            Fields marked required drive routing, reporting, and SLAs.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {categoriesError ? (
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 flex items-center justify-between gap-3">
-              <div>Failed to load categories. Please refresh and try again.</div>
-              <Button variant="outline" size="sm" onClick={() => refetchCategories()}>
+              <div>
+                Failed to load categories. Please refresh and try again.
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchCategories()}
+              >
                 Reload
               </Button>
             </div>
           ) : categoriesLoading ? (
-            <div className="rounded-md border bg-slate-50 p-3 text-sm text-slate-700">Loading categories…</div>
+            <div className="rounded-md border bg-slate-50 p-3 text-sm text-slate-700">
+              Loading categories…
+            </div>
           ) : null}
 
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -348,7 +466,12 @@ export default function NewInternalHelpdeskTicketPage() {
                   <select
                     className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
                     value={form.priority}
-                    onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as any }))}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        priority: e.target.value as any,
+                      }))
+                    }
                   >
                     {activePriorityLevels.length ? (
                       activePriorityLevels.map((p) => (
@@ -377,7 +500,12 @@ export default function NewInternalHelpdeskTicketPage() {
                     <select
                       className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
                       value={form.source || 'Web'}
-                      onChange={(e) => setForm((f) => ({ ...f, source: e.target.value as any }))}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          source: e.target.value as any,
+                        }))
+                      }
                     >
                       {channelOptions.map((o) => (
                         <option key={o.value} value={o.value}>
@@ -395,7 +523,12 @@ export default function NewInternalHelpdeskTicketPage() {
                   <select
                     className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
                     value={form.assignedDepartmentId || ''}
-                    onChange={(e) => setForm((f) => ({ ...f, assignedDepartmentId: e.target.value || undefined }))}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        assignedDepartmentId: e.target.value || undefined,
+                      }))
+                    }
                   >
                     <option value="">Select department</option>
                     {(departments || []).map((d) => (
@@ -404,7 +537,11 @@ export default function NewInternalHelpdeskTicketPage() {
                       </option>
                     ))}
                   </select>
-                  {myDepartment?.id ? <div className="text-xs text-slate-500">Auto-selected from your employee profile.</div> : null}
+                  {myDepartment?.id ? (
+                    <div className="text-xs text-slate-500">
+                      Auto-selected from your employee profile.
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -417,18 +554,37 @@ export default function NewInternalHelpdeskTicketPage() {
                     onChange={(e) =>
                       setForm((f) => {
                         const value = e.target.value || '';
-                        if (!value) return { ...f, categoryId: undefined, subcategoryId: undefined };
+                        if (!value)
+                          return {
+                            ...f,
+                            categoryId: undefined,
+                            subcategoryId: undefined,
+                          };
 
-                        const selected = visibleCategoryOptions.find((o) => (o.subcategoryId || o.categoryId) === value);
-                        if (!selected) return { ...f, categoryId: value, subcategoryId: undefined };
+                        const selected = visibleCategoryOptions.find(
+                          (o) => (o.subcategoryId || o.categoryId) === value
+                        );
+                        if (!selected)
+                          return {
+                            ...f,
+                            categoryId: value,
+                            subcategoryId: undefined,
+                          };
 
-                        return { ...f, categoryId: selected.categoryId, subcategoryId: selected.subcategoryId };
+                        return {
+                          ...f,
+                          categoryId: selected.categoryId,
+                          subcategoryId: selected.subcategoryId,
+                        };
                       })
                     }
                   >
                     <option value="">Select category</option>
                     {visibleCategoryOptions.map((o) => (
-                      <option key={`${o.categoryId}:${o.subcategoryId ?? ''}`} value={o.subcategoryId || o.categoryId}>
+                      <option
+                        key={`${o.categoryId}:${o.subcategoryId ?? ''}`}
+                        value={o.subcategoryId || o.categoryId}
+                      >
                         {o.label}
                       </option>
                     ))}
@@ -439,7 +595,9 @@ export default function NewInternalHelpdeskTicketPage() {
                   <Label>Subject</Label>
                   <Input
                     value={form.subject || ''}
-                    onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, subject: e.target.value }))
+                    }
                     placeholder="Short summary"
                   />
                 </div>
@@ -449,7 +607,9 @@ export default function NewInternalHelpdeskTicketPage() {
                 <Label>Description</Label>
                 <Textarea
                   value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, description: e.target.value }))
+                  }
                   placeholder="Describe the issue / request"
                   rows={7}
                 />
@@ -463,7 +623,12 @@ export default function NewInternalHelpdeskTicketPage() {
                   <select
                     className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
                     value={form.relatedEntityType || ''}
-                    onChange={(e) => setForm((f) => ({ ...f, relatedEntityType: e.target.value || undefined }))}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        relatedEntityType: e.target.value || undefined,
+                      }))
+                    }
                   >
                     {relatedEntityTypeOptions.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -478,8 +643,17 @@ export default function NewInternalHelpdeskTicketPage() {
                   <div className="flex gap-2">
                     <Input
                       value={form.relatedEntityReference || ''}
-                      onChange={(e) => setForm((f) => ({ ...f, relatedEntityReference: e.target.value || undefined }))}
-                      placeholder={form.relatedEntityType ? 'Enter reference or use Lookup' : '—'}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          relatedEntityReference: e.target.value || undefined,
+                        }))
+                      }
+                      placeholder={
+                        form.relatedEntityType
+                          ? 'Enter reference or use Lookup'
+                          : '—'
+                      }
                       disabled={!form.relatedEntityType}
                     />
                     <Button
@@ -491,13 +665,17 @@ export default function NewInternalHelpdeskTicketPage() {
                         setRelatedLookupError(null);
                         setRelatedLookupOpen(true);
                       }}
-                      disabled={!form.relatedEntityType || !relatedLookupSupportedTypes.has(form.relatedEntityType)}
+                      disabled={
+                        !form.relatedEntityType ||
+                        !relatedLookupSupportedTypes.has(form.relatedEntityType)
+                      }
                     >
                       Lookup
                     </Button>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Lookup supports Asset/Vehicle, Work Order, Purchase Order/Requisition, Tender, and RFQ.
+                    Lookup supports Asset/Vehicle, Work Order, Purchase
+                    Order/Requisition, Tender, and RFQ.
                   </div>
                 </div>
               </div>
@@ -507,19 +685,46 @@ export default function NewInternalHelpdeskTicketPage() {
                   <Paperclip className="h-4 w-4" />
                   Attachments
                 </Label>
-                <Input type="file" multiple onChange={(e) => setFiles(Array.from(e.target.files || []))} />
+                <Input
+                  type="file"
+                  multiple
+                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                />
                 <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input type="checkbox" checked={attachmentInternalOnly} onChange={(e) => setAttachmentInternalOnly(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={attachmentInternalOnly}
+                    onChange={(e) =>
+                      setAttachmentInternalOnly(e.target.checked)
+                    }
+                  />
                   Internal only (hidden from external users)
                 </label>
-                {files.length ? <div className="text-xs text-slate-600">{files.length} file(s) selected</div> : null}
+                {files.length ? (
+                  <div className="text-xs text-slate-600">
+                    {files.length} file(s) selected
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex items-center gap-2 pt-1">
-                <Button onClick={() => create.mutate()} disabled={!canSubmit || create.isPending} className="flex-1">
-                  {create.isPending ? 'Creating...' : scopeConfig.createButtonLabel}
+                <Button
+                  onClick={() => create.mutate()}
+                  disabled={!canSubmit || create.isPending}
+                  className="flex-1"
+                >
+                  {create.isPending
+                    ? 'Creating...'
+                    : scopeConfig.createButtonLabel}
                 </Button>
-                <Button variant="outline" onClick={() => router.push(buildScopedHelpdeskTicketsPath(scopeConfig.scope))}>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    router.push(
+                      buildScopedHelpdeskTicketsPath(scopeConfig.scope)
+                    )
+                  }
+                >
                   Cancel
                 </Button>
               </div>
@@ -531,11 +736,15 @@ export default function NewInternalHelpdeskTicketPage() {
                   <BookOpen className="h-4 w-4" />
                   Suggested articles
                 </div>
-                <div className="text-xs text-slate-500 mt-1">Based on your subject/description.</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Based on your subject/description.
+                </div>
 
                 <div className="mt-3 space-y-2">
                   {kbQuery.length < 3 ? (
-                    <div className="text-sm text-slate-500">Start typing a subject/description to see suggestions.</div>
+                    <div className="text-sm text-slate-500">
+                      Start typing a subject/description to see suggestions.
+                    </div>
                   ) : kbLoading ? (
                     <div className="text-sm text-slate-500">Loading…</div>
                   ) : (kbSuggestions ?? []).length ? (
@@ -550,17 +759,25 @@ export default function NewInternalHelpdeskTicketPage() {
                           trackKbView.mutate(a.id);
                         }}
                       >
-                        <div className="font-medium text-slate-900 line-clamp-2">{a.title}</div>
+                        <div className="font-medium text-slate-900 line-clamp-2">
+                          {a.title}
+                        </div>
                         <div className="text-xs text-slate-500 mt-1">
                           {a.code}
                           {a.categoryName ? ` • ${a.categoryName}` : ''}
                           {a.tagsCsv ? ` • ${a.tagsCsv}` : ''}
                         </div>
-                        {a.summary ? <div className="text-sm text-slate-700 mt-1 line-clamp-2">{a.summary}</div> : null}
+                        {a.summary ? (
+                          <div className="text-sm text-slate-700 mt-1 line-clamp-2">
+                            {a.summary}
+                          </div>
+                        ) : null}
                       </button>
                     ))
                   ) : (
-                    <div className="text-sm text-slate-500">No suggestions found.</div>
+                    <div className="text-sm text-slate-500">
+                      No suggestions found.
+                    </div>
                   )}
                 </div>
 
@@ -572,7 +789,8 @@ export default function NewInternalHelpdeskTicketPage() {
               <div className="rounded-lg border bg-slate-50 p-4 text-sm text-slate-700">
                 <div className="font-medium text-slate-900">Attachments</div>
                 <div className="text-xs text-slate-500 mt-1">
-                  File type and size policies apply per tenant/category (configured by admins).
+                  File type and size policies apply per tenant/category
+                  (configured by admins).
                 </div>
               </div>
             </div>
@@ -583,13 +801,19 @@ export default function NewInternalHelpdeskTicketPage() {
       <Dialog open={kbArticleOpen} onOpenChange={setKbArticleOpen}>
         <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-auto">
           <DialogHeader>
-            <DialogTitle>{(kbArticle as EhcKbArticleDetail | null)?.title ?? 'Article'}</DialogTitle>
+            <DialogTitle>
+              {(kbArticle as EhcKbArticleDetail | null)?.title ?? 'Article'}
+            </DialogTitle>
             <DialogDescription>
-              {(kbArticle as any)?.code ? `${(kbArticle as any).code}${(kbArticle as any)?.categoryName ? ` • ${(kbArticle as any).categoryName}` : ''}` : ''}
+              {(kbArticle as any)?.code
+                ? `${(kbArticle as any).code}${(kbArticle as any)?.categoryName ? ` • ${(kbArticle as any).categoryName}` : ''}`
+                : ''}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="prose prose-slate max-w-none whitespace-pre-wrap">{(kbArticle as EhcKbArticleDetail | null)?.body ?? ''}</div>
+          <div className="prose prose-slate max-w-none whitespace-pre-wrap">
+            {(kbArticle as EhcKbArticleDetail | null)?.body ?? ''}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -610,14 +834,20 @@ export default function NewInternalHelpdeskTicketPage() {
               <div className="sm:col-span-2 space-y-1">
                 <Label className="text-xs text-slate-600">Search</Label>
                 <div className="flex gap-2">
-                  <Input value={relatedLookupQ} onChange={(e) => setRelatedLookupQ(e.target.value)} placeholder="Type name/number..." />
+                  <Input
+                    value={relatedLookupQ}
+                    onChange={(e) => setRelatedLookupQ(e.target.value)}
+                    placeholder="Type name/number..."
+                  />
                   <Button
                     type="button"
                     onClick={doRelatedLookup}
                     disabled={
                       !relatedLookupQ.trim() ||
                       !form.relatedEntityType ||
-                      !relatedLookupSupportedTypes.has(form.relatedEntityType) ||
+                      !relatedLookupSupportedTypes.has(
+                        form.relatedEntityType
+                      ) ||
                       relatedLookupLoading
                     }
                   >
@@ -627,7 +857,9 @@ export default function NewInternalHelpdeskTicketPage() {
               </div>
             </div>
 
-            {relatedLookupError ? <div className="text-sm text-red-600">{relatedLookupError}</div> : null}
+            {relatedLookupError ? (
+              <div className="text-sm text-red-600">{relatedLookupError}</div>
+            ) : null}
 
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
@@ -666,7 +898,9 @@ export default function NewInternalHelpdeskTicketPage() {
                   ) : (
                     <tr>
                       <td className="py-6 px-3 text-slate-600" colSpan={3}>
-                        {relatedLookupLoading ? 'Searching…' : 'No results yet. Enter a search term and click Search.'}
+                        {relatedLookupLoading
+                          ? 'Searching…'
+                          : 'No results yet. Enter a search term and click Search.'}
                       </td>
                     </tr>
                   )}

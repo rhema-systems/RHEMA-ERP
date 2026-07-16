@@ -96,6 +96,21 @@ const menuItems: MenuItem[] = [
     comingSoon: true,
   },
   {
+    title: 'Property Listings',
+    href: '/external-portal/property-listings',
+    icon: Home,
+  },
+  {
+    title: 'Estate Services',
+    href: '/external-portal/estate-services',
+    icon: ClipboardList,
+  },
+  {
+    title: 'Estate Documents',
+    href: '/external-portal/estate-documents',
+    icon: FileText,
+  },
+  {
     title: 'My Profile',
     href: '/external-portal/profile',
     icon: User,

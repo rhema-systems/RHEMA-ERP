@@ -271,6 +271,41 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         return MapToDto(asset);
     }
 
+    public async Task<EstateManagedAssetDto> UpdateExternalListingAsync(Guid assetId, UpdateEstateManagedAssetListingDto request)
+    {
+        var repository = _unitOfWork.Repository<EstateManagedAsset>();
+        var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&
+            item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted);
+        if (asset == null) throw new InvalidOperationException("Estate asset was not found.");
+
+        var listingType = NormalizeListingType(request.ExternalListingType);
+        if (request.IsPublishedToExternalPortal && listingType == "None")
+        {
+            throw new InvalidOperationException("Select Sale, Rent, or Sale and Rent before publishing to the external portal.");
+        }
+
+        asset.IsPublishedToExternalPortal = request.IsPublishedToExternalPortal;
+        asset.ExternalListingType = listingType;
+        asset.ExternalListingStatus = request.IsPublishedToExternalPortal ? NormalizeListingStatus(request.ExternalListingStatus) : "Draft";
+        asset.ExternalListingPrice = request.ExternalListingPrice > 0 ? request.ExternalListingPrice : null;
+        asset.ExternalListingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
+            ? "GHS"
+            : request.ExternalListingCurrency.Trim().ToUpperInvariant();
+        asset.ExternalListingNotes = TrimOrNull(request.ExternalListingNotes);
+        asset.ExternalPublishedAt = request.IsPublishedToExternalPortal
+            ? asset.ExternalPublishedAt ?? DateTime.UtcNow
+            : null;
+        asset.IsAvailableForSale = listingType is "Sale" or "SaleAndRent";
+        asset.IsAvailableForLease = listingType is "Rent" or "SaleAndRent";
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserProvider.Username;
+        asset.LastModifiedById = _currentUserProvider.UserId;
+
+        await repository.UpdateAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+        return MapToDto(asset);
+    }
+
     public async Task<EstateManagedAssetDocumentDto> RegisterDocumentAsync(Guid assetId, RegisterEstateManagedAssetDocumentDto document)
     {
         var asset = await _unitOfWork.Repository<EstateManagedAsset>().FirstOrDefaultAsync(item => item.Id == assetId &&
@@ -287,11 +322,52 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             DocumentType = string.IsNullOrWhiteSpace(document.DocumentType) ? "Other" : document.DocumentType.Trim(),
             DocumentName = TrimOrNull(document.DocumentName),
             ContentType = TrimOrNull(document.ContentType),
-            FileSize = document.FileSize
+            FileSize = document.FileSize,
+            IsListingImage = document.IsListingImage,
+            IsPrimaryListingImage = document.IsPrimaryListingImage
         };
+
+        if (entity.IsPrimaryListingImage)
+        {
+            var existingImages = await _unitOfWork.Repository<EstateManagedAssetDocument>().FindAsync(item =>
+                item.EstateManagedAssetId == assetId && item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted);
+            foreach (var image in existingImages.Where(item => item.IsPrimaryListingImage))
+            {
+                image.IsPrimaryListingImage = false;
+                image.UpdatedAt = DateTime.UtcNow;
+                image.UpdatedBy = _currentUserProvider.Username;
+                image.LastModifiedById = _currentUserProvider.UserId;
+                await _unitOfWork.Repository<EstateManagedAssetDocument>().UpdateAsync(image);
+            }
+        }
+
         await _unitOfWork.Repository<EstateManagedAssetDocument>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return MapDocument(entity);
+    }
+
+    public async Task<EstateManagedAssetDocumentDto> SetPrimaryListingImageAsync(Guid assetId, Guid documentId)
+    {
+        var repository = _unitOfWork.Repository<EstateManagedAssetDocument>();
+        var documents = (await repository.FindAsync(item =>
+                item.EstateManagedAssetId == assetId && item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted))
+            .ToList();
+        var selected = documents.FirstOrDefault(item => item.Id == documentId);
+        if (selected == null) throw new InvalidOperationException("Listing image was not found.");
+        if (!IsImage(selected)) throw new InvalidOperationException("Only image files can be used as listing images.");
+
+        foreach (var document in documents)
+        {
+            document.IsListingImage = document.Id == documentId || document.IsListingImage;
+            document.IsPrimaryListingImage = document.Id == documentId;
+            document.UpdatedAt = DateTime.UtcNow;
+            document.UpdatedBy = _currentUserProvider.Username;
+            document.LastModifiedById = _currentUserProvider.UserId;
+            await repository.UpdateAsync(document);
+        }
+
+        await _unitOfWork.SaveChangesAsync();
+        return MapDocument(selected);
     }
 
     public async Task<IReadOnlyList<EstateManagedAssetDocumentDto>> GetDocumentsAsync(Guid assetId)
@@ -319,7 +395,12 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ContentType = document.ContentType,
         FileSize = document.FileSize,
         UploadedAt = document.CreatedAt,
-        UploadedBy = document.CreatedBy
+        UploadedBy = document.CreatedBy,
+        IsListingImage = document.IsListingImage,
+        IsPrimaryListingImage = document.IsPrimaryListingImage,
+        CentralDocumentRecordId = document.CentralDocumentRecordId,
+        CentralDocumentReference = document.CentralDocumentReference,
+        PublishedToCentralDmsAt = document.PublishedToCentralDmsAt
     };
 
     private static EstateManagedAssetType ResolveAssetType(string? unitType)
@@ -443,6 +524,19 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         IsAvailableForSale = asset.IsAvailableForSale,
         IsPublishedFromProject = asset.IsPublishedFromProject,
         PublishedFromProjectAt = asset.PublishedFromProjectAt,
+        IsPublishedToExternalPortal = asset.IsPublishedToExternalPortal,
+        ExternalListingType = asset.ExternalListingType,
+        ExternalListingStatus = asset.ExternalListingStatus,
+        ExternalListingPrice = asset.ExternalListingPrice,
+        ExternalListingCurrency = asset.ExternalListingCurrency,
+        ExternalListingNotes = asset.ExternalListingNotes,
+        ExternalPublishedAt = asset.ExternalPublishedAt,
+        PrimaryListingImageDocumentId = asset.Documents?
+            .Where(document => !document.IsDeleted && document.IsListingImage)
+            .OrderByDescending(document => document.IsPrimaryListingImage)
+            .ThenByDescending(document => document.CreatedAt)
+            .Select(document => (Guid?)document.Id)
+            .FirstOrDefault(),
         Notes = asset.Notes
     };
 
@@ -454,4 +548,35 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     private static string FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? "LAND-ASSET";
+
+    private static bool IsImage(EstateManagedAssetDocument document)
+        => document.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true
+            || document.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+            || document.FileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
+            || document.FileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+            || document.FileName.EndsWith(".webp", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeListingType(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "None" : value.Trim();
+        return normalized.ToLowerInvariant() switch
+        {
+            "sale" => "Sale",
+            "rent" or "lease" => "Rent",
+            "saleandrent" or "sale and rent" or "sale/rent" or "both" => "SaleAndRent",
+            _ => "None"
+        };
+    }
+
+    private static string NormalizeListingStatus(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "Published" : value.Trim();
+        return normalized.ToLowerInvariant() switch
+        {
+            "draft" => "Draft",
+            "published" or "active" => "Published",
+            "paused" => "Paused",
+            _ => "Published"
+        };
+    }
 }

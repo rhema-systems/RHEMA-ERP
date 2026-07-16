@@ -1,14 +1,15 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
+  BarChart3,
   Briefcase,
-  Building2,
   ClipboardCheck,
+  CreditCard,
   Database,
-  FileSignature,
   FileText,
   Loader2,
   MessageSquare,
@@ -29,98 +30,14 @@ import {
   type FacilitiesProcedure,
 } from '@/services/estate-facilities.service';
 
-const fallbackProcedures: FacilitiesProcedure[] = [
-  {
-    title: 'Property and Site Management',
-    entityType: 'EstateFacilityPropertySite',
-    source: 'Facilities Management ERP Module',
-    summary:
-      'Site creation, property records, unit and space capture, occupancy status, and availability monitoring.',
-    icon: 'Building2',
-    stageCount: 5,
-    accent: 'teal',
-  },
-  {
-    title: 'Lease Management',
-    entityType: 'EstateFacilityLease',
-    source: 'Facilities Management ERP BRS',
-    summary:
-      'Client details, lease dates, rental amount, renewal alerts, termination tracking, and lease status.',
-    icon: 'FileSignature',
-    stageCount: 7,
-    accent: 'sky',
-  },
-  {
-    title: 'Maintenance Management',
-    entityType: 'EstateFacilityMaintenance',
-    source: 'Facilities Management ERP Module',
-    summary:
-      'Maintenance request, complaint logging, priority assignment, contractor assignment, completion, inspection, and closure.',
-    icon: 'Wrench',
-    stageCount: 8,
-    accent: 'amber',
-  },
-  {
-    title: 'Complaint Management',
-    entityType: 'EstateFacilityComplaint',
-    source: 'Facilities Management ERP BRS',
-    summary:
-      'Tenant/customer complaints, issue tracking, escalation, resolution updates, and closure reporting.',
-    icon: 'MessageSquare',
-    stageCount: 6,
-    accent: 'rose',
-  },
-  {
-    title: 'Service Provider Management',
-    entityType: 'EstateFacilityServiceProvider',
-    source: 'Facilities Management ERP BRS',
-    summary:
-      'Contractor database, service categories, contracts, rates, performance records, and invoice history.',
-    icon: 'Briefcase',
-    stageCount: 6,
-    accent: 'violet',
-  },
-  {
-    title: 'Staff and Cleaner Management',
-    entityType: 'EstateFacilityStaffCleaner',
-    source: 'Facilities Management ERP Module',
-    summary:
-      'Facilities staff and cleaner assignment, duty monitoring, attendance support, and supervision workflows.',
-    icon: 'ClipboardCheck',
-    stageCount: 5,
-    accent: 'emerald',
-  },
-  {
-    title: 'Asset Register',
-    entityType: 'EstateFacilityAssetRegister',
-    source: 'Facilities Management ERP BRS',
-    summary:
-      'Asset number, description, location, cost, warranty, maintenance history, and current status register.',
-    icon: 'Database',
-    stageCount: 6,
-    accent: 'indigo',
-  },
-  {
-    title: 'Facilities Document Control',
-    entityType: 'EstateFacilityDocument',
-    source: 'Facilities Management ERP BRS',
-    summary:
-      'Upload, storage, search, and retrieval of leases, contracts, certificates, invoices, payment records, and property documents.',
-    icon: 'FileText',
-    stageCount: 5,
-    accent: 'lime',
-  },
-];
-
 const procedureIcons: Record<
   string,
   React.ComponentType<{ className?: string }>
 > = {
   Briefcase,
-  Building2,
   ClipboardCheck,
+  CreditCard,
   Database,
-  FileSignature,
   FileText,
   MessageSquare,
   Wrench,
@@ -128,20 +45,20 @@ const procedureIcons: Record<
 
 const accentClasses: Record<string, string> = {
   amber: 'text-amber-700 dark:text-amber-300',
+  cyan: 'text-cyan-700 dark:text-cyan-300',
   emerald: 'text-emerald-700 dark:text-emerald-300',
   indigo: 'text-indigo-700 dark:text-indigo-300',
   lime: 'text-lime-700 dark:text-lime-300',
   rose: 'text-rose-700 dark:text-rose-300',
-  sky: 'text-sky-700 dark:text-sky-300',
-  teal: 'text-teal-700 dark:text-teal-300',
   violet: 'text-violet-700 dark:text-violet-300',
 };
 
 export default function EstateFacilitiesPage() {
   const router = useRouter();
   const [procedures, setProcedures] =
-    React.useState<FacilitiesProcedure[]>(fallbackProcedures);
+    React.useState<FacilitiesProcedure[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let mounted = true;
@@ -149,12 +66,14 @@ export default function EstateFacilitiesPage() {
     const loadProcedures = async () => {
       try {
         const data = await estateFacilitiesService.getProcedures();
-        if (mounted && data.length > 0) {
+        if (mounted) {
           setProcedures(data);
+          setLoadError(data.length === 0 ? 'No facilities workspaces were returned by the API.' : null);
         }
       } catch {
         if (mounted) {
-          setProcedures(fallbackProcedures);
+          setProcedures([]);
+          setLoadError('Unable to load facilities workspaces from the API.');
         }
       } finally {
         if (mounted) {
@@ -186,19 +105,33 @@ export default function EstateFacilitiesPage() {
               Facilities Management
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Estate-owned facilities operations for sites, leases, maintenance,
-              complaints, providers, field teams, assets, and documents.
+              Estate-owned service operations for maintenance, complaints,
+              providers, field teams, operational assets, and facilities
+              documents.
             </p>
           </div>
         </div>
+        <Button asChild>
+          <Link href="/estate/facilities/dashboard">
+            <BarChart3 className="mr-2 h-4 w-4" />
+            Dashboard
+          </Link>
+        </Button>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {!isLoading && loadError ? (
+          <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
+            <CardContent className="py-12 text-center text-sm text-muted-foreground">
+              {loadError}
+            </CardContent>
+          </Card>
+        ) : null}
         {isLoading ? (
           <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
             <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading facilities procedures
+              Loading facilities workspaces
             </CardContent>
           </Card>
         ) : null}
@@ -206,8 +139,7 @@ export default function EstateFacilitiesPage() {
         {!isLoading &&
           procedures.map((procedure) => {
             const Icon = procedureIcons[procedure.icon] || FileText;
-            const accent =
-              accentClasses[procedure.accent] || accentClasses.teal;
+            const accent = accentClasses[procedure.accent] || 'text-primary';
 
             return (
               <Card
@@ -233,12 +165,9 @@ export default function EstateFacilitiesPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {procedure.summary}
-                  </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{procedure.entityType}</Badge>
-                    <Badge variant="outline">Procedure workspace</Badge>
+                    <Badge variant="outline">Facilities workspace</Badge>
                   </div>
                   <Button
                     variant="outline"

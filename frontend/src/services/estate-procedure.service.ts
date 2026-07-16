@@ -15,6 +15,10 @@ interface ApiResponse<T> {
   data: T;
 }
 
+export function findEstateProcedure(entityType: string, procedures: EstateProcedure[]): EstateProcedure | null {
+  return procedures.find((item) => item.entityType.toLowerCase() === entityType.toLowerCase()) ?? null;
+}
+
 class EstateProcedureService {
   async getProcedures(): Promise<EstateProcedure[]> {
     const response = await apiService.get<ApiResponse<EstateProcedure[]>>('/estate/procedures');

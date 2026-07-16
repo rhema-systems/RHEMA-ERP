@@ -9,7 +9,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Legal Department Procedure Manual",
             "LegalProcedure",
-            "Procedure manual",
+            "Source: Legal - Procedure Manual",
             "General legal intake, review, drafting, approval, execution, and record keeping workflow.",
             "BookOpen",
             6,
@@ -17,7 +17,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Mortgages",
             "LegalMortgage",
-            "Mortgage SOP",
+            "Source: Legal - Mortgages",
             "Mortgage request review, document preparation, execution support, and completion tracking.",
             "FileSignature",
             7,
@@ -25,7 +25,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Mortgage In Principle",
             "LegalMortgageInPrinciple",
-            "Mortgage in principle SOP",
+            "Source: Legal - Mortgage In Principle",
             "Initial mortgage review, legal checks, recommendation, and approval routing.",
             "FileCheck2",
             5,
@@ -33,7 +33,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Court Processes",
             "LegalCourtProcess",
-            "Court process SOP",
+            "Source: Legal - Court Processes",
             "Court process receipt, review, response preparation, filing, hearing, and follow-up.",
             "Scale",
             7,
@@ -41,7 +41,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Other Court Processes",
             "LegalOtherCourtProcess",
-            "Other court process SOP",
+            "Source: Legal - Other Court Processes",
             "Non-standard court matters routed for legal action, evidence handling, and closure.",
             "Gavel",
             6,
@@ -49,7 +49,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Termination / Recognition",
             "LegalTerminationRecognition",
-            "Termination-recognition SOP",
+            "Source: Legal - Termination / Recognition",
             "Termination and recognition requests reviewed through legal validation and approval stages.",
             "ShieldCheck",
             7,
@@ -57,7 +57,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Assignment / Sublease / Vesting",
             "LegalAssignmentSubleaseVesting",
-            "Assignment, sublease, and vesting SOP",
+            "Source: Legal - Assignment / Sublease / Vesting",
             "Instrument review, party verification, drafting, consent checks, and completion workflow.",
             "Landmark",
             8,
@@ -65,7 +65,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Leases / Deed of Variation / Renewal / Sublease",
             "LegalLeaseVariationRenewalSublease",
-            "Lease and variation SOP",
+            "Source: Legal - Leases / Variation / Renewal / Sublease",
             "Lease drafting, variation, renewal, sublease review, approval, execution, and filing.",
             "FileText",
             8,
@@ -73,7 +73,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         new(
             "Transfers",
             "LegalTransfer",
-            "Transfer SOP",
+            "Source: Legal - Transfers",
             "Transfer request validation, document review, approval, execution, registration, and records.",
             "BadgeCheck",
             7,

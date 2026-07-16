@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
@@ -10,12 +11,14 @@ import {
   FileCheck2,
   FilePenLine,
   FileText,
+  LayoutDashboard,
   Loader2,
   Map,
   MapPin,
   MessageSquare,
   RefreshCw,
   Search,
+  Settings,
   Users,
 } from 'lucide-react';
 
@@ -23,7 +26,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  planningFallbackProcedures,
   planningProcedureService,
   type PlanningProcedure,
 } from '@/services/planning-procedure.service';
@@ -60,8 +62,9 @@ const accentClasses: Record<string, string> = {
 
 export default function DevelopmentPlanningPage() {
   const router = useRouter();
-  const [procedures, setProcedures] = React.useState<PlanningProcedure[]>(planningFallbackProcedures);
+  const [procedures, setProcedures] = React.useState<PlanningProcedure[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let mounted = true;
@@ -69,12 +72,14 @@ export default function DevelopmentPlanningPage() {
     const loadProcedures = async () => {
       try {
         const data = await planningProcedureService.getProcedures();
-        if (mounted && data.length > 0) {
+        if (mounted) {
           setProcedures(data);
+          setLoadError(data.length === 0 ? 'No planning procedures were returned by the API.' : null);
         }
       } catch {
         if (mounted) {
-          setProcedures(planningFallbackProcedures);
+          setProcedures([]);
+          setLoadError('Unable to load planning procedures from the API.');
         }
       } finally {
         if (mounted) {
@@ -90,43 +95,90 @@ export default function DevelopmentPlanningPage() {
     };
   }, []);
 
-  const openWorkspace = (entityType: string) => {
-    router.push(`/development/planning/${encodeURIComponent(entityType)}`);
-  };
+  const totalStages = procedures.reduce((sum, procedure) => sum + procedure.stageCount, 0);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-2">
-            <Badge variant="outline" className="w-fit">
-              Development planning
-            </Badge>
-            <div>
-              <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
-                Planning Procedures
-              </h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-                SOP workspaces for land use vetting, change of use, planning schemes, site plans, searches, permit conformity, regularization, inspections, and committee reporting.
-              </p>
-            </div>
-          </div>
-          <Button variant="outline" onClick={() => router.push('/administration/workflow?q=Planning')}>
-            Workflow setup
-            <ArrowRight className="ml-2 h-4 w-4" />
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-2">
+          <Badge variant="outline" className="w-fit">
+            Project Management
+          </Badge>
+          <h1 className="text-3xl font-bold tracking-tight">Planning</h1>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href="/development/planning/dashboard">
+              <LayoutDashboard className="mr-2 h-4 w-4" />
+              Dashboard
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/administration/workflow?q=Planning">
+              <Settings className="mr-2 h-4 w-4" />
+              Workflow setup
+            </Link>
           </Button>
         </div>
+      </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {isLoading ? (
-            <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
-              <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading planning procedures
-              </CardContent>
-            </Card>
-          ) : null}
-          {!isLoading && procedures.map((procedure) => {
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Procedures</CardDescription>
+            <CardTitle>{procedures.length}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Stages</CardDescription>
+            <CardTitle>{totalStages}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Source</CardDescription>
+            <CardTitle className="text-base">Project Planning</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>DMS</CardDescription>
+            <CardTitle className="text-base">Enabled</CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline">
+          <Link href="/estate/land-management">Estate Land Bank</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/document-management?module=Planning">Document Mngt</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/development/project-approvals">Approvals</Link>
+        </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {!isLoading && loadError ? (
+          <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
+            <CardContent className="py-12 text-center text-sm text-muted-foreground">
+              {loadError}
+            </CardContent>
+          </Card>
+        ) : null}
+        {isLoading ? (
+          <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
+            <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading planning procedures
+            </CardContent>
+          </Card>
+        ) : null}
+        {!isLoading &&
+          procedures.map((procedure) => {
             const Icon = procedureIcons[procedure.icon] || ClipboardList;
             const accent = accentClasses[procedure.accent] || accentClasses.slate;
 
@@ -145,12 +197,15 @@ export default function DevelopmentPlanningPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm leading-6 text-muted-foreground">{procedure.summary}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{procedure.entityType}</Badge>
-                    <Badge variant="outline">SOP workspace</Badge>
+                    <Badge variant="outline">Live cases</Badge>
                   </div>
-                  <Button variant="outline" className="w-full justify-between" onClick={() => openWorkspace(procedure.entityType)}>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-between"
+                    onClick={() => router.push(`/development/planning/${encodeURIComponent(procedure.entityType)}`)}
+                  >
                     Open workspace
                     <ArrowRight className="h-4 w-4" />
                   </Button>
@@ -158,7 +213,6 @@ export default function DevelopmentPlanningPage() {
               </Card>
             );
           })}
-        </div>
       </div>
     </div>
   );

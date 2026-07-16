@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
@@ -180,6 +181,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // File upload governance (per-tenant, per-category)
     public DbSet<FileUploadPolicy> FileUploadPolicies { get; set; }
     public DbSet<FileUploadRecord> FileUploadRecords { get; set; }
+
+    // Central Document Management entities
+    public DbSet<CentralDocumentRecord> CentralDocumentRecords { get; set; }
+    public DbSet<CentralDocumentVersion> CentralDocumentVersions { get; set; }
+    public DbSet<CentralDocumentMetadataTemplate> CentralDocumentMetadataTemplates { get; set; }
+    public DbSet<CentralDocumentMetadataValue> CentralDocumentMetadataValues { get; set; }
+    public DbSet<CentralDocumentGenerationTemplate> CentralDocumentGenerationTemplates { get; set; }
+    public DbSet<CentralDocumentAnnotationReview> CentralDocumentAnnotationReviews { get; set; }
+    public DbSet<CentralDocumentAccessRule> CentralDocumentAccessRules { get; set; }
+    public DbSet<CentralDocumentRetentionPolicy> CentralDocumentRetentionPolicies { get; set; }
 
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
@@ -852,6 +863,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<WorkflowSignatureEvidence>().HasIndex(item => item.ApprovalId).IsUnique();
         builder.Entity<WorkflowIntegrationExecution>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.Entity<WorkflowOfflineAction>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+        ConfigureCentralDocumentManagementEntities(builder);
         ConfigureLandAcquisitionEntities(builder);
         ConfigureProcedureCaseEntities(builder);
         builder.ApplyConfiguration(new AssetTypeConfiguration());
@@ -6839,6 +6851,70 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<RolePermission>().HasData(rolePermissions.ToArray());
     }
 
+    private static void ConfigureCentralDocumentManagementEntities(ModelBuilder builder)
+    {
+        builder.Entity<CentralDocumentRecord>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentReference }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.SourceModule, item.SourceRecordReference });
+            entity.HasMany(item => item.Versions)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.AnnotationReviews)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.MetadataValues)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<CentralDocumentVersion>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.VersionNumber }).IsUnique();
+        });
+
+        builder.Entity<CentralDocumentMetadataTemplate>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+
+        builder.Entity<CentralDocumentMetadataValue>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.FieldKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode, item.FieldKey });
+        });
+
+        builder.Entity<CentralDocumentGenerationTemplate>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+
+        builder.Entity<CentralDocumentAnnotationReview>(entity =>
+        {
+            entity.HasOne(item => item.DocumentVersion)
+                .WithMany()
+                .HasForeignKey(item => item.DocumentVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.Status });
+        });
+
+        builder.Entity<CentralDocumentAccessRule>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.AccessProfile, item.Module, item.RoleName });
+        });
+
+        builder.Entity<CentralDocumentRetentionPolicy>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.PolicyCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+    }
+
     private static void ConfigureLandAcquisitionEntities(ModelBuilder builder)
     {
         builder.Entity<LandAcquisition>(entity =>
@@ -6978,12 +7054,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(item => new { item.TenantId, item.AssetType, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.ProjectUnitId });
             entity.HasIndex(item => new { item.TenantId, item.LandAcquisitionId });
+            entity.HasIndex(item => new { item.TenantId, item.IsPublishedToExternalPortal, item.ExternalListingStatus });
             entity.Property(item => item.AssetType).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.SourceType).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
             entity.Property(item => item.AreaValue).HasPrecision(18, 4);
             entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
             entity.HasMany(item => item.Documents)
                 .WithOne(item => item.EstateManagedAsset)
                 .HasForeignKey(item => item.EstateManagedAssetId)
@@ -6994,6 +7072,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.ToTable("EstateManagedAssetDocuments");
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId });
+            entity.HasIndex(item => new { item.TenantId, item.CentralDocumentRecordId });
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.IsListingImage });
         });
 
         builder.Entity<LandAcquisitionNote>(entity =>

@@ -30,99 +30,6 @@ import {
   type LegalProcedure,
 } from '@/services/legal-procedure.service';
 
-const fallbackLegalProcedures: LegalProcedure[] = [
-  {
-    title: 'Legal Department Procedure Manual',
-    entityType: 'LegalProcedure',
-    source: 'Procedure manual',
-    summary:
-      'General legal intake, review, drafting, approval, execution, and record keeping workflow.',
-    icon: 'BookOpen',
-    stageCount: 6,
-    accent: 'slate',
-  },
-  {
-    title: 'Mortgages',
-    entityType: 'LegalMortgage',
-    source: 'Mortgage SOP',
-    summary:
-      'Mortgage request review, document preparation, execution support, and completion tracking.',
-    icon: 'FileSignature',
-    stageCount: 7,
-    accent: 'cyan',
-  },
-  {
-    title: 'Mortgage In Principle',
-    entityType: 'LegalMortgageInPrinciple',
-    source: 'Mortgage in principle SOP',
-    summary:
-      'Initial mortgage review, legal checks, recommendation, and approval routing.',
-    icon: 'FileCheck2',
-    stageCount: 5,
-    accent: 'emerald',
-  },
-  {
-    title: 'Court Processes',
-    entityType: 'LegalCourtProcess',
-    source: 'Court process SOP',
-    summary:
-      'Court process receipt, review, response preparation, filing, hearing, and follow-up.',
-    icon: 'Scale',
-    stageCount: 7,
-    accent: 'violet',
-  },
-  {
-    title: 'Other Court Processes',
-    entityType: 'LegalOtherCourtProcess',
-    source: 'Other court process SOP',
-    summary:
-      'Non-standard court matters routed for legal action, evidence handling, and closure.',
-    icon: 'Gavel',
-    stageCount: 6,
-    accent: 'purple',
-  },
-  {
-    title: 'Termination / Recognition',
-    entityType: 'LegalTerminationRecognition',
-    source: 'Termination-recognition SOP',
-    summary:
-      'Termination and recognition requests reviewed through legal validation and approval stages.',
-    icon: 'ShieldCheck',
-    stageCount: 7,
-    accent: 'amber',
-  },
-  {
-    title: 'Assignment / Sublease / Vesting',
-    entityType: 'LegalAssignmentSubleaseVesting',
-    source: 'Assignment, sublease, and vesting SOP',
-    summary:
-      'Instrument review, party verification, drafting, consent checks, and completion workflow.',
-    icon: 'Landmark',
-    stageCount: 8,
-    accent: 'teal',
-  },
-  {
-    title: 'Leases / Deed of Variation / Renewal / Sublease',
-    entityType: 'LegalLeaseVariationRenewalSublease',
-    source: 'Lease and variation SOP',
-    summary:
-      'Lease drafting, variation, renewal, sublease review, approval, execution, and filing.',
-    icon: 'FileText',
-    stageCount: 8,
-    accent: 'sky',
-  },
-  {
-    title: 'Transfers',
-    entityType: 'LegalTransfer',
-    source: 'Transfer SOP',
-    summary:
-      'Transfer request validation, document review, approval, execution, registration, and records.',
-    icon: 'BadgeCheck',
-    stageCount: 7,
-    accent: 'blue',
-  },
-];
-
 const procedureIcons: Record<
   string,
   React.ComponentType<{ className?: string }>
@@ -152,10 +59,9 @@ const accentClasses: Record<string, string> = {
 
 export default function LegalProceduresPage() {
   const router = useRouter();
-  const [procedures, setProcedures] = React.useState<LegalProcedure[]>(
-    fallbackLegalProcedures
-  );
+  const [procedures, setProcedures] = React.useState<LegalProcedure[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let mounted = true;
@@ -163,12 +69,14 @@ export default function LegalProceduresPage() {
     const loadProcedures = async () => {
       try {
         const data = await legalProcedureService.getProcedures();
-        if (mounted && data.length > 0) {
+        if (mounted) {
           setProcedures(data);
+          setLoadError(data.length === 0 ? 'No legal procedures were returned by the API.' : null);
         }
       } catch {
         if (mounted) {
-          setProcedures(fallbackLegalProcedures);
+          setProcedures([]);
+          setLoadError('Unable to load legal procedures from the API.');
         }
       } finally {
         if (mounted) {
@@ -199,15 +107,18 @@ export default function LegalProceduresPage() {
             <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
               Legal Procedures
             </h1>
-            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Procedure workspaces for legal instruments, court processes,
-              mortgages, transfers, leases, and recognition matters.
-            </p>
           </div>
         </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {!isLoading && loadError ? (
+          <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
+            <CardContent className="py-12 text-center text-sm text-muted-foreground">
+              {loadError}
+            </CardContent>
+          </Card>
+        ) : null}
         {isLoading ? (
           <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
             <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
@@ -245,9 +156,6 @@ export default function LegalProceduresPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {procedure.summary}
-                  </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{procedure.entityType}</Badge>
                     <Badge variant="outline">Procedure workspace</Badge>

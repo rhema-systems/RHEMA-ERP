@@ -38,179 +38,18 @@ import {
   estateProcedureService,
   type EstateProcedure,
 } from '@/services/estate-procedure.service';
-
-const fallbackProcedures: EstateProcedure[] = [
-  {
-    title: 'Secretarial and Estates Registry',
-    entityType: 'EstateRegistrySecretariat',
-    source: 'Estates Operational Manual',
-    summary:
-      'Incoming files, letters, forms purchase, file dispatch, movement tracing, typing, client updates, and departmental registry controls.',
-    icon: 'ClipboardList',
-    stageCount: 7,
-    accent: 'slate',
-  },
-  {
-    title: 'Estate Records Management',
-    entityType: 'EstateRecordsManagement',
-    source: 'Estates Operational Manual',
-    summary:
-      'Estate registers, HOS ledger cards, record updates, transfer amendments, agency notifications, and building permit ownership verification.',
-    icon: 'Database',
-    stageCount: 8,
-    accent: 'indigo',
-  },
-  {
-    title: 'Land and Landed Property Inspection',
-    entityType: 'EstateInspection',
-    source: 'Estates Operational Manual',
-    summary:
-      'Site inspection, site report preparation, neighbourhood details, current development capture, and photographic evidence.',
-    icon: 'MapPin',
-    stageCount: 5,
-    accent: 'teal',
-  },
-  {
-    title: 'Search Application',
-    entityType: 'EstateSearchApplication',
-    source: 'Estates Operational Manual',
-    summary:
-      'Search request intake, ground-rent arrears control, property-file review, and search report preparation.',
-    icon: 'Search',
-    stageCount: 5,
-    accent: 'sky',
-  },
-  {
-    title: 'Change of Address and Record Amendment',
-    entityType: 'EstateRecordAmendment',
-    source: 'Estates Operational Manual',
-    summary:
-      'Address updates, statutory declaration support, arrears checks, and Revenue and Estate Records amendment routing.',
-    icon: 'FilePenLine',
-    stageCount: 5,
-    accent: 'cyan',
-  },
-  {
-    title: 'Certified True Copies',
-    entityType: 'EstateCertifiedTrueCopy',
-    source: 'Estates Operational Manual',
-    summary:
-      'Certified copy request, arrears verification, fee/payment confirmation, document preparation, and certification routing.',
-    icon: 'FileCheck2',
-    stageCount: 5,
-    accent: 'emerald',
-  },
-  {
-    title: 'Joint Ownership / Addition of Name',
-    entityType: 'EstateJointOwnership',
-    source: 'Estates Operational Manual',
-    summary:
-      'Additional-name requests, lease checks, cadastral plan routing, deed of variation, registration, detachment, and records amendment.',
-    icon: 'Users',
-    stageCount: 7,
-    accent: 'violet',
-  },
-  {
-    title: 'Transfer / Portion Transfer of Plot',
-    entityType: 'EstateTransfer',
-    source: 'Estates Operational Manual',
-    summary:
-      'Transfer request processing, fee calculation, HOE and MD approval, Legal routing, completion, and records amendment.',
-    icon: 'ArrowRightLeft',
-    stageCount: 7,
-    accent: 'blue',
-  },
-  {
-    title: 'Assignment',
-    entityType: 'EstateAssignment',
-    source: 'Estates Operational Manual',
-    summary:
-      'Consent to assign, draft deed review, arrears and development checks, Legal routing, registration, detachment, and completion notices.',
-    icon: 'FileSignature',
-    stageCount: 7,
-    accent: 'purple',
-  },
-  {
-    title: 'Lease Preparation',
-    entityType: 'EstateLeasePreparation',
-    source: 'Estates Operational Manual',
-    summary:
-      'Lease request processing, substantial development checks, cadastral requirements, invoice/payment routing, Legal preparation, and records update.',
-    icon: 'FileText',
-    stageCount: 8,
-    accent: 'amber',
-  },
-  {
-    title: 'Lease Surrender and Renewal',
-    entityType: 'EstateLeaseRenewal',
-    source: 'Estates Operational Manual',
-    summary:
-      'Renewal requirements, surrender option processing, term threshold checks, committee review, invoicing, approval, and lease renewal close-out.',
-    icon: 'RefreshCw',
-    stageCount: 8,
-    accent: 'lime',
-  },
-  {
-    title: 'Serviced Plots and HOS Allocation',
-    entityType: 'EstateServicedPlotAllocation',
-    source: 'Estates Operational Manual',
-    summary:
-      'HOS unit allocation, serviced plot allocation, payment book updates, Offer Letters, Right of Entry letters, and quarterly reporting.',
-    icon: 'Landmark',
-    stageCount: 8,
-    accent: 'green',
-  },
-  {
-    title: 'Lands / Partially Serviced Schedule',
-    entityType: 'EstateLandsPartiallyServiced',
-    source: 'Estates Operational Manual',
-    summary:
-      'Application intake, proposal letters, Land Management Fee and ground rent determination, Offer and Right of Entry preparation, and reports.',
-    icon: 'Home',
-    stageCount: 7,
-    accent: 'orange',
-  },
-  {
-    title: 'Housing and Home Ownership Scheme',
-    entityType: 'EstateHousingHomeOwnership',
-    source: 'Estates Questionnaire Response',
-    summary:
-      'Recognition of tenancy, rental-to-HOS conversion, purchase completion, Offer Letter preparation, lease request, and records update.',
-    icon: 'Building2',
-    stageCount: 7,
-    accent: 'rose',
-  },
-  {
-    title: 'Traditional Lands',
-    entityType: 'EstateTraditionalLands',
-    source: 'Estates Operational Manual',
-    summary:
-      'Traditional lands proposal processing, fee determination, allocation review, Offer and Right of Entry preparation, and quarterly reporting.',
-    icon: 'Trees',
-    stageCount: 6,
-    accent: 'emerald',
-  },
-  {
-    title: 'Tenancy Regularisation',
-    entityType: 'EstateTenancyRegularisation',
-    source: 'Estates Operational Manual',
-    summary:
-      'Regularisation communities, tenancy validation, documentation, fee/payment checks, approvals, and records amendment.',
-    icon: 'BadgeCheck',
-    stageCount: 7,
-    accent: 'yellow',
-  },
-  {
-    title: 'Reporting and Controls',
-    entityType: 'EstateReportingControls',
-    source: 'Estates Questionnaire Response',
-    summary:
-      'Quarterly productivity reports, rent roll, debtor lists, allocation reports, approval thresholds, segregation controls, audit trail, and policy enforcement.',
-    icon: 'BarChart3',
-    stageCount: 6,
-    accent: 'fuchsia',
-  },
-];
+import {
+  documentManagementService,
+  type CentralDocumentRecord,
+} from '@/services/document-management.service';
+import {
+  estateLandManagementService,
+  type EstateManagedAsset,
+} from '@/services/estate-land-management.service';
+import {
+  procedureCaseService,
+  type ProcedureCaseSummary,
+} from '@/services/procedure-case.service';
 
 const procedureIcons: Record<
   string,
@@ -262,44 +101,154 @@ const adminRoles = [
   'WorkflowAdmin',
 ];
 
-export default function EstateProceduresPage() {
+const crossModuleFlows = [
+  {
+    title: 'Land Bank To Project',
+    icon: ArrowRightLeft,
+  },
+  {
+    title: 'Project To Property',
+    icon: Home,
+  },
+  {
+    title: 'Facilities To Existing Modules',
+    icon: Building2,
+  },
+];
+
+export default function EstateOperationsPage() {
   const router = useRouter();
   const { hasAnyRole } = useAuth();
   const canManageWorkflows = hasAnyRole(adminRoles);
   const [procedures, setProcedures] =
-    React.useState<EstateProcedure[]>(fallbackProcedures);
+    React.useState<EstateProcedure[]>([]);
+  const [estateCases, setEstateCases] = React.useState<ProcedureCaseSummary[]>([]);
+  const [propertyCases, setPropertyCases] = React.useState<ProcedureCaseSummary[]>([]);
+  const [facilitiesCases, setFacilitiesCases] = React.useState<ProcedureCaseSummary[]>([]);
+  const [landBank, setLandBank] = React.useState<EstateManagedAsset[]>([]);
+  const [dmsRecords, setDmsRecords] = React.useState<CentralDocumentRecord[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
     let mounted = true;
 
-    const loadProcedures = async () => {
-      try {
-        const data = await estateProcedureService.getProcedures();
-        if (mounted && data.length > 0) {
-          setProcedures(data);
-        }
-      } catch {
-        if (mounted) {
-          setProcedures(fallbackProcedures);
-        }
-      } finally {
-        if (mounted) {
-          setIsLoading(false);
-        }
+    const loadEstateOperations = async () => {
+      const [procedureResult, estateCaseResult, propertyCaseResult, facilitiesCaseResult, landBankResult, dmsResult] =
+        await Promise.allSettled([
+          estateProcedureService.getProcedures(),
+          procedureCaseService.listModuleCases('Estate'),
+          procedureCaseService.listModuleCases('PropertyManagement'),
+          procedureCaseService.listModuleCases('Facilities'),
+          estateLandManagementService.getLandBank(),
+          documentManagementService.getRecords(),
+        ]);
+
+      if (!mounted) {
+        return;
       }
+
+      setProcedures(
+        procedureResult.status === 'fulfilled' ? procedureResult.value : []
+      );
+      setEstateCases(estateCaseResult.status === 'fulfilled' ? estateCaseResult.value : []);
+      setPropertyCases(propertyCaseResult.status === 'fulfilled' ? propertyCaseResult.value : []);
+      setFacilitiesCases(facilitiesCaseResult.status === 'fulfilled' ? facilitiesCaseResult.value : []);
+      setLandBank(landBankResult.status === 'fulfilled' ? landBankResult.value : []);
+      setDmsRecords(dmsResult.status === 'fulfilled' ? dmsResult.value : []);
+      setIsLoading(false);
     };
 
-    void loadProcedures();
+    void loadEstateOperations();
 
     return () => {
       mounted = false;
     };
   }, []);
 
-  const openWorkflow = (entityType: string) => {
-    router.push(`/administration/workflow?entityType=${entityType}`);
+  const openWorkspace = (entityType: string) => {
+    router.push(`/estate/${encodeURIComponent(entityType)}`);
   };
+
+  const estateDmsRecords = React.useMemo(
+    () =>
+      dmsRecords.filter(
+        (record) =>
+          record.sourceModule.toLowerCase().startsWith('estate') ||
+          record.sourceLabel.toLowerCase().includes('source: estate')
+      ),
+    [dmsRecords]
+  );
+
+  const openEstateCases = estateCases.filter((item) => item.status !== 'Completed');
+  const openPropertyCases = propertyCases.filter((item) => item.status !== 'Completed');
+  const openFacilitiesCases = facilitiesCases.filter((item) => item.status !== 'Completed');
+  const landReadyForProject = landBank.filter((item) => item.isReadyForProjectManagement);
+  const dmsMetadataComplete = estateDmsRecords.filter(
+    (record) =>
+      record.metadataCompleteness?.status === 'Complete' ||
+      (record.metadataCompleteness?.percentage ?? 0) >= 100
+  );
+  const dmsMetadataPercent =
+    estateDmsRecords.length > 0
+      ? Math.round((dmsMetadataComplete.length / estateDmsRecords.length) * 100)
+      : 0;
+
+  const estateAnalytics = [
+    {
+      label: 'Land Bank',
+      value: landBank.length.toString(),
+      icon: Landmark,
+    },
+    {
+      label: 'Estate Cases',
+      value: openEstateCases.length.toString(),
+      icon: ClipboardList,
+    },
+    {
+      label: 'Property Cases',
+      value: openPropertyCases.length.toString(),
+      icon: Home,
+    },
+    {
+      label: 'Facilities Cases',
+      value: openFacilitiesCases.length.toString(),
+      icon: Building2,
+    },
+    {
+      label: 'DMS Records',
+      value: estateDmsRecords.length.toString(),
+      icon: FileText,
+    },
+  ];
+
+  const estateReadiness = [
+    {
+      label: 'Project Pull Readiness',
+      value: landBank.length > 0 ? Math.round((landReadyForProject.length / landBank.length) * 100) : 0,
+    },
+    {
+      label: 'Estate Workflow Coverage',
+      value:
+        procedures.length > 0
+          ? Math.round(
+              (new Set(estateCases.map((item) => item.entityType)).size / procedures.length) * 100
+            )
+          : 0,
+    },
+    {
+      label: 'Estate Case Closure',
+      value:
+        estateCases.length > 0
+          ? Math.round(
+              (estateCases.filter((item) => item.status === 'Completed').length / estateCases.length) * 100
+            )
+          : 0,
+    },
+    {
+      label: 'Document Metadata Health',
+      value: dmsMetadataPercent,
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -310,13 +259,8 @@ export default function EstateProceduresPage() {
           </Badge>
           <div>
             <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
-              Estate Procedures
+              Estate Operations
             </h1>
-            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Operational workflows for registry, records, land services,
-              leases, allocations, housing, traditional lands, regularisation,
-              and controls.
-            </p>
           </div>
         </div>
         {canManageWorkflows ? (
@@ -329,7 +273,132 @@ export default function EstateProceduresPage() {
         ) : null}
       </div>
 
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {estateAnalytics.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Card
+              key={item.label}
+              className="border-border bg-card text-card-foreground"
+            >
+              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
+                <div>
+                  <CardDescription>{item.label}</CardDescription>
+                  <CardTitle className="mt-1 text-2xl">{item.value}</CardTitle>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+                  <Icon className="h-5 w-5 text-primary" />
+                </div>
+              </CardHeader>
+              <CardContent />
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+        <Card className="border-border bg-card text-card-foreground">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-primary" />
+              <CardTitle>Estate Analytics</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {estateReadiness.map((item) => (
+              <div key={item.label} className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">{item.label}</div>
+                  </div>
+                  <Badge variant="secondary">{item.value}%</Badge>
+                </div>
+                <div className="h-2 rounded-full bg-muted">
+                  <div
+                    className="h-2 rounded-full bg-primary"
+                    style={{ width: `${item.value}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border bg-card text-card-foreground">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-primary" />
+              <CardTitle>Cross-Module Flow</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {crossModuleFlows.map((flow) => {
+              const Icon = flow.icon;
+              return (
+                <div
+                  key={flow.title}
+                  className="flex items-start gap-3 rounded-md border bg-background p-4"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted">
+                    <Icon className="h-4 w-4 text-primary" />
+                  </div>
+                  <div>
+                    <div className="font-medium">{flow.title}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2">
+        <Card className="border-border bg-card text-card-foreground">
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+                <BarChart3 className="h-5 w-5 text-sky-700 dark:text-sky-300" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold">Property Dashboard</h2>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() =>
+                router.push('/estate/property-management/dashboard')
+              }
+              aria-label="Open property dashboard"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border bg-card text-card-foreground">
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+                <BarChart3 className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold">
+                  Facilities Dashboard
+                </h2>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => router.push('/estate/facilities/dashboard')}
+              aria-label="Open facilities dashboard"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+
         <Card className="border-border bg-card text-card-foreground">
           <CardContent className="flex items-center justify-between gap-4 p-5">
             <div className="flex items-start gap-4">
@@ -338,10 +407,6 @@ export default function EstateProceduresPage() {
               </div>
               <div>
                 <h2 className="text-base font-semibold">Land Acquisition</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Run acquisition stages through the configured workflow and
-                  capture cadastral demarcation.
-                </p>
               </div>
             </div>
             <Button
@@ -363,10 +428,6 @@ export default function EstateProceduresPage() {
               </div>
               <div>
                 <h2 className="text-base font-semibold">Land Management</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Review demarcated land bank records before project management
-                  pulls them for planning.
-                </p>
               </div>
             </div>
             <Button
@@ -379,70 +440,123 @@ export default function EstateProceduresPage() {
             </Button>
           </CardContent>
         </Card>
+
+        <Card className="border-border bg-card text-card-foreground">
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+                <Home className="h-5 w-5 text-sky-700 dark:text-sky-300" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold">Property Management</h2>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => router.push('/estate/property-management')}
+              aria-label="Open property management"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border bg-card text-card-foreground">
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+                <Building2 className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold">
+                  Facilities Management
+                </h2>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => router.push('/estate/facilities')}
+              aria-label="Open facilities management"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {isLoading ? (
-          <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
-            <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading estate procedures
-            </CardContent>
-          </Card>
-        ) : null}
+          {isLoading ? (
+            <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
+              <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading estate operations
+              </CardContent>
+            </Card>
+          ) : null}
 
-        {!isLoading &&
-          procedures.map((procedure) => {
-            const Icon = procedureIcons[procedure.icon] || FileText;
-            const accent =
-              accentClasses[procedure.accent] || accentClasses.teal;
+          {!isLoading &&
+            procedures.map((procedure) => {
+              const Icon = procedureIcons[procedure.icon] || FileText;
+              const accent =
+                accentClasses[procedure.accent] || accentClasses.teal;
 
-            return (
-              <Card
-                key={procedure.entityType}
-                className="border-border bg-card text-card-foreground"
-              >
-                <CardHeader className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
-                      <Icon className={`h-5 w-5 ${accent}`} />
+              return (
+                <Card
+                  key={procedure.entityType}
+                  className="border-border bg-card text-card-foreground"
+                >
+                  <CardHeader className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+                        <Icon className={`h-5 w-5 ${accent}`} />
+                      </div>
+                      <Badge variant="secondary">
+                        {procedure.stageCount} stages
+                      </Badge>
                     </div>
-                    <Badge variant="secondary">
-                      {procedure.stageCount} stages
-                    </Badge>
-                  </div>
-                  <div>
-                    <CardTitle className="text-base leading-6">
-                      {procedure.title}
-                    </CardTitle>
-                    <CardDescription className="mt-1">
-                      {procedure.source}
-                    </CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {procedure.summary}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{procedure.entityType}</Badge>
-                    <Badge variant="outline">Roles and assignments</Badge>
-                  </div>
-                  {canManageWorkflows ? (
+                    <div>
+                      <CardTitle className="text-base leading-6">
+                        {procedure.title}
+                      </CardTitle>
+                      <CardDescription className="mt-1">
+                        {procedure.source}
+                      </CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{procedure.entityType}</Badge>
+                      <Badge variant="outline">Live cases</Badge>
+                    </div>
                     <Button
                       variant="outline"
                       className="w-full justify-between"
-                      onClick={() => openWorkflow(procedure.entityType)}
+                      onClick={() => openWorkspace(procedure.entityType)}
                     >
-                      Configure workflow
+                      Open workspace
                       <ArrowRight className="h-4 w-4" />
                     </Button>
-                  ) : null}
-                </CardContent>
-              </Card>
-            );
-          })}
-      </div>
+                    {canManageWorkflows ? (
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-between"
+                        onClick={() =>
+                          router.push(
+                            `/administration/workflow?entityType=${procedure.entityType}`
+                          )
+                        }
+                      >
+                        Workflow setup
+                        <ArrowRight className="h-4 w-4" />
+                      </Button>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              );
+            })}
+        </div>
     </div>
   );
 }

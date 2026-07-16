@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Events;
+using Syncfusion.Licensing;
 
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
@@ -162,6 +163,14 @@ if (builder.Environment.IsEnvironment("Testing")
         ["JwtSettings:Issuer"] = "ErpSystem.Api.Tests",
         ["JwtSettings:Audience"] = "ErpSystem.Api.Tests.Client"
     });
+}
+
+var syncfusionLicenseKey =
+    builder.Configuration["Syncfusion:LicenseKey"] ??
+    builder.Configuration["SyncfusionLicenseKey"];
+if (!string.IsNullOrWhiteSpace(syncfusionLicenseKey))
+{
+    SyncfusionLicenseProvider.RegisterLicense(syncfusionLicenseKey);
 }
 
 // Configure host shutdown timeout

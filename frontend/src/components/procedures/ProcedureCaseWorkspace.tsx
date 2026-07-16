@@ -2,14 +2,21 @@
 
 import dynamic from 'next/dynamic';
 import React from 'react';
-import { CheckCircle2, ExternalLink, Eye, FileUp, Loader2, Plus, Save, Send } from 'lucide-react';
+import { BookTemplate, CheckCircle2, ExternalLink, Eye, FileText, FileUp, Loader2, PenLine, Plus, Save, Send, ShieldCheck, Truck } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { CentralDocumentViewerDialog } from '@/components/document-management/CentralDocumentViewerDialog';
+import {
+  documentManagementService,
+  type CentralDocumentGenerationTemplate,
+  type GeneratedCentralDocumentResult,
+} from '@/services/document-management.service';
 import {
   procedureCaseService,
   type ProcedureCaseDetail,
@@ -27,7 +34,7 @@ const ProcedurePdfViewer = dynamic(() => import('@/components/procedures/Procedu
 });
 
 interface ProcedureCaseWorkspaceProps {
-  module: 'Legal' | 'Facilities';
+  module: 'Legal' | 'Estate' | 'Facilities' | 'PropertyManagement' | 'Planning';
   entityType: string;
   defaultTitle: string;
 }
@@ -40,6 +47,18 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
   const [error, setError] = React.useState<string | null>(null);
   const [documentFiles, setDocumentFiles] = React.useState<Record<string, File | null>>({});
   const [previewDocumentId, setPreviewDocumentId] = React.useState<string | null>(null);
+  const [generationTemplates, setGenerationTemplates] = React.useState<CentralDocumentGenerationTemplate[]>([]);
+  const [selectedGenerationTemplate, setSelectedGenerationTemplate] = React.useState<string>('');
+  const [generatedDocument, setGeneratedDocument] = React.useState<GeneratedCentralDocumentResult | null>(null);
+  const [isGeneratingDocument, setIsGeneratingDocument] = React.useState(false);
+  const [isUpdatingDocumentWorkflow, setIsUpdatingDocumentWorkflow] = React.useState(false);
+  const [isGeneratedViewerOpen, setIsGeneratedViewerOpen] = React.useState(false);
+  const [dispatchDetails, setDispatchDetails] = React.useState({
+    channel: 'Email / Print',
+    recipient: '',
+    reference: '',
+    notes: '',
+  });
   const [newCase, setNewCase] = React.useState({
     title: defaultTitle,
     referenceNumber: '',
@@ -79,6 +98,35 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
   React.useEffect(() => {
     void loadCases();
   }, [loadCases]);
+
+  React.useEffect(() => {
+    if (module !== 'Estate') {
+      return;
+    }
+
+    let mounted = true;
+    const loadTemplates = async () => {
+      try {
+        const templates = await documentManagementService.getGenerationTemplates('Estate');
+        if (!mounted) {
+          return;
+        }
+
+        setGenerationTemplates(templates);
+        setSelectedGenerationTemplate((current) => current || templates[0]?.templateCode || '');
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Unable to load Estate document templates.');
+        }
+      }
+    };
+
+    void loadTemplates();
+
+    return () => {
+      mounted = false;
+    };
+  }, [module]);
 
   const selectCase = async (id: string) => {
     setIsSaving(true);
@@ -223,6 +271,89 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     setDocumentFiles((current) => ({ ...current, [documentId]: file }));
   };
 
+  const generateEstateDocument = async () => {
+    if (!selectedCase || !selectedGenerationTemplate) {
+      return;
+    }
+
+    const mergeValues = Object.fromEntries(
+      selectedCase.fields.flatMap((field) => {
+        const value = field.value ?? '';
+        return [
+          [field.key, value],
+          [field.label, value],
+        ];
+      })
+    );
+
+    setIsGeneratingDocument(true);
+    setError(null);
+    try {
+      const result = await documentManagementService.generateDocumentFromTemplate({
+        templateCode: selectedGenerationTemplate,
+        sourceModule: 'Estate',
+        sourceLabel: 'Source: Estate / Facility -> Central DMS',
+        sourceEntityType: entityType,
+        sourceRecordReference: selectedCase.referenceNumber || selectedCase.title,
+        sourceRecordId: selectedCase.id,
+        caseTitle: selectedCase.title,
+        caseReference: selectedCase.referenceNumber || selectedCase.title,
+        applicantName: selectedCase.applicantName || undefined,
+        preparedBy: selectedCase.sourceDepartment || 'Estate Section',
+        purpose: selectedCase.currentStageName,
+        mergeValues,
+      });
+      setGeneratedDocument(result);
+      setDispatchDetails((current) => ({
+        ...current,
+        channel: result.template.defaultDispatchChannel || current.channel,
+        recipient: selectedCase.applicantName || current.recipient,
+      }));
+      setIsGeneratedViewerOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to generate Estate document.');
+    } finally {
+      setIsGeneratingDocument(false);
+    }
+  };
+
+  const updateGeneratedDocumentWorkflow = async (
+    action: 'SubmitForApproval' | 'Approve' | 'Sign' | 'Dispatch' | 'Return'
+  ) => {
+    if (!generatedDocument) {
+      return;
+    }
+
+    setIsUpdatingDocumentWorkflow(true);
+    setError(null);
+    try {
+      const result = await documentManagementService.updateGeneratedDocumentWorkflow(
+        generatedDocument.record.id,
+        {
+          action,
+          notes: dispatchDetails.notes,
+          signatureRole: generatedDocument.template.signatureRole || undefined,
+          dispatchChannel: dispatchDetails.channel,
+          dispatchedTo: dispatchDetails.recipient,
+          dispatchReference: dispatchDetails.reference,
+        }
+      );
+      setGeneratedDocument((current) =>
+        current
+          ? {
+              ...current,
+              record: result.record,
+              version: result.version ?? current.version,
+            }
+          : current
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update generated document workflow.');
+    } finally {
+      setIsUpdatingDocumentWorkflow(false);
+    }
+  };
+
   const completeStage = async () => {
     if (!selectedCase) {
       return;
@@ -241,13 +372,62 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     }
   };
 
+  const renderField = (field: ProcedureCaseDetail['fields'][number]) => {
+    const isDisabled = !selectedCase?.canEditCurrentStage;
+    const fieldType = field.fieldType.toLowerCase();
+
+    if (fieldType === 'select' && field.options?.length) {
+      return (
+        <Select
+          key={field.id}
+          value={field.value ?? undefined}
+          disabled={isDisabled}
+          onValueChange={(value) => updateFieldValue(field.key, value)}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={field.label} />
+          </SelectTrigger>
+          <SelectContent>
+            {field.options.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    if (fieldType === 'textarea') {
+      return (
+        <Textarea
+          key={field.id}
+          placeholder={field.label}
+          value={field.value ?? ''}
+          disabled={isDisabled}
+          onChange={(event) => updateFieldValue(field.key, event.target.value)}
+        />
+      );
+    }
+
+    return (
+      <Input
+        key={field.id}
+        type={fieldType === 'date' ? 'date' : 'text'}
+        placeholder={field.label}
+        value={field.value ?? ''}
+        disabled={isDisabled}
+        onChange={(event) => updateFieldValue(field.key, event.target.value)}
+      />
+    );
+  };
+
   return (
     <Card className="border-border bg-card text-card-foreground">
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <CardTitle>Live Case Workspace</CardTitle>
-            <CardDescription>Create a procedure case, perform assigned stage work, and submit it onward.</CardDescription>
           </div>
           <Badge variant={selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'}>
             {selectedCase?.usesConfiguredWorkflow ? 'Administration workflow' : 'Procedure stages'}
@@ -344,15 +524,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                   <Input placeholder="Applicant / party name" value={selectedCase.applicantName ?? ''} disabled={!selectedCase.canEditCurrentStage} onChange={(event) => setSelectedCase({ ...selectedCase, applicantName: event.target.value })} />
                   <Input placeholder="Source department" value={selectedCase.sourceDepartment ?? ''} disabled={!selectedCase.canEditCurrentStage} onChange={(event) => setSelectedCase({ ...selectedCase, sourceDepartment: event.target.value })} />
                   <Input type="date" value={selectedCase.receivedDate?.slice(0, 10) ?? ''} disabled={!selectedCase.canEditCurrentStage} onChange={(event) => setSelectedCase({ ...selectedCase, receivedDate: event.target.value })} />
-                  {selectedCase.fields.map((field) => (
-                    <Input
-                      key={field.id}
-                      placeholder={field.label}
-                      value={field.value ?? ''}
-                      disabled={!selectedCase.canEditCurrentStage}
-                      onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                    />
-                  ))}
+                  {selectedCase.fields.map((field) => renderField(field))}
                 </div>
                 <Textarea
                   className="mt-3"
@@ -362,6 +534,198 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                   onChange={(event) => setSelectedCase({ ...selectedCase, description: event.target.value })}
                 />
               </div>
+
+              {module === 'Estate' ? (
+                <div className="rounded-md border border-border bg-background p-4">
+                  <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <h2 className="text-sm font-semibold">Generated Documents</h2>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Select
+                        value={selectedGenerationTemplate || undefined}
+                        onValueChange={setSelectedGenerationTemplate}
+                      >
+                        <SelectTrigger className="w-full sm:w-[260px]">
+                          <SelectValue placeholder="Select template" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {generationTemplates.map((template) => (
+                            <SelectItem key={template.templateCode} value={template.templateCode}>
+                              {template.title}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        className="gap-2"
+                        onClick={() => void generateEstateDocument()}
+                        disabled={!selectedGenerationTemplate || isGeneratingDocument}
+                      >
+                        {isGeneratingDocument ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <BookTemplate className="h-4 w-4" />
+                        )}
+                        Generate draft
+                      </Button>
+                    </div>
+                  </div>
+
+                  {generatedDocument ? (
+                    <div className="space-y-3 rounded-md border border-border bg-card p-3">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="text-sm font-medium">
+                            {generatedDocument.record.title}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {generatedDocument.dmsReference} · {generatedDocument.sourceLabel}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Badge variant="outline">
+                              {generatedDocument.record.lifecycleStatus}
+                            </Badge>
+                            <Badge variant="secondary">
+                              {generatedDocument.record.versionStatus}
+                            </Badge>
+                            {generatedDocument.template.requiresApproval ? (
+                              <Badge variant="outline">
+                                {generatedDocument.template.approvalRole || 'Approval required'}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => setIsGeneratedViewerOpen(true)}
+                          >
+                            <Eye className="h-4 w-4" />
+                            View
+                          </Button>
+                          <Button asChild size="sm" variant="outline" className="gap-2">
+                            <a href={`/document-management/records/${generatedDocument.record.id}`}>
+                              <FileText className="h-4 w-4" />
+                              DMS record
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <Input
+                          placeholder="Dispatch channel"
+                          value={dispatchDetails.channel}
+                          onChange={(event) =>
+                            setDispatchDetails((current) => ({
+                              ...current,
+                              channel: event.target.value,
+                            }))
+                          }
+                        />
+                        <Input
+                          placeholder="Recipient"
+                          value={dispatchDetails.recipient}
+                          onChange={(event) =>
+                            setDispatchDetails((current) => ({
+                              ...current,
+                              recipient: event.target.value,
+                            }))
+                          }
+                        />
+                        <Input
+                          placeholder="Dispatch reference"
+                          value={dispatchDetails.reference}
+                          onChange={(event) =>
+                            setDispatchDetails((current) => ({
+                              ...current,
+                              reference: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <Textarea
+                        placeholder="Approval, signature, or dispatch notes"
+                        value={dispatchDetails.notes}
+                        onChange={(event) =>
+                          setDispatchDetails((current) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }))
+                        }
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2"
+                          disabled={isUpdatingDocumentWorkflow}
+                          onClick={() => void updateGeneratedDocumentWorkflow('SubmitForApproval')}
+                        >
+                          <Send className="h-4 w-4" />
+                          Submit approval
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2"
+                          disabled={isUpdatingDocumentWorkflow}
+                          onClick={() => void updateGeneratedDocumentWorkflow('Approve')}
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2"
+                          disabled={isUpdatingDocumentWorkflow}
+                          onClick={() => void updateGeneratedDocumentWorkflow('Sign')}
+                        >
+                          <PenLine className="h-4 w-4" />
+                          Sign
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="gap-2"
+                          disabled={isUpdatingDocumentWorkflow}
+                          onClick={() => void updateGeneratedDocumentWorkflow('Dispatch')}
+                        >
+                          <Truck className="h-4 w-4" />
+                          Dispatch
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={isUpdatingDocumentWorkflow}
+                          onClick={() => void updateGeneratedDocumentWorkflow('Return')}
+                        >
+                          Return
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <CentralDocumentViewerDialog
+                open={isGeneratedViewerOpen}
+                onOpenChange={setIsGeneratedViewerOpen}
+                file={
+                  generatedDocument
+                    ? {
+                        title: generatedDocument.record.title,
+                        fileName: generatedDocument.version.fileName,
+                        repositoryPath: generatedDocument.version.repositoryPath || generatedDocument.pdfUrl,
+                        renditionPath: generatedDocument.version.renditionPath || generatedDocument.pdfUrl,
+                        contentType: generatedDocument.version.contentType,
+                        sourceLabel: generatedDocument.sourceLabel,
+                        version: generatedDocument.version.versionNumber,
+                      }
+                    : null
+                }
+              />
 
               <div className="rounded-md border border-border bg-background p-4">
                 <h2 className="text-sm font-semibold">Current Stage Checklist</h2>

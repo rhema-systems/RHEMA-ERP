@@ -90,6 +90,23 @@ public class EstateManagedAsset : TenantEntity
     public bool IsAvailableForSale { get; set; }
     public bool IsPublishedFromProject { get; set; }
     public DateTime? PublishedFromProjectAt { get; set; }
+    public bool IsPublishedToExternalPortal { get; set; }
+
+    [MaxLength(40)]
+    public string ExternalListingType { get; set; } = "None";
+
+    [MaxLength(40)]
+    public string ExternalListingStatus { get; set; } = "Draft";
+
+    public decimal? ExternalListingPrice { get; set; }
+
+    [MaxLength(10)]
+    public string ExternalListingCurrency { get; set; } = "GHS";
+
+    [MaxLength(2000)]
+    public string? ExternalListingNotes { get; set; }
+
+    public DateTime? ExternalPublishedAt { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -107,4 +124,9 @@ public class EstateManagedAssetDocument : TenantEntity
     [MaxLength(160)] public string? DocumentName { get; set; }
     [MaxLength(160)] public string? ContentType { get; set; }
     public long FileSize { get; set; }
+    public bool IsListingImage { get; set; }
+    public bool IsPrimaryListingImage { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    [MaxLength(80)] public string? CentralDocumentReference { get; set; }
+    public DateTime? PublishedToCentralDmsAt { get; set; }
 }

@@ -47,6 +47,14 @@ public class EstateManagedAssetDto
     public bool IsAvailableForSale { get; set; }
     public bool IsPublishedFromProject { get; set; }
     public DateTime? PublishedFromProjectAt { get; set; }
+    public bool IsPublishedToExternalPortal { get; set; }
+    public string ExternalListingType { get; set; } = "None";
+    public string ExternalListingStatus { get; set; } = "Draft";
+    public decimal? ExternalListingPrice { get; set; }
+    public string ExternalListingCurrency { get; set; } = "GHS";
+    public string? ExternalListingNotes { get; set; }
+    public DateTime? ExternalPublishedAt { get; set; }
+    public Guid? PrimaryListingImageDocumentId { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -76,6 +84,11 @@ public class EstateManagedAssetDocumentDto
     public long FileSize { get; set; }
     public DateTime UploadedAt { get; set; }
     public string? UploadedBy { get; set; }
+    public bool IsListingImage { get; set; }
+    public bool IsPrimaryListingImage { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public string? CentralDocumentReference { get; set; }
+    public DateTime? PublishedToCentralDmsAt { get; set; }
 }
 
 public class RegisterEstateManagedAssetDocumentDto
@@ -86,6 +99,18 @@ public class RegisterEstateManagedAssetDocumentDto
     public string? DocumentName { get; set; }
     public string? ContentType { get; set; }
     public long FileSize { get; set; }
+    public bool IsListingImage { get; set; }
+    public bool IsPrimaryListingImage { get; set; }
+}
+
+public class UpdateEstateManagedAssetListingDto
+{
+    public bool IsPublishedToExternalPortal { get; set; }
+    public string ExternalListingType { get; set; } = "None";
+    public string ExternalListingStatus { get; set; } = "Draft";
+    public decimal? ExternalListingPrice { get; set; }
+    public string ExternalListingCurrency { get; set; } = "GHS";
+    public string? ExternalListingNotes { get; set; }
 }
 
 public class CreateManualExistingLandDto

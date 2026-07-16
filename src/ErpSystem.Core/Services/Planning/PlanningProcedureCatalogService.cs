@@ -4,7 +4,7 @@ namespace ErpSystem.Core.Services.Planning;
 
 public sealed class PlanningProcedureCatalogService : IPlanningProcedureCatalogService
 {
-    private const string SourceName = "Planning Standard Operating Procedure";
+    private const string SourceName = "Source: Project Management / Planning Section SOP";
 
     private static readonly PlanningProcedureDefinition[] Procedures =
     {
@@ -255,10 +255,14 @@ public sealed class PlanningProcedureCatalogService : IPlanningProcedureCatalogS
             Field("procedureType", "Procedure", "text", procedureTitle),
             Field("applicantName", "Applicant / client name", "text"),
             Field("plotOrParcelReference", "Plot / parcel reference", "text"),
+            Field("estateLandBankReference", "Estate land bank reference", "text"),
+            Field("projectReference", "Project reference", "text"),
             Field("location", "Location", "text"),
+            Field("masterPlanLayoutReference", "Master plan / layout reference", "text"),
             Field("receivedDate", "Received date", "date"),
             Field("priority", "Priority", "select", "Normal", "Urgent", "Committee deadline", "Permit deadline"),
-            Field("assignedOfficer", "Assigned planning officer", "text")
+            Field("assignedOfficer", "Assigned planning officer", "text"),
+            Field("dmsFolderReference", "DMS folder reference", "text")
         };
 
     private static IReadOnlyList<PlanningWorkspaceHandoff> CommonHandoffs() =>

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import {
+  Annotation,
   BookmarkView,
   Inject,
   LinkAnnotation,
@@ -20,8 +21,14 @@ interface ProcedurePdfViewerProps {
   fileName?: string | null;
 }
 
-export default function ProcedurePdfViewer({ fileUrl, fileName }: ProcedurePdfViewerProps) {
-  const viewerId = React.useMemo(() => `procedure-pdf-${Math.random().toString(36).slice(2)}`, []);
+export default function ProcedurePdfViewer({
+  fileUrl,
+  fileName,
+}: ProcedurePdfViewerProps) {
+  const viewerId = React.useMemo(
+    () => `procedure-pdf-${Math.random().toString(36).slice(2)}`,
+    []
+  );
 
   if (!fileUrl) {
     return null;
@@ -41,6 +48,13 @@ export default function ProcedurePdfViewer({ fileUrl, fileName }: ProcedurePdfVi
         enableThumbnail
         enableTextSearch
         enableTextSelection
+        enableAnnotation
+        enableAnnotationToolbar
+        enableTextMarkupAnnotation
+        enableShapeAnnotation
+        enableStampAnnotations
+        enableStickyNotesAnnotation
+        enableInkAnnotation
         style={{ display: 'block', height: '520px', width: '100%' }}
       >
         <Inject
@@ -54,6 +68,7 @@ export default function ProcedurePdfViewer({ fileUrl, fileName }: ProcedurePdfVi
             Print,
             TextSelection,
             TextSearch,
+            Annotation,
           ]}
         />
       </PdfViewerComponent>

@@ -56,6 +56,16 @@ export interface EstateManagedAsset {
   areaSquareMeters?: number;
   valuationAmount?: number;
   currency: string;
+  isAvailableForLease: boolean;
+  isAvailableForSale: boolean;
+  isPublishedToExternalPortal: boolean;
+  externalListingType: string;
+  externalListingStatus: string;
+  externalListingPrice?: number;
+  externalListingCurrency: string;
+  externalListingNotes?: string;
+  externalPublishedAt?: string;
+  primaryListingImageDocumentId?: string | null;
   notes?: string;
 }
 
@@ -112,6 +122,33 @@ export interface EstateManagedAssetDocument {
   fileSize: number;
   uploadedAt: string;
   uploadedBy?: string;
+  isListingImage: boolean;
+  isPrimaryListingImage: boolean;
+  centralDocumentRecordId?: string | null;
+  centralDocumentReference?: string | null;
+  publishedToCentralDmsAt?: string | null;
+}
+
+export interface EstateCentralDmsPublication {
+  id: string;
+  documentReference: string;
+  title: string;
+  sourceModule: string;
+  sourceLabel: string;
+  sourceEntityType?: string | null;
+  sourceRecordReference?: string | null;
+  sourceRecordId?: string | null;
+  metadataTemplateCode?: string | null;
+  repositoryStatus: string;
+  repositoryPath?: string | null;
+  currentVersion?: string | null;
+  versionStatus: string;
+  annotationStatus: string;
+  commentStatus: string;
+  accessProfile: string;
+  retentionStatus: string;
+  lifecycleStatus: string;
+  publishedToCentralDmsAt?: string | null;
 }
 
 interface ApiListResponse<T> {
@@ -120,55 +157,180 @@ interface ApiListResponse<T> {
   message?: string;
 }
 
+export interface UpdateEstateManagedAssetListing {
+  isPublishedToExternalPortal: boolean;
+  externalListingType: string;
+  externalListingStatus: string;
+  externalListingPrice?: number | null;
+  externalListingCurrency: string;
+  externalListingNotes?: string | null;
+}
+
+export interface EstateManagedAssetQuery {
+  assetType?: EstateManagedAssetType;
+  status?: EstateManagedAssetStatus;
+  search?: string;
+  availableForLease?: boolean;
+  availableForSale?: boolean;
+  take?: number;
+}
+
 export class EstateLandManagementService {
   async getLandBank(search?: string): Promise<EstateManagedAsset[]> {
-    const response = await apiService.get<ApiListResponse<EstateManagedAsset>>('/estate/managed-assets', {
-      assetType: EstateManagedAssetType.Land,
-      status: EstateManagedAssetStatus.LandBank,
-      search: search || undefined,
-      take: 250,
-    });
+    const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
+      '/estate/managed-assets',
+      {
+        assetType: EstateManagedAssetType.Land,
+        status: EstateManagedAssetStatus.LandBank,
+        search: search || undefined,
+        take: 250,
+      }
+    );
 
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async createManualLand(payload: CreateManualExistingLand): Promise<EstateManagedAsset> {
-    const response = await apiService.post<{ success?: boolean; data?: EstateManagedAsset; message?: string }>(
-      '/estate/managed-assets/manual-land', payload
+  async getManagedAssets(
+    query: EstateManagedAssetQuery = {}
+  ): Promise<EstateManagedAsset[]> {
+    const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
+      '/estate/managed-assets',
+      {
+        assetType: query.assetType,
+        status: query.status,
+        search: query.search || undefined,
+        availableForLease: query.availableForLease,
+        availableForSale: query.availableForSale,
+        take: query.take || 250,
+      }
     );
-    if (!response.data) throw new Error(response.message || 'Unable to create existing land asset.');
+
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async updateExternalListing(
+    assetId: string,
+    payload: UpdateEstateManagedAssetListing
+  ): Promise<EstateManagedAsset> {
+    const response = await apiService.patch<{
+      success?: boolean;
+      data?: EstateManagedAsset;
+      message?: string;
+    }>(`/estate/managed-assets/${assetId}/external-listing`, payload);
+    if (!response.data) {
+      throw new Error(response.message || 'Unable to update portal listing.');
+    }
     return response.data;
   }
 
-  async markReadyForProjectManagement(assetId: string): Promise<EstateManagedAsset> {
-    const response = await apiService.post<{ success?: boolean; data?: EstateManagedAsset; message?: string }>(
-      `/estate/managed-assets/${assetId}/ready-for-project-management`, {}
-    );
-    if (!response.data) throw new Error(response.message || 'Unable to make land ready for project management.');
+  async createManualLand(
+    payload: CreateManualExistingLand
+  ): Promise<EstateManagedAsset> {
+    const response = await apiService.post<{
+      success?: boolean;
+      data?: EstateManagedAsset;
+      message?: string;
+    }>('/estate/managed-assets/manual-land', payload);
+    if (!response.data)
+      throw new Error(
+        response.message || 'Unable to create existing land asset.'
+      );
+    return response.data;
+  }
+
+  async markReadyForProjectManagement(
+    assetId: string
+  ): Promise<EstateManagedAsset> {
+    const response = await apiService.post<{
+      success?: boolean;
+      data?: EstateManagedAsset;
+      message?: string;
+    }>(`/estate/managed-assets/${assetId}/ready-for-project-management`, {});
+    if (!response.data)
+      throw new Error(
+        response.message || 'Unable to make land ready for project management.'
+      );
     return response.data;
   }
 
   async getDocuments(assetId: string): Promise<EstateManagedAssetDocument[]> {
-    const response = await apiService.get<{ success?: boolean; data?: EstateManagedAssetDocument[] }>(
-      `/estate/managed-assets/${assetId}/documents`
-    );
+    const response = await apiService.get<{
+      success?: boolean;
+      data?: EstateManagedAssetDocument[];
+    }>(`/estate/managed-assets/${assetId}/documents`);
     return response.data || [];
   }
 
-  async uploadDocument(assetId: string, file: File, documentType: string, documentName?: string): Promise<EstateManagedAssetDocument> {
+  async uploadDocument(
+    assetId: string,
+    file: File,
+    documentType: string,
+    documentName?: string,
+    options?: { isListingImage?: boolean; isPrimaryListingImage?: boolean }
+  ): Promise<EstateManagedAssetDocument> {
     const form = new FormData();
     form.append('file', file);
     form.append('documentType', documentType);
     if (documentName) form.append('documentName', documentName);
-    const response = await rawApiService.request<{ success?: boolean; data?: EstateManagedAssetDocument; message?: string }>(
-      `/estate/managed-assets/${assetId}/documents`, { method: 'POST', body: form }
+    if (options?.isListingImage) form.append('isListingImage', 'true');
+    if (options?.isPrimaryListingImage)
+      form.append('isPrimaryListingImage', 'true');
+    const response = await rawApiService.request<{
+      success?: boolean;
+      data?: EstateManagedAssetDocument;
+      message?: string;
+    }>(`/estate/managed-assets/${assetId}/documents`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.data)
+      throw new Error(response.message || 'Unable to upload land document.');
+    return response.data;
+  }
+
+  async setPrimaryListingImage(
+    assetId: string,
+    documentId: string
+  ): Promise<EstateManagedAssetDocument> {
+    const response = await apiService.post<{
+      success?: boolean;
+      data?: EstateManagedAssetDocument;
+      message?: string;
+    }>(
+      `/estate/managed-assets/${assetId}/documents/${documentId}/primary-listing-image`,
+      {}
     );
-    if (!response.data) throw new Error(response.message || 'Unable to upload land document.');
+    if (!response.data) {
+      throw new Error(
+        response.message || 'Unable to set the primary listing image.'
+      );
+    }
     return response.data;
   }
 
   async downloadDocument(assetId: string, documentId: string): Promise<Blob> {
-    return rawApiService.downloadBlob(`/estate/managed-assets/${assetId}/documents/${documentId}/download`);
+    return rawApiService.downloadBlob(
+      `/estate/managed-assets/${assetId}/documents/${documentId}/download`
+    );
+  }
+
+  async publishDocumentToCentralDms(
+    assetId: string,
+    documentId: string
+  ): Promise<EstateCentralDmsPublication> {
+    const response = await apiService.post<{
+      success?: boolean;
+      data?: EstateCentralDmsPublication;
+      message?: string;
+    }>(
+      `/estate/managed-assets/${assetId}/documents/${documentId}/publish-to-dms`,
+      {}
+    );
+    if (!response.data)
+      throw new Error(
+        response.message || 'Unable to publish document to Central DMS.'
+      );
+    return response.data;
   }
 }
 
