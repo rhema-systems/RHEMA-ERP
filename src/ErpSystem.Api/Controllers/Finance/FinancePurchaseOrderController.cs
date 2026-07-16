@@ -160,9 +160,7 @@ public class FinancePurchaseOrderController : ControllerBase
         }
 
         var orderDate = dto.OrderDate ?? DateTime.UtcNow;
-        var orderNumber = string.IsNullOrWhiteSpace(dto.OrderNumber)
-            ? await GeneratePurchaseOrderNumberAsync(tenantId, orderDate, cancellationToken)
-            : dto.OrderNumber.Trim();
+        var orderNumber = await ResolvePurchaseOrderNumberAsync(tenantId, orderDate, dto.OrderNumber, cancellationToken);
 
         var orderNumberExists = await _dbContext.FinancePurchaseOrders
             .AnyAsync(po => po.TenantId == tenantId && !po.IsDeleted && po.OrderNumber == orderNumber, cancellationToken);
@@ -599,6 +597,42 @@ public class FinancePurchaseOrderController : ControllerBase
             orderDate,
             nameof(FinancePurchaseOrder),
             cancellationToken: cancellationToken);
+    }
+
+    private async Task<string> ResolvePurchaseOrderNumberAsync(
+        Guid tenantId,
+        DateTime orderDate,
+        string? requestedOrderNumber,
+        CancellationToken cancellationToken)
+    {
+        var manualOrderNumber = requestedOrderNumber?.Trim();
+        if (string.IsNullOrWhiteSpace(manualOrderNumber))
+        {
+            return await GeneratePurchaseOrderNumberAsync(tenantId, orderDate, cancellationToken);
+        }
+
+        var definitions = await _documentNumberingService.GetDefinitionsAsync(
+            DocumentNumberingModules.Finance,
+            tenantId,
+            cancellationToken);
+
+        var definition = definitions
+            .Where(d => d.DocumentType == FinanceDocumentTypes.FinancePurchaseOrder
+                && d.IsActive
+                && d.IsDefault
+                && (d.EffectiveFrom == null || d.EffectiveFrom <= orderDate)
+                && (d.EffectiveTo == null || d.EffectiveTo >= orderDate))
+            .OrderByDescending(d => d.EffectiveFrom ?? DateTime.MinValue)
+            .FirstOrDefault();
+
+        if (definition?.AllowManualEntry == true)
+        {
+            return manualOrderNumber;
+        }
+
+        // Finance PO numbering is centrally controlled by default. Ignore client-supplied
+        // numbers unless the tenant sequence explicitly allows manual entry.
+        return await GeneratePurchaseOrderNumberAsync(tenantId, orderDate, cancellationToken);
     }
 
     private static int NormalizeLineType(int lineType) => lineType == 2 ? 2 : 1;

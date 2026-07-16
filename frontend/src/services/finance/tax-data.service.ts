@@ -128,6 +128,17 @@ class TaxDataService {
         return apiService.get<TaxGroup[]>(endpoint);
     }
 
+    async getActiveTaxGroups(applicability?: string): Promise<TaxGroup[]> {
+        const queryParams = new URLSearchParams();
+        if (applicability) queryParams.append('applicability', applicability);
+
+        // The general groups endpoint intentionally returns the administrative list.
+        // Transaction entry screens must use the active endpoint so inactive or
+        // wrong-applicability tax groups are not offered to users.
+        const endpoint = `/finance/tax/groups/active${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<TaxGroup[]>(endpoint);
+    }
+
     async getTaxGroupById(id: string): Promise<TaxGroup> {
         return apiService.get<TaxGroup>(`/finance/tax/groups/${id}`);
     }

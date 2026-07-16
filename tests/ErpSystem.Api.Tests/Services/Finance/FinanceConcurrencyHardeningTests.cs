@@ -135,9 +135,16 @@ public sealed class FinanceConcurrencyHardeningTests
         var numberingContracts = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Interfaces", "Numbering", "IDocumentNumberingService.cs"));
         var numberingService = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Services", "DocumentNumberingService.cs"));
 
+        var createMethod = ExtractMember(controllerSource, "public async Task<ActionResult<FinancePurchaseOrderDto>> Create", "[HttpPost(\"{id:guid}/submit-for-approval\")]");
+        var resolver = ExtractMember(controllerSource, "private async Task<string> ResolvePurchaseOrderNumberAsync", "private static int NormalizeLineType");
         var generator = ExtractMember(controllerSource, "private async Task<string> GeneratePurchaseOrderNumberAsync", "private static int NormalizeLineType");
 
         controllerSource.Should().Contain("IDocumentNumberingService", "finance PO number generation should use central document numbering");
+        createMethod.Should().Contain("ResolvePurchaseOrderNumberAsync(tenantId, orderDate, dto.OrderNumber, cancellationToken)", "API callers must not bypass tenant sequence policy by supplying an order number");
+        createMethod.Should().NotContain(": dto.OrderNumber.Trim()", "manual finance PO numbers must be accepted only through the sequence policy");
+        resolver.Should().Contain("AllowManualEntry", "manual finance PO numbers are valid only when the tenant sequence explicitly permits them");
+        resolver.Should().Contain("GetDefinitionsAsync", "manual-entry checks must read the tenant's document sequence policy");
+        resolver.Should().Contain("GeneratePurchaseOrderNumberAsync", "controlled sequence numbering remains the default when manual entry is disabled");
         generator.Should().Contain("_documentNumberingService.GenerateAsync", "generated finance PO numbers must be reserved transactionally");
         generator.Should().Contain("FinanceDocumentTypes.FinancePurchaseOrder", "finance POs need a dedicated numbering sequence");
         generator.Should().NotContain("CountAsync", "generated finance PO numbers must not be derived from visible row counts");
@@ -187,6 +194,21 @@ public sealed class FinanceConcurrencyHardeningTests
         source.Should().Contain("`/finance/ap/purchase-receipts/${id}`", "GRV-backed supplier returns should call the finance purchase receipt detail endpoint");
         source.Should().NotContain("'/ap/purchase-receipts'", "the AP route is not registered for finance GRV receipts");
         source.Should().NotContain("`/ap/purchase-receipts/${id}`", "the AP route is not registered for finance GRV receipt details");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinancePurchaseOrderCreatePage_ShouldUseActivePurchaseTaxGroups()
+    {
+        var root = FindRepositoryRoot();
+        var pageSource = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ap", "purchase-orders", "create", "page.tsx"));
+        var taxService = File.ReadAllText(Path.Combine(root, "frontend", "src", "services", "finance", "tax-data.service.ts"));
+
+        pageSource.Should().Contain("taxDataService.getActiveTaxGroups('Purchases')", "PO creation should only offer active purchase-applicable tax groups");
+        pageSource.Should().NotContain("taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' })", "the general groups endpoint ignores these filters");
+        taxService.Should().Contain("getActiveTaxGroups", "transaction entry forms need a typed helper for the filtered active tax endpoint");
+        taxService.Should().Contain("/finance/tax/groups/active", "the helper must call the controller action that applies active/applicability filtering");
     }
 
     [Fact]

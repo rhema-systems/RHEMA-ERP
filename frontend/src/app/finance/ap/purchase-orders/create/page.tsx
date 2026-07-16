@@ -135,7 +135,7 @@ export default function CreatePurchaseOrderPage() {
                     inventoryManagementService.getInventoryItems(),
                     inventoryManagementService.getWarehouses(true),
                     financeService.getAllAccounts(),
-                    taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' }),
+                    taxDataService.getActiveTaxGroups('Purchases'),
                     loadSupplierPaymentTerms()
                 ]);
 
