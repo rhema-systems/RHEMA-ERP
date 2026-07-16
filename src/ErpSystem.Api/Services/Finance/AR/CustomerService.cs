@@ -243,22 +243,26 @@ public class CustomerService : ICustomerService
             throw new InvalidOperationException("Customer not found.");
         }
 
-        var outstandingBalance = partner.OutstandingBalance ?? 0m;
+        var openInvoices = await GetOpenCustomerInvoicesQuery(customerId)
+            .ToListAsync(cancellationToken);
+        var outstandingBalance = openInvoices.Sum(i => i.BalanceAmount);
         var creditLimit = partner.CreditLimit ?? 0m;
 
-        return new CustomerBalanceDto
+        var balance = new CustomerBalanceDto
         {
             CustomerId = partner.Id,
             CustomerName = partner.PartnerName,
             TotalOutstanding = outstandingBalance,
-            Current = outstandingBalance,
-            Days1To30 = 0m,
-            Days31To60 = 0m,
-            Days61To90 = 0m,
-            Days90Plus = 0m,
             CreditLimit = creditLimit,
             AvailableCredit = Math.Max(0m, creditLimit - outstandingBalance)
         };
+
+        foreach (var invoice in openInvoices)
+        {
+            AddInvoiceToBalanceBuckets(balance, invoice);
+        }
+
+        return balance;
     }
 
     public async Task<CreditCheckResultDto> CheckCreditLimitAsync(Guid customerId, decimal amount, CancellationToken cancellationToken = default)
@@ -279,16 +283,33 @@ public class CustomerService : ICustomerService
         };
     }
 
-    public Task<List<InvoiceDto>> GetCustomerInvoicesAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task<List<InvoiceDto>> GetCustomerInvoicesAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("AR customer invoices are served by finance document endpoints; legacy invoice lookup skipped for {CustomerId}", customerId);
-        return Task.FromResult(new List<InvoiceDto>());
+        await EnsureCustomerExistsAsync(customerId, cancellationToken);
+
+        var invoices = await GetCustomerInvoicesQuery(customerId)
+            .Include(i => i.LineItems)
+            .ThenInclude(li => li.GLAccount)
+            .OrderByDescending(i => i.InvoiceDate)
+            .ThenByDescending(i => i.InvoiceNumber)
+            .ToListAsync(cancellationToken);
+
+        return invoices.Select(MapInvoiceToDto).ToList();
     }
 
-    public Task<List<CustomerPaymentDto>> GetCustomerPaymentsAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task<List<CustomerPaymentDto>> GetCustomerPaymentsAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("AR customer payments are served by finance document endpoints; legacy payment lookup skipped for {CustomerId}", customerId);
-        return Task.FromResult(new List<CustomerPaymentDto>());
+        var partner = await EnsureCustomerExistsAsync(customerId, cancellationToken);
+
+        var payments = await GetCustomerPaymentsQuery(customerId)
+            .Include(p => p.Allocations)
+            .ThenInclude(a => a.Invoice)
+            .Include(p => p.BankAccount)
+            .OrderByDescending(p => p.PaymentDate)
+            .ThenByDescending(p => p.PaymentNumber)
+            .ToListAsync(cancellationToken);
+
+        return payments.Select(p => MapPaymentToDto(p, partner)).ToList();
     }
 
     private IQueryable<BusinessPartner> CustomerPartners()
@@ -297,6 +318,43 @@ public class CustomerService : ICustomerService
             .GetQueryable(p => p.TenantId == TenantId &&
                                !p.IsDeleted &&
                                (p.PartnerType == "Customer" || p.PartnerType == "Both"));
+    }
+
+    private async Task<BusinessPartner> EnsureCustomerExistsAsync(Guid customerId, CancellationToken cancellationToken)
+    {
+        var partner = await CustomerPartners()
+            .FirstOrDefaultAsync(p => p.Id == customerId, cancellationToken);
+
+        return partner ?? throw new InvalidOperationException("Customer not found.");
+    }
+
+    // Customer account review must read the current Finance AR source tables; legacy CRM/customer
+    // navigation collections are intentionally not used for invoice/payment history.
+    private IQueryable<Invoice> GetCustomerInvoicesQuery(Guid customerId)
+    {
+        return _unitOfWork.Repository<Invoice>()
+            .GetQueryable(i =>
+                i.TenantId == TenantId &&
+                !i.IsDeleted &&
+                i.BusinessPartnerId == customerId);
+    }
+
+    private IQueryable<Invoice> GetOpenCustomerInvoicesQuery(Guid customerId)
+    {
+        return GetCustomerInvoicesQuery(customerId)
+            .Where(i =>
+                i.Status != InvoiceStatus.Draft &&
+                i.Status != InvoiceStatus.Cancelled &&
+                (i.TotalAmount - i.PaidAmount - i.CreditedAmount) > 0);
+    }
+
+    private IQueryable<CustomerPayment> GetCustomerPaymentsQuery(Guid customerId)
+    {
+        return _unitOfWork.Repository<CustomerPayment>()
+            .GetQueryable(p =>
+                p.TenantId == TenantId &&
+                !p.IsDeleted &&
+                p.CustomerId == customerId);
     }
 
     private async Task<string> GenerateCustomerCodeAsync(CancellationToken cancellationToken)
@@ -343,6 +401,146 @@ public class CustomerService : ICustomerService
                        !string.Equals(partner.RegistrationStatus, "Blacklisted", StringComparison.OrdinalIgnoreCase),
             Notes = partner.Notes,
             CreatedAt = partner.CreatedAt
+        };
+    }
+
+    private static void AddInvoiceToBalanceBuckets(CustomerBalanceDto balance, Invoice invoice)
+    {
+        var outstanding = Math.Max(0m, invoice.BalanceAmount);
+        if (outstanding <= 0)
+        {
+            return;
+        }
+
+        var asOfDate = DateTime.UtcNow.Date;
+        var dueDate = (invoice.DueDate ?? invoice.InvoiceDate).Date;
+        var daysOverdue = (asOfDate - dueDate).Days;
+
+        if (daysOverdue <= 0)
+        {
+            balance.Current += outstanding;
+        }
+        else if (daysOverdue <= 30)
+        {
+            balance.Days1To30 += outstanding;
+        }
+        else if (daysOverdue <= 60)
+        {
+            balance.Days31To60 += outstanding;
+        }
+        else if (daysOverdue <= 90)
+        {
+            balance.Days61To90 += outstanding;
+        }
+        else
+        {
+            balance.Days90Plus += outstanding;
+        }
+    }
+
+    private static InvoiceDto MapInvoiceToDto(Invoice invoice)
+    {
+        return new InvoiceDto
+        {
+            Id = invoice.Id,
+            InvoiceNumber = invoice.InvoiceNumber,
+            CustomerId = invoice.CustomerId,
+            CustomerName = invoice.CustomerName,
+            CustomerAddress = invoice.CustomerAddress,
+            InvoiceDate = invoice.InvoiceDate,
+            DueDate = invoice.DueDate,
+            SubTotal = invoice.SubTotal,
+            TaxAmount = invoice.TaxAmount,
+            DiscountAmount = invoice.DiscountAmount,
+            TotalAmount = invoice.TotalAmount,
+            PaidAmount = invoice.PaidAmount,
+            BalanceAmount = invoice.BalanceAmount,
+            Status = invoice.Status.ToString(),
+            Notes = invoice.Notes,
+            Reference = invoice.Reference,
+            IsOpeningBalance = invoice.IsOpeningBalance,
+            CurrencyCode = invoice.CurrencyCode,
+            ExchangeRate = invoice.ExchangeRate,
+            PaymentTermsDays = invoice.PaymentTermsDays,
+            PaymentTermId = invoice.PaymentTermId,
+            EarlyPaymentDiscountPercentage = invoice.EarlyPaymentDiscountPercentage,
+            EarlyPaymentDiscountDueDate = invoice.EarlyPaymentDiscountDueDate,
+            EarlyPaymentDiscountAmount = invoice.EarlyPaymentDiscountAmount,
+            TaxGroupId = invoice.TaxGroupId,
+            JournalEntryId = invoice.JournalEntryId,
+            LineItems = invoice.LineItems.Select(li => new InvoiceLineItemDto
+            {
+                Id = li.Id,
+                InvoiceId = li.InvoiceId,
+                LineItemType = li.LineItemType.ToString(),
+                ProductId = li.ProductId,
+                GLAccountId = li.GLAccountId,
+                GLAccountCode = li.GLAccount?.AccountCode,
+                GLAccountName = li.GLAccount?.AccountName,
+                Description = li.Description,
+                Quantity = li.Quantity,
+                UnitPrice = li.UnitPrice,
+                LineTotal = li.LineTotal,
+                TaxRate = li.TaxRate,
+                TaxAmount = li.TaxAmount,
+                TaxCode = li.TaxCode,
+                TaxGroupId = li.TaxGroupId,
+                TaxTreatment = li.TaxTreatment,
+                Unit = li.Unit,
+                DiscountPercentage = li.DiscountPercentage,
+                DiscountAmount = li.DiscountAmount
+            }).ToList(),
+            CreatedAt = invoice.CreatedAt,
+            UpdatedAt = invoice.UpdatedAt
+        };
+    }
+
+    private static CustomerPaymentDto MapPaymentToDto(CustomerPayment payment, BusinessPartner customer)
+    {
+        return new CustomerPaymentDto
+        {
+            Id = payment.Id,
+            PaymentNumber = payment.PaymentNumber,
+            CustomerId = payment.CustomerId,
+            CustomerName = customer.PartnerName,
+            PaymentDate = payment.PaymentDate,
+            TotalAmount = payment.TotalAmount,
+            AllocatedAmount = payment.AllocatedAmount,
+            UnallocatedAmount = payment.UnallocatedAmount,
+            PaymentMethod = payment.PaymentMethod,
+            CurrencyCode = payment.CurrencyCode,
+            ExchangeRate = payment.ExchangeRate,
+            BankAccountId = payment.BankAccountId,
+            BankAccountName = payment.BankAccount?.AccountName,
+            CheckNumber = payment.CheckNumber,
+            TransactionReference = payment.TransactionReference,
+            WithholdingTaxId = payment.WithholdingTaxId,
+            WithholdingTaxAccountId = payment.WithholdingTaxAccountId,
+            WithholdingTaxAmount = payment.WithholdingTaxAmount,
+            VatWithholdingTaxId = payment.VatWithholdingTaxId,
+            VatWithholdingAccountId = payment.VatWithholdingAccountId,
+            VatWithholdingAmount = payment.VatWithholdingAmount,
+            WithholdingCertificateNumber = payment.WithholdingCertificateNumber,
+            WithholdingCertificateDate = payment.WithholdingCertificateDate,
+            Notes = payment.Notes,
+            Status = payment.Status,
+            ClearedDate = payment.ClearedDate,
+            IsCreditNote = payment.IsCreditNote,
+            JournalEntryId = payment.JournalEntryId,
+            Allocations = payment.Allocations.Select(a => new PaymentAllocationDto
+            {
+                Id = a.Id,
+                CustomerPaymentId = a.CustomerPaymentId,
+                PaymentNumber = payment.PaymentNumber,
+                InvoiceId = a.InvoiceId,
+                InvoiceNumber = a.Invoice?.InvoiceNumber ?? string.Empty,
+                AllocatedAmount = a.AllocatedAmount,
+                DiscountAmount = a.DiscountAmount,
+                AllocationDate = a.AllocationDate,
+                Notes = a.Notes,
+                IsReversal = a.IsReversal
+            }).ToList(),
+            CreatedAt = payment.CreatedAt
         };
     }
 

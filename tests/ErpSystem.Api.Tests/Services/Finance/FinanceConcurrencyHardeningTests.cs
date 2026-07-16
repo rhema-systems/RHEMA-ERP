@@ -319,6 +319,41 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
+    public void CustomerAccountEndpoints_ShouldUseCurrentArHistoryAndAgingBuckets()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "CustomerService.cs"));
+
+        var balanceMethod = ExtractMember(source, "public async Task<CustomerBalanceDto> GetBalanceAsync", "public async Task<CreditCheckResultDto> CheckCreditLimitAsync");
+        var invoiceMethod = ExtractMember(source, "public async Task<List<InvoiceDto>> GetCustomerInvoicesAsync", "public async Task<List<CustomerPaymentDto>> GetCustomerPaymentsAsync");
+        var paymentMethod = ExtractMember(source, "public async Task<List<CustomerPaymentDto>> GetCustomerPaymentsAsync", "private IQueryable<BusinessPartner> CustomerPartners()");
+
+        balanceMethod.Should().Contain("GetOpenCustomerInvoicesQuery(customerId)", "customer balance must derive from current AR invoices, not mutable customer balance snapshots alone");
+        balanceMethod.Should().Contain("AddInvoiceToBalanceBuckets(balance, invoice)", "overdue invoice balances must be assigned to their due-date aging buckets");
+        source.Should().Contain("i.BusinessPartnerId == customerId", "AR invoices use BusinessPartnerId as the current customer key");
+        source.Should().Contain("p.CustomerId == customerId", "AR receipts use CustomerId as the current BusinessPartner-backed customer key");
+        source.Should().Contain("daysOverdue <= 30", "the 1-30 day bucket must be calculated from invoice due dates");
+        source.Should().Contain("daysOverdue <= 60", "the 31-60 day bucket must be calculated from invoice due dates");
+        source.Should().Contain("daysOverdue <= 90", "the 61-90 day bucket must be calculated from invoice due dates");
+        source.Should().NotContain("Days1To30 = 0m", "overdue customer balances must not be hard-coded to current");
+        source.Should().NotContain("Days31To60 = 0m", "overdue customer balances must not be hard-coded to current");
+        source.Should().NotContain("Days61To90 = 0m", "overdue customer balances must not be hard-coded to current");
+        source.Should().NotContain("Days90Plus = 0m", "overdue customer balances must not be hard-coded to current");
+
+        invoiceMethod.Should().Contain("GetCustomerInvoicesQuery(customerId)", "customer account review must query current Finance AR invoices");
+        invoiceMethod.Should().Contain(".Include(i => i.LineItems)", "invoice history should return line detail expected by the customer endpoint DTO");
+        invoiceMethod.Should().Contain("MapInvoiceToDto", "invoice history should return the existing finance invoice DTO shape");
+        invoiceMethod.Should().NotContain("Task.FromResult(new List<InvoiceDto>())", "customer invoice history must not be stubbed out");
+
+        paymentMethod.Should().Contain("GetCustomerPaymentsQuery(customerId)", "customer account review must query current Finance AR receipts");
+        paymentMethod.Should().Contain(".Include(p => p.Allocations)", "payment history should include allocation context for account review");
+        paymentMethod.Should().Contain("MapPaymentToDto", "payment history should return the existing finance payment DTO shape");
+        paymentMethod.Should().NotContain("Task.FromResult(new List<CustomerPaymentDto>())", "customer payment history must not be stubbed out");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
     public void YearEndClose_ShouldPostThroughFinancePostingEngine()
     {
         var root = FindRepositoryRoot();
