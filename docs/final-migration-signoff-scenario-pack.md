@@ -102,7 +102,6 @@ The run includes a limitation matrix covering:
 - `FIN-LIM-0009`
 - `FIN-LIM-0010`
 - `FIN-LIM-0011`
-- `FIN-LIM-0012`
 - `FIN-LIM-0013`
 - `FIN-LIM-0014`
 - `FIN-LIM-0021`
@@ -120,7 +119,6 @@ The run includes a limitation matrix covering:
 - `FIN-LIM-0041`
 - `FIN-LIM-0042`
 - `FIN-LIM-0043`
-- `FIN-LIM-0045`
 - `FIN-LIM-0046`
 - `FIN-LIM-0047`
 - `FIN-LIM-0048`

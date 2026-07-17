@@ -99,7 +99,20 @@ public class CreditNoteDetailDto : CreditNoteSummaryDto
     public Guid? OriginalInvoiceId { get; set; }
     public Guid? AppliedToInvoiceId { get; set; }
     public decimal TaxAmount { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    public string? ReversalReason { get; set; }
     public List<CreditNoteLineDto> Lines { get; set; } = new();
+}
+
+public class ReverseCreditNoteDto
+{
+    [Required]
+    [MaxLength(500)]
+    public string Reason { get; set; } = string.Empty;
+
+    public DateTime? ReversalDate { get; set; }
 }
 
 public class CreditNoteLineDto

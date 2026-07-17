@@ -494,7 +494,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                 throw new KeyNotFoundException($"Payment with Id '{paymentId}' not found.");
 
             if (payment.JournalEntryId.HasValue)
-                throw new InvalidOperationException("Posted customer payments cannot be allocated. Use a reversal, void, or adjustment workflow.");
+            {
+                if (!payment.IsCustomerAdvance)
+                    throw new InvalidOperationException("Posted customer payments cannot be allocated. Use a reversal, void, or adjustment workflow.");
+
+                // A posted customer advance is the explicit exception: applying it creates a
+                // separate advance-to-AR-control reclassification through the posting engine.
+                return await AllocatePostedCustomerAdvanceAsync(paymentId, allocations, cancellationToken);
+            }
 
             var result = new PaymentAllocationResultDto
             {
@@ -654,6 +661,186 @@ namespace ErpSystem.Api.Services.Finance.AR
                 payment.PaymentNumber, payment.AllocatedAmount, result.Allocations.Count);
 
             return result;
+        }
+
+        private async Task<PaymentAllocationResultDto> AllocatePostedCustomerAdvanceAsync(
+            Guid paymentId,
+            IReadOnlyCollection<InvoiceAllocationDto> requestedAllocations,
+            CancellationToken cancellationToken)
+        {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for customer advance application.");
+            if (requestedAllocations.Count == 0)
+                throw new InvalidOperationException("At least one customer-invoice allocation is required to apply an advance.");
+            if (requestedAllocations.Any(a => a.AllocatedAmount <= 0m || a.DiscountAmount != 0m))
+                throw new InvalidOperationException("Customer advance applications support positive cash allocations only; use a dedicated adjustment workflow for discounts.");
+
+            var transactionStarted = false;
+            try
+            {
+                // Keep the allocation, customer/invoice snapshots and the advance reclassification
+                // in one serializable transaction so an advance cannot be applied twice.
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                transactionStarted = true;
+
+                var payment = await _unitOfWork.Repository<CustomerPayment>()
+                    .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId && !p.IsDeleted)
+                    .Include(p => p.Allocations)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Customer advance with Id '{paymentId}' was not found.");
+
+                if (!payment.JournalEntryId.HasValue || !payment.IsCustomerAdvance || payment.IsCreditNote)
+                    throw new InvalidOperationException("Only a posted customer advance can be applied through this workflow.");
+
+                var settings = await GetFinanceSettingsAsync(cancellationToken);
+                var customer = await ResolveCustomerForPostingAsync(payment, cancellationToken);
+                var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+                if (!string.Equals(NormalizeCurrency(payment.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Foreign-currency customer advance application is not supported until advance FX settlement is implemented.");
+
+                var arAccountId = customer.DefaultArAccountId
+                    ?? settings.ControlAccountArId
+                    ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
+                var advanceAccountId = settings.CustomerAdvanceAccountId
+                    ?? throw new InvalidOperationException("Customer advance account is not configured for this tenant.");
+                var accountCache = new Dictionary<Guid, Account>();
+                await ResolveReceiptPostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+                var advanceAccount = await ResolveReceiptPostingAccountAsync(advanceAccountId, "customer advance account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+                if (advanceAccount.AccountType != AccountType.Liability)
+                    throw new InvalidOperationException("Customer advance account must be a liability account.");
+
+                var currentlyAllocated = RoundMoney(payment.Allocations.Where(a => !a.IsReversal).Sum(a => a.AllocatedAmount));
+                var requestedTotal = RoundMoney(requestedAllocations.Sum(a => a.AllocatedAmount));
+                if (requestedTotal > RoundMoney(payment.TotalAmount - currentlyAllocated))
+                    throw new InvalidOperationException("Customer advance application exceeds the unallocated advance balance.");
+
+                var now = DateTime.UtcNow;
+                var result = new PaymentAllocationResultDto { Success = false };
+                var newlyApplied = 0m;
+                foreach (var requested in requestedAllocations)
+                {
+                    var invoice = await _unitOfWork.Repository<Invoice>()
+                        .GetQueryable(i => i.TenantId == TenantId && i.Id == requested.InvoiceId && !i.IsDeleted)
+                        .FirstOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException("Customer advance application invoice was not found for this tenant.");
+                    if (invoice.BusinessPartnerId != payment.CustomerId)
+                        throw new InvalidOperationException("Customer advance can only be applied to invoices for the same customer.");
+                    if (!invoice.JournalEntryId.HasValue)
+                        throw new InvalidOperationException($"Customer advance cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
+                    if (!string.Equals(NormalizeCurrency(invoice.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Foreign-currency customer advance application is not supported until advance FX settlement is implemented.");
+
+                    var postedSalesCredits = await GetPostedSalesCreditAmountForInvoiceAsync(invoice.Id, cancellationToken);
+                    var invoiceOutstanding = RoundMoney(invoice.TotalAmount - invoice.PaidAmount - postedSalesCredits);
+                    if (requested.AllocatedAmount > invoiceOutstanding)
+                        throw new InvalidOperationException($"Customer advance application exceeds the outstanding balance of invoice '{invoice.InvoiceNumber}'.");
+
+                    var allocation = new PaymentAllocation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        CustomerPaymentId = payment.Id,
+                        InvoiceId = invoice.Id,
+                        AllocatedAmount = RoundMoney(requested.AllocatedAmount),
+                        AllocationDate = now,
+                        Notes = requested.Notes,
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    };
+
+                    // Register the allocation explicitly as Added. Updating the receipt source
+                    // record later must not turn this new row into a modified-only graph entry.
+                    await _unitOfWork.Repository<PaymentAllocation>().AddAsync(allocation);
+                    payment.Allocations.Add(allocation);
+                    // This is a read-side operational snapshot. Recompute it from allocations so
+                    // a stale value cannot cause an advance to be over-applied after a retry.
+                    payment.AllocatedAmount = RoundMoney(payment.Allocations
+                        .Where(a => !a.IsReversal)
+                        .Sum(a => a.AllocatedAmount));
+                    payment.UpdatedAt = now;
+                    payment.UpdatedBy = UserName;
+                    invoice.PaidAmount = RoundMoney(invoice.PaidAmount + allocation.AllocatedAmount);
+                    var operationalOutstanding = RoundMoney(invoice.TotalAmount - invoice.PaidAmount - postedSalesCredits);
+                    invoice.Status = operationalOutstanding <= 0.01m ? InvoiceStatus.Paid : InvoiceStatus.PartiallyPaid;
+                    invoice.UpdatedAt = now;
+                    invoice.UpdatedBy = UserName;
+                    newlyApplied += allocation.AllocatedAmount;
+                    await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
+                    await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    {
+                        SourceModule = "AR",
+                        SourceDocumentType = "CustomerPaymentAdvanceApplication",
+                        SourceDocumentId = allocation.Id,
+                        SourceDocumentTenantId = payment.TenantId,
+                        PostingAction = "Post",
+                        SourceDocumentReference = $"{payment.PaymentNumber}:{invoice.InvoiceNumber}",
+                        Description = $"Apply customer advance {payment.PaymentNumber} to invoice {invoice.InvoiceNumber}",
+                        PostingDate = now,
+                        JournalType = "AR Customer Advance Application",
+                        BookClassification = "IFRS",
+                        FunctionalCurrencyCode = functionalCurrency,
+                        IdempotencyKey = $"AR:CustomerPaymentAdvanceApplication:{payment.TenantId:N}:{allocation.Id:N}:Post",
+                        ReturnExistingOnDuplicate = true,
+                        Lines = new[]
+                        {
+                            BuildPostingLine(advanceAccountId, $"Apply customer advance {payment.PaymentNumber}", allocation.AllocatedAmount, 0m, functionalCurrency, functionalCurrency, 1m, now, payment.PaymentNumber, 1, "AR-CustomerAdvance"),
+                            BuildPostingLine(arAccountId, $"Apply customer advance {payment.PaymentNumber}", 0m, allocation.AllocatedAmount, functionalCurrency, functionalCurrency, 1m, now, payment.PaymentNumber, 2, "AR-Control")
+                        }
+                    }, cancellationToken);
+
+                    allocation.ApplicationJournalEntryId = postingResult.JournalEntryId;
+                    allocation.ApplicationPostingEventId = postingResult.PostingEventId;
+                    allocation.UpdatedAt = now;
+                    allocation.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<PaymentAllocation>().UpdateAsync(allocation);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    result.Allocations.Add(new PaymentAllocationDto
+                    {
+                        Id = allocation.Id,
+                        CustomerPaymentId = payment.Id,
+                        PaymentNumber = payment.PaymentNumber,
+                        InvoiceId = invoice.Id,
+                        InvoiceNumber = invoice.InvoiceNumber,
+                        AllocatedAmount = allocation.AllocatedAmount,
+                        AllocationDate = allocation.AllocationDate,
+                        Notes = allocation.Notes
+                    });
+                }
+
+                var customerPartner = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken);
+                if (customerPartner != null)
+                {
+                    customerPartner.OutstandingBalance = (customerPartner.OutstandingBalance ?? 0m) - newlyApplied;
+                    customerPartner.UpdatedAt = now;
+                    customerPartner.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customerPartner);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
+                result.Success = true;
+                result.TotalAllocated = payment.AllocatedAmount;
+                result.RemainingUnallocated = RoundMoney(payment.TotalAmount - payment.AllocatedAmount);
+                result.Message = $"Applied customer advance to {result.Allocations.Count} invoice(s).";
+                await RecordArReceiptAuditAsync(
+                    FinanceAuditEvents.ArCustomerAdvanceApplied,
+                    payment,
+                    afterValues: new { result.TotalAllocated, result.RemainingUnallocated, AllocationCount = result.Allocations.Count },
+                    comment: "Posted customer advance application through the central finance posting engine.",
+                    cancellationToken: cancellationToken);
+                return result;
+            }
+            catch
+            {
+                if (transactionStarted)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
         public async Task ReverseAllocationAsync(Guid allocationId, string reason, CancellationToken cancellationToken = default)
@@ -1007,8 +1194,13 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .ThenBy(a => a.Id)
                 .ToList() ?? new List<PaymentAllocation>();
 
-            if (activeAllocations.Count == 0)
-                throw new InvalidOperationException("AR receipt must have at least one invoice allocation before posting. Customer advances are not supported in this batch.");
+            var isCustomerAdvance = activeAllocations.Count == 0;
+            if (isCustomerAdvance &&
+                (payment.WithholdingTaxAmount != 0m || payment.VatWithholdingAmount != 0m))
+            {
+                throw new InvalidOperationException(
+                    "Customer advances cannot include withholding tax. Apply the advance to a posted invoice before recording withholding settlement amounts.");
+            }
 
             foreach (var allocation in activeAllocations)
             {
@@ -1059,6 +1251,10 @@ namespace ErpSystem.Api.Services.Finance.AR
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
             var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            if (isCustomerAdvance && !string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Foreign-currency customer advances are not supported until advance application FX settlement is implemented.");
+            }
             foreach (var allocation in activeAllocations)
             {
                 var invoiceCurrency = NormalizeCurrency(allocation.Invoice.CurrencyCode, paymentCurrency);
@@ -1075,6 +1271,22 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ?? settings.ControlAccountArId
                 ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
             await ResolveReceiptPostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            Guid creditAccountId = arAccountId;
+            if (isCustomerAdvance)
+            {
+                creditAccountId = settings.CustomerAdvanceAccountId
+                    ?? throw new InvalidOperationException("Customer advance account is not configured for this tenant.");
+                var customerAdvanceAccount = await ResolveReceiptPostingAccountAsync(
+                    creditAccountId,
+                    "customer advance account",
+                    accountCache,
+                    allowControlAccount: false,
+                    requireDirectPosting: true,
+                    cancellationToken);
+                if (customerAdvanceAccount.AccountType != AccountType.Liability)
+                    throw new InvalidOperationException("Customer advance account must be a liability account.");
+            }
 
             var bankAccountId = payment.BankAccountId
                 ?? settings.DefaultBankAccountId
@@ -1101,8 +1313,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 throw new InvalidOperationException("AR receipt withholding amounts cannot be negative.");
 
             var allocatedSettlementAmount = RoundMoney(activeAllocations.Sum(a => a.AllocatedAmount));
-            if (allocatedSettlementAmount != RoundMoney(payment.TotalAmount + withholdingTaxAmount + vatWithholdingAmount))
-                throw new InvalidOperationException("AR receipt allocations must equal cash received plus configured withholding amounts before posting.");
+            if (!isCustomerAdvance && allocatedSettlementAmount != RoundMoney(payment.TotalAmount + withholdingTaxAmount + vatWithholdingAmount))
+                throw new InvalidOperationException("AR receipt allocations must equal cash received plus configured withholding amounts before posting. Use the customer-advance path for an unapplied receipt.");
 
             var arSettlementAmount = RoundMoney(payment.TotalAmount + discountAllowed + withholdingTaxAmount + vatWithholdingAmount);
 
@@ -1185,22 +1397,25 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             postingLines.Add(BuildPostingLine(
-                arAccountId,
-                $"AR receipt {payment.PaymentNumber}",
+                creditAccountId,
+                isCustomerAdvance
+                    ? $"Customer advance {payment.PaymentNumber}"
+                    : $"AR receipt {payment.PaymentNumber}",
                 debitTransactionAmount: 0m,
-                creditTransactionAmount: arSettlementAmount,
+                creditTransactionAmount: isCustomerAdvance ? payment.TotalAmount : arSettlementAmount,
                 paymentCurrency,
                 functionalCurrency,
                 exchangeRate,
                 payment.PaymentDate,
                 payment.PaymentNumber,
                 lineNumber++,
-                "AR-Control"));
+                isCustomerAdvance ? "AR-CustomerAdvance" : "AR-Control"));
 
             if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
                 throw new InvalidOperationException("AR receipt posting is not balanced.");
 
             payment.BankAccountId ??= bankAccount.Id;
+            payment.IsCustomerAdvance = isCustomerAdvance;
 
             return new FinancePostingRequestDto
             {
@@ -1210,7 +1425,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                 SourceDocumentTenantId = payment.TenantId,
                 PostingAction = "Post",
                 SourceDocumentReference = payment.PaymentNumber,
-                Description = $"Customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
+                Description = isCustomerAdvance
+                    ? $"Customer advance {payment.PaymentNumber} - {customer.PartnerName}"
+                    : $"Customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AR Receipt",
                 BookClassification = "IFRS",

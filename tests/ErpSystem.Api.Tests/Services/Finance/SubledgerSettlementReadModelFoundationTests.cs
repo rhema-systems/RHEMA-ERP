@@ -182,6 +182,131 @@ public sealed class SubledgerSettlementReadModelFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PostedSupplierAdvanceAppearsSeparatelyFromInvoiceAging()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var advance = SeedPostedSupplierAdvance(db, fixture, "APP-ADV-001", 75m);
+        await db.SaveChangesAsync();
+
+        var service = CreateSettlementService(db, tenantId);
+        var rebuild = await service.RebuildAsync(new SubledgerSettlementRebuildRequestDto { SourceModule = "AP", AsOfDate = AsOfDate });
+        var unapplied = (await service.GetUnappliedBalancesAsync("AP", AsOfDate)).Should().ContainSingle().Subject;
+
+        rebuild.ApDocumentCount.Should().Be(0);
+        rebuild.ApUnappliedSettlementCount.Should().Be(1);
+        unapplied.SettlementSourceId.Should().Be(advance.Id);
+        unapplied.Classification.Should().Be(SubledgerUnappliedSettlementClassifications.SupplierAdvance);
+        unapplied.UnappliedAmount.Should().Be(75m);
+        (await service.GetBalancesAsync("AP", AsOfDate)).Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task PostedCustomerAdvanceAppearsSeparatelyFromInvoiceAgingAndRebuildIsIdempotent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var advance = SeedPostedCustomerAdvance(db, fixture, "ARR-ADV-001", 90m);
+        await db.SaveChangesAsync();
+
+        var service = CreateSettlementService(db, tenantId);
+        await service.RebuildAsync(new SubledgerSettlementRebuildRequestDto { SourceModule = "AR", AsOfDate = AsOfDate });
+        await service.RebuildAsync(new SubledgerSettlementRebuildRequestDto { SourceModule = "AR", AsOfDate = AsOfDate });
+        var unapplied = (await service.GetUnappliedBalancesAsync("AR", AsOfDate)).Should().ContainSingle().Subject;
+
+        unapplied.SettlementSourceId.Should().Be(advance.Id);
+        unapplied.Classification.Should().Be(SubledgerUnappliedSettlementClassifications.CustomerAdvance);
+        unapplied.UnappliedAmount.Should().Be(90m);
+        (await db.SubledgerUnappliedSettlementBalances.CountAsync()).Should().Be(1);
+        (await service.GetBalancesAsync("AR", AsOfDate)).Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CustomerAdvanceAllocationUsesItsPostedApplicationEvent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var invoice = SeedPostedArInvoice(db, fixture, "AR-ADV-APPLY-001", 100m);
+        var receipt = SeedPostedArReceipt(db, fixture, invoice, "ARR-ADV-APPLY-001", 60m);
+        receipt.Payment.IsCustomerAdvance = true;
+
+        // The advance origin is cash-to-liability. This event proves the later
+        // liability-to-AR-control application that is allowed to settle the invoice.
+        var applicationPosting = SeedPostedSource(
+            db,
+            fixture,
+            "AR",
+            "CustomerPaymentAdvanceApplication",
+            receipt.Allocation.Id,
+            "ARR-ADV-APPLY-001-APPLY",
+            SettlementDate,
+            60m,
+            (fixture.ArControl.Id, 0m, 60m),
+            (fixture.Revenue.Id, 60m, 0m));
+        receipt.Allocation.ApplicationJournalEntryId = applicationPosting.Journal.Id;
+        receipt.Allocation.ApplicationPostingEventId = applicationPosting.Event.Id;
+        await db.SaveChangesAsync();
+
+        var service = CreateSettlementService(db, tenantId);
+        var balance = (await service.GetBalancesAfterRebuildAsync("AR", AsOfDate)).Should().ContainSingle().Subject;
+
+        balance.SettledAmount.Should().Be(60m);
+        balance.OutstandingAmount.Should().Be(40m);
+        balance.Applications.Should().ContainSingle().Which.SettlementPostingEventId.Should().Be(applicationPosting.Event.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task SupplierAdvanceAllocationWithoutPostedApplicationEventIsDiagnosedAndExcluded()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var invoice = SeedPostedApInvoice(db, fixture, "AP-ADV-MISSING-001", 100m);
+        var payment = SeedPostedApPayment(db, fixture, invoice, "APP-ADV-MISSING-001", 60m);
+        payment.Payment.IsSupplierAdvance = true;
+        await db.SaveChangesAsync();
+
+        var service = CreateSettlementService(db, tenantId);
+        var rebuild = await service.RebuildAsync(new SubledgerSettlementRebuildRequestDto { SourceModule = "AP", AsOfDate = AsOfDate });
+        var balance = (await service.GetBalancesAsync("AP", AsOfDate)).Should().ContainSingle().Subject;
+
+        rebuild.Diagnostics.Should().Contain(d => d.Code == "MissingAdvanceApplicationPostingEvent" && d.SourceDocumentId == payment.Allocation.Id);
+        balance.Applications.Should().BeEmpty();
+        balance.OutstandingAmount.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task LegacyUnappliedReceiptIsNotMisclassifiedAsCustomerAdvance()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var receipt = SeedPostedCustomerAdvance(db, fixture, "ARR-UNAPPLIED-001", 90m);
+        receipt.IsCustomerAdvance = false;
+        await db.SaveChangesAsync();
+
+        var service = CreateSettlementService(db, tenantId);
+        await service.RebuildAsync(new SubledgerSettlementRebuildRequestDto { SourceModule = "AR", AsOfDate = AsOfDate });
+
+        var unapplied = (await service.GetUnappliedBalancesAsync("AR", AsOfDate)).Should().ContainSingle().Subject;
+        unapplied.Classification.Should().Be(SubledgerUnappliedSettlementClassifications.UnappliedCustomerReceipt);
+        unapplied.UnappliedAmount.Should().Be(90m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
     [Trait("Category", "AccountsReceivable")]
     public async Task ArCreditNoteReducesOutstanding()
     {
@@ -201,6 +326,28 @@ public sealed class SubledgerSettlementReadModelFoundationTests
             a.SettlementSourceType == "SalesCreditNote" &&
             a.SettlementSourceId == creditNote.Id &&
             a.CreditedAmount == 25m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ReversedSalesCreditNoteDoesNotRemainInArSettlementProjection()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var invoice = SeedPostedArInvoice(db, fixture, "AR-004-REV", 100m);
+        var creditNote = SeedPostedSalesCreditNote(db, fixture, invoice, "CN-004-REV", 25m);
+        creditNote.CreditNoteStatus = CreditNoteStatus.Reversed;
+        creditNote.ReversedAt = SettlementDate.AddDays(1);
+        await db.SaveChangesAsync();
+
+        var balance = (await CreateSettlementService(db, tenantId)
+            .GetBalancesAfterRebuildAsync("AR", AsOfDate)).Should().ContainSingle().Subject;
+
+        balance.CreditedAmount.Should().Be(0m);
+        balance.OutstandingAmount.Should().Be(100m);
+        balance.Applications.Should().NotContain(a => a.SettlementSourceId == creditNote.Id);
     }
 
     [Fact]
@@ -717,6 +864,33 @@ public sealed class SubledgerSettlementReadModelFoundationTests
         return (payment, allocation);
     }
 
+    private static VendorPayment SeedPostedSupplierAdvance(
+        ApplicationDbContext db,
+        FinanceFixture fixture,
+        string number,
+        decimal amount)
+    {
+        var payment = new VendorPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            PaymentNumber = number,
+            SupplierId = fixture.Supplier.Id,
+            PaymentDate = SettlementDate,
+            TotalAmount = amount,
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            IsSupplierAdvance = true,
+            Status = VendorPaymentStatus.Processed
+        };
+        db.Set<VendorPayment>().Add(payment);
+        var posted = SeedPostedSource(db, fixture, "AP", "VendorPayment", payment.Id, number, SettlementDate, amount,
+            (fixture.Expense.Id, amount, 0m),
+            (fixture.Cash.Id, 0m, amount));
+        payment.JournalEntryId = posted.Journal.Id;
+        return payment;
+    }
+
     private static Invoice SeedArInvoice(ApplicationDbContext db, FinanceFixture fixture, string number, decimal amount)
     {
         var invoice = new Invoice
@@ -802,6 +976,33 @@ public sealed class SubledgerSettlementReadModelFoundationTests
             (fixture.ArControl.Id, 0m, functionalAmount));
         payment.JournalEntryId = posted.Journal.Id;
         return (payment, allocation);
+    }
+
+    private static CustomerPayment SeedPostedCustomerAdvance(
+        ApplicationDbContext db,
+        FinanceFixture fixture,
+        string number,
+        decimal amount)
+    {
+        var payment = new CustomerPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            PaymentNumber = number,
+            CustomerId = fixture.Customer.Id,
+            PaymentDate = SettlementDate,
+            TotalAmount = amount,
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            IsCustomerAdvance = true,
+            Status = "Posted"
+        };
+        db.Set<CustomerPayment>().Add(payment);
+        var posted = SeedPostedSource(db, fixture, "AR", "CustomerPayment", payment.Id, number, SettlementDate, amount,
+            (fixture.Cash.Id, amount, 0m),
+            (fixture.Revenue.Id, 0m, amount));
+        payment.JournalEntryId = posted.Journal.Id;
+        return payment;
     }
 
     private static CreditNote SeedPostedSalesCreditNote(

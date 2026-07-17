@@ -52,7 +52,7 @@ The run returns a tenant-scoped status, check list, evidence export manifest, li
 - AP control reconciliation generated and reviewed.
 - AR control reconciliation generated and reviewed.
 - Operational paid/credited fields compared to read model as diagnostics only.
-- Unapplied payments/receipts and advances reviewed under `FIN-LIM-0045`.
+- Unapplied payments/receipts and functional-currency advances reviewed through the settlement read-model balances; this is resolved under `FIN-LIM-0045`.
 
 ## Fixed Assets
 
@@ -114,7 +114,7 @@ The run returns a tenant-scoped status, check list, evidence export manifest, li
 - Sign-off run request declares whether AP/AR/fixed-asset source-level openings are in scope.
 - `FIN-LIM-0048` is marked not applicable only when the tenant cutover has no open AP/AR/fixed-asset source balances requiring aging/register proof.
 - `FIN-LIM-0048` blocks sign-off when source-level AP/AR/fixed-asset openings are required but not loaded through supported posted source-document/import paths.
-- `FIN-LIM-0045` reviewed if unapplied payments, receipts, or advances exist.
+- Unapplied payment/receipt and functional-currency advance balances are reviewed separately from invoice aging; foreign-currency advances remain safely rejected pending dedicated FX settlement support.
 - Reversal/correction limitations reviewed against cutover correction policy.
 
 ## Rollback And Reset

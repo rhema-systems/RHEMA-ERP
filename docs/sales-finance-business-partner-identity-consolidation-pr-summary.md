@@ -47,5 +47,5 @@ This is a development-stage schema cut. A production database with retained lega
 ## Limitation Register
 
 - `FIN-LIM-0049` is resolved by the canonical `BusinessPartnerId` accounting identity and explicit same-partner application checks.
-- `FIN-LIM-0045` remains open for unapplied payment/receipt/advance reporting.
-- `FIN-LIM-0012` remains open for credit-note reversal and correction accounting.
+- `FIN-LIM-0045` is resolved for functional-currency advance reporting and application by `docs/ap-ar-advance-settlement-credit-note-reversal-pr-summary.md`.
+- `FIN-LIM-0012` is resolved for immutable Sales credit-note reversal and correction accounting by `docs/ap-ar-advance-settlement-credit-note-reversal-pr-summary.md`.

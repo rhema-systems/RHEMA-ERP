@@ -47,6 +47,68 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
 
+        public async Task<SubledgerUnappliedSettlementReportDto> GetUnappliedSettlementsAsync(
+            DateTime? asOfDate = null,
+            Guid? supplierId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var date = asOfDate ?? DateTime.UtcNow;
+            var rebuild = await _settlementReadModelService.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsPayable,
+                AsOfDate = date,
+                RecordAudit = false
+            }, cancellationToken);
+
+            var balances = (await _settlementReadModelService.GetUnappliedBalancesAsync(
+                    SubledgerSettlementModules.AccountsPayable,
+                    date,
+                    supplierId,
+                    cancellationToken))
+                .Where(b => b.UnappliedAmount != 0m)
+                .ToList();
+
+            var supplierIds = balances.Select(b => b.CounterpartyId).Distinct().ToList();
+            var supplierNames = await _unitOfWork.Repository<Supplier>()
+                .GetQueryable(s => s.TenantId == TenantId && supplierIds.Contains(s.Id) && !s.IsDeleted)
+                .Select(s => new { s.Id, s.Name })
+                .ToDictionaryAsync(s => s.Id, s => s.Name, cancellationToken);
+
+            var report = new SubledgerUnappliedSettlementReportDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsPayable,
+                AsOfDate = date,
+                TotalUnappliedAmount = balances.Sum(b => b.UnappliedAmount),
+                CounterpartyCount = balances.Select(b => b.CounterpartyId).Distinct().Count(),
+                Diagnostics = rebuild.Diagnostics
+            };
+
+            report.Lines = balances.Select(b => new SubledgerUnappliedSettlementBalanceDto
+            {
+                Id = b.Id,
+                SourceModule = b.SourceModule,
+                CounterpartyId = b.CounterpartyId,
+                CounterpartyName = supplierNames.GetValueOrDefault(b.CounterpartyId) ?? "Supplier",
+                SettlementSourceType = b.SettlementSourceType,
+                SettlementSourceId = b.SettlementSourceId,
+                SettlementSourceNumber = b.SettlementSourceNumber,
+                Classification = b.Classification,
+                SettlementPostingEventId = b.SettlementPostingEventId,
+                SettlementJournalEntryId = b.SettlementJournalEntryId,
+                SettlementDate = b.SettlementDate,
+                DocumentCurrencyCode = b.DocumentCurrencyCode,
+                FunctionalCurrencyCode = b.FunctionalCurrencyCode,
+                OriginalAmount = b.OriginalAmount,
+                AppliedAmount = b.AppliedAmount,
+                UnappliedAmount = b.UnappliedAmount,
+                HasDiagnostics = b.HasDiagnostics,
+                DiagnosticFlags = b.DiagnosticFlags
+            }).ToList();
+
+            await RecordReportAuditAsync(FinanceAuditEvents.ApUnappliedSettlementsGenerated, report, cancellationToken);
+            return report;
+        }
+
         // ═════════════════════════════════════════════════════════════════
         //  AGING REPORT
         // ═════════════════════════════════════════════════════════════════

@@ -26,6 +26,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? SuspenseAccountId { get; set; }
         public Guid? ControlAccountArId { get; set; }
         public Guid? ControlAccountApId { get; set; }
+        public Guid? SupplierAdvanceAccountId { get; set; }
+        public Guid? CustomerAdvanceAccountId { get; set; }
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
@@ -62,6 +64,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? SuspenseAccountId { get; set; }
         public Guid? ControlAccountArId { get; set; }
         public Guid? ControlAccountApId { get; set; }
+        public Guid? SupplierAdvanceAccountId { get; set; }
+        public Guid? CustomerAdvanceAccountId { get; set; }
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }

@@ -394,12 +394,33 @@ WHERE TenantId = @TenantId
   AND (OriginalFunctionalAmount = 0 OR FunctionalCurrencyCode IS NULL);
 ```
 
+## Unapplied Payments and Advances
+
+`SubledgerUnappliedSettlementBalance` is a rebuildable, tenant-scoped read model for posted
+supplier payments and customer receipts with an unallocated balance. It is intentionally kept
+outside invoice aging: an advance is a separate asset/liability position, not a current invoice.
+
+- AP supplier advance: initial posting is `Dr Supplier Advance / Cr Bank or Cash`; each later
+  invoice application posts `Dr AP Control / Cr Supplier Advance` through `IFinancePostingEngine`.
+- AR customer advance: initial posting is `Dr Bank or Cash / Cr Customer Advance`; each later
+  invoice application posts `Dr Customer Advance / Cr AR Control` through `IFinancePostingEngine`.
+- The read model is rebuilt from posted payment/receipt events and non-reversed allocations. It
+  creates no journals and never mutates source documents or posted GL.
+- Advance account mappings are tenant-scoped Finance settings. Supplier advance accounts must be
+  active, direct-posting assets; customer advance accounts must be active, direct-posting liabilities.
+- Foreign-currency advances are rejected until a dedicated FX application/reclassification model
+  is implemented. That guard prevents a current-rate application from misstating the advance.
+
+Dedicated endpoints are available at `GET /api/ap/reports/unapplied-settlements` and
+`GET /api/ar/reports/unapplied-settlements`. They use the same tenant validation and Finance
+report permission as the existing aging reports, but never mix advances into aging buckets.
+
 ## Known Limitations
 
 - `FIN-LIM-0001` is resolved for rebuildable AP/AR settlement read models, aging, and control reconciliation.
-- `FIN-LIM-0045` tracks unapplied AP payments, unapplied AR receipts, and advances as a separate go-live reporting scope.
+- `FIN-LIM-0045` is resolved for functional-currency AP/AR advances, separate unapplied balance reporting, and engine-posted advance application. Foreign-currency advances remain rejected safely rather than partially posted.
 - `FIN-LIM-0013` remains open for the compatibility `CustomerPayment.IsCreditNote` workflow path.
-- `FIN-LIM-0009`, `FIN-LIM-0010`, and `FIN-LIM-0012` remain open for AP payment, AR receipt, and AR credit-note reversal/correction accounting.
+- `FIN-LIM-0009` and `FIN-LIM-0010` remain open for AP payment and AR receipt reversal/correction accounting. Sales credit-note correction is resolved under `FIN-LIM-0012`.
 
 ## Test Coverage
 

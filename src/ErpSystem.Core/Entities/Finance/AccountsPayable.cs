@@ -401,6 +401,12 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    /// <summary>
+    /// True only when the original posted payment was recorded to the configured supplier-advance
+    /// account. Later allocations must reclassify that advance through the Finance posting engine.
+    /// </summary>
+    public bool IsSupplierAdvance { get; set; }
+
     [NotMapped]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 
@@ -516,6 +522,14 @@ public class VendorPaymentAllocation : TenantEntity
     // Track reversals
     public bool IsReversal { get; set; } = false;
     public Guid? OriginalAllocationId { get; set; }
+
+    /// <summary>
+    /// Present only when a previously posted supplier advance is applied. The allocation's
+    /// reclassification journal/event are immutable evidence; ordinary pre-post allocations
+    /// do not create a second journal.
+    /// </summary>
+    public Guid? ApplicationJournalEntryId { get; set; }
+    public Guid? ApplicationPostingEventId { get; set; }
 
     // ── Multi-tenant ────────────────────────────────────────────────────
 

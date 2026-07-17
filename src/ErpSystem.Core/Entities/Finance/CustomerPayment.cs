@@ -31,6 +31,12 @@ public class CustomerPayment : BusinessEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    /// <summary>
+    /// True only when the original posted receipt was recorded to the configured customer-advance
+    /// liability account. Later allocations must reclassify that advance through the Finance posting engine.
+    /// </summary>
+    public bool IsCustomerAdvance { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 

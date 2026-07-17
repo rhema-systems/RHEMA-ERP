@@ -37,6 +37,7 @@ public interface IReturnOrderService
     Task<CreditNoteDetailDto> ApproveCreditNoteAsync(Guid id);
     Task<CreditNoteDetailDto> PostCreditNoteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CreditNoteDetailDto> ApplyCreditNoteAsync(Guid id, Guid? invoiceId = null);
+    Task<CreditNoteDetailDto> ReverseCreditNoteAsync(Guid id, ReverseCreditNoteDto dto, CancellationToken cancellationToken = default);
     Task<CreditNoteDetailDto> VoidCreditNoteAsync(Guid id, string? reason = null);
 
     // ── Refunds ──

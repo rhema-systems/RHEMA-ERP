@@ -120,7 +120,7 @@ Full solution build was attempted earlier but timed out in this workspace; targe
 
 - `FIN-LIM-0018`: resolved for normal runtime Finance posting paths.
 - `FIN-LIM-0006`: remains open for opening-balance and migration posting through a future controlled posting-engine batch.
-- `FIN-LIM-0009`, `FIN-LIM-0010`, `FIN-LIM-0011`, `FIN-LIM-0012`, `FIN-LIM-0030`, `FIN-LIM-0033`, and `FIN-LIM-0037` remain open because reversal/correction accounting was not part of this batch.
+- `FIN-LIM-0009`, `FIN-LIM-0010`, `FIN-LIM-0011`, `FIN-LIM-0030`, `FIN-LIM-0033`, and `FIN-LIM-0037` remain open because reversal/correction accounting was not part of this batch. Sales credit-note correction is resolved separately under `FIN-LIM-0012`.
 
 ## Rollback Considerations
 

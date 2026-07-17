@@ -46,6 +46,68 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
 
+        public async Task<SubledgerUnappliedSettlementReportDto> GetUnappliedSettlementsAsync(
+            DateTime? asOfDate = null,
+            Guid? customerId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var date = asOfDate ?? DateTime.UtcNow;
+            var rebuild = await _settlementReadModelService.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsReceivable,
+                AsOfDate = date,
+                RecordAudit = false
+            }, cancellationToken);
+
+            var balances = (await _settlementReadModelService.GetUnappliedBalancesAsync(
+                    SubledgerSettlementModules.AccountsReceivable,
+                    date,
+                    customerId,
+                    cancellationToken))
+                .Where(b => b.UnappliedAmount != 0m)
+                .ToList();
+
+            var customerIds = balances.Select(b => b.CounterpartyId).Distinct().ToList();
+            var customerNames = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p => p.TenantId == TenantId && customerIds.Contains(p.Id) && !p.IsDeleted)
+                .Select(p => new { p.Id, p.PartnerName })
+                .ToDictionaryAsync(p => p.Id, p => p.PartnerName, cancellationToken);
+
+            var report = new SubledgerUnappliedSettlementReportDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsReceivable,
+                AsOfDate = date,
+                TotalUnappliedAmount = balances.Sum(b => b.UnappliedAmount),
+                CounterpartyCount = balances.Select(b => b.CounterpartyId).Distinct().Count(),
+                Diagnostics = rebuild.Diagnostics
+            };
+
+            report.Lines = balances.Select(b => new SubledgerUnappliedSettlementBalanceDto
+            {
+                Id = b.Id,
+                SourceModule = b.SourceModule,
+                CounterpartyId = b.CounterpartyId,
+                CounterpartyName = customerNames.GetValueOrDefault(b.CounterpartyId) ?? "Customer",
+                SettlementSourceType = b.SettlementSourceType,
+                SettlementSourceId = b.SettlementSourceId,
+                SettlementSourceNumber = b.SettlementSourceNumber,
+                Classification = b.Classification,
+                SettlementPostingEventId = b.SettlementPostingEventId,
+                SettlementJournalEntryId = b.SettlementJournalEntryId,
+                SettlementDate = b.SettlementDate,
+                DocumentCurrencyCode = b.DocumentCurrencyCode,
+                FunctionalCurrencyCode = b.FunctionalCurrencyCode,
+                OriginalAmount = b.OriginalAmount,
+                AppliedAmount = b.AppliedAmount,
+                UnappliedAmount = b.UnappliedAmount,
+                HasDiagnostics = b.HasDiagnostics,
+                DiagnosticFlags = b.DiagnosticFlags
+            }).ToList();
+
+            await RecordReportAuditAsync(FinanceAuditEvents.ArUnappliedSettlementsGenerated, report, cancellationToken);
+            return report;
+        }
+
         public async Task<AgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default)
         {
             // The constructor requires the projection service. This branch is deliberately

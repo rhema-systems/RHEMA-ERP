@@ -128,6 +128,20 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual Account? ControlAccountAp { get; set; }
 
         /// <summary>
+        /// Asset account used when a posted vendor payment is not yet applied to a supplier invoice.
+        /// Applying the advance later reclassifies it to AP control through the Finance posting engine.
+        /// </summary>
+        public Guid? SupplierAdvanceAccountId { get; set; }
+        public virtual Account? SupplierAdvanceAccount { get; set; }
+
+        /// <summary>
+        /// Liability account used when a posted customer receipt is not yet applied to an AR invoice.
+        /// Applying the advance later reclassifies it to AR control through the Finance posting engine.
+        /// </summary>
+        public Guid? CustomerAdvanceAccountId { get; set; }
+        public virtual Account? CustomerAdvanceAccount { get; set; }
+
+        /// <summary>
         /// Default Control Account for Inventory
         /// </summary>
         public Guid? ControlAccountInventoryId { get; set; }

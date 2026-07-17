@@ -224,6 +224,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             if (dto.ControlAccountArId.HasValue) settings.ControlAccountArId = dto.ControlAccountArId;
             if (dto.ControlAccountApId.HasValue) settings.ControlAccountApId = dto.ControlAccountApId;
+            if (dto.SupplierAdvanceAccountId.HasValue) settings.SupplierAdvanceAccountId = dto.SupplierAdvanceAccountId;
+            if (dto.CustomerAdvanceAccountId.HasValue) settings.CustomerAdvanceAccountId = dto.CustomerAdvanceAccountId;
             if (dto.ControlAccountInventoryId.HasValue) settings.ControlAccountInventoryId = dto.ControlAccountInventoryId;
             if (dto.ControlAccountPayrollId.HasValue) settings.ControlAccountPayrollId = dto.ControlAccountPayrollId;
             if (dto.ControlAccountTaxId.HasValue) settings.ControlAccountTaxId = dto.ControlAccountTaxId;
@@ -358,6 +360,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 SuspenseAccountId = settings.SuspenseAccountId,
                 ControlAccountArId = settings.ControlAccountArId,
                 ControlAccountApId = settings.ControlAccountApId,
+                SupplierAdvanceAccountId = settings.SupplierAdvanceAccountId,
+                CustomerAdvanceAccountId = settings.CustomerAdvanceAccountId,
                 ControlAccountInventoryId = settings.ControlAccountInventoryId,
                 ControlAccountPayrollId = settings.ControlAccountPayrollId,
                 ControlAccountTaxId = settings.ControlAccountTaxId,

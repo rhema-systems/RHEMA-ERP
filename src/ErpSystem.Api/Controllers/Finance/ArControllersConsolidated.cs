@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -813,6 +814,17 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("control-reconciliation")]
         public async Task<ActionResult<SubledgerControlReconciliationDto>> GetControlReconciliation([FromQuery] DateTime? asOfDate = null)
             => Ok(await _reportsService.GetControlReconciliationAsync(asOfDate));
+
+        /// <summary>
+        /// Shows customer advances and other posted but unapplied receipts. These balances are
+        /// intentionally excluded from invoice aging because they do not have an invoice due date.
+        /// </summary>
+        [HttpGet("unapplied-settlements")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<SubledgerUnappliedSettlementReportDto>> GetUnappliedSettlements(
+            [FromQuery] DateTime? asOfDate = null,
+            [FromQuery] Guid? customerId = null)
+            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, customerId));
 
         /// <summary>
         /// Generates a detailed AR aging report with per-customer and per-invoice breakdown by aging buckets.

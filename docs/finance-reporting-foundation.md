@@ -192,7 +192,7 @@ All open limitations are tracked in `docs/finance-go-live-limitations-register.m
 - `FIN-LIM-0001`: Resolved by `docs/ap-ar-settlement-read-model-foundation.md`; AP/AR aging and control reconciliation now use the rebuildable settlement read model.
 - `FIN-LIM-0002`: Resolved for backend CSV export/print endpoints and export/print audit by `docs/backend-reporting-export-presentation-foundation.md`.
 - `FIN-LIM-0044`: Resolved for core income statement/export presentation by mapping fixed asset disposal gains out of operating expense and surfacing warnings where the COA still uses a presentation workaround.
-- `FIN-LIM-0045`: Unapplied AP payments, unapplied AR receipts, and advances remain a separate reporting/statement scope where production requires them.
+- `FIN-LIM-0045`: Resolved for functional-currency advances and unapplied settlement reporting; these balances remain separate from invoice aging. Foreign-currency advances are rejected pending dedicated FX settlement support.
 - `FIN-LIM-0015`: Cash/bank position and ledger are functional-currency GL reports. Foreign-currency cash/bank presentation and IAS 21 revaluation/translation belong to the FX batch.
 - `FIN-LIM-0003`: Resolved by `docs/ghana-statutory-tax-reporting-export-foundation.md`; Ghana statutory tax reports and CSV exports now use posted tax snapshots and posted GL tax account movement.
 

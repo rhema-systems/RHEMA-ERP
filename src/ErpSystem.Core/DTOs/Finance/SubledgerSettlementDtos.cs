@@ -14,6 +14,8 @@ public sealed class SubledgerSettlementRebuildResultDto
     public DateTime RebuiltAt { get; set; }
     public int ApDocumentCount { get; set; }
     public int ArDocumentCount { get; set; }
+    public int ApUnappliedSettlementCount { get; set; }
+    public int ArUnappliedSettlementCount { get; set; }
     public int ApplicationCount { get; set; }
     public int DiagnosticCount { get; set; }
     public List<SubledgerSettlementDiagnosticDto> Diagnostics { get; set; } = new();
@@ -45,6 +47,39 @@ public sealed class SubledgerSettlementBalanceDto
     public decimal OperationalOutstandingSnapshot { get; set; }
     public decimal OperationalVariance { get; set; }
     public List<SubledgerSettlementApplicationDto> Applications { get; set; } = new();
+}
+
+public sealed class SubledgerUnappliedSettlementBalanceDto
+{
+    public Guid Id { get; set; }
+    public string SourceModule { get; set; } = string.Empty;
+    public Guid CounterpartyId { get; set; }
+    public string CounterpartyName { get; set; } = string.Empty;
+    public string SettlementSourceType { get; set; } = string.Empty;
+    public Guid SettlementSourceId { get; set; }
+    public string SettlementSourceNumber { get; set; } = string.Empty;
+    public string Classification { get; set; } = string.Empty;
+    public Guid? SettlementPostingEventId { get; set; }
+    public Guid? SettlementJournalEntryId { get; set; }
+    public DateTime SettlementDate { get; set; }
+    public string DocumentCurrencyCode { get; set; } = string.Empty;
+    public string FunctionalCurrencyCode { get; set; } = string.Empty;
+    public decimal OriginalAmount { get; set; }
+    public decimal AppliedAmount { get; set; }
+    public decimal UnappliedAmount { get; set; }
+    public bool HasDiagnostics { get; set; }
+    public string? DiagnosticFlags { get; set; }
+}
+
+public sealed class SubledgerUnappliedSettlementReportDto
+{
+    public string SourceModule { get; set; } = string.Empty;
+    public DateTime AsOfDate { get; set; }
+    public bool UsesSettlementReadModel { get; set; } = true;
+    public decimal TotalUnappliedAmount { get; set; }
+    public int CounterpartyCount { get; set; }
+    public List<SubledgerUnappliedSettlementBalanceDto> Lines { get; set; } = new();
+    public List<SubledgerSettlementDiagnosticDto> Diagnostics { get; set; } = new();
 }
 
 public sealed class SubledgerSettlementApplicationDto

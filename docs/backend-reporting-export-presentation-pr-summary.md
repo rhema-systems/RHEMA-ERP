@@ -117,7 +117,7 @@ No migration required. This batch adds backend services, DTOs, audit constants, 
 - `FIN-LIM-0003`: Resolved by `docs/ghana-statutory-tax-reporting-export-foundation.md` for backend Ghana statutory tax reports and CSV exports.
 - `FIN-LIM-0004`: Resolved by `docs/ghana-statutory-tax-reporting-export-foundation.md` for backend WHT/VAT withholding certificate/reference reporting and CSV exports.
 - `FIN-LIM-0047`: Remains open for portal-specific filing pack formats and full withholding certificate issuance/receipt workflow if production requires them.
-- `FIN-LIM-0045`: Remains open for unapplied payments/receipts and advances.
+- `FIN-LIM-0045`: Resolved by `docs/ap-ar-advance-settlement-credit-note-reversal-pr-summary.md` for functional-currency advances and unapplied settlement reporting.
 
 ## Accounting Impact
 

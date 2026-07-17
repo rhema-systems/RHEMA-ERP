@@ -72,6 +72,12 @@ public static class FinanceAuditEvents
     public const string ArCreditNotePosted = "Finance.ARCreditNote.Posted";
     public const string ArCreditNotePostingFailed = "Finance.ARCreditNote.PostingFailed";
     public const string ArCreditNoteDuplicatePostingAttempt = "Finance.ARCreditNote.DuplicatePostingAttempt";
+    public const string ArCreditNoteReversed = "Finance.ARCreditNote.Reversed";
+    public const string ArCreditNoteReversalFailed = "Finance.ARCreditNote.ReversalFailed";
+    public const string ApSupplierAdvanceApplied = "Finance.AP.SupplierAdvanceApplied";
+    public const string ArCustomerAdvanceApplied = "Finance.AR.CustomerAdvanceApplied";
+    public const string ApUnappliedSettlementsGenerated = "Finance.AP.UnappliedSettlements.Generated";
+    public const string ArUnappliedSettlementsGenerated = "Finance.AR.UnappliedSettlements.Generated";
     public const string CashBankTransactionCaptured = "Finance.CashBankTransaction.Captured";
     public const string CashBankTransactionSubmitted = "Finance.CashBankTransaction.Submitted";
     public const string CashBankTransactionApproved = "Finance.CashBankTransaction.Approved";

@@ -660,6 +660,12 @@ public class ReturnOrderService : IReturnOrderService
             ?? throw new InvalidOperationException($"Credit Note {id} not found");
 
         var applicationInvoiceId = invoiceId ?? cn.OriginalInvoiceId;
+        if (cn.CreditNoteStatus == CreditNoteStatus.Reversed)
+        {
+            throw new InvalidOperationException(
+                "Reversed AR credit notes cannot be applied. Create a new approved credit note if a correction is required.");
+        }
+
         if (cn.CreditNoteStatus == CreditNoteStatus.Applied)
         {
             if (cn.AppliedToInvoiceId == applicationInvoiceId)
@@ -723,6 +729,134 @@ public class ReturnOrderService : IReturnOrderService
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Credit Note {DocNumber} applied", cn.DocumentNumber);
         return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+    }
+
+    public async Task<CreditNoteDetailDto> ReverseCreditNoteAsync(
+        Guid id,
+        ReverseCreditNoteDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        if (_financePostingEngine == null)
+            throw new InvalidOperationException("Central finance posting engine is not configured for AR credit note reversal.");
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+            throw new InvalidOperationException("A credit note reversal reason is required.");
+
+        CreditNote? creditNote = null;
+        var transactionStarted = false;
+        try
+        {
+            // Serialize the status check, inverse journal, and source links. A repeated request
+            // returns the first completed reversal rather than creating a second one.
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            transactionStarted = true;
+
+            var tenantId = _currentUserProvider.TenantId;
+            creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new KeyNotFoundException($"Credit Note {id} not found.");
+
+            if (creditNote.CreditNoteStatus == CreditNoteStatus.Reversed)
+            {
+                if (!creditNote.ReversalJournalEntryId.HasValue || !creditNote.ReversalPostingEventId.HasValue)
+                    throw new InvalidOperationException("Reversed AR credit note is missing its immutable reversal references.");
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
+                return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+            }
+
+            if (!creditNote.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Only a posted AR credit note can be reversed.");
+            if (creditNote.CreditNoteStatus != CreditNoteStatus.Approved && creditNote.CreditNoteStatus != CreditNoteStatus.Applied)
+                throw new InvalidOperationException("Only approved or applied AR credit notes can be reversed.");
+
+            var originalPostingEvent = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(e =>
+                    e.TenantId == tenantId &&
+                    e.SourceModule == "AR" &&
+                    e.SourceDocumentType == "SalesCreditNote" &&
+                    e.SourceDocumentId == creditNote.Id &&
+                    e.PostingAction == "Post" &&
+                    e.PostingStatus == "Posted" &&
+                    e.JournalEntryId == creditNote.JournalEntryId &&
+                    !e.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The original AR credit note posting event was not found for this tenant.");
+
+            var reversalPlan = await _financePostingEngine.GetReversalPlanAsync(
+                originalPostingEvent.Id,
+                dto.Reason,
+                dto.ReversalDate,
+                cancellationToken);
+            var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+            {
+                SourceModule = "AR",
+                SourceDocumentType = "SalesCreditNoteReversal",
+                SourceDocumentId = creditNote.Id,
+                SourceDocumentTenantId = creditNote.TenantId,
+                ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
+                ReversalReason = reversalPlan.Reason,
+                ReversalType = "Correction",
+                PostingAction = reversalPlan.PostingAction,
+                SourceDocumentReference = $"{creditNote.DocumentNumber}-REV",
+                Description = $"Reverse AR credit note {creditNote.DocumentNumber}",
+                PostingDate = reversalPlan.ReversalDate,
+                JournalType = "AR Credit Note Reversal",
+                BookClassification = originalPostingEvent.BookClassification,
+                FunctionalCurrencyCode = originalPostingEvent.FunctionalCurrencyCode,
+                IdempotencyKey = $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Reverse",
+                ReturnExistingOnDuplicate = true,
+                Lines = reversalPlan.ReversalLines
+            }, cancellationToken);
+
+            creditNote.CreditNoteStatus = CreditNoteStatus.Reversed;
+            creditNote.ReversalJournalEntryId = postingResult.JournalEntryId;
+            creditNote.ReversalPostingEventId = postingResult.PostingEventId;
+            creditNote.ReversedAt = reversalPlan.ReversalDate;
+            creditNote.ReversalReason = reversalPlan.Reason;
+            creditNote.UpdatedAt = DateTime.UtcNow;
+            creditNote.UpdatedBy = _currentUserProvider.Username;
+            await _creditNoteRepo.UpdateAsync(creditNote);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
+            transactionStarted = false;
+
+            await RecordArCreditNoteAuditAsync(
+                FinanceAuditEvents.ArCreditNoteReversed,
+                creditNote,
+                postingEventId: postingResult.PostingEventId,
+                journalEntryId: postingResult.JournalEntryId,
+                afterValues: new
+                {
+                    creditNote.CreditNoteStatus,
+                    creditNote.ReversalPostingEventId,
+                    creditNote.ReversalJournalEntryId,
+                    creditNote.ReversedAt
+                },
+                reason: reversalPlan.Reason,
+                comment: "AR credit note reversed through the central finance posting engine.",
+                cancellationToken: cancellationToken);
+
+            return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+        }
+        catch (Exception ex)
+        {
+            if (transactionStarted)
+                await _unitOfWork.RollbackAsync(cancellationToken);
+
+            if (creditNote != null)
+            {
+                await RecordArCreditNoteAuditAsync(
+                    FinanceAuditEvents.ArCreditNoteReversalFailed,
+                    creditNote,
+                    afterValues: new { error = ex.Message },
+                    reason: ex.Message,
+                    cancellationToken: cancellationToken);
+            }
+
+            _logger.LogError(ex, "Failed to reverse AR credit note {DocumentNumber}", creditNote?.DocumentNumber ?? id.ToString());
+            throw;
+        }
     }
 
     public async Task<CreditNoteDetailDto> VoidCreditNoteAsync(Guid id, string? reason = null)
@@ -829,6 +963,9 @@ public class ReturnOrderService : IReturnOrderService
         var tenantId = _currentUserProvider.TenantId;
         if (creditNote.TenantId != tenantId)
             throw new InvalidOperationException("AR credit note belongs to another tenant.");
+
+        if (creditNote.CreditNoteStatus == CreditNoteStatus.Reversed)
+            throw new InvalidOperationException("Reversed AR credit notes cannot be posted again. Create a new approved credit note if a correction is required.");
 
         var existingPostedEvent = creditNote.JournalEntryId.HasValue ||
             await _unitOfWork.Repository<FinancePostingEvent>()
@@ -1028,10 +1165,11 @@ public class ReturnOrderService : IReturnOrderService
         // authoritative prior-credit facts used to prevent concurrent over-crediting.
         return RoundMoney(await _creditNoteRepo
             .GetQueryable(c =>
-                c.TenantId == tenantId &&
-                (!excludedCreditNoteId.HasValue || c.Id != excludedCreditNoteId.Value) &&
-                c.OriginalInvoiceId == invoiceId &&
-                postedCreditNoteIds.Contains(c.Id) &&
+            c.TenantId == tenantId &&
+            (!excludedCreditNoteId.HasValue || c.Id != excludedCreditNoteId.Value) &&
+            c.OriginalInvoiceId == invoiceId &&
+            c.CreditNoteStatus != CreditNoteStatus.Reversed &&
+            postedCreditNoteIds.Contains(c.Id) &&
                 !c.IsDeleted)
             .SumAsync(c => c.TotalAmount, cancellationToken));
     }
@@ -1587,6 +1725,10 @@ public class ReturnOrderService : IReturnOrderService
         OriginalInvoiceId = c.OriginalInvoiceId,
         AppliedToInvoiceId = c.AppliedToInvoiceId,
         TaxAmount = c.TaxAmount,
+        ReversalJournalEntryId = c.ReversalJournalEntryId,
+        ReversalPostingEventId = c.ReversalPostingEventId,
+        ReversedAt = c.ReversedAt,
+        ReversalReason = c.ReversalReason,
         Lines = c.Lines?.Select(l => new CreditNoteLineDto
         {
             Id = l.Id,

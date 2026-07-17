@@ -33,6 +33,14 @@ public interface IApReportsService
     Task<SubledgerControlReconciliationDto> GetControlReconciliationAsync(DateTime? asOfDate = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Shows posted supplier advances and other unapplied vendor payments separately from invoice aging.
+    /// </summary>
+    Task<SubledgerUnappliedSettlementReportDto> GetUnappliedSettlementsAsync(
+        DateTime? asOfDate = null,
+        Guid? supplierId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Generates detailed aging report with invoice-level breakdown per supplier.
     /// </summary>
     Task<ApAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default);

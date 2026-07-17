@@ -329,7 +329,7 @@ Regression checks run:
 - `FIN-LIM-0003`: resolved for backend Ghana statutory tax report and CSV export foundation.
 - `FIN-LIM-0004`: resolved for backend WHT/VAT withholding certificate/reference reporting and CSV export foundation.
 - `FIN-LIM-0047`: added for portal-specific statutory filing pack formats and full withholding certificate issuance/receipt workflow if required before final sign-off.
-- `FIN-LIM-0045`: remains open for unapplied payments/receipts and advances.
+- `FIN-LIM-0045`: resolved for functional-currency advances and separate unapplied settlement reporting by `docs/ap-ar-advance-settlement-credit-note-reversal-pr-summary.md`.
 - `FIN-LIM-0046`: remains accepted non-blocking for richer formatted finance report packs.
 
 ## PR Definition Of Done

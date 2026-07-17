@@ -125,6 +125,12 @@ public class ReturnOrderController : ControllerBase
     public async Task<IActionResult> ApplyCreditNote(Guid id, [FromQuery] Guid? invoiceId = null)
         => Ok(await _service.ApplyCreditNoteAsync(id, invoiceId));
 
+    // A posted credit note is corrected through an immutable Finance-engine reversal, never a void/update.
+    [HttpPost("~/api/sales/credit-notes/{id:guid}/reverse")]
+    [Authorize(Policy = FinancePermissions.VoidArInvoices)]
+    public async Task<IActionResult> ReverseCreditNote(Guid id, [FromBody] ReverseCreditNoteDto dto, CancellationToken cancellationToken)
+        => Ok(await _service.ReverseCreditNoteAsync(id, dto, cancellationToken));
+
     [HttpPost("~/api/sales/credit-notes/{id:guid}/void")]
     [Authorize(Policy = FinancePermissions.VoidArInvoices)]
     public async Task<IActionResult> VoidCreditNote(Guid id, [FromQuery] string? reason = null)

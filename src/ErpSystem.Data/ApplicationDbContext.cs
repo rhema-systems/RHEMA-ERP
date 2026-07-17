@@ -127,6 +127,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<FxRevaluationLine> FxRevaluationLines { get; set; }
     public DbSet<SubledgerSettlementBalance> SubledgerSettlementBalances { get; set; }
     public DbSet<SubledgerSettlementApplication> SubledgerSettlementApplications { get; set; }
+    public DbSet<SubledgerUnappliedSettlementBalance> SubledgerUnappliedSettlementBalances { get; set; }
     public DbSet<OpeningBalanceBatch> OpeningBalanceBatches { get; set; }
     public DbSet<OpeningBalanceLine> OpeningBalanceLines { get; set; }
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
@@ -1081,6 +1082,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<PaymentAllocation>(entity =>
+        {
+            // Advance applications are their own posted reclassification, not an edit to the receipt.
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.ApplicationJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.ApplicationPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.ApplicationPostingEventId });
+        });
+
         builder.Entity<InvoiceLineItem>(entity =>
         {
             entity.ToTable("InvoiceLineItem");
@@ -1407,11 +1422,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.JournalEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.JournalEntryId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalJournalEntryId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
         });
 
         builder.Entity<CreditNoteLine>(entity =>
@@ -1853,6 +1878,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(i => i.PaymentAllocations)
                 .HasForeignKey(e => e.VendorInvoiceId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.ApplicationJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.ApplicationPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.ApplicationPostingEventId });
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
@@ -2215,6 +2249,37 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(e => e.FxRealizedSettlement)
                 .WithMany()
                 .HasForeignKey(e => e.FxRealizedSettlementId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SubledgerUnappliedSettlementBalance>(entity =>
+        {
+            entity.ToTable("SubledgerUnappliedSettlementBalances");
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => new { e.TenantId, e.SourceModule, e.SettlementSourceType, e.SettlementSourceId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.SourceModule, e.CounterpartyId, e.SettlementDate });
+            entity.HasIndex(e => new { e.TenantId, e.SettlementPostingEventId });
+            entity.HasIndex(e => new { e.TenantId, e.SettlementJournalEntryId });
+            entity.Property(e => e.SourceModule).HasMaxLength(10).IsRequired();
+            entity.Property(e => e.SettlementSourceType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.SettlementSourceNumber).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Classification).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.DocumentCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.DiagnosticFlags).HasMaxLength(1000);
+            entity.HasOne(e => e.SettlementPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementJournalEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
@@ -9285,6 +9350,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(s => s.UnrealizedFxLossAccount)
                 .WithMany()
                 .HasForeignKey(s => s.UnrealizedFxLossAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(s => s.SupplierAdvanceAccount)
+                .WithMany()
+                .HasForeignKey(s => s.SupplierAdvanceAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(s => s.CustomerAdvanceAccount)
+                .WithMany()
+                .HasForeignKey(s => s.CustomerAdvanceAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

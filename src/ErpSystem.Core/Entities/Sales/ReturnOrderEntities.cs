@@ -121,6 +121,14 @@ public class CreditNote : DocumentEntity
     // GL Posting
     public Guid? JournalEntryId { get; set; }
 
+    // Posted credit notes are corrected by a separate, engine-posted reversal. The original amount,
+    // lines and source links remain immutable for audit and settlement rebuilds.
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    [StringLength(500)]
+    public string? ReversalReason { get; set; }
+
     // Multi-tenant
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;

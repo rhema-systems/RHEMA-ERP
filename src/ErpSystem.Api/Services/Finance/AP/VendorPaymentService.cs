@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -340,7 +341,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new KeyNotFoundException($"Vendor payment with Id '{paymentId}' not found.");
 
             if (payment.JournalEntryId.HasValue)
-                throw new InvalidOperationException("Posted vendor payments cannot be allocated. Use a reversal, void, or adjustment workflow.");
+            {
+                if (!payment.IsSupplierAdvance)
+                    throw new InvalidOperationException("Posted vendor payments cannot be allocated. Use a reversal, void, or adjustment workflow.");
+
+                // A posted supplier advance is the explicit exception: applying it creates a new
+                // AP-control/advance reclassification through the central posting engine.
+                return await AllocatePostedSupplierAdvanceAsync(paymentId, allocations, cancellationToken);
+            }
 
             var result = new VendorPaymentAllocationResultDto
             {
@@ -446,6 +454,171 @@ namespace ErpSystem.Api.Services.Finance.AP
                 result.Allocations.Count, paymentId, result.TotalAllocated);
 
             return result;
+        }
+
+        private async Task<VendorPaymentAllocationResultDto> AllocatePostedSupplierAdvanceAsync(
+            Guid paymentId,
+            IReadOnlyCollection<VendorPaymentAllocationCreateDto> requestedAllocations,
+            CancellationToken cancellationToken)
+        {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for supplier advance application.");
+            if (requestedAllocations.Count == 0)
+                throw new InvalidOperationException("At least one supplier-invoice allocation is required to apply an advance.");
+            if (requestedAllocations.Any(a => a.AllocatedAmount <= 0m || a.DiscountAmount != 0m || a.WithholdingTaxAmount != 0m))
+                throw new InvalidOperationException("Supplier advance applications support positive cash allocations only; use a dedicated adjustment workflow for discounts or withholding.");
+
+            var transactionStarted = false;
+            try
+            {
+                // The available advance, invoice balances, allocation facts, and reclassification
+                // postings have to commit together. Serializable isolation prevents double use of one advance.
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                transactionStarted = true;
+
+                var payment = await _unitOfWork.Repository<VendorPayment>()
+                    .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId && !p.IsDeleted)
+                    .Include(p => p.Allocations)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Supplier advance with Id '{paymentId}' was not found.");
+
+                if (!payment.JournalEntryId.HasValue || !payment.IsSupplierAdvance)
+                    throw new InvalidOperationException("Only a posted supplier advance can be applied through this workflow.");
+
+                var settings = await GetFinanceSettingsAsync(cancellationToken);
+                var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
+                var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+                if (!string.Equals(NormalizeCurrency(payment.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Foreign-currency supplier advance application is not supported until advance FX settlement is implemented.");
+
+                var apAccountId = supplier.DefaultApAccountId
+                    ?? settings.ControlAccountApId
+                    ?? throw new InvalidOperationException("AP control account is not configured for this tenant.");
+                var advanceAccountId = settings.SupplierAdvanceAccountId
+                    ?? throw new InvalidOperationException("Supplier advance account is not configured for this tenant.");
+                var accountCache = new Dictionary<Guid, Account>();
+                await ResolvePaymentPostingAccountAsync(apAccountId, "AP control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+                var advanceAccount = await ResolvePaymentPostingAccountAsync(advanceAccountId, "supplier advance account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+                if (advanceAccount.AccountType != AccountType.Asset)
+                    throw new InvalidOperationException("Supplier advance account must be an asset account.");
+
+                var currentlyAllocated = RoundMoney(payment.Allocations.Where(a => !a.IsReversal).Sum(a => a.AllocatedAmount));
+                var requestedTotal = RoundMoney(requestedAllocations.Sum(a => a.AllocatedAmount));
+                if (requestedTotal > RoundMoney(payment.TotalAmount - currentlyAllocated))
+                    throw new InvalidOperationException("Supplier advance application exceeds the unallocated advance balance.");
+
+                var now = DateTime.UtcNow;
+                var result = new VendorPaymentAllocationResultDto { PaymentId = payment.Id };
+                foreach (var requested in requestedAllocations)
+                {
+                    var invoice = await _unitOfWork.Repository<VendorInvoice>()
+                        .GetQueryable(i => i.TenantId == TenantId && i.Id == requested.VendorInvoiceId && !i.IsDeleted)
+                        .FirstOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException("Supplier advance application invoice was not found for this tenant.");
+                    if (invoice.SupplierId != payment.SupplierId)
+                        throw new InvalidOperationException("Supplier advance can only be applied to invoices for the same supplier.");
+                    if (!invoice.JournalEntryId.HasValue)
+                        throw new InvalidOperationException($"Supplier advance cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
+                    if (!string.Equals(NormalizeCurrency(invoice.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Foreign-currency supplier advance application is not supported until advance FX settlement is implemented.");
+
+                    var invoiceOutstanding = RoundMoney(invoice.TotalAmount - invoice.PaidAmount);
+                    if (requested.AllocatedAmount > invoiceOutstanding)
+                        throw new InvalidOperationException($"Supplier advance application exceeds the outstanding balance of invoice '{invoice.InvoiceNumber}'.");
+
+                    var allocation = new VendorPaymentAllocation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        VendorPaymentId = payment.Id,
+                        VendorInvoiceId = invoice.Id,
+                        AllocatedAmount = RoundMoney(requested.AllocatedAmount),
+                        AllocationDate = now,
+                        Notes = requested.Notes,
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    };
+
+                    // Register the allocation explicitly as Added. Updating the payment source
+                    // record later must not turn this new row into a modified-only graph entry.
+                    await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(allocation);
+                    payment.Allocations.Add(allocation);
+                    // This is a read-side operational snapshot. Recompute it from allocations so
+                    // a stale value cannot cause an advance to be over-applied after a retry.
+                    payment.AllocatedAmount = RoundMoney(payment.Allocations
+                        .Where(a => !a.IsReversal)
+                        .Sum(a => a.AllocatedAmount));
+                    payment.UpdatedAt = now;
+                    payment.UpdatedBy = UserName;
+                    invoice.PaidAmount = RoundMoney(invoice.PaidAmount + allocation.AllocatedAmount);
+                    invoice.Status = invoice.PaidAmount >= invoice.TotalAmount
+                        ? VendorInvoiceStatus.Paid
+                        : VendorInvoiceStatus.PartiallyPaid;
+                    invoice.UpdatedAt = now;
+                    invoice.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+                    await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    {
+                        SourceModule = "AP",
+                        SourceDocumentType = "VendorPaymentAdvanceApplication",
+                        SourceDocumentId = allocation.Id,
+                        SourceDocumentTenantId = payment.TenantId,
+                        PostingAction = "Post",
+                        SourceDocumentReference = $"{payment.PaymentNumber}:{invoice.InvoiceNumber}",
+                        Description = $"Apply supplier advance {payment.PaymentNumber} to invoice {invoice.InvoiceNumber}",
+                        PostingDate = now,
+                        JournalType = "AP Supplier Advance Application",
+                        BookClassification = "IFRS",
+                        FunctionalCurrencyCode = functionalCurrency,
+                        IdempotencyKey = $"AP:VendorPaymentAdvanceApplication:{payment.TenantId:N}:{allocation.Id:N}:Post",
+                        ReturnExistingOnDuplicate = true,
+                        Lines = new[]
+                        {
+                            BuildPostingLine(apAccountId, $"Apply supplier advance {payment.PaymentNumber}", allocation.AllocatedAmount, 0m, functionalCurrency, functionalCurrency, 1m, now, payment.PaymentNumber, 1, "AP-Control"),
+                            BuildPostingLine(advanceAccountId, $"Apply supplier advance {payment.PaymentNumber}", 0m, allocation.AllocatedAmount, functionalCurrency, functionalCurrency, 1m, now, payment.PaymentNumber, 2, "AP-SupplierAdvance")
+                        }
+                    }, cancellationToken);
+
+                    allocation.ApplicationJournalEntryId = postingResult.JournalEntryId;
+                    allocation.ApplicationPostingEventId = postingResult.PostingEventId;
+                    allocation.UpdatedAt = now;
+                    allocation.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<VendorPaymentAllocation>().UpdateAsync(allocation);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    result.Allocations.Add(new VendorPaymentAllocationDto
+                    {
+                        Id = allocation.Id,
+                        VendorPaymentId = payment.Id,
+                        VendorInvoiceId = invoice.Id,
+                        InvoiceNumber = invoice.InvoiceNumber,
+                        AllocatedAmount = allocation.AllocatedAmount,
+                        AllocationDate = allocation.AllocationDate,
+                        Notes = allocation.Notes
+                    });
+                }
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
+                result.TotalAllocated = payment.AllocatedAmount;
+                result.RemainingUnallocated = RoundMoney(payment.TotalAmount - payment.AllocatedAmount);
+                await RecordApPaymentAuditAsync(
+                    FinanceAuditEvents.ApSupplierAdvanceApplied,
+                    payment,
+                    afterValues: new { result.TotalAllocated, result.RemainingUnallocated, AllocationCount = result.Allocations.Count },
+                    comment: "Posted supplier advance application through the central finance posting engine.",
+                    cancellationToken: cancellationToken);
+                return result;
+            }
+            catch
+            {
+                if (transactionStarted)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
         public async Task ReverseAllocationAsync(Guid allocationId, string reason, CancellationToken cancellationToken = default)
@@ -1054,8 +1227,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .ThenBy(a => a.Id)
                 .ToList() ?? new List<VendorPaymentAllocation>();
 
-            if (activeAllocations.Count == 0)
-                throw new InvalidOperationException("AP payment must have at least one invoice allocation before posting.");
+            var isSupplierAdvance = activeAllocations.Count == 0;
+            if (isSupplierAdvance &&
+                (payment.WithholdingTaxAmount != 0m || payment.DiscountTaken != 0m))
+            {
+                throw new InvalidOperationException(
+                    "Supplier advances cannot include withholding tax or settlement discounts. Apply the advance to a posted invoice before using those settlement features.");
+            }
 
             foreach (var allocation in activeAllocations)
             {
@@ -1098,15 +1276,19 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
 
             var allocatedCashAmount = RoundMoney(activeAllocations.Sum(a => a.AllocatedAmount));
-            if (allocatedCashAmount != RoundMoney(payment.TotalAmount))
+            if (!isSupplierAdvance && allocatedCashAmount != RoundMoney(payment.TotalAmount))
             {
-                throw new InvalidOperationException("AP payment amount must equal allocated cash amount before posting. Overpayments are not supported in this batch.");
+                throw new InvalidOperationException("AP payment amount must equal allocated cash amount before posting. Use the supplier-advance path for an unapplied payment.");
             }
 
             var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
             var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            if (isSupplierAdvance && !string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Foreign-currency supplier advances are not supported until advance application FX settlement is implemented.");
+            }
             foreach (var allocation in activeAllocations)
             {
                 var invoiceCurrency = NormalizeCurrency(allocation.VendorInvoice.CurrencyCode, paymentCurrency);
@@ -1123,6 +1305,22 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ?? settings.ControlAccountApId
                 ?? throw new InvalidOperationException("AP control account is not configured for this tenant.");
             await ResolvePaymentPostingAccountAsync(apAccountId, "AP control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            Guid debitAccountId = apAccountId;
+            if (isSupplierAdvance)
+            {
+                debitAccountId = settings.SupplierAdvanceAccountId
+                    ?? throw new InvalidOperationException("Supplier advance account is not configured for this tenant.");
+                var supplierAdvanceAccount = await ResolvePaymentPostingAccountAsync(
+                    debitAccountId,
+                    "supplier advance account",
+                    accountCache,
+                    allowControlAccount: false,
+                    requireDirectPosting: true,
+                    cancellationToken);
+                if (supplierAdvanceAccount.AccountType != AccountType.Asset)
+                    throw new InvalidOperationException("Supplier advance account must be an asset account.");
+            }
 
             var bankAccountId = payment.BankAccountId
                 ?? settings.DefaultBankAccountId
@@ -1152,9 +1350,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             var postingLines = new List<FinancePostingLineDto>();
             var lineNumber = 1;
             postingLines.Add(BuildPostingLine(
-                apAccountId,
-                $"AP payment {payment.PaymentNumber}",
-                debitTransactionAmount: apSettlementAmount,
+                debitAccountId,
+                isSupplierAdvance
+                    ? $"Supplier advance {payment.PaymentNumber}"
+                    : $"AP payment {payment.PaymentNumber}",
+                debitTransactionAmount: isSupplierAdvance ? payment.TotalAmount : apSettlementAmount,
                 creditTransactionAmount: 0m,
                 paymentCurrency,
                 functionalCurrency,
@@ -1162,7 +1362,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 payment.PaymentDate,
                 payment.PaymentNumber,
                 lineNumber++,
-                "AP-Control"));
+                isSupplierAdvance ? "AP-SupplierAdvance" : "AP-Control"));
 
             postingLines.Add(BuildPostingLine(
                 bankAccount.GLAccountId.Value,
@@ -1222,6 +1422,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("AP payment posting is not balanced.");
 
             payment.BankAccountId ??= bankAccount.Id;
+            payment.IsSupplierAdvance = isSupplierAdvance;
 
             return new FinancePostingRequestDto
             {
@@ -1231,7 +1432,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 SourceDocumentTenantId = payment.TenantId,
                 PostingAction = "Post",
                 SourceDocumentReference = payment.PaymentNumber,
-                Description = $"Vendor payment {payment.PaymentNumber} - {supplier.Name}",
+                Description = isSupplierAdvance
+                    ? $"Supplier advance {payment.PaymentNumber} - {supplier.Name}"
+                    : $"Vendor payment {payment.PaymentNumber} - {supplier.Name}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AP Payment",
                 BookClassification = "IFRS",

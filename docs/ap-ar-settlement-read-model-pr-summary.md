@@ -41,9 +41,9 @@ Rollback drops the read-model tables only. Posted source documents, posted GL, p
 ## Limitations Register
 
 - `FIN-LIM-0001`: resolved for AP/AR settlement read model, aging, and control reconciliation.
-- `FIN-LIM-0045`: added for unapplied payments, unapplied receipts, and advances where production scope requires aging/statement treatment.
+- `FIN-LIM-0045`: resolved by `docs/ap-ar-advance-settlement-credit-note-reversal-pr-summary.md` for functional-currency advances and separate unapplied settlement reporting.
 - `FIN-LIM-0013`: remains open for compatibility customer credit-note workflow semantics.
-- `FIN-LIM-0009`, `FIN-LIM-0010`, `FIN-LIM-0012`: remain open for posted AP payment, AR receipt, and credit-note reversal/correction accounting.
+- `FIN-LIM-0009` and `FIN-LIM-0010` remain open for posted AP payment and AR receipt reversal/correction accounting. Sales credit-note correction is resolved under `FIN-LIM-0012`.
 
 ## Accounting Impact
 
@@ -77,4 +77,4 @@ Rollback can remove the read-model tables and service endpoints. AP/AR posting, 
 
 ## Safe To Proceed
 
-Safe to proceed to broader reporting/export, workflow hardening, or migration/sign-off work after the Finance go-live regression slice passes. Export/sign-off should account for `FIN-LIM-0045` if unapplied advances are in production scope.
+Safe to proceed to broader reporting/export, workflow hardening, or migration/sign-off work after the Finance go-live regression slice passes. The settlement read model now reports supported functional-currency advances separately from invoice aging.

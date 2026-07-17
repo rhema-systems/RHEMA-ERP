@@ -32,6 +32,14 @@ public interface IArReportsService
     Task<SubledgerControlReconciliationDto> GetControlReconciliationAsync(DateTime? asOfDate = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Shows posted customer advances and other unapplied receipts separately from invoice aging.
+    /// </summary>
+    Task<SubledgerUnappliedSettlementReportDto> GetUnappliedSettlementsAsync(
+        DateTime? asOfDate = null,
+        Guid? customerId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Generates detailed aging report with invoice-level breakdown.
     /// </summary>
     Task<DetailedAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default);

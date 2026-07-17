@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AR;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -391,6 +392,60 @@ public sealed class ArCreditNotePostingMigrationTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posted AR credit notes cannot be voided by mutation. Use a reversal or adjustment workflow.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task PostedSalesCreditNote_ShouldReverseThroughPostingEngineWithoutMutatingOriginal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, taxAmount: 20m);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var posted = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        var reversed = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto
+        {
+            Reason = "Correct approved credit note"
+        });
+
+        reversed.CreditNoteStatus.Should().Be(CreditNoteStatus.Reversed);
+        reversed.JournalEntryId.Should().Be(posted.JournalEntryId);
+        reversed.ReversalJournalEntryId.Should().NotBeNull();
+        reversed.ReversalPostingEventId.Should().NotBeNull();
+        reversed.ReversalReason.Should().Be("Correct approved credit note");
+
+        var originalJournal = await db.JournalEntries.SingleAsync(j => j.Id == posted.JournalEntryId);
+        originalJournal.PostingStatus.Should().Be("Reversed");
+        originalJournal.ReversalJournalEntryId.Should().Be(reversed.ReversalJournalEntryId);
+        var reversalJournal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == reversed.ReversalJournalEntryId);
+        reversalJournal.SourceDocumentType.Should().Be("SalesCreditNoteReversal");
+        reversalJournal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(120m);
+        reversalJournal.Transactions.Single(t => t.AccountId == fixture.SalesReturnsAccount.Id).CreditAmount.Should().Be(100m);
+        reversalJournal.Transactions.Single(t => t.AccountId == fixture.TaxAccount.Id).CreditAmount.Should().Be(20m);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNoteReversed && a.TenantId == tenantId)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task RepeatedSalesCreditNoteReversal_ShouldReturnTheExistingImmutableReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        var first = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Correction" });
+        var second = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Repeated request" });
+
+        second.ReversalJournalEntryId.Should().Be(first.ReversalJournalEntryId);
+        second.ReversalPostingEventId.Should().Be(first.ReversalPostingEventId);
+        (await db.JournalEntries.CountAsync(j => j.SourceDocumentType == "SalesCreditNoteReversal")).Should().Be(1);
     }
 
     [Fact]

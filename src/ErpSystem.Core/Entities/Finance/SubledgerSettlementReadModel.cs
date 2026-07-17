@@ -19,6 +19,14 @@ public static class SubledgerSettlementStatuses
     public const string Disputed = "Disputed";
 }
 
+public static class SubledgerUnappliedSettlementClassifications
+{
+    public const string SupplierAdvance = "SupplierAdvance";
+    public const string CustomerAdvance = "CustomerAdvance";
+    public const string UnappliedVendorPayment = "UnappliedVendorPayment";
+    public const string UnappliedCustomerReceipt = "UnappliedCustomerReceipt";
+}
+
 public class SubledgerSettlementBalance : BusinessEntity
 {
     [Required]
@@ -164,4 +172,69 @@ public class SubledgerSettlementApplication : BusinessEntity
     public virtual FinancePostingEvent? SettlementPostingEvent { get; set; }
     public virtual JournalEntry? SettlementJournalEntry { get; set; }
     public virtual FxRealizedSettlement? FxRealizedSettlement { get; set; }
+}
+
+/// <summary>
+/// Rebuildable, read-side record of a posted AP payment or AR receipt that remains
+/// unapplied. It is deliberately separate from invoice aging: an advance is not an
+/// overdue invoice and must not be treated as one by statements or control reports.
+/// </summary>
+public class SubledgerUnappliedSettlementBalance : BusinessEntity
+{
+    [Required]
+    [MaxLength(10)]
+    public string SourceModule { get; set; } = SubledgerSettlementModules.AccountsReceivable;
+
+    [Required]
+    public Guid CounterpartyId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string SettlementSourceType { get; set; } = string.Empty;
+
+    [Required]
+    public Guid SettlementSourceId { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string SettlementSourceNumber { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(50)]
+    public string Classification { get; set; } = string.Empty;
+
+    public Guid? SettlementPostingEventId { get; set; }
+
+    public Guid? SettlementJournalEntryId { get; set; }
+
+    public DateTime SettlementDate { get; set; }
+
+    [Required]
+    [MaxLength(3)]
+    public string DocumentCurrencyCode { get; set; } = "GHS";
+
+    [Required]
+    [MaxLength(3)]
+    public string FunctionalCurrencyCode { get; set; } = "GHS";
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal OriginalAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal AppliedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnappliedAmount { get; set; }
+
+    public Guid RebuildBatchId { get; set; }
+
+    public DateTime LastRebuiltAt { get; set; }
+
+    public bool HasDiagnostics { get; set; }
+
+    [MaxLength(1000)]
+    public string? DiagnosticFlags { get; set; }
+
+    public virtual FinancePostingEvent? SettlementPostingEvent { get; set; }
+    public virtual JournalEntry? SettlementJournalEntry { get; set; }
 }

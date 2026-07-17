@@ -8,6 +8,7 @@
 - [x] Legacy AR payment and Sales credit-note posting methods are guarded and marked obsolete/internal-only.
 - [x] Credit-note tenant/account/source-document validation is enforced below the controller layer.
 - [x] Posted Sales credit notes are immutable through direct void mutation.
+- [x] Sales credit-note correction creates a linked, engine-posted reversal rather than mutating the original document.
 - [x] Finance audit events are emitted for submitted, approved/rejected, posted, failed, and duplicate/idempotent credit-note posting attempts.
 - [x] Back-reference diagnostics cover Sales credit notes and compatibility customer credit notes.
 - [x] Tests were added and targeted posting regressions pass.
@@ -33,7 +34,8 @@ Accounting treatment:
 - Sales credit notes must be approved before posting.
 - Sales credit notes linked to an original invoice require that original invoice to be posted as a `CustomerInvoice` posting event.
 - Credit amount cannot exceed the original invoice total less already-posted same-tenant Sales credit notes.
-- Posted Sales credit notes cannot be voided by mutation; reversal/adjustment must be implemented as a later posting-engine workflow.
+- Posted Sales credit notes cannot be voided by mutation. `POST /api/sales/credit-notes/{id}/reverse` requires a reason and posts the engine-generated inverse journal with the AR void permission.
+- A reversed credit note retains its original journal and records immutable reversal journal/event, date, and reason links. A corrected commercial amount must be issued as a new approved credit note.
 - Duplicate post attempts return the existing posting result safely and create an audit event.
 
 ## Affected Files
@@ -58,6 +60,7 @@ Accounting treatment:
 ## API Impact
 
 - Added `POST /api/sales/credit-notes/{id}/post`.
+- Added `POST /api/sales/credit-notes/{id}/reverse` for controlled correction of a posted Sales credit note.
 - Added `CreditNoteSummaryDto.JournalEntryId` and `CreditNoteDetailDto.JournalEntryId` through inheritance.
 - Existing compatibility customer credit-note creation still uses the AR payment create flow, but the posting call now uses the central posting engine.
 
@@ -118,7 +121,8 @@ The database rollback drops only the nullable Sales credit-note journal back-ref
 
 ## Known Limitations
 
-- Sales credit-note reversal/adjustment posting is not implemented in this batch; direct void mutation is blocked for posted credit notes.
+- Sales credit-note reversal/adjustment posting is resolved by the follow-up Finance batch documented in `docs/ap-ar-advance-settlement-credit-note-reversal-pr-summary.md`; direct void mutation remains blocked for posted credit notes.
+- Compatibility `CustomerPayment.IsCreditNote` reversal is not included in the Sales credit-note correction flow and remains governed by `FIN-LIM-0013`.
 - Full Ghana VAT/NHIL/GETFund/VAT withholding logic is deferred to the tax batch. This batch maps only existing credit-note tax amounts/accounts.
 - Inventory/COGS reversal is not posted because the current credit-note posting path does not expose complete return-to-inventory accounting data.
 - Compatibility `CustomerPayment.IsCreditNote` posting is centralized but remains a compatibility path with weaker workflow semantics than the primary Sales `CreditNote` flow.

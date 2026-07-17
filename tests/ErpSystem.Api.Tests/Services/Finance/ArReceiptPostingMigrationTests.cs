@@ -68,6 +68,49 @@ public sealed class ArReceiptPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task CustomerAdvance_ShouldPostAndApplyThroughFinancePostingEngine()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var customerAdvanceAccount = SeedAccount(db, tenantId, "2301", AccountType.Liability);
+        var settings = await db.Set<FinanceSettings>().SingleAsync(s => s.TenantId == tenantId);
+        settings.CustomerAdvanceAccountId = customerAdvanceAccount.Id;
+        db.Remove(fixture.Allocation);
+        fixture.Payment.AllocatedAmount = 0m;
+        fixture.Invoice.PaidAmount = 0m;
+        fixture.Invoice.Status = InvoiceStatus.Sent;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var (service, subledgerPostingMock) = CreateService(db, tenantId);
+
+        var initialPosting = await service.PostAsync(fixture.Payment.Id);
+        var application = await service.AllocatePaymentAsync(new PaymentAllocation_CreateDto
+        {
+            CustomerPaymentId = fixture.Payment.Id,
+            Allocations = new List<InvoiceAllocationDto>
+            {
+                new() { InvoiceId = fixture.Invoice.Id, AllocatedAmount = 100m }
+            }
+        });
+
+        (await db.Set<CustomerPayment>().SingleAsync(p => p.Id == fixture.Payment.Id)).IsCustomerAdvance.Should().BeTrue();
+        (await db.JournalEntries.SingleAsync(j => j.Id == initialPosting.JournalEntryId)).SourceDocumentType.Should().Be("CustomerPayment");
+        var allocation = await db.Set<PaymentAllocation>().SingleAsync(a => a.Id == application.Allocations.Single().Id);
+        allocation.ApplicationJournalEntryId.Should().NotBeNull();
+        allocation.ApplicationPostingEventId.Should().NotBeNull();
+        var applicationJournal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == allocation.ApplicationJournalEntryId);
+        applicationJournal.SourceDocumentType.Should().Be("CustomerPaymentAdvanceApplication");
+        applicationJournal.Transactions.Single(t => t.AccountId == customerAdvanceAccount.Id).DebitAmount.Should().Be(100m);
+        applicationJournal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(100m);
+        subledgerPostingMock.Verify(x => x.PostArPaymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task UnapprovedArReceipt_ShouldNotPost()
     {
         var tenantId = Guid.NewGuid();

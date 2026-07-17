@@ -67,6 +67,45 @@ public sealed class ApPaymentPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
     [Trait("Category", "AccountsPayable")]
+    public async Task SupplierAdvance_ShouldPostAndApplyThroughFinancePostingEngine()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var supplierAdvanceAccount = SeedAccount(db, tenantId, "1500", AccountType.Asset);
+        var settings = await db.Set<FinanceSettings>().SingleAsync(s => s.TenantId == tenantId);
+        settings.SupplierAdvanceAccountId = supplierAdvanceAccount.Id;
+        db.Remove(fixture.Allocation);
+        fixture.Payment.AllocatedAmount = 0m;
+        fixture.Invoice.PaidAmount = 0m;
+        fixture.Invoice.Status = VendorInvoiceStatus.Approved;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var (service, subledgerPostingMock) = CreateService(db, tenantId);
+
+        var initialPosting = await service.PostAsync(fixture.Payment.Id);
+        var application = await service.AllocatePaymentAsync(fixture.Payment.Id, new List<VendorPaymentAllocationCreateDto>
+        {
+            new() { VendorInvoiceId = fixture.Invoice.Id, AllocatedAmount = 100m }
+        });
+
+        (await db.Set<VendorPayment>().SingleAsync(p => p.Id == fixture.Payment.Id)).IsSupplierAdvance.Should().BeTrue();
+        (await db.JournalEntries.SingleAsync(j => j.Id == initialPosting.JournalEntryId)).SourceDocumentType.Should().Be("VendorPayment");
+        var allocation = await db.Set<VendorPaymentAllocation>().SingleAsync(a => a.Id == application.Allocations.Single().Id);
+        allocation.ApplicationJournalEntryId.Should().NotBeNull();
+        allocation.ApplicationPostingEventId.Should().NotBeNull();
+        var applicationJournal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == allocation.ApplicationJournalEntryId);
+        applicationJournal.SourceDocumentType.Should().Be("VendorPaymentAdvanceApplication");
+        applicationJournal.Transactions.Single(t => t.AccountId == fixture.ApAccount.Id).DebitAmount.Should().Be(100m);
+        applicationJournal.Transactions.Single(t => t.AccountId == supplierAdvanceAccount.Id).CreditAmount.Should().Be(100m);
+        subledgerPostingMock.Verify(x => x.PostApPaymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
     public async Task UnapprovedApPayment_ShouldNotPost()
     {
         var tenantId = Guid.NewGuid();

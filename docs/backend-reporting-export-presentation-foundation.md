@@ -173,7 +173,7 @@ Focused tests:
 
 - Ghana statutory backend tax reporting and CSV exports are resolved by `docs/ghana-statutory-tax-reporting-export-foundation.md`.
 - WHT/VAT withholding certificate/reference reporting is resolved by `docs/ghana-statutory-tax-reporting-export-foundation.md`; portal-specific filing packs and full certificate issuance/receipt workflow remain tracked under `FIN-LIM-0047`.
-- Unapplied AP payments, unapplied AR receipts, and advances remain tracked under `FIN-LIM-0045`.
+- Unapplied AP payments, unapplied AR receipts, and functional-currency advances are resolved under `FIN-LIM-0045` by the dedicated settlement read-model balance class. Foreign-currency advances remain rejected until advance-specific FX settlement is implemented.
 - Rich PDF/Excel report pack formatting is not implemented in this backend CSV foundation. It should be handled in a later report-pack/export batch if product requires formatted packs beyond CSV.
 
 ## Rollback Considerations

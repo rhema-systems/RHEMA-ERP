@@ -410,6 +410,17 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<SubledgerControlReconciliationDto>> GetControlReconciliation([FromQuery] DateTime? asOfDate = null)
             => Ok(await _reportsService.GetControlReconciliationAsync(asOfDate));
 
+        /// <summary>
+        /// Shows supplier advances and other posted but unapplied vendor payments. These balances are
+        /// intentionally not included in invoice aging because they have no invoice due date.
+        /// </summary>
+        [HttpGet("unapplied-settlements")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<SubledgerUnappliedSettlementReportDto>> GetUnappliedSettlements(
+            [FromQuery] DateTime? asOfDate = null,
+            [FromQuery] Guid? supplierId = null)
+            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, supplierId));
+
         /// <summary>Generates a detailed AP aging report with per-supplier, per-invoice breakdown.</summary>
         [HttpGet("aging/detailed")]
         public async Task<ActionResult<ApAgingReportDto>> GetDetailedAgingReport(

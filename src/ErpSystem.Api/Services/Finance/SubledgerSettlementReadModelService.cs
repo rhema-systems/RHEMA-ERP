@@ -65,6 +65,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 await ClearModuleAsync(SubledgerSettlementModules.AccountsPayable, cancellationToken);
                 var apResult = await RebuildAccountsPayableAsync(tenantId, asOfDate, rebuildBatchId, rebuiltAt, cancellationToken);
                 result.ApDocumentCount = apResult.DocumentCount;
+                result.ApUnappliedSettlementCount = apResult.UnappliedSettlementCount;
                 result.ApplicationCount += apResult.ApplicationCount;
                 result.Diagnostics.AddRange(apResult.Diagnostics);
             }
@@ -74,6 +75,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 await ClearModuleAsync(SubledgerSettlementModules.AccountsReceivable, cancellationToken);
                 var arResult = await RebuildAccountsReceivableAsync(tenantId, asOfDate, rebuildBatchId, rebuiltAt, cancellationToken);
                 result.ArDocumentCount = arResult.DocumentCount;
+                result.ArUnappliedSettlementCount = arResult.UnappliedSettlementCount;
                 result.ApplicationCount += arResult.ApplicationCount;
                 result.Diagnostics.AddRange(arResult.Diagnostics);
             }
@@ -142,6 +144,36 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
         return await query
             .OrderBy(b => b.DueDate ?? b.TransactionDate)
             .ThenBy(b => b.SourceDocumentNumber)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SubledgerUnappliedSettlementBalance>> GetUnappliedBalancesAsync(
+        string sourceModule,
+        DateTime asOfDate,
+        Guid? counterpartyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var module = NormalizeModule(sourceModule);
+        if (module == "Both")
+        {
+            throw new ArgumentException("A single source module is required when reading unapplied settlement balances.", nameof(sourceModule));
+        }
+
+        var query = _context.SubledgerUnappliedSettlementBalances
+            .AsNoTracking()
+            .Where(b =>
+                b.TenantId == TenantId &&
+                b.SourceModule == module &&
+                b.SettlementDate.Date <= asOfDate.Date);
+
+        if (counterpartyId.HasValue)
+        {
+            query = query.Where(b => b.CounterpartyId == counterpartyId.Value);
+        }
+
+        return await query
+            .OrderBy(b => b.SettlementDate)
+            .ThenBy(b => b.SettlementSourceNumber)
             .ToListAsync(cancellationToken);
     }
 
@@ -262,6 +294,11 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             .Where(b => b.TenantId == tenantId && b.SourceModule == module)
             .ToListAsync(cancellationToken);
         _context.SubledgerSettlementBalances.RemoveRange(balances);
+
+        var unappliedBalances = await _context.SubledgerUnappliedSettlementBalances
+            .Where(b => b.TenantId == tenantId && b.SourceModule == module)
+            .ToListAsync(cancellationToken);
+        _context.SubledgerUnappliedSettlementBalances.RemoveRange(unappliedBalances);
     }
 
     private async Task<ModuleRebuildResult> RebuildAccountsPayableAsync(
@@ -273,6 +310,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
     {
         var postedInvoiceEvents = await GetPostingEventsAsync(tenantId, "AP", VendorInvoiceType, asOfDate, cancellationToken);
         var postedPaymentEvents = await GetPostingEventsAsync(tenantId, "AP", VendorPaymentType, asOfDate, cancellationToken);
+        var postedAdvanceApplicationEvents = await GetPostingEventsAsync(tenantId, "AP", "VendorPaymentAdvanceApplication", asOfDate, cancellationToken);
         var invoiceIds = postedInvoiceEvents.Keys.ToList();
         var invoices = await _context.VendorInvoices
             .AsNoTracking()
@@ -333,6 +371,35 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                     a.VendorPayment.PaymentDate.Date <= asOfDate.Date)
                 .ToList();
 
+            // An advance does not settle AP when cash is first paid. It settles AP only when
+            // the later advance-application posting exists and is linked to this allocation.
+            invoiceAllocations = invoiceAllocations
+                .Where(allocation =>
+                {
+                    var payment = allocation.VendorPayment!;
+                    if (!payment.IsSupplierAdvance)
+                    {
+                        return true;
+                    }
+
+                    var hasApplicationEvent = allocation.ApplicationPostingEventId.HasValue &&
+                                              postedAdvanceApplicationEvents.TryGetValue(allocation.Id, out var applicationEvent) &&
+                                              applicationEvent.Id == allocation.ApplicationPostingEventId.Value;
+                    if (!hasApplicationEvent)
+                    {
+                        diagnostics.Add("MissingAdvanceApplicationPostingEvent");
+                        result.Diagnostics.Add(BuildDiagnostic(
+                            SubledgerSettlementModules.AccountsPayable,
+                            "MissingAdvanceApplicationPostingEvent",
+                            "Supplier advance allocation is missing its posted advance-application event and is excluded from AP settlement.",
+                            allocation.Id,
+                            allocation.ApplicationPostingEventId));
+                    }
+
+                    return hasApplicationEvent;
+                })
+                .ToList();
+
             var settledAmount = invoiceAllocations.Sum(a => a.AllocatedAmount + a.DiscountAmount);
             var withheldAmount = invoiceAllocations.Sum(a => a.WithholdingTaxAmount);
             var creditedAmount = 0m;
@@ -381,6 +448,9 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             {
                 var payment = allocation.VendorPayment!;
                 var paymentEvent = postedPaymentEvents[allocation.VendorPaymentId];
+                var settlementEvent = payment.IsSupplierAdvance
+                    ? postedAdvanceApplicationEvents[allocation.Id]
+                    : paymentEvent;
                 var application = BuildApplication(
                     tenantId,
                     SubledgerSettlementModules.AccountsPayable,
@@ -390,7 +460,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                     VendorPaymentType,
                     payment.Id,
                     allocation.Id,
-                    paymentEvent,
+                    settlementEvent,
                     payment.PaymentDate,
                     invoice.CurrencyCode,
                     sourceEvent.FunctionalCurrencyCode,
@@ -408,6 +478,15 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             result.DocumentCount++;
         }
 
+        result.UnappliedSettlementCount = await RebuildApUnappliedSettlementsAsync(
+            tenantId,
+            asOfDate,
+            rebuildBatchId,
+            rebuiltAt,
+            postedPaymentEvents,
+            result.Diagnostics,
+            cancellationToken);
+
         return result;
     }
 
@@ -420,6 +499,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
     {
         var postedInvoiceEvents = await GetPostingEventsAsync(tenantId, "AR", CustomerInvoiceType, asOfDate, cancellationToken);
         var postedReceiptEvents = await GetPostingEventsAsync(tenantId, "AR", CustomerPaymentType, asOfDate, cancellationToken);
+        var postedAdvanceApplicationEvents = await GetPostingEventsAsync(tenantId, "AR", "CustomerPaymentAdvanceApplication", asOfDate, cancellationToken);
         var postedSalesCreditNoteEvents = await GetPostingEventsAsync(tenantId, "AR", SalesCreditNoteType, asOfDate, cancellationToken);
         var postedCompatibilityCreditNoteEvents = await GetPostingEventsAsync(tenantId, "AR", CustomerCreditNoteType, asOfDate, cancellationToken);
         var invoiceIds = postedInvoiceEvents.Keys.ToList();
@@ -516,6 +596,35 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                     postedReceiptEvents.ContainsKey(a.CustomerPaymentId))
                 .ToList();
 
+            // A customer advance reaches the AR control account only in its later application
+            // journal. Do not let a missing application event reduce invoice aging silently.
+            receiptAllocations = receiptAllocations
+                .Where(allocation =>
+                {
+                    var payment = allocation.CustomerPayment!;
+                    if (!payment.IsCustomerAdvance)
+                    {
+                        return true;
+                    }
+
+                    var hasApplicationEvent = allocation.ApplicationPostingEventId.HasValue &&
+                                              postedAdvanceApplicationEvents.TryGetValue(allocation.Id, out var applicationEvent) &&
+                                              applicationEvent.Id == allocation.ApplicationPostingEventId.Value;
+                    if (!hasApplicationEvent)
+                    {
+                        diagnostics.Add("MissingAdvanceApplicationPostingEvent");
+                        result.Diagnostics.Add(BuildDiagnostic(
+                            SubledgerSettlementModules.AccountsReceivable,
+                            "MissingAdvanceApplicationPostingEvent",
+                            "Customer advance allocation is missing its posted advance-application event and is excluded from AR settlement.",
+                            allocation.Id,
+                            allocation.ApplicationPostingEventId));
+                    }
+
+                    return hasApplicationEvent;
+                })
+                .ToList();
+
             var compatibilityCreditNoteAllocations = invoiceAllocations
                 .Where(a =>
                     a.CustomerPayment != null &&
@@ -527,6 +636,9 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 .Where(c =>
                     c.AppliedToInvoiceId == invoice.Id ||
                     (!c.AppliedToInvoiceId.HasValue && c.OriginalInvoiceId == invoice.Id))
+                // The original posting event remains immutable after correction, but its credit
+                // effect must leave the settlement projection once the inverse journal is posted.
+                .Where(c => c.CreditNoteStatus != CreditNoteStatus.Reversed)
                 .Where(c => postedSalesCreditNoteEvents.ContainsKey(c.Id))
                 .ToList();
 
@@ -565,6 +677,9 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             {
                 var payment = allocation.CustomerPayment!;
                 var paymentEvent = postedReceiptEvents[allocation.CustomerPaymentId];
+                var settlementEvent = payment.IsCustomerAdvance
+                    ? postedAdvanceApplicationEvents[allocation.Id]
+                    : paymentEvent;
                 var allocationWithholding = CalculateArAllocationWithholding(allocation, receiptAllocations);
                 var applicationSettledAmount = Math.Max(0m, allocation.AllocatedAmount + allocation.DiscountAmount - allocationWithholding);
 
@@ -580,7 +695,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                     CustomerPaymentType,
                     payment.Id,
                     allocation.Id,
-                    paymentEvent,
+                    settlementEvent,
                     payment.PaymentDate,
                     invoice.CurrencyCode,
                     sourceEvent.FunctionalCurrencyCode,
@@ -669,7 +784,191 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             result.DocumentCount++;
         }
 
+        result.UnappliedSettlementCount = await RebuildArUnappliedSettlementsAsync(
+            tenantId,
+            asOfDate,
+            rebuildBatchId,
+            rebuiltAt,
+            postedReceiptEvents,
+            result.Diagnostics,
+            cancellationToken);
+
         return result;
+    }
+
+    private async Task<int> RebuildApUnappliedSettlementsAsync(
+        Guid tenantId,
+        DateTime asOfDate,
+        Guid rebuildBatchId,
+        DateTime rebuiltAt,
+        IReadOnlyDictionary<Guid, FinancePostingEvent> postedPaymentEvents,
+        ICollection<SubledgerSettlementDiagnosticDto> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        if (postedPaymentEvents.Count == 0)
+        {
+            return 0;
+        }
+
+        var paymentIds = postedPaymentEvents.Keys.ToList();
+        var payments = await _context.Set<VendorPayment>()
+            .AsNoTracking()
+            .Where(p =>
+                p.TenantId == tenantId &&
+                paymentIds.Contains(p.Id) &&
+                p.PaymentDate.Date <= asOfDate.Date &&
+                p.Status != VendorPaymentStatus.Voided &&
+                p.Status != VendorPaymentStatus.Failed &&
+                !p.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        var allocations = await _context.Set<VendorPaymentAllocation>()
+            .AsNoTracking()
+            .Where(a =>
+                a.TenantId == tenantId &&
+                paymentIds.Contains(a.VendorPaymentId) &&
+                !a.IsDeleted &&
+                !a.IsReversal &&
+                a.AllocationDate.Date <= asOfDate.Date)
+            .ToListAsync(cancellationToken);
+
+        var count = 0;
+        foreach (var payment in payments)
+        {
+            var applied = Round(allocations
+                .Where(a => a.VendorPaymentId == payment.Id)
+                .Sum(a => a.AllocatedAmount));
+            var unapplied = Round(payment.TotalAmount - applied);
+
+            var flags = new List<string>();
+            if (applied > Round(payment.TotalAmount))
+            {
+                flags.Add("OverAppliedPayment");
+                diagnostics.Add(BuildDiagnostic(
+                    SubledgerSettlementModules.AccountsPayable,
+                    "OverAppliedPayment",
+                    "Posted vendor payment allocations exceed the payment cash amount.",
+                    payment.Id,
+                    postedPaymentEvents[payment.Id].Id,
+                    Round(applied - payment.TotalAmount)));
+            }
+
+            if (unapplied <= 0m)
+            {
+                continue;
+            }
+
+            _context.SubledgerUnappliedSettlementBalances.Add(BuildUnappliedBalance(
+                tenantId,
+                SubledgerSettlementModules.AccountsPayable,
+                payment.SupplierId,
+                VendorPaymentType,
+                payment.Id,
+                payment.PaymentNumber,
+                payment.IsSupplierAdvance
+                    ? SubledgerUnappliedSettlementClassifications.SupplierAdvance
+                    : SubledgerUnappliedSettlementClassifications.UnappliedVendorPayment,
+                postedPaymentEvents[payment.Id],
+                payment.PaymentDate,
+                payment.CurrencyCode,
+                payment.TotalAmount,
+                applied,
+                unapplied,
+                rebuildBatchId,
+                rebuiltAt,
+                flags));
+            count++;
+        }
+
+        return count;
+    }
+
+    private async Task<int> RebuildArUnappliedSettlementsAsync(
+        Guid tenantId,
+        DateTime asOfDate,
+        Guid rebuildBatchId,
+        DateTime rebuiltAt,
+        IReadOnlyDictionary<Guid, FinancePostingEvent> postedReceiptEvents,
+        ICollection<SubledgerSettlementDiagnosticDto> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        if (postedReceiptEvents.Count == 0)
+        {
+            return 0;
+        }
+
+        var receiptIds = postedReceiptEvents.Keys.ToList();
+        var receipts = await _context.Set<CustomerPayment>()
+            .AsNoTracking()
+            .Where(p =>
+                p.TenantId == tenantId &&
+                receiptIds.Contains(p.Id) &&
+                !p.IsCreditNote &&
+                p.PaymentDate.Date <= asOfDate.Date &&
+                !string.Equals(p.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(p.Status, "Bounced", StringComparison.OrdinalIgnoreCase) &&
+                !p.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        var allocations = await _context.Set<PaymentAllocation>()
+            .AsNoTracking()
+            .Where(a =>
+                a.TenantId == tenantId &&
+                receiptIds.Contains(a.CustomerPaymentId) &&
+                !a.IsDeleted &&
+                !a.IsReversal &&
+                a.AllocationDate.Date <= asOfDate.Date)
+            .ToListAsync(cancellationToken);
+
+        var count = 0;
+        foreach (var receipt in receipts)
+        {
+            var applied = Round(allocations
+                .Where(a => a.CustomerPaymentId == receipt.Id)
+                .Sum(a => a.AllocatedAmount));
+            var unapplied = Round(receipt.TotalAmount - applied);
+
+            var flags = new List<string>();
+            if (applied > Round(receipt.TotalAmount))
+            {
+                flags.Add("OverAppliedReceipt");
+                diagnostics.Add(BuildDiagnostic(
+                    SubledgerSettlementModules.AccountsReceivable,
+                    "OverAppliedReceipt",
+                    "Posted customer receipt allocations exceed the receipt cash amount.",
+                    receipt.Id,
+                    postedReceiptEvents[receipt.Id].Id,
+                    Round(applied - receipt.TotalAmount)));
+            }
+
+            if (unapplied <= 0m)
+            {
+                continue;
+            }
+
+            _context.SubledgerUnappliedSettlementBalances.Add(BuildUnappliedBalance(
+                tenantId,
+                SubledgerSettlementModules.AccountsReceivable,
+                receipt.CustomerId,
+                CustomerPaymentType,
+                receipt.Id,
+                receipt.PaymentNumber,
+                receipt.IsCustomerAdvance
+                    ? SubledgerUnappliedSettlementClassifications.CustomerAdvance
+                    : SubledgerUnappliedSettlementClassifications.UnappliedCustomerReceipt,
+                postedReceiptEvents[receipt.Id],
+                receipt.PaymentDate,
+                receipt.CurrencyCode,
+                receipt.TotalAmount,
+                applied,
+                unapplied,
+                rebuildBatchId,
+                rebuiltAt,
+                flags));
+            count++;
+        }
+
+        return count;
     }
 
     private async Task<Dictionary<Guid, FinancePostingEvent>> GetPostingEventsAsync(
@@ -826,6 +1125,51 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             OperationalCreditedAmountSnapshot = Round(operationalCreditedAmount),
             OperationalOutstandingSnapshot = Round(operationalOutstandingAmount),
             OperationalVariance = Round(operationalVariance),
+            Status = "Active",
+            CreatedAt = rebuiltAt
+        };
+    }
+
+    private static SubledgerUnappliedSettlementBalance BuildUnappliedBalance(
+        Guid tenantId,
+        string module,
+        Guid counterpartyId,
+        string settlementSourceType,
+        Guid settlementSourceId,
+        string settlementSourceNumber,
+        string classification,
+        FinancePostingEvent settlementEvent,
+        DateTime settlementDate,
+        string documentCurrencyCode,
+        decimal originalAmount,
+        decimal appliedAmount,
+        decimal unappliedAmount,
+        Guid rebuildBatchId,
+        DateTime rebuiltAt,
+        IReadOnlyCollection<string> diagnostics)
+    {
+        return new SubledgerUnappliedSettlementBalance
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceModule = module,
+            CounterpartyId = counterpartyId,
+            SettlementSourceType = settlementSourceType,
+            SettlementSourceId = settlementSourceId,
+            SettlementSourceNumber = settlementSourceNumber,
+            Classification = classification,
+            SettlementPostingEventId = settlementEvent.Id,
+            SettlementJournalEntryId = settlementEvent.JournalEntryId,
+            SettlementDate = settlementDate,
+            DocumentCurrencyCode = string.IsNullOrWhiteSpace(documentCurrencyCode) ? "GHS" : documentCurrencyCode,
+            FunctionalCurrencyCode = string.IsNullOrWhiteSpace(settlementEvent.FunctionalCurrencyCode) ? "GHS" : settlementEvent.FunctionalCurrencyCode,
+            OriginalAmount = Round(originalAmount),
+            AppliedAmount = Round(appliedAmount),
+            UnappliedAmount = Round(unappliedAmount),
+            RebuildBatchId = rebuildBatchId,
+            LastRebuiltAt = rebuiltAt,
+            HasDiagnostics = diagnostics.Count > 0,
+            DiagnosticFlags = diagnostics.Count == 0 ? null : string.Join(";", diagnostics.Distinct()),
             Status = "Active",
             CreatedAt = rebuiltAt
         };
@@ -994,6 +1338,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
     private sealed class ModuleRebuildResult
     {
         public int DocumentCount { get; set; }
+        public int UnappliedSettlementCount { get; set; }
         public int ApplicationCount { get; set; }
         public List<SubledgerSettlementDiagnosticDto> Diagnostics { get; } = new();
     }

@@ -25,7 +25,6 @@ public sealed class MigrationSignOffService : IMigrationSignOffService
         "FIN-LIM-0009",
         "FIN-LIM-0010",
         "FIN-LIM-0011",
-        "FIN-LIM-0012",
         "FIN-LIM-0013",
         "FIN-LIM-0014",
         "FIN-LIM-0021",
@@ -43,7 +42,6 @@ public sealed class MigrationSignOffService : IMigrationSignOffService
         "FIN-LIM-0041",
         "FIN-LIM-0042",
         "FIN-LIM-0043",
-        "FIN-LIM-0045",
         "FIN-LIM-0046",
         "FIN-LIM-0047",
         "FIN-LIM-0048"
@@ -1104,11 +1102,10 @@ public sealed class MigrationSignOffService : IMigrationSignOffService
     private static string LimitationArea(string id)
         => id switch
         {
-            "FIN-LIM-0009" or "FIN-LIM-0010" or "FIN-LIM-0011" or "FIN-LIM-0012" or "FIN-LIM-0013" => "Corrections/Reversals",
+            "FIN-LIM-0009" or "FIN-LIM-0010" or "FIN-LIM-0011" or "FIN-LIM-0013" => "Corrections/Reversals",
             "FIN-LIM-0014" => "Tenant Roles",
             "FIN-LIM-0021" or "FIN-LIM-0022" => "FX/CashBank",
             "FIN-LIM-0028" or "FIN-LIM-0030" or "FIN-LIM-0031" or "FIN-LIM-0033" or "FIN-LIM-0034" or "FIN-LIM-0035" or "FIN-LIM-0037" or "FIN-LIM-0038" or "FIN-LIM-0039" or "FIN-LIM-0040" or "FIN-LIM-0041" or "FIN-LIM-0042" or "FIN-LIM-0043" => "Fixed Assets",
-            "FIN-LIM-0045" => "AP/AR Settlement",
             "FIN-LIM-0046" => "Reporting/Export",
             "FIN-LIM-0047" => "Tax",
             "FIN-LIM-0048" => "Migration/Subledger Openings",
@@ -1128,7 +1125,6 @@ public sealed class MigrationSignOffService : IMigrationSignOffService
         => id switch
         {
             "FIN-LIM-0048" => "GL-only opening balances do not prove AP/AR aging or fixed asset register source balances.",
-            "FIN-LIM-0045" => "Unapplied payments, receipts, and advances remain outside the core settlement projection scope.",
             "FIN-LIM-0046" => "Backend CSV export is accountant-reviewable; richer packs are product presentation scope.",
             "FIN-LIM-0047" => "Backend tax reports exist; portal-specific filing/certificate workflow may still be required.",
             _ => "Open limitation from the Finance go-live register."
