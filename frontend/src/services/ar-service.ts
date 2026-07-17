@@ -52,6 +52,22 @@ export interface PaymentQuery {
     status?: string;
 }
 
+export type EstateArSource = 'facilities' | 'property-management';
+
+export interface EstateArResultNotificationRequest {
+    actionType: string;
+    financeArEntityId?: string | null;
+    financeArReference?: string | null;
+    customerId?: string | null;
+    customerName?: string | null;
+    amount?: number | null;
+    currencyCode?: string | null;
+    sourceRecordReference?: string | null;
+    propertyUnit?: string | null;
+    notes?: string | null;
+    actionUrl?: string | null;
+}
+
 class ArService {
     private readonly baseUrl = '/ar';
 
@@ -166,6 +182,14 @@ class ArService {
 
     public async getArSummary(): Promise<any> {
         return apiService.get<any>(`${this.baseUrl}/reports/ar-summary`);
+    }
+
+    public async notifyEstateArResult(source: EstateArSource, data: EstateArResultNotificationRequest): Promise<void> {
+        const basePath = source === 'facilities'
+            ? '/estate/facilities/ar-billing/results'
+            : '/estate/property-management/ar-billing/results';
+
+        await apiService.post(basePath, data);
     }
 }
 

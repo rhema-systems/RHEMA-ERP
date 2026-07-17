@@ -36,6 +36,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { arService } from '@/services/ar-service';
+import type { EstateArSource } from '@/services/ar-service';
 import { formatCurrency } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
@@ -51,6 +52,7 @@ export default function InvoicesPage() {
     const [page, setPage] = useState(1);
     const [pageSize] = useState(10);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const [estateNotifyId, setEstateNotifyId] = useState<string | null>(null);
 
     const { data: invoicesData, isLoading } = useQuery({
         queryKey: ['invoices', page, pageSize, debouncedSearchTerm, statusFilter],
@@ -83,6 +85,42 @@ export default function InvoicesPage() {
     const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSearchTerm(e.target.value);
         setPage(1);
+    };
+
+    const notifyEstateInvoiceResult = async (
+        invoice: NonNullable<typeof invoicesData>['items'][number],
+        source: EstateArSource
+    ) => {
+        setEstateNotifyId(`${source}:${invoice.id}`);
+        try {
+            await arService.notifyEstateArResult(source, {
+                actionType: 'Invoice created',
+                financeArEntityId: invoice.id,
+                financeArReference: invoice.invoiceNumber,
+                customerId: invoice.customerId,
+                customerName: invoice.customerName,
+                amount: invoice.totalAmount,
+                currencyCode: invoice.currencyCode,
+                sourceRecordReference: invoice.invoiceNumber,
+                notes: invoice.notes || null,
+                actionUrl: `/finance/ar/invoices/${invoice.id}`,
+            });
+            toast({
+                title: 'Estate notified',
+                description:
+                    source === 'facilities'
+                        ? 'Estate / Facilities has been notified of this AR invoice.'
+                        : 'Estate / Property Management has been notified of this AR invoice.',
+            });
+        } catch (error: any) {
+            toast({
+                title: 'Notification failed',
+                description: error.message || 'The Estate notification could not be created.',
+                variant: 'destructive',
+            });
+        } finally {
+            setEstateNotifyId(null);
+        }
     };
 
     const getStatusBadge = (status: string) => {
@@ -218,6 +256,24 @@ export default function InvoicesPage() {
                                                         <DropdownMenuSeparator />
                                                         <DropdownMenuItem onClick={() => arService.sendInvoice(invoice.id)}>
                                                             <Send className="mr-2 h-4 w-4" /> Send Email
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            disabled={estateNotifyId === `facilities:${invoice.id}`}
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                notifyEstateInvoiceResult(invoice, 'facilities');
+                                                            }}
+                                                        >
+                                                            Notify Estate / Facilities
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            disabled={estateNotifyId === `property-management:${invoice.id}`}
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                notifyEstateInvoiceResult(invoice, 'property-management');
+                                                            }}
+                                                        >
+                                                            Notify Estate / Property Mgnt
                                                         </DropdownMenuItem>
                                                         {(invoice.status === 'Posted' || invoice.status === 'Overdue') && (
                                                             <DropdownMenuItem

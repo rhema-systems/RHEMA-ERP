@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -23,14 +24,29 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { arService } from '@/services/ar-service';
+import type { EstateArSource } from '@/services/ar-service';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/components/ui/use-toast';
+
+const ESTATE_AR_ACTIONS = [
+    'Invoice created',
+    'Statement issued',
+    'Arrears updated',
+    'Deposit handled',
+    'GL posted',
+    'Returned for correction',
+];
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
+    const { toast } = useToast();
     const params = useParams();
     const id = params.id as string;
+    const [estateSource, setEstateSource] = useState<EstateArSource>('facilities');
+    const [estateAction, setEstateAction] = useState(ESTATE_AR_ACTIONS[0]);
+    const [isNotifyingEstate, setIsNotifyingEstate] = useState(false);
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
@@ -51,6 +67,39 @@ export default function InvoiceDetailsPage() {
             </div>
         );
     }
+
+    const notifyEstate = async () => {
+        setIsNotifyingEstate(true);
+        try {
+            await arService.notifyEstateArResult(estateSource, {
+                actionType: estateAction,
+                financeArEntityId: invoice.id,
+                financeArReference: invoice.invoiceNumber,
+                customerId: invoice.customerId,
+                customerName: invoice.customerName,
+                amount: invoice.totalAmount,
+                currencyCode: invoice.currencyCode,
+                sourceRecordReference: invoice.invoiceNumber,
+                notes: invoice.notes || null,
+                actionUrl: `/finance/ar/invoices/${invoice.id}`,
+            });
+            toast({
+                title: 'Estate notified',
+                description:
+                    estateSource === 'facilities'
+                        ? 'Estate / Facilities has been notified of this AR result.'
+                        : 'Estate / Property Management has been notified of this AR result.',
+            });
+        } catch (error: any) {
+            toast({
+                title: 'Notification failed',
+                description: error.message || 'The Estate notification could not be created.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsNotifyingEstate(false);
+        }
+    };
 
     return (
         <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
@@ -185,6 +234,48 @@ export default function InvoiceDetailsPage() {
                             <p className="text-sm text-muted-foreground">{invoice.notes}</p>
                         </div>
                     )}
+                </CardContent>
+            </Card>
+
+            <Card className="no-print">
+                <CardHeader>
+                    <CardTitle>Estate AR Callback</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium" htmlFor="estate-source">
+                            Estate source
+                        </label>
+                        <select
+                            id="estate-source"
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={estateSource}
+                            onChange={(event) => setEstateSource(event.target.value as EstateArSource)}
+                        >
+                            <option value="facilities">Estate / Facilities</option>
+                            <option value="property-management">Estate / Property Management</option>
+                        </select>
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium" htmlFor="estate-action">
+                            Result
+                        </label>
+                        <select
+                            id="estate-action"
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={estateAction}
+                            onChange={(event) => setEstateAction(event.target.value)}
+                        >
+                            {ESTATE_AR_ACTIONS.map((action) => (
+                                <option key={action}>{action}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex items-end">
+                        <Button onClick={notifyEstate} disabled={isNotifyingEstate}>
+                            {isNotifyingEstate ? 'Notifying...' : 'Notify Estate'}
+                        </Button>
+                    </div>
                 </CardContent>
             </Card>
         </div>

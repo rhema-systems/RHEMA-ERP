@@ -39,14 +39,18 @@ import { formatCurrency } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
+import { useToast } from '@/components/ui/use-toast';
+import type { EstateArSource } from '@/services/ar-service';
 
 export default function PaymentsPage() {
     const router = useRouter();
+    const { toast } = useToast();
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const [page, setPage] = useState(1);
     const [pageSize] = useState(10);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const [estateNotifyId, setEstateNotifyId] = useState<string | null>(null);
 
     const { data: paymentsData, isLoading } = useQuery({
         queryKey: ['payments', page, pageSize, debouncedSearchTerm, statusFilter],
@@ -64,6 +68,46 @@ export default function PaymentsPage() {
     const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSearchTerm(e.target.value);
         setPage(1);
+    };
+
+    const notifyEstatePaymentResult = async (
+        payment: NonNullable<typeof paymentsData>['items'][number],
+        source: EstateArSource
+    ) => {
+        const actionType = payment.unallocatedAmount > 0
+            ? 'Receipt recorded'
+            : 'Allocation completed';
+
+        setEstateNotifyId(`${source}:${payment.id}`);
+        try {
+            await arService.notifyEstateArResult(source, {
+                actionType,
+                financeArEntityId: payment.id,
+                financeArReference: payment.paymentNumber,
+                customerId: payment.customerId,
+                customerName: payment.customerName,
+                amount: payment.totalAmount,
+                currencyCode: payment.currencyCode,
+                sourceRecordReference: payment.paymentNumber,
+                notes: payment.notes || null,
+                actionUrl: '/finance/ar/payments',
+            });
+            toast({
+                title: 'Estate notified',
+                description:
+                    source === 'facilities'
+                        ? 'Estate / Facilities has been notified of this AR payment result.'
+                        : 'Estate / Property Management has been notified of this AR payment result.',
+            });
+        } catch (error: any) {
+            toast({
+                title: 'Notification failed',
+                description: error.message || 'The Estate notification could not be created.',
+                variant: 'destructive',
+            });
+        } finally {
+            setEstateNotifyId(null);
+        }
     };
 
     const getStatusBadge = (status: string) => {
@@ -193,6 +237,19 @@ export default function PaymentsPage() {
                                                                 <FileText className="mr-2 h-4 w-4" /> Allocate Payment
                                                             </DropdownMenuItem>
                                                         )}
+                                                        <DropdownMenuSeparator />
+                                                        <DropdownMenuItem
+                                                            disabled={estateNotifyId === `facilities:${payment.id}`}
+                                                            onClick={() => notifyEstatePaymentResult(payment, 'facilities')}
+                                                        >
+                                                            Notify Estate / Facilities
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            disabled={estateNotifyId === `property-management:${payment.id}`}
+                                                            onClick={() => notifyEstatePaymentResult(payment, 'property-management')}
+                                                        >
+                                                            Notify Estate / Property Mgnt
+                                                        </DropdownMenuItem>
                                                     </DropdownMenuContent>
                                                 </DropdownMenu>
                                             </TableCell>

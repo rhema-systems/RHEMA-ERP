@@ -296,6 +296,60 @@ public interface IWorkflowEntityDisplayService
     Task<WorkflowEntityDisplayInfo> GetEntityDisplayInfoAsync(string entityType, Guid entityId);
 }
 
+/// <summary>
+/// Central catalog of workflow-enabled entity types shared by API endpoints, seeders, and module services.
+/// </summary>
+public interface IWorkflowEntityTypeCatalogService
+{
+    IReadOnlyList<WorkflowEntityTypeCatalogItem> GetDefaultEntityTypes();
+}
+
+public sealed record WorkflowEntityTypeCatalogItem(
+    string Name,
+    string Module,
+    string? Description,
+    string? Icon,
+    string? ColorCode,
+    int DisplayOrder)
+{
+    public string Code => WorkflowEntityTypeCodeGenerator.Generate(Name);
+}
+
+public static class WorkflowEntityTypeCodeGenerator
+{
+    public static string Generate(string entityType)
+    {
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            return "ENTITY";
+        }
+
+        var codeChars = new List<char>();
+        for (var i = 0; i < entityType.Length; i++)
+        {
+            var ch = entityType[i];
+            if (char.IsWhiteSpace(ch) || ch == '-' || ch == '_')
+            {
+                if (codeChars.LastOrDefault() != '_')
+                {
+                    codeChars.Add('_');
+                }
+                continue;
+            }
+
+            if (char.IsUpper(ch) && i > 0 && char.IsLower(entityType[i - 1]))
+            {
+                codeChars.Add('_');
+            }
+
+            codeChars.Add(char.ToUpperInvariant(ch));
+        }
+
+        var code = new string(codeChars.ToArray()).Trim('_');
+        return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
+    }
+}
+
 public class WorkflowEntityDisplayInfo
 {
     public string EntityType { get; set; } = string.Empty; // canonical type for UI navigation (e.g., "PurchaseRequisition")

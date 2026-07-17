@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
@@ -316,6 +317,45 @@ public partial class ProjectService
         await _unitOfWork.Repository<ProjectUnit>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return await GetProjectUnitDtoAsync(entity.ProjectId, entity.Id);
+    }
+
+    public async Task<EstateManagedAssetDto> PublishProjectUnitToEstateAsync(Guid unitId)
+    {
+        var unit = await GetProjectUnitEntityAsync(unitId);
+        var project = await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
+
+        var isReadyForEstate = unit.IsReleasedForMarket
+            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.HandedOver)
+            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Occupied);
+
+        if (!isReadyForEstate)
+        {
+            throw new InvalidOperationException("Release or hand over the project unit before publishing it to Estate management.");
+        }
+
+        var handoff = new ProjectUnitEstateHandoffDto
+        {
+            ProjectId = project.Id,
+            ProjectCode = project.ProjectCode,
+            ProjectTitle = project.Title,
+            ProjectUnitId = unit.Id,
+            ProjectUnitCode = unit.Code,
+            ProjectUnitName = unit.Name,
+            UnitType = unit.UnitType,
+            UnitStatus = unit.Status,
+            BlockName = unit.BlockName,
+            FloorLabel = unit.FloorLabel,
+            Location = project.Title,
+            AreaSquareMeters = unit.AreaSquareMeters,
+            ValuationAmount = unit.BasePrice,
+            Currency = unit.Currency,
+            IsAvailableForLease = !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Sold),
+            IsAvailableForSale = !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Leased),
+            HandoverDate = unit.HandoverDate,
+            Notes = unit.Notes
+        };
+
+        return await _estateManagedAssetService.PublishProjectUnitAsync(handoff);
     }
 
     public async Task DeleteProjectUnitAsync(Guid unitId)

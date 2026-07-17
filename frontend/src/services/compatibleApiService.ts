@@ -37,6 +37,15 @@ class CompatibleApiService {
     }
   }
 
+  async patch<T = any>(endpoint: string, data?: any): Promise<T> {
+    try {
+      return await apiService.patch<T>(endpoint, data);
+    } catch (error) {
+      console.error(`PATCH ${endpoint} failed:`, error);
+      throw error;
+    }
+  }
+
   async delete<T = any>(endpoint: string): Promise<T> {
     try {
       return await apiService.delete<T>(endpoint);

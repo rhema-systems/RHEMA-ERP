@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Events;
+using Syncfusion.Licensing;
 
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
@@ -164,6 +165,14 @@ if (builder.Environment.IsEnvironment("Testing")
     });
 }
 
+var syncfusionLicenseKey =
+    builder.Configuration["Syncfusion:LicenseKey"] ??
+    builder.Configuration["SyncfusionLicenseKey"];
+if (!string.IsNullOrWhiteSpace(syncfusionLicenseKey))
+{
+    SyncfusionLicenseProvider.RegisterLicense(syncfusionLicenseKey);
+}
+
 // Configure host shutdown timeout
 builder.Host.ConfigureServices((context, services) =>
 {
@@ -191,7 +200,7 @@ builder.Services.AddErpSystemWebFarm(builder.Configuration);
 builder.Services.AddErpSystemSearch(builder.Configuration);
 builder.Services.AddErpSystemLifecycle();
 builder.Services.AddErpSystemCors(builder.Configuration);
-builder.Services.AddErpSystemRateLimiting();
+builder.Services.AddErpSystemRateLimiting(builder.Environment);
 builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();

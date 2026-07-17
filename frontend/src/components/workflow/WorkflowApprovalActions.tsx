@@ -48,6 +48,8 @@ export interface WorkflowApprovalActionsProps {
   // Action enablement (defaults based on status if omitted)
   canSubmit?: boolean;
   canApproveReject?: boolean;
+  forwardActionsDisabled?: boolean;
+  forwardActionsDisabledReason?: string;
 
   // Handlers
   onSubmit?: () => Promise<void>;
@@ -75,6 +77,8 @@ export function WorkflowApprovalActions({
   loadWorkflowSummary = false,
   canSubmit,
   canApproveReject,
+  forwardActionsDisabled = false,
+  forwardActionsDisabledReason,
   onSubmit,
   onApprove,
   onReject,
@@ -326,6 +330,10 @@ export function WorkflowApprovalActions({
   };
 
   const confirmSubmit = async () => {
+    if (forwardActionsDisabled) {
+      toast.error(forwardActionsDisabledReason || 'Complete all required inputs before submitting.');
+      return false;
+    }
     if (!onSubmit) return false;
     try {
       setSubmitting(true);
@@ -361,6 +369,10 @@ export function WorkflowApprovalActions({
   };
 
   const openApproval = (mode: WorkflowApprovalDialogMode) => {
+    if (mode === 'approve' && forwardActionsDisabled) {
+      toast.error(forwardActionsDisabledReason || 'Complete all required inputs before approving.');
+      return;
+    }
     setApprovalMode(mode);
     setApprovalOpen(true);
   };
@@ -493,6 +505,10 @@ export function WorkflowApprovalActions({
   };
 
   const completeTask = async () => {
+    if (forwardActionsDisabled) {
+      toast.error(forwardActionsDisabledReason || 'Complete all required inputs before completing this task.');
+      return;
+    }
     if (!effectiveStepInstanceId) {
       toast.error('Cannot complete workflow task', {
         description: 'The current workflow step could not be identified. Refresh the page and try again.',
@@ -661,7 +677,8 @@ export function WorkflowApprovalActions({
               event.preventDefault();
               setSubmitOpen(true);
             }}
-            disabled={submitting}
+            disabled={submitting || forwardActionsDisabled}
+            title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined}
           >
             <Send className="mr-2 h-4 w-4" />
             Submit for Approval
@@ -676,7 +693,8 @@ export function WorkflowApprovalActions({
                 event.preventDefault();
                 openApproval('approve');
               }}
-              disabled={!effectiveCanApprove || processing || summaryLoading}
+              disabled={!effectiveCanApprove || processing || summaryLoading || forwardActionsDisabled}
+              title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined}
             >
               <CheckCircle className="mr-2 h-4 w-4" />
               Approve
@@ -703,7 +721,7 @@ export function WorkflowApprovalActions({
         )}
 
         {workflowSummary?.canCurrentUserResubmit && workflowSummary.currentUserCorrectionId && (
-          <DropdownMenuItem onSelect={event => { event.preventDefault(); setResubmitOpen(true); }}><Send className="mr-2 h-4 w-4" />Resubmit correction</DropdownMenuItem>
+          <DropdownMenuItem disabled={forwardActionsDisabled} title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined} onSelect={event => { event.preventDefault(); setResubmitOpen(true); }}><Send className="mr-2 h-4 w-4" />Resubmit correction</DropdownMenuItem>
         )}
 
         {canShowRecall && (
@@ -727,7 +745,8 @@ export function WorkflowApprovalActions({
               event.preventDefault();
               setTaskOpen(true);
             }}
-            disabled={taskProcessing || summaryLoading}
+            disabled={taskProcessing || summaryLoading || forwardActionsDisabled}
+            title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined}
           >
             {isDocumentTask && !hasRequiredTaskAttachment ? (
               <Upload className="mr-2 h-4 w-4" />
@@ -1002,8 +1021,8 @@ export function WorkflowApprovalActions({
           <Button
             size={size}
             onClick={() => setSubmitOpen(true)}
-            disabled={submitting}
-            title={iconOnly ? `Submit ${entityLabel}` : undefined}
+            disabled={submitting || forwardActionsDisabled}
+            title={forwardActionsDisabled ? forwardActionsDisabledReason : iconOnly ? `Submit ${entityLabel}` : undefined}
             aria-label={iconOnly ? `Submit ${entityLabel}` : undefined}
           >
             <Send className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
@@ -1018,8 +1037,8 @@ export function WorkflowApprovalActions({
               variant="outline"
               className="text-green-600"
               onClick={() => openApproval('approve')}
-              disabled={!effectiveCanApprove || processing || summaryLoading}
-              title={iconOnly ? `Approve ${entityLabel}` : undefined}
+              disabled={!effectiveCanApprove || processing || summaryLoading || forwardActionsDisabled}
+              title={forwardActionsDisabled ? forwardActionsDisabledReason : iconOnly ? `Approve ${entityLabel}` : undefined}
               aria-label={iconOnly ? `Approve ${entityLabel}` : undefined}
             >
               <CheckCircle className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
@@ -1048,7 +1067,7 @@ export function WorkflowApprovalActions({
         )}
 
         {workflowSummary?.canCurrentUserResubmit && workflowSummary.currentUserCorrectionId && (
-          <Button size={size} variant="outline" onClick={() => setResubmitOpen(true)} title="Resubmit correction"><Send className={iconOnly ? 'h-4 w-4' : 'mr-1 h-4 w-4'} />{!iconOnly && 'Resubmit'}</Button>
+          <Button size={size} variant="outline" onClick={() => setResubmitOpen(true)} disabled={forwardActionsDisabled} title={forwardActionsDisabled ? forwardActionsDisabledReason : 'Resubmit correction'}><Send className={iconOnly ? 'h-4 w-4' : 'mr-1 h-4 w-4'} />{!iconOnly && 'Resubmit'}</Button>
         )}
 
         {canShowRecall && (
@@ -1072,8 +1091,8 @@ export function WorkflowApprovalActions({
             variant="outline"
             className="text-blue-600"
             onClick={() => setTaskOpen(true)}
-            disabled={taskProcessing || summaryLoading}
-            title={iconOnly ? `${taskButtonLabel} for ${entityLabel}` : undefined}
+            disabled={taskProcessing || summaryLoading || forwardActionsDisabled}
+            title={forwardActionsDisabled ? forwardActionsDisabledReason : iconOnly ? `${taskButtonLabel} for ${entityLabel}` : undefined}
             aria-label={iconOnly ? `${taskButtonLabel} for ${entityLabel}` : undefined}
           >
             {isDocumentTask && !hasRequiredTaskAttachment ? (

@@ -1,12 +1,15 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Pricing;
+using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
@@ -178,6 +181,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // File upload governance (per-tenant, per-category)
     public DbSet<FileUploadPolicy> FileUploadPolicies { get; set; }
     public DbSet<FileUploadRecord> FileUploadRecords { get; set; }
+
+    // Central Document Management entities
+    public DbSet<CentralDocumentRecord> CentralDocumentRecords { get; set; }
+    public DbSet<CentralDocumentVersion> CentralDocumentVersions { get; set; }
+    public DbSet<CentralDocumentMetadataTemplate> CentralDocumentMetadataTemplates { get; set; }
+    public DbSet<CentralDocumentMetadataValue> CentralDocumentMetadataValues { get; set; }
+    public DbSet<CentralDocumentGenerationTemplate> CentralDocumentGenerationTemplates { get; set; }
+    public DbSet<CentralDocumentAnnotationReview> CentralDocumentAnnotationReviews { get; set; }
+    public DbSet<CentralDocumentAccessRule> CentralDocumentAccessRules { get; set; }
+    public DbSet<CentralDocumentRetentionPolicy> CentralDocumentRetentionPolicies { get; set; }
 
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
@@ -712,6 +725,32 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EhcInboundMessagingChannel> EhcInboundMessagingChannels { get; set; }
     public DbSet<EhcInboundMessagingMessage> EhcInboundMessagingMessages { get; set; }
 
+    // Estate land acquisition entities
+    public DbSet<LandAcquisition> LandAcquisitions { get; set; }
+    public DbSet<LandAcquisitionDocument> LandAcquisitionDocuments { get; set; }
+    public DbSet<LandPhysicalAssessment> LandPhysicalAssessments { get; set; }
+    public DbSet<CadastralSurvey> CadastralSurveys { get; set; }
+    public DbSet<OwnershipHistory> OwnershipHistories { get; set; }
+    public DbSet<NegotiationOffer> NegotiationOffers { get; set; }
+    public DbSet<LandAgreement> LandAgreements { get; set; }
+    public DbSet<LandInstrument> LandInstruments { get; set; }
+    public DbSet<StatutoryConsent> StatutoryConsents { get; set; }
+    public DbSet<StampDutyAssessment> StampDutyAssessments { get; set; }
+    public DbSet<StampDutyPayment> StampDutyPayments { get; set; }
+    public DbSet<LandRegistration> LandRegistrations { get; set; }
+    public DbSet<LandAsset> LandAssets { get; set; }
+    public DbSet<EstateManagedAsset> EstateManagedAssets { get; set; }
+    public DbSet<EstateManagedAssetDocument> EstateManagedAssetDocuments { get; set; }
+    public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
+    public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
+
+    // Shared procedure case workspaces
+    public DbSet<ProcedureCase> ProcedureCases { get; set; }
+    public DbSet<ProcedureCaseField> ProcedureCaseFields { get; set; }
+    public DbSet<ProcedureCaseChecklistItem> ProcedureCaseChecklistItems { get; set; }
+    public DbSet<ProcedureCaseDocument> ProcedureCaseDocuments { get; set; }
+    public DbSet<ProcedureCaseActivity> ProcedureCaseActivities { get; set; }
+
     // Workflow Engine entities
     public DbSet<WorkflowDefinition> WorkflowDefinitions { get; set; }
     public DbSet<WorkflowStep> WorkflowSteps { get; set; }
@@ -824,6 +863,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<WorkflowSignatureEvidence>().HasIndex(item => item.ApprovalId).IsUnique();
         builder.Entity<WorkflowIntegrationExecution>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.Entity<WorkflowOfflineAction>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+        ConfigureCentralDocumentManagementEntities(builder);
+        ConfigureLandAcquisitionEntities(builder);
+        ConfigureProcedureCaseEntities(builder);
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
 
@@ -877,7 +919,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
 
-        // ─── CRM Entity FK Configurations (prevent cascade cycles) ───
+        // â”€â”€â”€ CRM Entity FK Configurations (prevent cascade cycles) â”€â”€â”€
 
         builder.Entity<Lead>(entity =>
         {
@@ -1155,7 +1197,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── Return Order / Credit Note / Refund FK Configurations ───
+        // â”€â”€â”€ Return Order / Credit Note / Refund FK Configurations â”€â”€â”€
 
         builder.Entity<ReturnOrder>(entity =>
         {
@@ -1268,7 +1310,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── Collections & Debt Management FK Configurations ───
+        // â”€â”€â”€ Collections & Debt Management FK Configurations â”€â”€â”€
 
         builder.Entity<CollectionActivity>(entity =>
         {
@@ -1323,7 +1365,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── Accounts Payable FK Configurations ───
+        // â”€â”€â”€ Accounts Payable FK Configurations â”€â”€â”€
 
         builder.Entity<VendorInvoice>(entity =>
         {
@@ -1451,7 +1493,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── General Ledger FK Configurations ───
+        // â”€â”€â”€ General Ledger FK Configurations â”€â”€â”€
 
         builder.Entity<FiscalYear>(entity =>
         {
@@ -1561,7 +1603,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Configure FixedAssetCategory → Account relationships (prevent cascade cycles with multiple FKs)
+        // Configure FixedAssetCategory â†’ Account relationships (prevent cascade cycles with multiple FKs)
         builder.Entity<FixedAssetCategory>(entity =>
         {
             entity.HasOne(c => c.AssetAccount)
@@ -1600,7 +1642,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Configure CashTransaction → BankAccount relationships (disambiguate two FKs)
+        // Configure CashTransaction â†’ BankAccount relationships (disambiguate two FKs)
         builder.Entity<CashTransaction>(entity =>
         {
             entity.HasOne(ct => ct.BankAccount)
@@ -1613,7 +1655,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .HasForeignKey(ct => ct.ToBankAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // 1:1 with Cheque — Cheque is the dependent (has CashTransactionId FK)
+            // 1:1 with Cheque â€” Cheque is the dependent (has CashTransactionId FK)
             entity.HasOne(ct => ct.Cheque)
                 .WithOne(c => c.CashTransaction)
                 .HasForeignKey<Cheque>(c => c.CashTransactionId)
@@ -1626,7 +1668,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Configure ReconciliationMatch → BankStatementLine 1:1 (ReconciliationMatch is dependent)
+        // Configure ReconciliationMatch â†’ BankStatementLine 1:1 (ReconciliationMatch is dependent)
         builder.Entity<ReconciliationMatch>(entity =>
         {
             entity.HasOne(rm => rm.BankStatementLine)
@@ -6809,6 +6851,297 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<RolePermission>().HasData(rolePermissions.ToArray());
     }
 
+    private static void ConfigureCentralDocumentManagementEntities(ModelBuilder builder)
+    {
+        builder.Entity<CentralDocumentRecord>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentReference }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.SourceModule, item.SourceRecordReference });
+            entity.HasMany(item => item.Versions)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.AnnotationReviews)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.MetadataValues)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<CentralDocumentVersion>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.VersionNumber }).IsUnique();
+        });
+
+        builder.Entity<CentralDocumentMetadataTemplate>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+
+        builder.Entity<CentralDocumentMetadataValue>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.FieldKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode, item.FieldKey });
+        });
+
+        builder.Entity<CentralDocumentGenerationTemplate>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+
+        builder.Entity<CentralDocumentAnnotationReview>(entity =>
+        {
+            entity.HasOne(item => item.DocumentVersion)
+                .WithMany()
+                .HasForeignKey(item => item.DocumentVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.Status });
+        });
+
+        builder.Entity<CentralDocumentAccessRule>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.AccessProfile, item.Module, item.RoleName });
+        });
+
+        builder.Entity<CentralDocumentRetentionPolicy>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.PolicyCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+    }
+
+    private static void ConfigureLandAcquisitionEntities(ModelBuilder builder)
+    {
+        builder.Entity<LandAcquisition>(entity =>
+        {
+            entity.ToTable("LandAcquisitions");
+            entity.HasIndex(item => new { item.TenantId, item.ProjectReference }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.StageOrder, item.Status });
+            entity.Property(item => item.EstimatedSize).HasPrecision(18, 4);
+            entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(60);
+            entity.Property(item => item.CurrentStage).HasConversion<string>().HasMaxLength(80);
+            entity.Property(item => item.OwnershipType).HasConversion<string>().HasMaxLength(80);
+
+            entity.HasMany(item => item.Documents)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Notes)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.ChecklistResponses)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.CadastralSurveys)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.OwnershipHistories)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.NegotiationOffers)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Registrations)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.LandAssets)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.PhysicalAssessment)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<LandPhysicalAssessment>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.Agreement)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<LandAgreement>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.LandInstrument)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<LandInstrument>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.StatutoryConsent)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<StatutoryConsent>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.StampDutyAssessment)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<StampDutyAssessment>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.StampDutyPayment)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<StampDutyPayment>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<LandAcquisitionDocument>(entity =>
+        {
+            entity.ToTable("LandAcquisitionDocuments");
+            entity.Property(item => item.Procedure).HasConversion<string>().HasMaxLength(80);
+        });
+
+        builder.Entity<LandPhysicalAssessment>().ToTable("LandPhysicalAssessments");
+        builder.Entity<CadastralSurvey>().ToTable("CadastralSurveys");
+
+        builder.Entity<OwnershipHistory>(entity =>
+        {
+            entity.ToTable("OwnershipHistories");
+            entity.Property(item => item.OwnershipType).HasConversion<string>().HasMaxLength(80);
+            entity.Property(item => item.AcquisitionMethod).HasConversion<string>().HasMaxLength(80);
+        });
+
+        builder.Entity<NegotiationOffer>(entity =>
+        {
+            entity.ToTable("NegotiationOffers");
+            entity.Property(item => item.OpeningOffer).HasPrecision(18, 2);
+            entity.Property(item => item.CounterOffer).HasPrecision(18, 2);
+            entity.Property(item => item.NegotiatedValue).HasPrecision(18, 2);
+        });
+
+        builder.Entity<LandAgreement>().ToTable("LandAgreements");
+        builder.Entity<LandInstrument>().ToTable("LandInstruments");
+        builder.Entity<StatutoryConsent>().ToTable("StatutoryConsents");
+
+        builder.Entity<StampDutyAssessment>(entity =>
+        {
+            entity.ToTable("StampDutyAssessments");
+            entity.Property(item => item.AssessedValue).HasPrecision(18, 2);
+            entity.Property(item => item.DutyAmount).HasPrecision(18, 2);
+        });
+
+        builder.Entity<StampDutyPayment>(entity =>
+        {
+            entity.ToTable("StampDutyPayments");
+            entity.Property(item => item.AmountPaid).HasPrecision(18, 2);
+        });
+
+        builder.Entity<LandRegistration>().ToTable("LandRegistrations");
+
+        builder.Entity<LandAsset>(entity =>
+        {
+            entity.ToTable("LandAssets");
+            entity.Property(item => item.CapitalizationValue).HasPrecision(18, 2);
+        });
+
+        builder.Entity<EstateManagedAsset>(entity =>
+        {
+            entity.ToTable("EstateManagedAssets");
+            entity.HasIndex(item => new { item.TenantId, item.AssetCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AssetType, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.ProjectUnitId });
+            entity.HasIndex(item => new { item.TenantId, item.LandAcquisitionId });
+            entity.HasIndex(item => new { item.TenantId, item.IsPublishedToExternalPortal, item.ExternalListingStatus });
+            entity.Property(item => item.AssetType).HasConversion<string>().HasMaxLength(40);
+            entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(40);
+            entity.Property(item => item.SourceType).HasConversion<string>().HasMaxLength(40);
+            entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
+            entity.Property(item => item.AreaValue).HasPrecision(18, 4);
+            entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
+            entity.HasMany(item => item.Documents)
+                .WithOne(item => item.EstateManagedAsset)
+                .HasForeignKey(item => item.EstateManagedAssetId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EstateManagedAssetDocument>(entity =>
+        {
+            entity.ToTable("EstateManagedAssetDocuments");
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId });
+            entity.HasIndex(item => new { item.TenantId, item.CentralDocumentRecordId });
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.IsListingImage });
+        });
+
+        builder.Entity<LandAcquisitionNote>(entity =>
+        {
+            entity.ToTable("LandAcquisitionNotes");
+            entity.Property(item => item.Stage).HasConversion<string>().HasMaxLength(80);
+        });
+
+        builder.Entity<LandAcquisitionChecklistResponse>(entity =>
+        {
+            entity.ToTable("LandAcquisitionChecklistResponses");
+            entity.Property(item => item.Procedure).HasConversion<string>().HasMaxLength(80);
+        });
+    }
+
+    private static void ConfigureProcedureCaseEntities(ModelBuilder builder)
+    {
+        builder.Entity<ProcedureCase>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.EntityType, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.ReferenceNumber });
+            entity.HasIndex(item => new { item.TenantId, item.CurrentAssignedRole });
+            entity.HasIndex(item => item.WorkflowDefinitionId);
+            entity.HasIndex(item => item.WorkflowInstanceId);
+            entity.HasIndex(item => item.WorkflowStepId);
+
+            entity.HasMany(item => item.Fields)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.ChecklistItems)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Documents)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Activities)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ProcedureCaseField>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.Key }).IsUnique();
+        });
+
+        builder.Entity<ProcedureCaseChecklistItem>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.StageIndex });
+        });
+
+        builder.Entity<ProcedureCaseDocument>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.IsMandatory });
+        });
+
+        builder.Entity<ProcedureCaseActivity>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.PerformedAt });
+        });
+    }
+
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         UpdateAuditableEntities();
@@ -8758,7 +9091,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             }
         );
 
-        // ── Global: default all FKs to Restrict to prevent cascade-cycle errors on SQL Server ──
+        // â”€â”€ Global: default all FKs to Restrict to prevent cascade-cycle errors on SQL Server â”€â”€
         foreach (var relationship in builder.Model.GetEntityTypes()
             .SelectMany(e => e.GetForeignKeys()))
         {
