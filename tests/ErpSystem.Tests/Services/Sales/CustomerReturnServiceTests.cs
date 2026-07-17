@@ -250,7 +250,6 @@ namespace ErpSystem.Tests.Services.Sales
             {
                 SalesOrderId = soId,
                 InvoiceId = invoice.Id,
-                BusinessPartnerId = bpId,
                 ReasonCode = ReturnReasonCode.Defective,
                 ReasonDescription = "Faulty item",
                 Lines = new List<CreateReturnOrderLineDto>
@@ -322,7 +321,6 @@ namespace ErpSystem.Tests.Services.Sales
             {
                 SalesOrderId = soId,
                 DeliveryNoteId = dn.Id,
-                BusinessPartnerId = bpId,
                 ReasonCode = ReturnReasonCode.CustomerChanged,
                 ReasonDescription = "No longer needed",
                 Lines = new List<CreateReturnOrderLineDto>
@@ -398,7 +396,6 @@ namespace ErpSystem.Tests.Services.Sales
             {
                 SalesOrderId = soId,
                 InvoiceId = invoice.Id,
-                BusinessPartnerId = bpId,
                 Lines = new List<CreateReturnOrderLineDto>
                 {
                     new CreateReturnOrderLineDto
@@ -456,7 +453,6 @@ namespace ErpSystem.Tests.Services.Sales
             {
                 SalesOrderId = soId,
                 InvoiceId = invoice.Id,
-                BusinessPartnerId = bpId,
                 Lines = new List<CreateReturnOrderLineDto>
                 {
                     new CreateReturnOrderLineDto
@@ -477,7 +473,6 @@ namespace ErpSystem.Tests.Services.Sales
             {
                 SalesOrderId = soId,
                 InvoiceId = invoice.Id,
-                BusinessPartnerId = bpId,
                 Lines = new List<CreateReturnOrderLineDto>
                 {
                     new CreateReturnOrderLineDto
@@ -529,7 +524,6 @@ namespace ErpSystem.Tests.Services.Sales
             {
                 SalesOrderId = soId,
                 InvoiceId = invoice.Id,
-                BusinessPartnerId = bpId,
                 Lines = new List<CreateReturnOrderLineDto>
                 {
                     new CreateReturnOrderLineDto
@@ -616,7 +610,6 @@ namespace ErpSystem.Tests.Services.Sales
             {
                 SalesOrderId = soId,
                 DeliveryNoteId = dn.Id,
-                BusinessPartnerId = bpId,
                 Lines = new List<CreateReturnOrderLineDto>
                 {
                     new CreateReturnOrderLineDto

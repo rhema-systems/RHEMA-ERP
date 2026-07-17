@@ -574,17 +574,19 @@ public sealed class SubledgerSettlementReadModelFoundationTests
         };
         db.Suppliers.Add(supplier);
 
-        var customer = new Customer
+        var customer = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            CustomerCode = "CUS-001",
-            CustomerName = "Settlement Customer",
-            CustomerType = "Corporate",
+            PartnerCode = "CUS-001",
+            PartnerName = "Settlement Customer",
+            PartnerType = "Customer",
+            RegistrationStatus = "Approved",
             DefaultArAccountId = arControl.Id,
-            CurrencyCode = "GHS"
+            Currency = "GHS",
+            IsActive = true
         };
-        db.Set<Customer>().Add(customer);
+        db.BusinessPartners.Add(customer);
 
         return new FinanceFixture(tenantId, period, apControl, arControl, expense, revenue, cash, fxGainLoss, supplier, customer);
     }
@@ -723,7 +725,7 @@ public sealed class SubledgerSettlementReadModelFoundationTests
             TenantId = fixture.TenantId,
             InvoiceNumber = number,
             BusinessPartnerId = fixture.Customer.Id,
-            CustomerName = fixture.Customer.CustomerName,
+            CustomerName = fixture.Customer.PartnerName,
             InvoiceDate = InvoiceDate,
             DueDate = new DateTime(2026, 8, 9),
             CurrencyCode = "GHS",
@@ -813,7 +815,7 @@ public sealed class SubledgerSettlementReadModelFoundationTests
         {
             Id = Guid.NewGuid(),
             TenantId = fixture.TenantId,
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             DocumentNumber = number,
             DocumentDate = SettlementDate,
             AppliedDate = SettlementDate,
@@ -962,7 +964,7 @@ public sealed class SubledgerSettlementReadModelFoundationTests
         Account Cash,
         Account FxGainLoss,
         Supplier Supplier,
-        Customer Customer);
+        BusinessPartner Customer);
 
     private sealed class CapturingFinanceAuditService : IFinanceAuditService
     {

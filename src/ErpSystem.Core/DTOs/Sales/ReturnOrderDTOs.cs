@@ -25,7 +25,7 @@ public class ReturnOrderDetailDto : ReturnOrderSummaryDto
 {
     public Guid SalesOrderId { get; set; }
     public Guid? DeliveryNoteId { get; set; }
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string? ReasonDescription { get; set; }
     public DateTime? InspectedDate { get; set; }
     public string? InspectedByName { get; set; }
@@ -54,8 +54,6 @@ public class CreateReturnOrderDto
     [Required]
     public Guid SalesOrderId { get; set; }
     public Guid? DeliveryNoteId { get; set; }
-    [Required]
-    public Guid CustomerId { get; set; }
     public ReturnReasonCode ReasonCode { get; set; }
     public string? ReasonDescription { get; set; }
     [Required]
@@ -95,7 +93,7 @@ public class CreditNoteSummaryDto
 
 public class CreditNoteDetailDto : CreditNoteSummaryDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? ReturnOrderId { get; set; }
     public string? ReturnOrderNumber { get; set; }
     public Guid? OriginalInvoiceId { get; set; }
@@ -118,7 +116,7 @@ public class CreditNoteLineDto
 public class CreateCreditNoteDto
 {
     [Required]
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? ReturnOrderId { get; set; }
     public Guid? OriginalInvoiceId { get; set; }
     public string? Reason { get; set; }
@@ -165,7 +163,7 @@ public class RefundSummaryDto
 
 public class RefundDetailDto : RefundSummaryDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? CreditNoteId { get; set; }
     public string? CreditNoteNumber { get; set; }
     public Guid? ReturnOrderId { get; set; }
@@ -177,7 +175,7 @@ public class RefundDetailDto : RefundSummaryDto
 public class CreateRefundDto
 {
     [Required]
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? CreditNoteId { get; set; }
     public Guid? ReturnOrderId { get; set; }
     public decimal RefundAmount { get; set; }

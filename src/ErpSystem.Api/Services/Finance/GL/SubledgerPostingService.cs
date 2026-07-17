@@ -1347,7 +1347,8 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var tenantId = TenantId;
             var creditNote = await _context.Set<CreditNote>()
-                .Include(c => c.Customer)
+                // This disabled legacy path must still compile against the canonical AR counterparty.
+                .Include(c => c.BusinessPartner)
                 .Include(c => c.Lines)
                 .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Id == creditNoteId && !c.IsDeleted, cancellationToken);
 
@@ -1366,7 +1367,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var settings = await GetSettingsAsync(cancellationToken);
-            var arAccountId = creditNote.Customer?.DefaultArAccountId ?? settings.ControlAccountArId;
+            var arAccountId = creditNote.BusinessPartner?.DefaultArAccountId ?? settings.ControlAccountArId;
             if (arAccountId == null) throw new InvalidOperationException("AR Control Account not configured.");
 
             var salesReturnsAccountId = settings.DiscountAllowedAccountId;
@@ -1428,7 +1429,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var jeDto = new CreateJournalEntryDto
             {
                 TransactionDate = creditNote.DocumentDate,
-                Description = $"Sales Credit Note {creditNote.DocumentNumber} - {creditNote.Customer?.CustomerName ?? "Customer"}",
+                Description = $"Sales Credit Note {creditNote.DocumentNumber} - {creditNote.BusinessPartner?.PartnerName ?? "Customer"}",
                 Reference = creditNote.DocumentNumber,
                 SourceModule = "AR",
                 SourceDocumentId = creditNote.Id,

@@ -1346,9 +1346,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.DeliveryNoteId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Customer)
+            // Return/credit/refund documents feed Finance AR, so their counterparty is the canonical
+            // tenant-scoped BusinessPartner rather than the legacy CRM/Sales Customer record.
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.CustomerId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.InspectedBy)
                 .WithMany()
@@ -1389,9 +1391,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<CreditNote>(entity =>
         {
             entity.ToTable("CreditNotes");
-            entity.HasOne(e => e.Customer)
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.CustomerId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ReturnOrder)
                 .WithMany()
@@ -1429,9 +1431,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<Refund>(entity =>
         {
             entity.ToTable("Refunds");
-            entity.HasOne(e => e.Customer)
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.CustomerId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.CreditNote)
                 .WithMany()

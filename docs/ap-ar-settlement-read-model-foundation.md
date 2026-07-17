@@ -63,7 +63,9 @@ Sales credit-note safeguards:
 - A credit note with an original Finance invoice is applied only to that invoice; posted-fact limits prevent its total from exceeding the invoice after prior posted Sales credit notes.
 - Application also rejects a credit that would make posted customer receipts plus posted Sales credit notes exceed the original invoice amount.
 - Settlement rebuilds use `AppliedToInvoiceId` as the authoritative target. `OriginalInvoiceId` is used only for older rows without an explicit target, so one credit cannot reduce two invoices.
-- A standalone Sales credit note is retained as an unapplied AR credit until a supported mapping from legacy Sales customer records to Finance `BusinessPartner` records is implemented. It is not force-applied through a GL-only or ID-assumption shortcut.
+- Return orders, Sales credit notes, and refunds use the canonical Finance/Sales `BusinessPartnerId` identity. Return creation derives it from the tenant-scoped source Sales order rather than accepting a caller-supplied CRM customer identifier.
+- A standalone Sales credit note can be applied only to an explicitly selected, posted Finance invoice for the same tenant and `BusinessPartnerId`. No legacy customer ID or inferred cross-model mapping is used.
+- The development-stage identity migration renames the three accounting-document foreign keys only when their tables are empty. Existing legacy return, credit-note, and refund test rows must be reset and recreated through the current model; they are never reinterpreted as Finance AR parties.
 
 Compatibility customer credit notes remain visible under `FIN-LIM-0013`.
 
@@ -411,6 +413,9 @@ WHERE TenantId = @TenantId
 - `FullApPaymentClosesOutstanding`
 - `FullArReceiptClosesOutstanding`
 - `ArCreditNoteReducesOutstanding`
+- `StandaloneSalesCreditNoteCanApplyToSameBusinessPartnerInvoice`
+- `StandaloneSalesCreditNoteCannotApplyToAnotherBusinessPartnerInvoice`
+- `SalesReturnAccountingEntitiesUseCanonicalBusinessPartnerIdentity`
 - `ForeignCurrencyApSettlementUsesPostedSnapshotsAndFxLink`
 - `ForeignCurrencyArSettlementUsesPostedSnapshotsAndFxLink`
 - `CrossTenantAllocationsAreDiagnosedAndExcluded`

@@ -183,6 +183,65 @@ public sealed class ArCreditNotePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task StandaloneSalesCreditNoteCanApplyToSameBusinessPartnerInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var standaloneCredit = CreateApprovedSalesCreditNote(fixture, "SCN-2026-STANDALONE", amount: 25m);
+        standaloneCredit.OriginalInvoiceId = null;
+        db.CreditNotes.Add(standaloneCredit);
+        await db.SaveChangesAsync();
+
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        await service.PostCreditNoteAsync(standaloneCredit.Id);
+
+        var result = await service.ApplyCreditNoteAsync(standaloneCredit.Id, fixture.Invoice.Id);
+
+        result.CreditNoteStatus.Should().Be(CreditNoteStatus.Applied);
+        result.AppliedToInvoiceId.Should().Be(fixture.Invoice.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task StandaloneSalesCreditNoteCannotApplyToAnotherBusinessPartnerInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var standaloneCredit = CreateApprovedSalesCreditNote(fixture, "SCN-2026-OTHER-PARTNER", amount: 25m);
+        standaloneCredit.OriginalInvoiceId = null;
+        var otherInvoice = new Invoice
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerId = Guid.NewGuid(),
+            InvoiceNumber = "INV-2026-OTHER-PARTNER",
+            CustomerName = "Other customer",
+            TotalAmount = 100m,
+            JournalEntryId = Guid.NewGuid(),
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.CreditNotes.Add(standaloneCredit);
+        db.Invoices.Add(otherInvoice);
+        await db.SaveChangesAsync();
+
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+        await service.PostCreditNoteAsync(standaloneCredit.Id);
+
+        var act = () => service.ApplyCreditNoteAsync(standaloneCredit.Id, otherInvoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit notes can only be applied to invoices for the same business partner.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task SalesCreditNoteApplicationCannotOverSettleAnInvoiceAfterPostedReceipts()
     {
         var tenantId = Guid.NewGuid();
@@ -202,7 +261,7 @@ public sealed class ArCreditNotePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "AccountsReceivable")]
-    public async Task CrossTenantCustomer_ShouldBeRejected()
+    public async Task CrossTenantBusinessPartner_ShouldBeRejected()
     {
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
@@ -210,8 +269,8 @@ public sealed class ArCreditNotePostingMigrationTests
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherAr = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
-        var otherCustomer = SeedSalesCustomer(db, otherTenantId, otherAr.Id);
-        fixture.CreditNote.CustomerId = otherCustomer.Id;
+        var otherBusinessPartner = SeedBusinessPartner(db, otherTenantId, Guid.NewGuid(), otherAr.Id);
+        fixture.CreditNote.BusinessPartnerId = otherBusinessPartner.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateReturnOrderService(db, tenantId);
 
@@ -232,7 +291,7 @@ public sealed class ArCreditNotePostingMigrationTests
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherAr = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
-        fixture.Customer.DefaultArAccountId = otherAr.Id;
+        fixture.BusinessPartner.DefaultArAccountId = otherAr.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateReturnOrderService(db, tenantId);
 
@@ -526,8 +585,7 @@ public sealed class ArCreditNotePostingMigrationTests
         var arAccount = SeedAccount(db, tenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var salesReturnsAccount = SeedAccount(db, tenantId, "5200", AccountType.Expense);
         var taxAccount = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
-        var customer = SeedSalesCustomer(db, tenantId, arAccount.Id);
-        var businessPartner = SeedBusinessPartner(db, tenantId, customer.Id, arAccount.Id);
+        var businessPartner = SeedBusinessPartner(db, tenantId, Guid.NewGuid(), arAccount.Id);
 
         var settings = new FinanceSettings
         {
@@ -547,7 +605,7 @@ public sealed class ArCreditNotePostingMigrationTests
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            CustomerId = customer.Id,
+            BusinessPartnerId = businessPartner.Id,
             OriginalInvoiceId = invoice.Id,
             DocumentNumber = "SCN-2026-00001",
             DocumentDate = new DateTime(2026, 7, 5),
@@ -576,7 +634,7 @@ public sealed class ArCreditNotePostingMigrationTests
         db.CreditNotes.Add(creditNote);
         await db.SaveChangesAsync();
 
-        return new ArCreditNoteFixture(creditNote, invoice, customer, arAccount, salesReturnsAccount, taxAccount, settings);
+        return new ArCreditNoteFixture(creditNote, invoice, businessPartner, arAccount, salesReturnsAccount, taxAccount, settings);
     }
 
     private static CreditNote CreateApprovedSalesCreditNote(
@@ -588,7 +646,7 @@ public sealed class ArCreditNotePostingMigrationTests
         {
             Id = Guid.NewGuid(),
             TenantId = fixture.CreditNote.TenantId,
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.BusinessPartner.Id,
             OriginalInvoiceId = fixture.Invoice.Id,
             DocumentNumber = documentNumber,
             DocumentDate = fixture.CreditNote.DocumentDate,
@@ -764,26 +822,6 @@ public sealed class ArCreditNotePostingMigrationTests
         return account;
     }
 
-    private static Customer SeedSalesCustomer(ApplicationDbContext db, Guid tenantId, Guid arAccountId)
-    {
-        var customer = new Customer
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            CustomerCode = $"CUS-{tenantId.ToString("N")[..6]}",
-            CustomerName = "Test Sales Customer",
-            CustomerType = "Corporate",
-            IsActive = true,
-            CurrencyCode = "GHS",
-            DefaultArAccountId = arAccountId,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = "seed"
-        };
-
-        db.Set<Customer>().Add(customer);
-        return customer;
-    }
-
     private static BusinessPartner SeedBusinessPartner(ApplicationDbContext db, Guid tenantId, Guid businessPartnerId, Guid arAccountId)
     {
         var businessPartner = new BusinessPartner
@@ -897,7 +935,7 @@ public sealed class ArCreditNotePostingMigrationTests
     private sealed record ArCreditNoteFixture(
         CreditNote CreditNote,
         Invoice Invoice,
-        Customer Customer,
+        BusinessPartner BusinessPartner,
         Account ArAccount,
         Account SalesReturnsAccount,
         Account TaxAccount,

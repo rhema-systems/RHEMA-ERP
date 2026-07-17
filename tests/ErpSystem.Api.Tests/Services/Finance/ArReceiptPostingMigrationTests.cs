@@ -475,7 +475,7 @@ public sealed class ArReceiptPostingMigrationTests
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            CustomerId = Guid.NewGuid(),
+            BusinessPartnerId = db.Invoices.Single(i => i.Id == invoiceId).BusinessPartnerId,
             OriginalInvoiceId = invoiceId,
             AppliedToInvoiceId = invoiceId,
             CreditNoteStatus = CreditNoteStatus.Applied,

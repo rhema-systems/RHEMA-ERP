@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -72,6 +73,22 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<ReturnOrderDetailDto> CreateReturnOrderAsync(CreateReturnOrderDto dto)
     {
         var tenantId = _currentUserProvider.TenantId;
+        var salesOrder = await _unitOfWork.Repository<SalesOrder>()
+            .GetQueryable(s => s.TenantId == tenantId && s.Id == dto.SalesOrderId && !s.IsDeleted)
+            .FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException("Return order source sales order was not found for this tenant.");
+
+        if (dto.DeliveryNoteId.HasValue)
+        {
+            var deliveryNote = await _unitOfWork.Repository<DeliveryNote>()
+                .GetQueryable(d => d.TenantId == tenantId && d.Id == dto.DeliveryNoteId.Value && !d.IsDeleted)
+                .FirstOrDefaultAsync()
+                ?? throw new InvalidOperationException("Return order delivery note was not found for this tenant.");
+
+            if (deliveryNote.BusinessPartnerId != salesOrder.BusinessPartnerId)
+                throw new InvalidOperationException("Return order delivery note must belong to the source sales order business partner.");
+        }
+
         var docNumber = await _documentNumberingService.GenerateAsync(
             DocumentNumberingModules.Sales,
             SalesDocumentTypes.ReturnOrder,
@@ -85,7 +102,9 @@ public class ReturnOrderService : IReturnOrderService
             DocumentDate = DateTime.UtcNow,
             SalesOrderId = dto.SalesOrderId,
             DeliveryNoteId = dto.DeliveryNoteId,
-            CustomerId = dto.CustomerId,
+            // Sales orders already use BusinessPartner. Deriving the return counterparty prevents a
+            // caller from creating a return against a different tenant/customer identity.
+            BusinessPartnerId = salesOrder.BusinessPartnerId,
             ReturnStatus = ReturnOrderStatus.Requested,
             ReasonCode = dto.ReasonCode,
             ReasonDescription = dto.ReasonDescription,
@@ -136,7 +155,7 @@ public class ReturnOrderService : IReturnOrderService
     {
         var ro = await _returnRepo.GetByIdAsync(id,
             r => r.SalesOrder,
-            r => r.Customer,
+            r => r.BusinessPartner,
             r => r.CreditNote!,
             r => r.Lines);
         return ro == null ? null : MapReturnOrderDetailDto(ro);
@@ -145,7 +164,7 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<PagedResult<ReturnOrderSummaryDto>> GetReturnOrdersAsync(
         int page = 1, int pageSize = 20,
         string? search = null, ReturnOrderStatus? status = null,
-        Guid? customerId = null, Guid? salesOrderId = null,
+        Guid? businessPartnerId = null, Guid? salesOrderId = null,
         DateTime? startDate = null, DateTime? endDate = null)
     {
         var query = _returnRepo.GetQueryable();
@@ -153,8 +172,8 @@ public class ReturnOrderService : IReturnOrderService
             query = query.Where(r => r.DocumentNumber.Contains(search));
         if (status.HasValue)
             query = query.Where(r => r.ReturnStatus == status.Value);
-        if (customerId.HasValue)
-            query = query.Where(r => r.CustomerId == customerId.Value);
+        if (businessPartnerId.HasValue)
+            query = query.Where(r => r.BusinessPartnerId == businessPartnerId.Value);
         if (salesOrderId.HasValue)
             query = query.Where(r => r.SalesOrderId == salesOrderId.Value);
         if (startDate.HasValue)
@@ -165,7 +184,7 @@ public class ReturnOrderService : IReturnOrderService
         var totalCount = await query.CountAsync();
         var items = await query
             .Include(r => r.SalesOrder)
-            .Include(r => r.Customer)
+            .Include(r => r.BusinessPartner)
             .Include(r => r.Lines)
             .OrderByDescending(r => r.CreatedAt)
             .Skip((page - 1) * pageSize).Take(pageSize)
@@ -265,6 +284,7 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<CreditNoteDetailDto> CreateCreditNoteAsync(CreateCreditNoteDto dto)
     {
         var tenantId = _currentUserProvider.TenantId;
+        await ValidateCreditNoteBusinessPartnerAsync(dto, tenantId);
         var docNumber = await _documentNumberingService.GenerateAsync(
             DocumentNumberingModules.Sales,
             SalesDocumentTypes.CreditNote,
@@ -276,7 +296,7 @@ public class ReturnOrderService : IReturnOrderService
         {
             DocumentNumber = docNumber,
             DocumentDate = DateTime.UtcNow,
-            CustomerId = dto.CustomerId,
+            BusinessPartnerId = dto.BusinessPartnerId,
             ReturnOrderId = dto.ReturnOrderId,
             OriginalInvoiceId = dto.OriginalInvoiceId,
             CreditNoteStatus = CreditNoteStatus.PendingApproval,
@@ -325,7 +345,7 @@ public class ReturnOrderService : IReturnOrderService
             {
                 cn.DocumentNumber,
                 cn.CreditNoteStatus,
-                cn.CustomerId,
+                cn.BusinessPartnerId,
                 cn.OriginalInvoiceId,
                 cn.TotalAmount,
                 cn.TaxAmount
@@ -346,7 +366,7 @@ public class ReturnOrderService : IReturnOrderService
 
         var createDto = new CreateCreditNoteDto
         {
-            CustomerId = ro.CustomerId,
+            BusinessPartnerId = ro.BusinessPartnerId,
             ReturnOrderId = returnOrderId,
             Reason = $"Credit for Return Order {ro.DocumentNumber}",
             Lines = ro.Lines.Select(l => new CreateCreditNoteLineDto
@@ -372,7 +392,7 @@ public class ReturnOrderService : IReturnOrderService
     {
         var tenantId = _currentUserProvider.TenantId;
         var cn = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id)
-            .Include(c => c.Customer)
+            .Include(c => c.BusinessPartner)
             .Include(c => c.ReturnOrder!)
             .Include(c => c.OriginalInvoice)
             .Include(c => c.Lines)
@@ -383,7 +403,7 @@ public class ReturnOrderService : IReturnOrderService
     public async Task<PagedResult<CreditNoteSummaryDto>> GetCreditNotesAsync(
         int page = 1, int pageSize = 20,
         string? search = null, CreditNoteStatus? status = null,
-        Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null)
+        Guid? businessPartnerId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
         var tenantId = _currentUserProvider.TenantId;
         var query = _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId);
@@ -391,8 +411,8 @@ public class ReturnOrderService : IReturnOrderService
             query = query.Where(c => c.DocumentNumber.Contains(search));
         if (status.HasValue)
             query = query.Where(c => c.CreditNoteStatus == status.Value);
-        if (customerId.HasValue)
-            query = query.Where(c => c.CustomerId == customerId.Value);
+        if (businessPartnerId.HasValue)
+            query = query.Where(c => c.BusinessPartnerId == businessPartnerId.Value);
         if (startDate.HasValue)
             query = query.Where(c => c.DocumentDate >= startDate.Value);
         if (endDate.HasValue)
@@ -400,7 +420,7 @@ public class ReturnOrderService : IReturnOrderService
 
         var totalCount = await query.CountAsync();
         var items = await query
-            .Include(c => c.Customer)
+            .Include(c => c.BusinessPartner)
             .Include(c => c.Lines)
             .OrderByDescending(c => c.CreatedAt)
             .Skip((page - 1) * pageSize).Take(pageSize)
@@ -665,15 +685,11 @@ public class ReturnOrderService : IReturnOrderService
         if (!postedEventExists)
             throw new InvalidOperationException("AR credit note must be posted through the central finance posting engine before it can be applied.");
 
-        if (!cn.OriginalInvoiceId.HasValue)
-        {
-            // Sales CreditNote.CustomerId is a legacy Sales customer key, while Finance Invoice uses
-            // BusinessPartnerId. Do not manufacture a cross-model application without an explicit mapping.
-            throw new InvalidOperationException("Standalone Sales credit notes cannot be applied to Finance AR invoices until a supported BusinessPartner mapping is implemented.");
-        }
-
-        if (applicationInvoiceId != cn.OriginalInvoiceId)
+        if (cn.OriginalInvoiceId.HasValue && applicationInvoiceId != cn.OriginalInvoiceId)
             throw new InvalidOperationException("AR credit notes can only be applied to their original invoice. Use a reversal or adjustment workflow to correct the target.");
+
+        if (!applicationInvoiceId.HasValue)
+            throw new InvalidOperationException("Standalone AR credit notes require an open Finance invoice for the same business partner before application.");
 
         if (applicationInvoiceId.HasValue)
         {
@@ -682,6 +698,8 @@ public class ReturnOrderService : IReturnOrderService
                 .FirstOrDefaultAsync();
             if (invoice == null)
                 throw new InvalidOperationException("AR credit note application invoice was not found for this tenant.");
+            if (invoice.BusinessPartnerId != cn.BusinessPartnerId)
+                throw new InvalidOperationException("AR credit notes can only be applied to invoices for the same business partner.");
             if (!invoice.JournalEntryId.HasValue)
                 throw new InvalidOperationException($"AR credit note cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
 
@@ -725,11 +743,75 @@ public class ReturnOrderService : IReturnOrderService
     //  REFUNDS
     // ═════════════════════════════════════
 
+    private async Task ValidateCreditNoteBusinessPartnerAsync(CreateCreditNoteDto dto, Guid tenantId)
+    {
+        if (dto.BusinessPartnerId == Guid.Empty)
+            throw new InvalidOperationException("AR credit note business partner is required.");
+
+        var businessPartner = await _unitOfWork.Repository<BusinessPartner>()
+            .GetQueryable(p => p.TenantId == tenantId && p.Id == dto.BusinessPartnerId && p.IsActive && !p.IsDeleted)
+            .FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException("AR credit note business partner was not found or is inactive for this tenant.");
+
+        if (dto.OriginalInvoiceId.HasValue)
+        {
+            var invoice = await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i => i.TenantId == tenantId && i.Id == dto.OriginalInvoiceId.Value && !i.IsDeleted)
+                .FirstOrDefaultAsync()
+                ?? throw new InvalidOperationException("AR credit note original invoice was not found for this tenant.");
+
+            if (invoice.BusinessPartnerId != businessPartner.Id)
+                throw new InvalidOperationException("AR credit note business partner must match the original invoice.");
+        }
+
+        if (dto.ReturnOrderId.HasValue)
+        {
+            var returnOrder = await _returnRepo.GetQueryable(r => r.TenantId == tenantId && r.Id == dto.ReturnOrderId.Value && !r.IsDeleted)
+                .FirstOrDefaultAsync()
+                ?? throw new InvalidOperationException("AR credit note return order was not found for this tenant.");
+
+            if (returnOrder.BusinessPartnerId != businessPartner.Id)
+                throw new InvalidOperationException("AR credit note business partner must match the return order.");
+        }
+    }
+
+    private async Task ValidateRefundBusinessPartnerAsync(CreateRefundDto dto, Guid tenantId)
+    {
+        if (dto.BusinessPartnerId == Guid.Empty)
+            throw new InvalidOperationException("Refund business partner is required.");
+
+        var businessPartnerExists = await _unitOfWork.Repository<BusinessPartner>()
+            .GetQueryable(p => p.TenantId == tenantId && p.Id == dto.BusinessPartnerId && p.IsActive && !p.IsDeleted)
+            .AnyAsync();
+        if (!businessPartnerExists)
+            throw new InvalidOperationException("Refund business partner was not found or is inactive for this tenant.");
+
+        if (dto.CreditNoteId.HasValue)
+        {
+            var creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == dto.CreditNoteId.Value && !c.IsDeleted)
+                .FirstOrDefaultAsync()
+                ?? throw new InvalidOperationException("Refund credit note was not found for this tenant.");
+
+            if (creditNote.BusinessPartnerId != dto.BusinessPartnerId)
+                throw new InvalidOperationException("Refund business partner must match the credit note.");
+        }
+
+        if (dto.ReturnOrderId.HasValue)
+        {
+            var returnOrder = await _returnRepo.GetQueryable(r => r.TenantId == tenantId && r.Id == dto.ReturnOrderId.Value && !r.IsDeleted)
+                .FirstOrDefaultAsync()
+                ?? throw new InvalidOperationException("Refund return order was not found for this tenant.");
+
+            if (returnOrder.BusinessPartnerId != dto.BusinessPartnerId)
+                throw new InvalidOperationException("Refund business partner must match the return order.");
+        }
+    }
+
     private async Task<CreditNote> LoadCreditNoteForPostingAsync(Guid id, CancellationToken cancellationToken)
     {
         var tenantId = _currentUserProvider.TenantId;
         var creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
-            .Include(c => c.Customer)
+            .Include(c => c.BusinessPartner)
             .Include(c => c.OriginalInvoice)
             .Include(c => c.Lines)
             .FirstOrDefaultAsync(cancellationToken);
@@ -766,11 +848,11 @@ public class ReturnOrderService : IReturnOrderService
         if (creditNote.TotalAmount <= 0m)
             throw new InvalidOperationException("AR credit note amount must be positive.");
 
-        if (creditNote.Customer == null || creditNote.Customer.TenantId != tenantId)
+        if (creditNote.BusinessPartner == null || creditNote.BusinessPartner.TenantId != tenantId)
             throw new InvalidOperationException("AR credit note customer was not found for this tenant.");
 
-        if (!creditNote.Customer.IsActive)
-            throw new InvalidOperationException($"Customer '{creditNote.Customer.CustomerName}' is not active for AR credit note posting.");
+        if (!creditNote.BusinessPartner.IsActive)
+            throw new InvalidOperationException($"Customer '{creditNote.BusinessPartner.PartnerName}' is not active for AR credit note posting.");
 
         var activeLines = creditNote.Lines?
             .Where(l => !l.IsDeleted)
@@ -797,6 +879,8 @@ public class ReturnOrderService : IReturnOrderService
             var originalInvoice = creditNote.OriginalInvoice;
             if (originalInvoice == null || originalInvoice.TenantId != tenantId)
                 throw new InvalidOperationException("AR credit note original invoice was not found for this tenant.");
+            if (originalInvoice.BusinessPartnerId != creditNote.BusinessPartnerId)
+                throw new InvalidOperationException("AR credit note and original invoice must use the same business partner.");
 
             if (!originalInvoice.JournalEntryId.HasValue)
                 throw new InvalidOperationException($"AR credit note cannot post against unposted invoice '{originalInvoice.InvoiceNumber}'.");
@@ -830,7 +914,7 @@ public class ReturnOrderService : IReturnOrderService
         var exchangeRate = NormalizeExchangeRate(creditNote.ExchangeRate);
         var accountCache = new Dictionary<Guid, Account>();
 
-        var arAccountId = creditNote.Customer.DefaultArAccountId
+        var arAccountId = creditNote.BusinessPartner.DefaultArAccountId
             ?? settings.ControlAccountArId
             ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
         await ResolveCreditNotePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
@@ -908,7 +992,7 @@ public class ReturnOrderService : IReturnOrderService
             SourceDocumentTenantId = creditNote.TenantId,
             PostingAction = "Post",
             SourceDocumentReference = creditNote.DocumentNumber,
-            Description = $"Sales credit note {creditNote.DocumentNumber} - {creditNote.Customer.CustomerName}",
+            Description = $"Sales credit note {creditNote.DocumentNumber} - {creditNote.BusinessPartner.PartnerName}",
             PostingDate = creditNote.DocumentDate,
             JournalType = "AR Credit Note",
             BookClassification = "IFRS",
@@ -1128,17 +1212,19 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<RefundDetailDto> CreateRefundAsync(CreateRefundDto dto)
     {
+        var tenantId = _currentUserProvider.TenantId;
+        await ValidateRefundBusinessPartnerAsync(dto, tenantId);
         var docNumber = await _documentNumberingService.GenerateAsync(
             DocumentNumberingModules.Sales,
             SalesDocumentTypes.Refund,
-            _currentUserProvider.TenantId,
+            tenantId,
             DateTime.UtcNow,
             nameof(Refund));
         var refund = new Refund
         {
             DocumentNumber = docNumber,
             DocumentDate = DateTime.UtcNow,
-            CustomerId = dto.CustomerId,
+            BusinessPartnerId = dto.BusinessPartnerId,
             CreditNoteId = dto.CreditNoteId,
             ReturnOrderId = dto.ReturnOrderId,
             RefundStatus = RefundStatus.PendingApproval,
@@ -1146,7 +1232,7 @@ public class ReturnOrderService : IReturnOrderService
             TotalAmount = dto.RefundAmount,
             RefundMethod = dto.RefundMethod,
             Reason = dto.Reason,
-            TenantId = _currentUserProvider.TenantId
+            TenantId = tenantId
         };
 
         await _refundRepo.AddAsync(refund);
@@ -1167,25 +1253,28 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<RefundDetailDto?> GetRefundByIdAsync(Guid id)
     {
-        var refund = await _refundRepo.GetByIdAsync(id,
-            r => r.Customer,
-            r => r.CreditNote!,
-            r => r.ProcessedBy!);
+        var tenantId = _currentUserProvider.TenantId;
+        var refund = await _refundRepo.GetQueryable(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted)
+            .Include(r => r.BusinessPartner)
+            .Include(r => r.CreditNote)
+            .Include(r => r.ProcessedBy)
+            .FirstOrDefaultAsync();
         return refund == null ? null : MapRefundDetailDto(refund);
     }
 
     public async Task<PagedResult<RefundSummaryDto>> GetRefundsAsync(
         int page = 1, int pageSize = 20,
         string? search = null, RefundStatus? status = null,
-        Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null)
+        Guid? businessPartnerId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
-        var query = _refundRepo.GetQueryable();
+        var tenantId = _currentUserProvider.TenantId;
+        var query = _refundRepo.GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted);
         if (!string.IsNullOrEmpty(search))
             query = query.Where(r => r.DocumentNumber.Contains(search));
         if (status.HasValue)
             query = query.Where(r => r.RefundStatus == status.Value);
-        if (customerId.HasValue)
-            query = query.Where(r => r.CustomerId == customerId.Value);
+        if (businessPartnerId.HasValue)
+            query = query.Where(r => r.BusinessPartnerId == businessPartnerId.Value);
         if (startDate.HasValue)
             query = query.Where(r => r.DocumentDate >= startDate.Value);
         if (endDate.HasValue)
@@ -1193,7 +1282,7 @@ public class ReturnOrderService : IReturnOrderService
 
         var totalCount = await query.CountAsync();
         var items = await query
-            .Include(r => r.Customer)
+            .Include(r => r.BusinessPartner)
             .Include(r => r.CreditNote)
             .OrderByDescending(r => r.CreatedAt)
             .Skip((page - 1) * pageSize).Take(pageSize)
@@ -1422,7 +1511,7 @@ public class ReturnOrderService : IReturnOrderService
         DocumentNumber = r.DocumentNumber,
         ReturnStatus = r.ReturnStatus,
         ReasonCode = r.ReasonCode,
-        CustomerName = r.Customer?.CustomerName,
+        CustomerName = r.BusinessPartner?.PartnerName,
         SalesOrderNumber = r.SalesOrder?.DocumentNumber,
         TotalAmount = r.TotalAmount,
         LineCount = r.Lines?.Count ?? 0,
@@ -1436,7 +1525,7 @@ public class ReturnOrderService : IReturnOrderService
         DocumentNumber = r.DocumentNumber,
         ReturnStatus = r.ReturnStatus,
         ReasonCode = r.ReasonCode,
-        CustomerName = r.Customer?.CustomerName,
+        CustomerName = r.BusinessPartner?.PartnerName,
         SalesOrderNumber = r.SalesOrder?.DocumentNumber,
         TotalAmount = r.TotalAmount,
         LineCount = r.Lines?.Count ?? 0,
@@ -1444,7 +1533,7 @@ public class ReturnOrderService : IReturnOrderService
         CreatedAt = r.CreatedAt,
         SalesOrderId = r.SalesOrderId,
         DeliveryNoteId = r.DeliveryNoteId,
-        CustomerId = r.CustomerId,
+        BusinessPartnerId = r.BusinessPartnerId,
         ReasonDescription = r.ReasonDescription,
         InspectedDate = r.InspectedDate,
         InspectedByName = r.InspectedBy?.UserName,
@@ -1471,7 +1560,7 @@ public class ReturnOrderService : IReturnOrderService
         Id = c.Id,
         DocumentNumber = c.DocumentNumber,
         CreditNoteStatus = c.CreditNoteStatus,
-        CustomerName = c.Customer?.CustomerName,
+        CustomerName = c.BusinessPartner?.PartnerName,
         TotalAmount = c.TotalAmount,
         Reason = c.Reason,
         AppliedDate = c.AppliedDate,
@@ -1485,14 +1574,14 @@ public class ReturnOrderService : IReturnOrderService
         Id = c.Id,
         DocumentNumber = c.DocumentNumber,
         CreditNoteStatus = c.CreditNoteStatus,
-        CustomerName = c.Customer?.CustomerName,
+        CustomerName = c.BusinessPartner?.PartnerName,
         TotalAmount = c.TotalAmount,
         Reason = c.Reason,
         AppliedDate = c.AppliedDate,
         JournalEntryId = c.JournalEntryId,
         LineCount = c.Lines?.Count ?? 0,
         CreatedAt = c.CreatedAt,
-        CustomerId = c.CustomerId,
+        BusinessPartnerId = c.BusinessPartnerId,
         ReturnOrderId = c.ReturnOrderId,
         ReturnOrderNumber = c.ReturnOrder?.DocumentNumber,
         OriginalInvoiceId = c.OriginalInvoiceId,
@@ -1515,7 +1604,7 @@ public class ReturnOrderService : IReturnOrderService
         Id = r.Id,
         DocumentNumber = r.DocumentNumber,
         RefundStatus = r.RefundStatus,
-        CustomerName = r.Customer?.CustomerName,
+        CustomerName = r.BusinessPartner?.PartnerName,
         RefundAmount = r.RefundAmount,
         RefundMethod = r.RefundMethod,
         ProcessedDate = r.ProcessedDate,
@@ -1527,12 +1616,12 @@ public class ReturnOrderService : IReturnOrderService
         Id = r.Id,
         DocumentNumber = r.DocumentNumber,
         RefundStatus = r.RefundStatus,
-        CustomerName = r.Customer?.CustomerName,
+        CustomerName = r.BusinessPartner?.PartnerName,
         RefundAmount = r.RefundAmount,
         RefundMethod = r.RefundMethod,
         ProcessedDate = r.ProcessedDate,
         CreatedAt = r.CreatedAt,
-        CustomerId = r.CustomerId,
+        BusinessPartnerId = r.BusinessPartnerId,
         CreditNoteId = r.CreditNoteId,
         CreditNoteNumber = r.CreditNote?.DocumentNumber,
         ReturnOrderId = r.ReturnOrderId,

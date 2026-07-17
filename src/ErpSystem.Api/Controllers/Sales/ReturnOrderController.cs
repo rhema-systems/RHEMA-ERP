@@ -25,10 +25,10 @@ public class ReturnOrderController : ControllerBase
     public async Task<IActionResult> GetReturnOrders(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null, [FromQuery] ReturnOrderStatus? status = null,
-        [FromQuery] Guid? customerId = null, [FromQuery] Guid? salesOrderId = null,
+        [FromQuery] Guid? businessPartnerId = null, [FromQuery] Guid? salesOrderId = null,
         [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
     {
-        var result = await _service.GetReturnOrdersAsync(page, pageSize, search, status, customerId, salesOrderId, startDate, endDate);
+        var result = await _service.GetReturnOrdersAsync(page, pageSize, search, status, businessPartnerId, salesOrderId, startDate, endDate);
         return Ok(result);
     }
 
@@ -77,10 +77,10 @@ public class ReturnOrderController : ControllerBase
     public async Task<IActionResult> GetCreditNotes(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null, [FromQuery] CreditNoteStatus? status = null,
-        [FromQuery] Guid? customerId = null,
+        [FromQuery] Guid? businessPartnerId = null,
         [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
     {
-        var result = await _service.GetCreditNotesAsync(page, pageSize, search, status, customerId, startDate, endDate);
+        var result = await _service.GetCreditNotesAsync(page, pageSize, search, status, businessPartnerId, startDate, endDate);
         return Ok(result);
     }
 
@@ -136,10 +136,10 @@ public class ReturnOrderController : ControllerBase
     public async Task<IActionResult> GetRefunds(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null, [FromQuery] RefundStatus? status = null,
-        [FromQuery] Guid? customerId = null,
+        [FromQuery] Guid? businessPartnerId = null,
         [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
     {
-        var result = await _service.GetRefundsAsync(page, pageSize, search, status, customerId, startDate, endDate);
+        var result = await _service.GetRefundsAsync(page, pageSize, search, status, businessPartnerId, startDate, endDate);
         return Ok(result);
     }
 

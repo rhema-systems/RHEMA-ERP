@@ -56203,7 +56203,7 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
-                    b.Property<Guid>("CustomerId")
+                    b.Property<Guid>("BusinessPartnerId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("DeletedAt")
@@ -56309,7 +56309,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CustomerId");
+                    b.HasIndex("BusinessPartnerId");
 
                     b.HasIndex("JournalEntryId");
 
@@ -57813,7 +57813,7 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
-                    b.Property<Guid>("CustomerId")
+                    b.Property<Guid>("BusinessPartnerId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("DeletedAt")
@@ -57936,7 +57936,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("CreditNoteId");
 
-                    b.HasIndex("CustomerId");
+                    b.HasIndex("BusinessPartnerId");
 
                     b.HasIndex("ProcessedById");
 
@@ -57985,7 +57985,7 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
-                    b.Property<Guid>("CustomerId")
+                    b.Property<Guid>("BusinessPartnerId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("DeletedAt")
@@ -58112,7 +58112,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("CreditNoteId");
 
-                    b.HasIndex("CustomerId");
+                    b.HasIndex("BusinessPartnerId");
 
                     b.HasIndex("DeliveryNoteId");
 
@@ -77678,9 +77678,9 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.CreditNote", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.Sales.Customer", "Customer")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
                         .WithMany()
-                        .HasForeignKey("CustomerId")
+                        .HasForeignKey("BusinessPartnerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -77705,7 +77705,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("Customer");
+                    b.Navigation("BusinessPartner");
 
                     b.Navigation("OriginalInvoice");
 
@@ -78021,9 +78021,9 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("CreditNoteId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("ErpSystem.Core.Entities.Sales.Customer", "Customer")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
                         .WithMany()
-                        .HasForeignKey("CustomerId")
+                        .HasForeignKey("BusinessPartnerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -78045,7 +78045,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("CreditNote");
 
-                    b.Navigation("Customer");
+                    b.Navigation("BusinessPartner");
 
                     b.Navigation("ProcessedBy");
 
@@ -78061,9 +78061,9 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("CreditNoteId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("ErpSystem.Core.Entities.Sales.Customer", "Customer")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
                         .WithMany()
-                        .HasForeignKey("CustomerId")
+                        .HasForeignKey("BusinessPartnerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -78096,7 +78096,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("CreditNote");
 
-                    b.Navigation("Customer");
+                    b.Navigation("BusinessPartner");
 
                     b.Navigation("DeliveryNote");
 

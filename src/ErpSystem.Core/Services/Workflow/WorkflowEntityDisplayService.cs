@@ -339,20 +339,21 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
             if (key == Normalize("ReturnOrder"))
             {
-                var returnOrder = await _unitOfWork.Repository<ReturnOrder>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Customer);
+                // Return workflows use the canonical BusinessPartner identity so workflow cards agree with AR.
+                var returnOrder = await _unitOfWork.Repository<ReturnOrder>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.BusinessPartner);
                 info.EntityType = "ReturnOrder";
                 info.EntityNumber = returnOrder?.DocumentNumber;
-                info.EntityName = returnOrder?.Customer?.CustomerName;
+                info.EntityName = returnOrder?.BusinessPartner?.PartnerName;
                 info.ActionUrl = $"/sales/return-orders";
                 return info;
             }
 
             if (key == Normalize("CreditNote"))
             {
-                var creditNote = await _unitOfWork.Repository<CreditNote>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Customer);
+                var creditNote = await _unitOfWork.Repository<CreditNote>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.BusinessPartner);
                 info.EntityType = "CreditNote";
                 info.EntityNumber = creditNote?.DocumentNumber;
-                info.EntityName = creditNote?.Customer?.CustomerName;
+                info.EntityName = creditNote?.BusinessPartner?.PartnerName;
                 info.ActionUrl = $"/sales/credit-notes";
                 return info;
             }
@@ -369,10 +370,10 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
             if (key == Normalize("Refund"))
             {
-                var refund = await _unitOfWork.Repository<Refund>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Customer);
+                var refund = await _unitOfWork.Repository<Refund>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.BusinessPartner);
                 info.EntityType = "Refund";
                 info.EntityNumber = refund?.DocumentNumber;
-                info.EntityName = refund?.Customer?.CustomerName;
+                info.EntityName = refund?.BusinessPartner?.PartnerName;
                 info.ActionUrl = $"/sales/refunds";
                 return info;
             }
