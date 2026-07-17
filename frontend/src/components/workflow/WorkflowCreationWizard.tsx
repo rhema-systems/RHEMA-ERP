@@ -50,6 +50,7 @@ interface WorkflowStep {
   requiresDocument?: boolean;
   documentName?: string;
   documentRequirementKey?: string;
+  documentRequirements?: DocumentRequirement[];
 }
 
 interface ChecklistItem {
@@ -57,9 +58,14 @@ interface ChecklistItem {
   text: string;
   isRequired: boolean;
   isCompleted?: boolean;
-  requiresDocument?: boolean;
-  documentName?: string;
+}
+
+interface DocumentRequirement {
+  id: string;
+  documentName: string;
   documentType?: string;
+  requirementKey?: string;
+  isRequired: boolean;
 }
 
 const moduleOptions = [
@@ -118,8 +124,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
   const [conditions, setConditions] = useState<string[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [requiresDocument, setRequiresDocument] = useState(false);
-  const [documentName, setDocumentName] = useState('');
-  const [documentRequirementKey, setDocumentRequirementKey] = useState('');
+  const [documentRequirements, setDocumentRequirements] = useState<DocumentRequirement[]>([]);
 
   const customEntityTypeValue = '__custom__';
   const { items: entityTypeOptions, fallback: entityTypeFallback } = filterEntityTypesByModule(
@@ -210,8 +215,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
     setConditions([]);
     setChecklist([]);
     setRequiresDocument(false);
-    setDocumentName('');
-    setDocumentRequirementKey('');
+    setDocumentRequirements([]);
   };
 
   const handleAddStep = () => {
@@ -231,8 +235,18 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
     setConditions(step.conditions || []);
     setChecklist(step.checklist || []);
     setRequiresDocument(step.requiresDocument || step.type === 'document');
-    setDocumentName(step.documentName || '');
-    setDocumentRequirementKey(step.documentRequirementKey || '');
+    setDocumentRequirements(
+      step.documentRequirements && step.documentRequirements.length > 0
+        ? step.documentRequirements
+        : step.documentName
+          ? [{
+              id: step.documentRequirementKey || crypto.randomUUID(),
+              documentName: step.documentName,
+              requirementKey: step.documentRequirementKey,
+              isRequired: true,
+            }]
+          : []
+    );
     setEditingStep(step);
     setIsStepModalOpen(true);
   };
@@ -250,8 +264,16 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
       conditions: conditions.length > 0 ? conditions : undefined,
       checklist: checklist.length > 0 ? checklist : undefined,
       requiresDocument: requiresDocument || stepType === 'document',
-      documentName: documentName.trim() ? documentName.trim() : undefined,
-      documentRequirementKey: documentRequirementKey.trim() ? documentRequirementKey.trim() : undefined,
+      documentRequirements: documentRequirements
+        .filter(item => item.documentName.trim())
+        .map((item, index) => ({
+          ...item,
+          id: item.id || `document-${index + 1}`,
+          documentName: item.documentName.trim(),
+          documentType: item.documentType?.trim() || undefined,
+          requirementKey: item.requirementKey?.trim() || buildRequirementKey(item.documentName, index),
+          isRequired: item.isRequired !== false,
+        })),
     };
 
     if (editingStep) {
@@ -297,6 +319,40 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
     setChecklist(prev => prev.filter((_, i) => i !== index));
   };
 
+  const buildRequirementKey = (value: string, index: number) => {
+    const normalized = (value || `document-${index + 1}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    return normalized || `document-${index + 1}`;
+  };
+
+  const addDocumentRequirement = () => {
+    setDocumentRequirements(prev => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        documentName: '',
+        documentType: '',
+        requirementKey: '',
+        isRequired: true,
+      },
+    ]);
+  };
+
+  const updateDocumentRequirement = (
+    index: number,
+    field: keyof DocumentRequirement,
+    value: string | boolean
+  ) => {
+    setDocumentRequirements(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  };
+
+  const removeDocumentRequirement = (index: number) => {
+    setDocumentRequirements(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleComplete = () => {
     void (async () => {
       try {
@@ -312,12 +368,21 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
               name: item.text.trim(),
               description: '',
               isRequired: item.isRequired !== false,
-              requiresDocument: item.requiresDocument === true,
-              documentName: item.requiresDocument ? (item.documentName?.trim() || item.text.trim()) : undefined,
-              documentType: item.requiresDocument ? (item.documentType?.trim() || undefined) : undefined,
+              requiresDocument: false,
             }));
 
-          const hasStageDocument = Boolean(s.requiresDocument || s.type === 'document' || s.documentName?.trim());
+          // Stage document uploads are configured separately from checklist items.
+          const documentRequirements = (s.documentRequirements || [])
+            .filter(item => item.documentName.trim())
+            .map((item, requirementIndex) => ({
+              id: item.id || `document-${idx + 1}-${requirementIndex + 1}`,
+              requirementKey: item.requirementKey?.trim() || buildRequirementKey(item.documentName, requirementIndex),
+              documentName: item.documentName.trim(),
+              documentType: item.documentType?.trim() || undefined,
+              isRequired: item.isRequired !== false,
+            }));
+          const fallbackDocumentName = s.documentName?.trim();
+          const hasStageDocument = Boolean(s.requiresDocument || s.type === 'document' || documentRequirements.length > 0 || fallbackDocumentName);
           const configuration = hasStageDocument || qualityChecks.length > 0
             ? {
                 ...(hasStageDocument
@@ -325,8 +390,18 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                       taskConfig: {
                         taskActionType: s.type === 'document' ? 'document' : 'general',
                         requiresDocument: Boolean(s.requiresDocument || s.type === 'document'),
-                        documentName: s.documentName?.trim() || undefined,
-                        documentRequirementKey: s.documentRequirementKey?.trim() || s.id,
+                        documentName: documentRequirements[0]?.documentName || fallbackDocumentName || undefined,
+                        documentRequirementKey: documentRequirements[0]?.requirementKey || s.documentRequirementKey?.trim() || s.id,
+                        documentRequirements: documentRequirements.length > 0
+                          ? documentRequirements
+                          : fallbackDocumentName
+                            ? [{
+                                id: s.documentRequirementKey?.trim() || s.id,
+                                requirementKey: s.documentRequirementKey?.trim() || s.id,
+                                documentName: fallbackDocumentName,
+                                isRequired: true,
+                              }]
+                            : [],
                         instructions: s.description?.trim() || undefined,
                       },
                     }
@@ -603,7 +678,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                     <div className="space-y-4">
                       {workflowSteps.map((step, index) => {
                         const IconComponent = getStepIcon(step.type);
-                        const documentChecklistCount = step.checklist?.filter(item => item.requiresDocument).length || 0;
+                        const stageDocumentCount = step.documentRequirements?.filter(item => item.documentName.trim()).length || 0;
                         return (
                           <Card key={step.id}>
                             <CardContent className="p-4">
@@ -621,11 +696,10 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                                       {step.isRequired && (
                                         <Badge variant="secondary" className="text-xs">Required</Badge>
                                       )}
-                                      {(step.requiresDocument || step.type === 'document') && (
-                                        <Badge variant="secondary" className="text-xs">Document</Badge>
-                                      )}
-                                      {documentChecklistCount > 0 && (
-                                        <Badge variant="secondary" className="text-xs">{documentChecklistCount} document checks</Badge>
+                                      {(step.requiresDocument || step.type === 'document' || stageDocumentCount > 0) && (
+                                        <Badge variant="secondary" className="text-xs">
+                                          {stageDocumentCount > 1 ? `${stageDocumentCount} Documents` : 'Document'}
+                                        </Badge>
                                       )}
                                     </div>
                                     <p className="text-sm text-muted-foreground mb-2">{step.description}</p>
@@ -634,14 +708,11 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                                       {step.timeoutHours && (
                                         <span>Timeout: {step.timeoutHours}h</span>
                                       )}
-                                      {(step.requiresDocument || step.type === 'document') && (
-                                        <span>Document: {step.documentName || step.name}</span>
+                                      {stageDocumentCount > 0 && (
+                                        <span>Documents: {stageDocumentCount}</span>
                                       )}
                                       {step.checklist && step.checklist.length > 0 && (
                                         <span>Checklist: {step.checklist.length} items</span>
-                                      )}
-                                      {documentChecklistCount > 0 && (
-                                        <span>Document uploads: {documentChecklistCount}</span>
                                       )}
                                     </div>
                                   </div>
@@ -714,7 +785,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   <div className="space-y-3">
                     {workflowSteps.map((step, index) => {
                       const IconComponent = getStepIcon(step.type);
-                      const documentChecklistCount = step.checklist?.filter(item => item.requiresDocument).length || 0;
+                      const stageDocumentCount = step.documentRequirements?.filter(item => item.documentName.trim()).length || 0;
                       return (
                         <div key={step.id} className="flex items-center space-x-3 p-3 bg-muted/60 rounded">
                           <div className="bg-primary/10 p-1.5 rounded">
@@ -726,20 +797,16 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                               <Badge variant="outline" className="text-xs">
                                 {step.type}
                               </Badge>
-                              {(step.requiresDocument || step.type === 'document') && (
-                                <Badge variant="secondary" className="text-xs">Document</Badge>
-                              )}
-                              {documentChecklistCount > 0 && (
-                                <Badge variant="secondary" className="text-xs">{documentChecklistCount} document checks</Badge>
+                              {(step.requiresDocument || step.type === 'document' || stageDocumentCount > 0) && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {stageDocumentCount > 1 ? `${stageDocumentCount} Documents` : 'Document'}
+                                </Badge>
                               )}
                             </div>
                             <p className="text-sm text-muted-foreground">
                               {step.assignee}
-                              {(step.requiresDocument || step.type === 'document') && (
-                                <span> - {step.documentName || step.name}</span>
-                              )}
-                              {documentChecklistCount > 0 && (
-                                <span> - {documentChecklistCount} document uploads</span>
+                              {stageDocumentCount > 0 && (
+                                <span> - {stageDocumentCount} document upload{stageDocumentCount === 1 ? '' : 's'}</span>
                               )}
                             </p>
                           </div>
@@ -811,7 +878,15 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   </div>
                   <div>
                     <Label htmlFor="stepType">Step Type</Label>
-                    <Select value={stepType} onValueChange={setStepType}>
+                    <Select
+                      value={stepType}
+                      onValueChange={(value) => {
+                        setStepType(value);
+                        if (value === 'document' && documentRequirements.length === 0) {
+                          addDocumentRequirement();
+                        }
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select step type" />
                       </SelectTrigger>
@@ -891,30 +966,81 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                     <Checkbox
                       id="requiresDocument"
                       checked={requiresDocument || stepType === 'document'}
-                      onCheckedChange={(checked) => setRequiresDocument(checked as boolean)}
+                      onCheckedChange={(checked) => {
+                        const enabled = checked === true;
+                        setRequiresDocument(enabled);
+                        if (enabled && documentRequirements.length === 0) {
+                          addDocumentRequirement();
+                        }
+                      }}
                       disabled={stepType === 'document'}
                     />
                     <Label htmlFor="requiresDocument">Require document upload for this stage</Label>
                   </div>
                   {(requiresDocument || stepType === 'document') && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="documentName">Required Document</Label>
-                        <Input
-                          id="documentName"
-                          value={documentName}
-                          onChange={(e) => setDocumentName(e.target.value)}
-                          placeholder="e.g. Property file"
-                        />
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label>Required Documents</Label>
+                        <Button variant="outline" size="sm" onClick={addDocumentRequirement}>
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Document
+                        </Button>
                       </div>
-                      <div>
-                        <Label htmlFor="documentRequirementKey">Requirement Key</Label>
-                        <Input
-                          id="documentRequirementKey"
-                          value={documentRequirementKey}
-                          onChange={(e) => setDocumentRequirementKey(e.target.value)}
-                          placeholder="Auto-generated if blank"
-                        />
+                      {documentRequirements.length === 0 && (
+                        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                          Add each document that must be uploaded before this stage can be completed.
+                        </div>
+                      )}
+                      <div className="space-y-3">
+                        {documentRequirements.map((item, index) => (
+                          <div key={item.id || index} className="rounded-md border border-border p-3">
+                            <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                              <div>
+                                <Label className="text-xs">Document Name</Label>
+                                <Input
+                                  value={item.documentName}
+                                  onChange={(e) => updateDocumentRequirement(index, 'documentName', e.target.value)}
+                                  placeholder="e.g. Cadastral plan"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Document Type</Label>
+                                <Input
+                                  value={item.documentType || ''}
+                                  onChange={(e) => updateDocumentRequirement(index, 'documentType', e.target.value)}
+                                  placeholder="e.g. Survey Plan"
+                                />
+                              </div>
+                              <div className="flex items-end">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => removeDocumentRequirement(index)}
+                                  aria-label="Remove document requirement"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+                              <div>
+                                <Label className="text-xs">Requirement Key</Label>
+                                <Input
+                                  value={item.requirementKey || ''}
+                                  onChange={(e) => updateDocumentRequirement(index, 'requirementKey', e.target.value)}
+                                  placeholder="Auto-generated if blank"
+                                />
+                              </div>
+                              <div className="flex items-end space-x-2 pb-2">
+                                <Checkbox
+                                  checked={item.isRequired !== false}
+                                  onCheckedChange={(checked) => updateDocumentRequirement(index, 'isRequired', checked as boolean)}
+                                />
+                                <Label className="text-xs">Required</Label>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -988,34 +1114,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                             />
                             <Label className="text-xs">Required</Label>
                           </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox
-                              checked={item.requiresDocument === true}
-                              onCheckedChange={(checked) => updateChecklistItem(index, 'requiresDocument', checked as boolean)}
-                            />
-                            <Label className="text-xs">Requires document upload</Label>
-                          </div>
                         </div>
-                        {item.requiresDocument && (
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <div>
-                              <Label className="text-xs">Document Name</Label>
-                              <Input
-                                value={item.documentName || ''}
-                                onChange={(e) => updateChecklistItem(index, 'documentName', e.target.value)}
-                                placeholder="e.g. Physical assessment report"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Document Type</Label>
-                              <Input
-                                value={item.documentType || ''}
-                                onChange={(e) => updateChecklistItem(index, 'documentType', e.target.value)}
-                                placeholder="e.g. Assessment Report"
-                              />
-                            </div>
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>

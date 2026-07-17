@@ -2051,7 +2051,7 @@ public class WorkflowController : ControllerBase
 
             if (!string.IsNullOrWhiteSpace(safeRequirementKey) && checklist.Count > 0)
             {
-                // Estate/DMS integration: checklist evidence is the document bridge used by Estate stages and Syncfusion previews.
+                // Resolve named upload requirements so attachments stay tied to the workflow step that requested them.
                 checklistItem = checklist.FirstOrDefault(item =>
                     string.Equals(
                         WorkflowChecklistEvidenceValidator.NormalizeKey(item.Id, item.Name),
@@ -2928,10 +2928,71 @@ public class WorkflowController : ControllerBase
         {
             TaskActionType = taskActionType,
             DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName) ? null : taskConfig.DocumentName.Trim(),
-            RequiresDocument = taskConfig.RequiresDocument || taskActionType.Equals("document", StringComparison.OrdinalIgnoreCase),
+            RequiresDocument = taskConfig.RequiresDocument ||
+                taskConfig.DocumentRequirements.Any(requirement => requirement.IsRequired) ||
+                taskActionType.Equals("document", StringComparison.OrdinalIgnoreCase),
             DocumentRequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey) ? null : taskConfig.DocumentRequirementKey.Trim(),
+            DocumentRequirements = NormalizeDocumentRequirements(taskConfig),
             Instructions = string.IsNullOrWhiteSpace(taskConfig.Instructions) ? null : taskConfig.Instructions.Trim()
         };
+    }
+
+    private static List<WorkflowDocumentRequirementDto> NormalizeDocumentRequirements(WorkflowTaskConfigDto taskConfig)
+    {
+        // Surface a normalized requirement list to the UI while still honoring older single-document configs.
+        var configured = taskConfig.DocumentRequirements
+            .Where(requirement =>
+                !string.IsNullOrWhiteSpace(requirement.DocumentName) ||
+                !string.IsNullOrWhiteSpace(requirement.RequirementKey))
+            .Select((requirement, index) => new WorkflowDocumentRequirementDto
+            {
+                Id = string.IsNullOrWhiteSpace(requirement.Id) ? $"document-{index + 1}" : requirement.Id,
+                RequirementKey = string.IsNullOrWhiteSpace(requirement.RequirementKey)
+                    ? BuildRequirementKey(requirement.DocumentName, index)
+                    : requirement.RequirementKey.Trim(),
+                DocumentName = string.IsNullOrWhiteSpace(requirement.DocumentName)
+                    ? $"Document {index + 1}"
+                    : requirement.DocumentName.Trim(),
+                DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? null : requirement.DocumentType.Trim(),
+                IsRequired = requirement.IsRequired,
+            })
+            .ToList();
+
+        if (configured.Count > 0)
+        {
+            return configured;
+        }
+
+        if (taskConfig.RequiresDocument ||
+            taskConfig.TaskActionType.Equals("document", StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(taskConfig.DocumentName))
+        {
+            configured.Add(new WorkflowDocumentRequirementDto
+            {
+                Id = "document-1",
+                RequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey)
+                    ? BuildRequirementKey(taskConfig.DocumentName, 0)
+                    : taskConfig.DocumentRequirementKey.Trim(),
+                DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
+                    ? "Required document"
+                    : taskConfig.DocumentName.Trim(),
+                IsRequired = true,
+            });
+        }
+
+        return configured;
+    }
+
+    private static string BuildRequirementKey(string? value, int index)
+    {
+        var source = string.IsNullOrWhiteSpace(value) ? $"document-{index + 1}" : value.Trim().ToLowerInvariant();
+        var key = new string(source.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray()).Trim('-');
+        while (key.Contains("--", StringComparison.Ordinal))
+        {
+            key = key.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        return string.IsNullOrWhiteSpace(key) ? $"document-{index + 1}" : key;
     }
 
     private static List<WorkflowQualityCheckDto> GetChecklistFromStepConfiguration(string? configurationJson)

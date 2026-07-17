@@ -17,6 +17,7 @@ import { WorkflowApprovalCommentDialog, WorkflowApprovalDialogMode } from '@/com
 import { workflowApiService } from '@/services/workflow-api.service';
 import type {
   WorkflowApprovalChecklistResponseDto,
+  WorkflowDocumentRequirementDto,
   WorkflowEntitySummaryDto,
   WorkflowPendingApproverDto,
   WorkflowQualityCheckDto,
@@ -111,7 +112,7 @@ export function WorkflowApprovalActions({
   const [recallOpen, setRecallOpen] = React.useState(false);
   const [taskOpen, setTaskOpen] = React.useState(false);
   const [taskComments, setTaskComments] = React.useState('');
-  const [taskFile, setTaskFile] = React.useState<File | null>(null);
+  const [taskFiles, setTaskFiles] = React.useState<Record<string, File | null>>({});
   const [taskChecklistState, setTaskChecklistState] = React.useState<Record<string, WorkflowApprovalChecklistResponseDto>>({});
   const [taskChecklistUploadingKey, setTaskChecklistUploadingKey] = React.useState<string | null>(null);
   const [taskLocalAttachments, setTaskLocalAttachments] = React.useState<WorkflowTaskAttachmentDto[]>([]);
@@ -198,22 +199,58 @@ export function WorkflowApprovalActions({
   const showApproveRejectControls = canShowApprovalActions && !canShowRecall;
   const canCompleteTask = isCurrentTaskStep && effectiveCanCompleteFlag === true && !!effectiveStepInstanceId;
   const normalizedTaskAction = effectiveTaskConfig?.taskActionType?.trim().toLowerCase();
+  // Stage-level document requirements define the uploads needed before this task can advance.
+  const taskDocumentRequirements = React.useMemo<WorkflowDocumentRequirementDto[]>(() => {
+    const configured = (effectiveTaskConfig?.documentRequirements || [])
+      .filter((requirement) => requirement?.documentName?.trim() || requirement?.requirementKey?.trim())
+      .map((requirement, index) => ({
+        id: requirement.id || `document-${index + 1}`,
+        requirementKey: requirement.requirementKey?.trim() || `document-${index + 1}`,
+        documentName: requirement.documentName?.trim() || `Document ${index + 1}`,
+        documentType: requirement.documentType?.trim() || undefined,
+        isRequired: requirement.isRequired !== false,
+      }));
+
+    if (configured.length > 0) {
+      return configured;
+    }
+
+    if (
+      effectiveTaskConfig?.requiresDocument === true ||
+      normalizedTaskAction === 'document' ||
+      effectiveTaskConfig?.documentName?.trim()
+    ) {
+      return [{
+        id: 'document-1',
+        requirementKey: effectiveTaskConfig?.documentRequirementKey?.trim() || 'document-1',
+        documentName: effectiveTaskConfig?.documentName?.trim() || 'Required document',
+        isRequired: true,
+      }];
+    }
+
+    return [];
+  }, [effectiveTaskConfig, normalizedTaskAction]);
   const isDocumentTask =
     effectiveTaskConfig?.requiresDocument === true ||
+    taskDocumentRequirements.length > 0 ||
     normalizedTaskAction === 'document' ||
     (effectiveStepName || '').trim().toLowerCase() === 'attach document';
-  const taskRequirementKey = effectiveTaskConfig?.documentRequirementKey?.trim();
+  const requiredTaskDocumentRequirements = taskDocumentRequirements.filter((requirement) => requirement.isRequired !== false);
+  const hasTaskAttachmentForRequirement = React.useCallback(
+    (requirement: WorkflowDocumentRequirementDto) =>
+      effectiveTaskAttachments.some((attachment) =>
+        (attachment.requirementKey || '').trim().toLowerCase() === requirement.requirementKey.trim().toLowerCase()
+      ),
+    [effectiveTaskAttachments]
+  );
+  const missingTaskDocumentRequirements = requiredTaskDocumentRequirements.filter(
+    (requirement) => !hasTaskAttachmentForRequirement(requirement) && !taskFiles[requirement.requirementKey]
+  );
   const hasRequiredTaskAttachment =
     !isDocumentTask ||
-    effectiveTaskAttachments.some((attachment) => {
-      if (!taskRequirementKey) {
-        return true;
-      }
-
-      return (attachment.requirementKey || '').trim().toLowerCase() === taskRequirementKey.toLowerCase();
-    });
-  const taskButtonLabel = isDocumentTask && !hasRequiredTaskAttachment ? 'Attach Document' : 'Complete Task';
-  const taskDialogTitle = isDocumentTask ? 'Attach Document' : 'Complete Workflow Task';
+    requiredTaskDocumentRequirements.every((requirement) => hasTaskAttachmentForRequirement(requirement));
+  const taskButtonLabel = isDocumentTask && !hasRequiredTaskAttachment ? 'Attach Documents' : 'Complete Task';
+  const taskDialogTitle = isDocumentTask ? 'Attach Documents' : 'Complete Workflow Task';
   const taskDialogDescription = isDocumentTask
     ? `Attach the required document for ${entityNumber || entityLabel}.`
     : `Complete the current workflow step for ${entityNumber || entityLabel}.`;
@@ -243,6 +280,7 @@ export function WorkflowApprovalActions({
   const taskConfirmDisabled =
     taskProcessing ||
     taskChecklistUploadingKey !== null ||
+    missingTaskDocumentRequirements.length > 0 ||
     taskRequiredChecklistIncomplete ||
     taskRequiredDocumentIncomplete;
 
@@ -516,11 +554,9 @@ export function WorkflowApprovalActions({
       return;
     }
 
-    if (isDocumentTask && !hasRequiredTaskAttachment && !taskFile) {
+    if (isDocumentTask && missingTaskDocumentRequirements.length > 0) {
       toast.error('Upload required document', {
-        description: effectiveTaskConfig?.documentName
-          ? `${effectiveTaskConfig.documentName} must be attached before this task can be completed.`
-          : 'A document must be attached before this task can be completed.',
+        description: `${missingTaskDocumentRequirements[0].documentName} must be attached before this task can be completed.`,
       });
       return;
     }
@@ -533,8 +569,8 @@ export function WorkflowApprovalActions({
     }
 
     if (taskRequiredDocumentIncomplete) {
-      toast.error('Attach required checklist evidence', {
-        description: 'One or more checklist items require document evidence before this task can move forward.',
+      toast.error('Attach required document', {
+        description: 'One or more required documents must be attached before this task can move forward.',
       });
       return;
     }
@@ -547,15 +583,22 @@ export function WorkflowApprovalActions({
     try {
       setTaskProcessing(true);
 
-      if (taskFile) {
+      // Upload every selected stage-level document before completing the workflow task.
+      for (const requirement of taskDocumentRequirements) {
+        const selectedFile = taskFiles[requirement.requirementKey];
+        if (!selectedFile) {
+          continue;
+        }
+
         const uploadedAttachment = await workflowApiService.uploadStepAttachment(
           effectiveStepInstanceId,
-          taskFile,
-          taskRequirementKey,
-          effectiveTaskConfig?.documentName
+          selectedFile,
+          requirement.requirementKey,
+          requirement.documentName,
+          requirement.documentType
         );
-        setSummaryTaskAttachments((prev) => [...prev, uploadedAttachment]);
-        setTaskLocalAttachments((prev) => [...prev, uploadedAttachment]);
+        setSummaryTaskAttachments((prev) => [...prev.filter((item) => item.id !== uploadedAttachment.id), uploadedAttachment]);
+        setTaskLocalAttachments((prev) => [...prev.filter((item) => item.id !== uploadedAttachment.id), uploadedAttachment]);
       }
 
       const taskChecklistResponses = buildTaskChecklistResponses();
@@ -581,7 +624,7 @@ export function WorkflowApprovalActions({
       });
       setTaskOpen(false);
       setTaskComments('');
-      setTaskFile(null);
+      setTaskFiles({});
       await runAfter();
     } catch (e: any) {
       toast.error('Failed to complete workflow task', { description: e?.message || undefined });
@@ -845,27 +888,49 @@ export function WorkflowApprovalActions({
               )}
 
               {isDocumentTask && (
-                <div className="space-y-2">
-                  <Label htmlFor={`workflow-task-file-${effectiveStepInstanceId}`}>Required Document</Label>
-                  {effectiveTaskConfig?.documentName && (
-                    <div className="text-sm font-medium">{effectiveTaskConfig.documentName}</div>
-                  )}
-                  <Input
-                    id={`workflow-task-file-${effectiveStepInstanceId}`}
-                    type="file"
-                    onChange={(event) => setTaskFile(event.target.files?.[0] ?? null)}
-                    disabled={taskProcessing}
-                  />
-                  {effectiveTaskAttachments.length > 0 && (
-                    <div className="space-y-1 text-xs text-muted-foreground">
-                      {effectiveTaskAttachments.map((attachment) => (
-                        <div key={attachment.id} className="flex items-center gap-2">
-                          <Upload className="h-3.5 w-3.5" />
-                          <span className="truncate">{attachment.fileName}</span>
+                <div className="space-y-3">
+                  <Label>Required Documents</Label>
+                  {taskDocumentRequirements.map((requirement, index) => {
+                    const attachments = effectiveTaskAttachments.filter((attachment) =>
+                      (attachment.requirementKey || '').trim().toLowerCase() === requirement.requirementKey.toLowerCase()
+                    );
+                    const inputId = `workflow-task-file-${effectiveStepInstanceId}-${requirement.requirementKey || index}`;
+
+                    return (
+                      <div key={requirement.id || requirement.requirementKey || index} className="space-y-2 rounded-md border p-3">
+                        <div>
+                          <div className="text-sm font-medium">
+                            {requirement.documentName}
+                            {requirement.isRequired !== false && <span className="text-red-600"> *</span>}
+                          </div>
+                          {requirement.documentType && (
+                            <div className="text-xs text-muted-foreground">{requirement.documentType}</div>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <Input
+                          id={inputId}
+                          type="file"
+                          onChange={(event) =>
+                            setTaskFiles((current) => ({
+                              ...current,
+                              [requirement.requirementKey]: event.target.files?.[0] ?? null,
+                            }))
+                          }
+                          disabled={taskProcessing}
+                        />
+                        {attachments.length > 0 && (
+                          <div className="space-y-1 text-xs text-muted-foreground">
+                            {attachments.map((attachment) => (
+                              <div key={attachment.id} className="flex items-center gap-2">
+                                <Upload className="h-3.5 w-3.5" />
+                                <span className="truncate">{attachment.fileName}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -1193,29 +1258,51 @@ export function WorkflowApprovalActions({
             )}
 
             {isDocumentTask && (
-              <div className="space-y-2">
-                <Label htmlFor={`workflow-task-file-${effectiveStepInstanceId}`}>Required Document</Label>
-                {effectiveTaskConfig?.documentName && (
-                  <div className="text-sm font-medium">{effectiveTaskConfig.documentName}</div>
-                )}
-                <Input
-                  id={`workflow-task-file-${effectiveStepInstanceId}`}
-                  type="file"
-                  onChange={(event) => setTaskFile(event.target.files?.[0] ?? null)}
-                  disabled={taskProcessing}
-                />
-                {effectiveTaskAttachments.length > 0 && (
-                  <div className="space-y-1 text-xs text-muted-foreground">
-                    {effectiveTaskAttachments.map((attachment) => (
-                      <div key={attachment.id} className="flex items-center gap-2">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span className="truncate">{attachment.fileName}</span>
+              <div className="space-y-3">
+                <Label>Required Documents</Label>
+                {taskDocumentRequirements.map((requirement, index) => {
+                  const attachments = effectiveTaskAttachments.filter((attachment) =>
+                    (attachment.requirementKey || '').trim().toLowerCase() === requirement.requirementKey.toLowerCase()
+                  );
+                  const inputId = `workflow-task-file-${effectiveStepInstanceId}-${requirement.requirementKey || index}`;
+
+                  return (
+                    <div key={requirement.id || requirement.requirementKey || index} className="space-y-2 rounded-md border p-3">
+                      <div>
+                        <div className="text-sm font-medium">
+                          {requirement.documentName}
+                          {requirement.isRequired !== false && <span className="text-red-600"> *</span>}
+                        </div>
+                        {requirement.documentType && (
+                          <div className="text-xs text-muted-foreground">{requirement.documentType}</div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                  )}
-                </div>
-              )}
+                      <Input
+                        id={inputId}
+                        type="file"
+                        onChange={(event) =>
+                          setTaskFiles((current) => ({
+                            ...current,
+                            [requirement.requirementKey]: event.target.files?.[0] ?? null,
+                          }))
+                        }
+                        disabled={taskProcessing}
+                      />
+                      {attachments.length > 0 && (
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          {attachments.map((attachment) => (
+                            <div key={attachment.id} className="flex items-center gap-2">
+                              <Upload className="h-3.5 w-3.5" />
+                              <span className="truncate">{attachment.fileName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {taskChecklistItems.length > 0 && (
               <div className="space-y-3 rounded-md border bg-muted/30 p-3">
