@@ -725,7 +725,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EhcInboundMessagingChannel> EhcInboundMessagingChannels { get; set; }
     public DbSet<EhcInboundMessagingMessage> EhcInboundMessagingMessages { get; set; }
 
-    // Estate land acquisition entities
+    // Estate/DMS integration: Estate acquisition, property assets, and procedure cases are modeled here for shared workflow/DMS links.
     public DbSet<LandAcquisition> LandAcquisitions { get; set; }
     public DbSet<LandAcquisitionDocument> LandAcquisitionDocuments { get; set; }
     public DbSet<LandPhysicalAssessment> LandPhysicalAssessments { get; set; }

@@ -74,6 +74,7 @@ export default function PaymentsPage() {
         payment: NonNullable<typeof paymentsData>['items'][number],
         source: EstateArSource
     ) => {
+        // Estate/Finance integration: payment results are pushed back to Estate after Finance records the receipt/allocation.
         const actionType = payment.unallocatedAmount > 0
             ? 'Receipt recorded'
             : 'Allocation completed';

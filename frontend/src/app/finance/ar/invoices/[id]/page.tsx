@@ -69,6 +69,7 @@ export default function InvoiceDetailsPage() {
     }
 
     const notifyEstate = async () => {
+        // Estate/Finance integration: sends status back to Estate/Facilities or Estate/Property Management after AR processing.
         setIsNotifyingEstate(true);
         try {
             await arService.notifyEstateArResult(estateSource, {
@@ -238,6 +239,7 @@ export default function InvoiceDetailsPage() {
             </Card>
 
             <Card className="no-print">
+                {/* Estate/Finance integration: callback panel is for handoff visibility, not a replacement AR workflow. */}
                 <CardHeader>
                     <CardTitle>Estate AR Callback</CardTitle>
                 </CardHeader>

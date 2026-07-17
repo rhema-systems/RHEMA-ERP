@@ -641,6 +641,7 @@ export default function JobCardsPage() {
       return;
     }
 
+    // Estate/Maintenance integration: Estate can seed the request, but Maintenance still owns job card execution.
     setIsCreateDialogOpen(true);
     setNewJobCard((current) => ({
       ...current,

@@ -980,6 +980,7 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    // Estate/DMS integration: keep Central DMS visible as a shared workspace, not nested inside another module owner.
     title: 'Document Mngt',
     href: '/document-management',
     icon: BookTemplate,
@@ -1007,6 +1008,7 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    // Estate/DMS integration: Estate owns these workspaces; other modules should link into them instead of duplicating pages.
     title: 'Estate',
     href: '/estate',
     icon: Home,
@@ -1192,6 +1194,7 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    // Estate/DMS integration: Legal procedure links support Estate-driven cases while keeping Legal under its own sidebar area.
     title: 'Legal',
     href: '/legal',
     icon: Gavel,

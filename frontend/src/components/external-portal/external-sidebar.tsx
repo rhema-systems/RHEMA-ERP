@@ -95,6 +95,7 @@ const menuItems: MenuItem[] = [
     icon: MapPin,
     comingSoon: true,
   },
+  // Estate/customer portal integration: expose only public Estate listings, service requests, and dispatched documents.
   {
     title: 'Property Listings',
     href: '/external-portal/property-listings',

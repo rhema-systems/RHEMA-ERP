@@ -273,6 +273,7 @@ export default function NewInternalHelpdeskTicketPage() {
   useEffect(() => {
     if (!isEstateFacilitiesSource) return;
 
+    // Estate/Helpdesk integration: prefill a complaint raised from Estate while Helpdesk remains the ticket owner.
     setForm((f) => ({
       ...f,
       subject: f.subject || 'Estate / Facilities complaint',

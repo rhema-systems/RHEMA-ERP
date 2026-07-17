@@ -99,6 +99,7 @@ const canWithdrawRelease = (unit: ProjectUnitDto) =>
   && !unit.salesAgreementId
   && !unit.salesOrderId;
 
+// Estate/Project integration: Project keeps unit creation; Estate only receives released or handed-over units.
 const canPublishToEstate = (unit: ProjectUnitDto) =>
   unit.isReleasedForMarket
   || ['handedover', 'occupied'].includes((unit.status || '').toLowerCase());

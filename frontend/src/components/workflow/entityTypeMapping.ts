@@ -19,6 +19,7 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
   hr: ['Employee', 'PayrollRun', 'PayrollSalaryAdvance', 'PayrollBonusSetup', 'PayrollBackpaySetup'],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],
+  // Estate/DMS integration: Planning, Estate, and Legal entries make existing Workflow filters aware of our procedure cases.
   planning: [
     'PlanningLandAllocationVetting',
     'PlanningChangeOfUseReview',
@@ -33,6 +34,7 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'PlanningDisputeComplaint',
     'PlanningAssemblySpatialCommittee'
   ],
+  // Estate/DMS integration: Estate procedure and land-acquisition cases use Workflow approvals instead of a separate approval engine.
   estate: [
     'LandAcquisition',
     'EstateFacilityPropertySite',
@@ -61,6 +63,7 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'EstateTenancyRegularisation',
     'EstateReportingControls'
   ],
+  // Estate/DMS integration: Legal procedures are exposed to Workflow so Estate handoffs can still route through Legal-owned review.
   legal: [
     'LegalProcedure',
     'LegalMortgage',

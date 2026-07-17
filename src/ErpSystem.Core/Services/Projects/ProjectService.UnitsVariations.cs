@@ -324,6 +324,7 @@ public partial class ProjectService
         var unit = await GetProjectUnitEntityAsync(unitId);
         var project = await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
 
+        // Estate/Project integration: only released, handed-over, or occupied Project units can enter Estate management.
         var isReadyForEstate = unit.IsReleasedForMarket
             || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.HandedOver)
             || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Occupied);

@@ -2051,6 +2051,7 @@ public class WorkflowController : ControllerBase
 
             if (!string.IsNullOrWhiteSpace(safeRequirementKey) && checklist.Count > 0)
             {
+                // Estate/DMS integration: checklist evidence is the document bridge used by Estate stages and Syncfusion previews.
                 checklistItem = checklist.FirstOrDefault(item =>
                     string.Equals(
                         WorkflowChecklistEvidenceValidator.NormalizeKey(item.Id, item.Name),

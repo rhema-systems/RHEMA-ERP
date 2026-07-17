@@ -1231,6 +1231,7 @@ public class ProjectsController : ControllerBase
     {
         try
         {
+            // Estate/Project integration: Project remains the source of constructed units; Estate receives the managed asset.
             var asset = await _projectService.PublishProjectUnitToEstateAsync(unitId);
             await NotifyEstateProjectUnitHandoffAsync(asset);
             return Ok(asset);
@@ -1249,6 +1250,7 @@ public class ProjectsController : ControllerBase
     {
         try
         {
+            // Estate/Project integration: notify Estate roles about the handoff without changing Project module ownership.
             await RoleNotificationDispatcher.NotifyRolesAsync(
                 _db,
                 _notificationService,

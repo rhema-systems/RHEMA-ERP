@@ -103,6 +103,7 @@ export default function ExternalPortalDashboard() {
       color: 'bg-purple-500',
       available: false,
     },
+    // Estate/customer portal integration: public Estate cards route customers into request flows owned by Estate APIs.
     {
       title: 'Property Listings',
       description: 'Search available lands, buildings, and apartments for sale or rent',

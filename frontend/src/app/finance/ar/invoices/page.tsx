@@ -91,6 +91,7 @@ export default function InvoicesPage() {
         invoice: NonNullable<typeof invoicesData>['items'][number],
         source: EstateArSource
     ) => {
+        // Estate/Finance integration: this only notifies Estate of the AR result; invoice ownership stays in Finance.
         setEstateNotifyId(`${source}:${invoice.id}`);
         try {
             await arService.notifyEstateArResult(source, {

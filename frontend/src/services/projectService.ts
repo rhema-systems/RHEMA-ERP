@@ -1448,6 +1448,7 @@ export interface ProjectUnitDto {
 }
 
 export interface EstateManagedAssetDto {
+  // Estate/Project integration: this DTO is the receiving shape after Project publishes a completed or market-ready unit.
   id: string;
   assetCode: string;
   name: string;
@@ -5114,6 +5115,7 @@ class ProjectService {
   }
 
   async publishProjectUnitToEstate(unitId: string): Promise<EstateManagedAssetDto> {
+    // Estate/Project integration: Project triggers the handoff; Estate creates/updates the managed asset record.
     const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/publish-to-estate`, {
       method: 'POST',
       headers: getAuthHeaders(),

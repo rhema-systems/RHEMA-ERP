@@ -50,6 +50,7 @@ public class WorkflowStatusAdapterRegistry : IWorkflowStatusAdapterRegistry
 
 public sealed class LandAcquisitionWorkflowStatusAdapter : IWorkflowStatusAdapter
 {
+    // Estate/DMS integration: Land Acquisition uses Workflow for approvals while keeping Estate-specific status transitions here.
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]
     {
         "LandAcquisition",
@@ -169,6 +170,7 @@ public sealed class LegalProcedureWorkflowStatusAdapter : IWorkflowStatusAdapter
 
 public sealed class EstateFacilitiesWorkflowStatusAdapter : IWorkflowStatusAdapter
 {
+    // Estate/DMS integration: generic Estate/Facilities procedure cases reuse Workflow without adding another approval engine.
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]
     {
         "EstatePropertyManagementPropertyUnit",
@@ -248,6 +250,7 @@ public sealed class EstateFacilitiesWorkflowStatusAdapter : IWorkflowStatusAdapt
 
 public sealed class CentralDocumentManagementWorkflowStatusAdapter : IWorkflowStatusAdapter
 {
+    // Estate/DMS integration: DMS governance stages participate in Workflow for approvals and audit trails.
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]
     {
         "CentralDocumentRegister",
