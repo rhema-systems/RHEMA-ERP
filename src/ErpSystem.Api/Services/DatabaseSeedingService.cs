@@ -240,6 +240,8 @@ namespace ErpSystem.Web.Services
         {
             // Keep this lightweight and idempotent so startup can repair baseline workflow definitions
             // without enabling the broader development/demo data seed.
+            _logger.LogInformation("Ensuring finance permission catalogue and baseline role grants are seeded...");
+            await EnsureFinancePermissionAssignmentsAsync();
             _logger.LogInformation("Ensuring EHC workflow is seeded...");
             await EnsureEhcWorkflowSeededAsync();
             _logger.LogInformation("Ensuring finance workflows are seeded...");
@@ -250,6 +252,15 @@ namespace ErpSystem.Web.Services
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
+        }
+
+        private async Task EnsureFinancePermissionAssignmentsAsync()
+        {
+            // This is an additive, idempotent production-startup repair. It creates no tenants,
+            // transactions, or demo records; it only ensures the role and permission catalogue
+            // required by Finance authorization policies exists before those policies are enforced.
+            await SeedRolesAsync();
+            await SeedRolePermissionAssignmentsAsync();
         }
 
         private async Task EnsureProjectWorkflowsSeededAsync()

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { financePurchaseOrderService } from '@/services/financePurchaseOrderService';
 import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
-import { financeService } from '@/services/finance.service';
+import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { useToast } from '@/components/ui/use-toast';
@@ -210,9 +210,7 @@ export default function CreatePurchaseOrderPage() {
             } else {
                 try {
                     const rateObj = await financeService.getCurrentExchangeRate(currency);
-                    const rawRate = rateObj?.rate || (rateObj as any)?.currentExchangeRate || 1.0;
-                    const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
-                    setExchangeRate(finalRate);
+                    setExchangeRate(resolvePostingExchangeRate(rateObj));
                     setExchangeRateSource('Daily');
                 } catch (err) {
                     console.error("Failed to fetch exchange rate for vendor currency", err);
@@ -231,9 +229,7 @@ export default function CreatePurchaseOrderPage() {
         } else {
             try {
                 const rateObj = await financeService.getCurrentExchangeRate(val);
-                const rawRate = rateObj?.rate || (rateObj as any)?.currentExchangeRate || 1.0;
-                const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
-                setExchangeRate(finalRate);
+                setExchangeRate(resolvePostingExchangeRate(rateObj));
                 setExchangeRateSource('Daily');
             } catch (err) {
                 console.error("Failed to fetch exchange rate for currency", err);

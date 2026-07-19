@@ -29,13 +29,14 @@ Supported:
 
 - Balanced GL trial-balance opening-balance batches by account.
 - Single explicit book classification such as `IFRS`.
-- Optional line-level bank account, counterparty, currency, and segment references as migration metadata.
+- Optional line-level bank account, counterparty, functional-currency, and segment references as migration metadata.
 - Posting through `IFinancePostingEngine` after approval.
 
 Rejected or deferred:
 
 - `ALL_ACTIVE_BOOKS`.
 - Unbalanced or single-sided imports.
+- Foreign-currency GL opening lines. The current model stores functional debit/credit amounts only and therefore rejects a non-functional transaction currency before approval or posting rather than inventing an original foreign amount or FX snapshot.
 - Silent suspense/equity plug creation.
 - Direct mutation of `Account.Balance`.
 - Direct mutation of `BankAccount.CurrentBalance`.

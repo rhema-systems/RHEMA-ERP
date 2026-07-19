@@ -104,7 +104,7 @@ public sealed class ControlledOpeningBalancePostingTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posting period is not open.");
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
-        (await db.OpeningBalanceBatches.SingleAsync(b => b.Id == batch.Id)).Status.Should().Be("Failed");
+        (await db.OpeningBalanceBatches.SingleAsync(b => b.Id == batch.Id)).Status.Should().Be("PostingFailed");
     }
 
     [Fact]
@@ -197,6 +197,94 @@ public sealed class ControlledOpeningBalancePostingTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Opening balance batch must be approved before posting.");
         workflow.Verify(x => x.StartApprovalWorkflowAsync("OpeningBalanceBatch", batch.Id), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Workflow")]
+    public async Task WorkflowStartupFailure_ShouldNotAllowOpeningBalancePosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(x => x.StartApprovalWorkflowAsync("OpeningBalanceBatch", It.IsAny<Guid>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = false,
+                Message = "Workflow routing is unavailable."
+            });
+        var service = CreateService(db, tenantId, workflow: workflow.Object);
+
+        var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
+        Func<Task> submit = () => service.SubmitForApprovalAsync(batch.Id);
+        await submit
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Workflow routing is unavailable*");
+
+        var post = () => service.PostAsync(batch.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must be approved before posting*");
+        (await db.OpeningBalanceBatches.SingleAsync(b => b.Id == batch.Id)).Status.Should().Be("Failed");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Migration")]
+    public async Task OpeningDateOutsideSelectedPeriod_ShouldFailValidation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var request = CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id);
+        request.OpeningDate = fixture.Period.EndDate.AddDays(1);
+
+        var batch = await service.CreateBatchAsync(request);
+        var validation = await service.ValidateBatchAsync(batch.Id);
+
+        validation.IsValid.Should().BeFalse();
+        validation.Errors.Should().Contain(error => error.Contains("must fall within the selected fiscal period", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Migration")]
+    public async Task ForeignCurrencyOpeningLine_ShouldFailValidationBeforePosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var request = CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id);
+        request.Lines = new[]
+        {
+            new CreateOpeningBalanceLineDto
+            {
+                AccountId = fixture.Cash.Id,
+                DebitAmount = 100m,
+                TransactionCurrencyCode = "USD",
+                FunctionalCurrencyCode = "GHS"
+            },
+            new CreateOpeningBalanceLineDto
+            {
+                AccountId = fixture.Equity.Id,
+                CreditAmount = 100m,
+                TransactionCurrencyCode = "USD",
+                FunctionalCurrencyCode = "GHS"
+            }
+        };
+
+        var batch = await service.CreateBatchAsync(request);
+        var validation = await service.ValidateBatchAsync(batch.Id);
+
+        validation.IsValid.Should().BeFalse();
+        validation.Errors.Should().Contain(error => error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
     }
 
     [Fact]

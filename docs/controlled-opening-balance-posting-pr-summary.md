@@ -47,6 +47,7 @@ The migration is schema-only. It does not post opening balances or mutate accoun
 
 - `ALL_ACTIVE_BOOKS`.
 - Single-sided imports with automatic suspense/equity plug.
+- Foreign-currency GL opening lines without explicitly modelled original foreign debit/credit amounts.
 - AP/AR/fixed-asset subledger opening-document migration.
 - Final production migration execution or accountant sign-off.
 

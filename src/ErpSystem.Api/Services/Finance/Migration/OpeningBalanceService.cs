@@ -22,6 +22,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     private const string StatusRejected = "Rejected";
     private const string StatusPosted = "Posted";
     private const string StatusFailed = "Failed";
+    private const string StatusPostingFailed = "PostingFailed";
 
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
@@ -171,7 +172,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         }
         else if (batch.OpeningDate.Date < period.StartDate.Date || batch.OpeningDate.Date > period.EndDate.Date)
         {
-            warnings.Add("Opening date is outside the selected fiscal period date range.");
+            errors.Add("Opening date must fall within the selected fiscal period date range.");
         }
 
         foreach (var line in batch.Lines.OrderBy(l => l.LineNumber))
@@ -189,6 +190,13 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             if (line.DebitAmount > 0 && line.CreditAmount > 0)
             {
                 errors.Add($"Line {line.LineNumber}: a line cannot contain both debit and credit amounts.");
+            }
+
+            if (!string.Equals(line.TransactionCurrencyCode, line.FunctionalCurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                // This GL-only import records functional debit/credit amounts. It cannot safely
+                // reconstruct an original foreign amount for the posting-engine FX snapshot.
+                errors.Add($"Line {line.LineNumber}: foreign-currency opening balances are not supported by the controlled GL opening-balance flow.");
             }
 
             var account = line.Account;
@@ -355,7 +363,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         }
 
         if (!string.Equals(batch.Status, StatusApproved, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(batch.Status, StatusFailed, StringComparison.OrdinalIgnoreCase))
+            !string.Equals(batch.Status, StatusPostingFailed, StringComparison.OrdinalIgnoreCase))
         {
             await RecordAuditAsync(
                 FinanceAuditEvents.FinancePostingBlockedPendingApproval,
@@ -403,7 +411,9 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         }
         catch (Exception ex)
         {
-            batch.Status = StatusFailed;
+            // Only a failure after a recorded approval may be retried. A failed workflow start
+            // remains StatusFailed and can never be interpreted as permission to post.
+            batch.Status = StatusPostingFailed;
             batch.FailedAt = DateTime.UtcNow;
             batch.FailureReason = ex.Message;
             batch.UpdatedAt = DateTime.UtcNow;
@@ -447,7 +457,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             }));
 
         diagnostics.AddRange(batches
-            .Where(b => string.Equals(b.Status, StatusFailed, StringComparison.OrdinalIgnoreCase))
+            .Where(b => string.Equals(b.Status, StatusFailed, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(b.Status, StatusPostingFailed, StringComparison.OrdinalIgnoreCase))
             .Select(b => new OpeningBalanceDiagnosticDto
             {
                 DiagnosticCode = "FAILED_OPENING_BALANCE_BATCH",

@@ -1,4 +1,8 @@
+using ErpSystem.Data;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -314,6 +318,67 @@ public sealed class FinanceConcurrencyHardeningTests
         source.Should().Contain("CREATE INDEX [IX_Invoices_BusinessPartnerId]", "the current AR model requires the BusinessPartner lookup index");
         source.Should().Contain("ALTER TABLE [dbo].[Invoices] ALTER COLUMN [BusinessPartnerId] uniqueidentifier NOT NULL", "BusinessPartnerId should be enforced after the backfill succeeds");
         source.Should().Contain("THROW 51000", "the migration must fail loudly instead of leaving unmapped legacy AR rows");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void SalesReturnBusinessPartnerMigration_ShouldBeDiscoveredByEfCore()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260717090000_UseBusinessPartnersForSalesReturnAccounting.cs"));
+
+        source.Should().Contain("[Microsoft.EntityFrameworkCore.Infrastructure.DbContext(typeof(ApplicationDbContext))]",
+            "hand-written migrations need DbContext metadata when no generated designer partial is present");
+        source.Should().Contain("[Migration(\"20260717090000_UseBusinessPartnersForSalesReturnAccounting\")]",
+            "EF Core needs the stable migration identifier to discover and apply this schema change");
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            // Migration discovery is a relational-provider concern. No connection is opened;
+            // SQL Server options only register the same migrations services used at runtime.
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=MigrationDiscovery;Trusted_Connection=True")
+            .Options;
+        using var context = new ApplicationDbContext(options);
+        var migrations = context.GetService<IMigrationsAssembly>().Migrations;
+
+        migrations.Should().ContainKey("20260717090000_UseBusinessPartnersForSalesReturnAccounting",
+            "the hand-written migration must be included in EF Core's migration assembly");
+    }
+
+    [Fact]
+    [Trait("Category", "Authorization")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void WorkflowStartupSeeding_ShouldIncludeFinancePermissionsOutsideDevelopmentDataSeeding()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var workflowSeedMethod = ExtractMember(source, "public async Task SeedWorkflowDefinitionsAsync", "private async Task EnsureFinancePermissionAssignmentsAsync");
+
+        workflowSeedMethod.Should().Contain("EnsureFinancePermissionAssignmentsAsync()",
+            "normal startup invokes workflow seeding outside the development-only demo-data branch");
+        source.Should().Contain("await SeedRolePermissionAssignmentsAsync();",
+            "Finance policy definitions must have matching persisted role grants before protected endpoints are exposed");
+    }
+
+    [Fact]
+    [Trait("Category", "Frontend")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinanceEntryForms_ShouldUseTheApiRateSnapshotWithoutMagnitudeBasedInversion()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "frontend", "src", "services", "finance.service.ts"));
+        var arInvoice = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ar", "invoices", "new", "page.tsx"));
+        var apInvoice = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ap", "invoices", "create", "page.tsx"));
+        var purchaseOrder = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ap", "purchase-orders", "create", "page.tsx"));
+
+        service.Should().Contain("resolvePostingExchangeRate", "entry forms need one explicit contract for the rate validated by the posting engine");
+        service.Should().Contain("return resolvedRate;", "the service must preserve the API snapshot rather than derive an inverse rate");
+
+        foreach (var pageSource in new[] { arInvoice, apInvoice, purchaseOrder })
+        {
+            pageSource.Should().Contain("resolvePostingExchangeRate(rateObj)");
+            pageSource.Should().NotContain("rawRate < 1", "the exchange-rate direction cannot be inferred from a rate being smaller than one");
+        }
     }
 
     [Fact]

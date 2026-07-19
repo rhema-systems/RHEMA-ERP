@@ -109,6 +109,8 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(JournalEntryController), "ReverseJournalEntry", FinancePermissions.ReverseJournalEntries)]
     [InlineData(typeof(JournalEntryController), "ApproveJournalEntry", FinancePermissions.ApproveJournalEntries)]
     [InlineData(typeof(VendorInvoiceController), "Post", FinancePermissions.PostApInvoices)]
+    [InlineData(typeof(InvoiceController), "Send", FinancePermissions.SendArInvoices)]
+    [InlineData(typeof(InvoiceController), "Post", FinancePermissions.ApprovePostArInvoices)]
     [InlineData(typeof(VendorPaymentController), "Create", FinancePermissions.ProcessApPayments)]
     [InlineData(typeof(PaymentBatchController), "Approve", FinancePermissions.ApproveApPayments)]
     [InlineData(typeof(PaymentBatchController), "Process", FinancePermissions.ProcessApPayments)]

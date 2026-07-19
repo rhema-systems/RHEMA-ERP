@@ -212,7 +212,9 @@ public static class FinancePermissionPolicyMap
             "Create" => One(FinancePermissions.CreateArInvoices),
             "Update" => One(FinancePermissions.EditArInvoices),
             "Delete" => One(FinancePermissions.DeleteArInvoices),
-            "Send" or "Post" => One(FinancePermissions.ApprovePostArInvoices),
+            // Sending is an operational AR action; posting approval remains a separate control.
+            "Send" => One(FinancePermissions.SendArInvoices),
+            "Post" => One(FinancePermissions.ApprovePostArInvoices),
             "Void" => One(FinancePermissions.VoidArInvoices),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ManageArInvoices)
         };

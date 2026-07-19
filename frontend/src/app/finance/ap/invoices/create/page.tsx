@@ -51,7 +51,7 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { taxDataService } from '@/services/finance/tax-data.service';
-import { financeService } from '@/services/finance.service';
+import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
@@ -394,9 +394,7 @@ export default function CreateVendorInvoicePage() {
                 } else {
                     try {
                         const rateObj = await financeService.getCurrentExchangeRate(supplier.currency);
-                        const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
-                        const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
-                        form.setValue('exchangeRate', finalRate);
+                        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
                         form.setValue('exchangeRateSource', 'Daily');
                     } catch (err) {
                         console.error("Failed to fetch exchange rate for supplier currency", err);
@@ -618,9 +616,7 @@ export default function CreateVendorInvoicePage() {
                                             } else {
                                                 try {
                                                     const rateObj = await financeService.getCurrentExchangeRate(val);
-                                                    const rawRate = rateObj?.rate || rateObj?.currentExchangeRate || 1.0;
-                                                    const finalRate = rawRate < 1 ? Number((1 / rawRate).toFixed(4)) : rawRate;
-                                                    form.setValue('exchangeRate', finalRate);
+                                                    form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
                                                     form.setValue('exchangeRateSource', 'Daily');
                                                 } catch (err) {
                                                     console.error("Failed to fetch exchange rate for currency", err);

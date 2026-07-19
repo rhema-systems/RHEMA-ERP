@@ -8,6 +8,8 @@ namespace ErpSystem.Data.Migrations;
 /// Replaces the legacy CRM Customer key at the return/credit/refund boundary with the canonical
 /// tenant-scoped BusinessPartner key used by Sales orders and Finance AR.
 /// </summary>
+[Microsoft.EntityFrameworkCore.Infrastructure.DbContext(typeof(ApplicationDbContext))]
+[Migration("20260717090000_UseBusinessPartnersForSalesReturnAccounting")]
 public partial class UseBusinessPartnersForSalesReturnAccounting : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

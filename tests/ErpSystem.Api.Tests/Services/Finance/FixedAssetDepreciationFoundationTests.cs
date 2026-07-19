@@ -47,6 +47,66 @@ public sealed class FixedAssetDepreciationFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDepreciation")]
     [Trait("Category", "FixedAssets")]
+    public async Task BulkScheduleGeneration_ShouldSkipActiveAssetsThatAreNotCapitalized()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDepreciationFoundationAsync(db, tenantId);
+        var ineligibleAsset = AddActiveUncapitalizedAsset(db, fixture, tenantId);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+
+        var schedules = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            PostToGl = false
+        });
+
+        schedules.Should().ContainSingle(schedule => schedule.FixedAssetId == fixture.Asset.Id);
+        schedules.Should().NotContain(schedule => schedule.FixedAssetId == ineligibleAsset.Id);
+        (await db.AssetDepreciationSchedules.AnyAsync(schedule => schedule.FixedAssetId == ineligibleAsset.Id)).Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciation")]
+    [Trait("Category", "Workflow")]
+    public async Task ApprovedBulkRun_ShouldNotPostWhenAnAssetBecomesIneligible()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDepreciationFoundationAsync(db, tenantId);
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(service => service.StartApprovalWorkflowAsync("FixedAssetDepreciationRun", It.IsAny<Guid>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
+        var services = CreateServices(db, tenantId, workflow.Object);
+
+        await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            PostToGl = true
+        });
+
+        fixture.Asset.Status = FixedAssetStatus.Disposed;
+        var run = await db.FixedAssetDepreciationRuns.SingleAsync();
+        run.Status = "Approved";
+        await db.SaveChangesAsync();
+
+        var post = () => services.Depreciation.PostApprovedRunAsync(run.Id);
+
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*status is not eligible for depreciation*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+        (await db.AssetDepreciationSchedules.SingleAsync()).IsPosted.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciation")]
+    [Trait("Category", "FixedAssets")]
     public async Task DepreciationCannotRunBeforeActivationOrPlacedInServiceDate()
     {
         var tenantId = Guid.NewGuid();
@@ -702,6 +762,55 @@ public sealed class FixedAssetDepreciationFoundationTests
             accumulatedAccount,
             expenseAccount,
             rate);
+    }
+
+    private static FixedAsset AddActiveUncapitalizedAsset(
+        ApplicationDbContext db,
+        DepreciationFixture fixture,
+        Guid tenantId)
+    {
+        var asset = new FixedAsset
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AssetCode = $"FA-UNCAP-{Guid.NewGuid():N}"[..18],
+            Name = "Uncapitalized imported asset",
+            FixedAssetCategoryId = fixture.Category.Id,
+            PurchaseDate = new DateTime(2026, 6, 30),
+            PlacedInServiceDate = new DateTime(2026, 7, 1),
+            PurchasePrice = 1200m,
+            AcquisitionCost = 1200m,
+            NetBookValue = 1200m,
+            UsefulLifeMonths = 12,
+            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationConvention = DepreciationConvention.FullMonth,
+            Status = FixedAssetStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            TransactionCurrencyCode = "GHS",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+
+        asset.BookValues.Add(new FixedAssetBookValue
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FixedAssetId = asset.Id,
+            AccountingBookId = fixture.Book.Id,
+            BookClassification = "IFRS",
+            AcquisitionCost = 1200m,
+            NetBookValue = 1200m,
+            UsefulLifeMonths = 12,
+            RemainingUsefulLifeMonths = 12,
+            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationConvention = DepreciationConvention.FullMonth,
+            PlacedInServiceDate = asset.PlacedInServiceDate,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+
+        db.FixedAssets.Add(asset);
+        return asset;
     }
 
     private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")

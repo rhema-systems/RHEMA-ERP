@@ -136,8 +136,9 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         var depreciationLines = new List<DepreciationLineWorkItem>();
         foreach (var asset in assets)
         {
-            EnsureAssetEligibleForDepreciation(asset, fiscalPeriod, postingDate, dto.FixedAssetId.HasValue);
-            if (asset.Status != FixedAssetStatus.Active)
+            // A bulk run must omit ineligible assets rather than allowing a validator return to
+            // fall through into schedule creation. A single-asset request still fails explicitly.
+            if (!EnsureAssetEligibleForDepreciation(asset, fiscalPeriod, postingDate, dto.FixedAssetId.HasValue))
             {
                 continue;
             }
@@ -493,7 +494,9 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
                 throw new InvalidOperationException("Depreciation run references a fixed asset that was not found for this tenant.");
             }
 
-            EnsureAssetEligibleForDepreciation(asset, run.FiscalPeriod, run.PostingDate, isSingleAssetRun: run.FixedAssetId.HasValue);
+            // A run can wait for workflow approval. Revalidate each persisted schedule before
+            // posting so an asset disposed or put on hold in the interim cannot reach the GL.
+            EnsureAssetEligibleForDepreciation(asset, run.FiscalPeriod, run.PostingDate, isSingleAssetRun: true);
             var bookValue = asset.BookValues.FirstOrDefault(value =>
                     !value.IsDeleted &&
                     ((schedule.AccountingBookId.HasValue && value.AccountingBookId == schedule.AccountingBookId) ||
@@ -810,7 +813,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         bool postToGl)
         => $"FA:Depreciation:{tenantId:N}:{fiscalPeriodId:N}:{bookClassification}:{fixedAssetId?.ToString("N") ?? "ALL"}:{(postToGl ? "Post" : "Calculate")}";
 
-    private void EnsureAssetEligibleForDepreciation(
+    private bool EnsureAssetEligibleForDepreciation(
         FixedAsset asset,
         FiscalPeriod fiscalPeriod,
         DateTime postingDate,
@@ -823,45 +826,45 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
 
         if (asset.Status is FixedAssetStatus.Disposed or FixedAssetStatus.WrittenOff or FixedAssetStatus.HeldForSale or FixedAssetStatus.OnHold)
         {
-            if (isSingleAssetRun)
-            {
-                throw new InvalidOperationException("Fixed asset status is not eligible for depreciation.");
-            }
-            return;
+            return HandleIneligibleAsset("Fixed asset status is not eligible for depreciation.", isSingleAssetRun);
         }
 
         if (!IsCapitalized(asset))
         {
-            if (isSingleAssetRun)
-            {
-                throw new InvalidOperationException("Fixed asset must be capitalized before depreciation can run.");
-            }
-            return;
+            return HandleIneligibleAsset("Fixed asset must be capitalized before depreciation can run.", isSingleAssetRun);
         }
 
         if (asset.Status != FixedAssetStatus.Active)
         {
-            if (isSingleAssetRun)
-            {
-                throw new InvalidOperationException("Fixed asset must be active before depreciation can run.");
-            }
-            return;
+            return HandleIneligibleAsset("Fixed asset must be active before depreciation can run.", isSingleAssetRun);
         }
 
         if (!asset.PlacedInServiceDate.HasValue)
         {
-            throw new InvalidOperationException("Fixed asset must have a placed-in-service date before depreciation can run.");
+            return HandleIneligibleAsset("Fixed asset must have a placed-in-service date before depreciation can run.", isSingleAssetRun);
         }
 
         if (asset.CapitalizationDate.HasValue && postingDate < asset.CapitalizationDate.Value.Date)
         {
-            throw new InvalidOperationException("Depreciation cannot post before the capitalization date.");
+            return HandleIneligibleAsset("Depreciation cannot post before the capitalization date.", isSingleAssetRun);
         }
 
         if (postingDate < asset.PlacedInServiceDate.Value.Date || fiscalPeriod.EndDate.Date < asset.PlacedInServiceDate.Value.Date)
         {
-            throw new InvalidOperationException("Depreciation cannot post before the placed-in-service date.");
+            return HandleIneligibleAsset("Depreciation cannot post before the placed-in-service date.", isSingleAssetRun);
         }
+
+        return true;
+    }
+
+    private static bool HandleIneligibleAsset(string message, bool isSingleAssetRun)
+    {
+        if (isSingleAssetRun)
+        {
+            throw new InvalidOperationException(message);
+        }
+
+        return false;
     }
 
     private static void ValidateBookValueForDepreciation(
