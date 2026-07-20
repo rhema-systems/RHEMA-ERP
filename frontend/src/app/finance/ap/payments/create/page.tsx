@@ -38,6 +38,9 @@ import { accountsPayableService } from '@/services/accountsPayableService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeService } from '@/services/finance.service';
+import { taxDataService } from '@/services/finance/tax-data.service';
+import { PaymentMethodType } from '@/types/cash-management';
+import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
@@ -50,13 +53,39 @@ const paymentSchema = z.object({
     paymentDate: z.date(),
     totalAmount: z.coerce.number().min(0.01, 'Amount must be positive'),
     paymentMethod: z.enum(['BankTransfer', 'Cheque', 'Cash', 'WireTransfer', 'MobileMoney', 'DirectDebit', 'Other']).default('BankTransfer'),
+    paymentMethodId: z.string().optional(),
     transactionReference: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
+    withholdingTaxId: z.string().optional(),
+    withholdingTaxAccountId: z.string().optional(),
+    withholdingTaxRate: z.coerce.number().min(0).max(100).optional().default(0),
+    withholdingCertificateNumber: z.string().optional(),
     notes: z.string().optional(),
 });
 
 type PaymentFormValues = z.infer<typeof paymentSchema>;
+
+const toVendorPaymentMethod = (type?: PaymentMethodType): PaymentFormValues['paymentMethod'] => {
+    switch (type) {
+        case PaymentMethodType.Cash:
+            return 'Cash';
+        case PaymentMethodType.Cheque:
+            return 'Cheque';
+        case PaymentMethodType.MobileMoney:
+            return 'MobileMoney';
+        case PaymentMethodType.DirectDebit:
+            return 'DirectDebit';
+        case PaymentMethodType.EFT:
+        case PaymentMethodType.BankTransfer:
+        case PaymentMethodType.StandingOrder:
+            return 'BankTransfer';
+        default:
+            return 'Other';
+    }
+};
+
+const roundMoney = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
 
 export default function NewVendorPaymentPage() {
     const router = useRouter();
@@ -64,6 +93,7 @@ export default function NewVendorPaymentPage() {
     const preselectedSupplierId = searchParams.get('supplierId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
+    const preselectedPaymentMethodId = searchParams.get('paymentMethodId') || '';
     const preselectedAmountParam = searchParams.get('amount');
     const preselectedAmount = preselectedAmountParam && Number.isFinite(Number(preselectedAmountParam))
         ? Number(preselectedAmountParam)
@@ -78,6 +108,7 @@ export default function NewVendorPaymentPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [allocations, setAllocations] = useState<Record<string, number>>({});
     const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
+    const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
 
     const { data: suppliersData } = useQuery({
         queryKey: ['business-partners', 'ap-suppliers'],
@@ -89,6 +120,16 @@ export default function NewVendorPaymentPage() {
         queryFn: () => cashManagementDataService.getActiveBankAccounts(),
     });
 
+    const { data: paymentMethods } = useQuery({
+        queryKey: ['payment-methods', 'active'],
+        queryFn: () => cashManagementDataService.getActivePaymentMethods(),
+    });
+
+    const { data: withholdingTaxes } = useQuery({
+        queryKey: ['taxes', 'withholding', 'active'],
+        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
+    });
+
     const form = useForm<PaymentFormValues>({
         // @ts-expect-error TODO: fix type
         resolver: zodResolver(paymentSchema),
@@ -98,20 +139,52 @@ export default function NewVendorPaymentPage() {
             paymentDate: preselectedPaymentDate,
             totalAmount: preselectedAmount,
             paymentMethod: 'BankTransfer',
+            paymentMethodId: preselectedPaymentMethodId || undefined,
             transactionReference: preselectedReferenceNumber,
             currencyCode: 'GHS',
             exchangeRate: 1,
+            withholdingTaxId: undefined,
+            withholdingTaxAccountId: undefined,
+            withholdingTaxRate: 0,
+            withholdingCertificateNumber: undefined,
             notes: preselectedDescription,
         },
     });
 
     const selectedSupplierId = form.watch('supplierId');
     const selectedBankAccountId = form.watch('bankAccountId');
+    const selectedPaymentMethodId = form.watch('paymentMethodId');
+    const selectedWithholdingTaxId = form.watch('withholdingTaxId');
     const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const selectedWithholdingTax = withholdingTaxes?.find((tax: Tax) => tax.id === selectedWithholdingTaxId);
+    const withholdingTaxOptions = (withholdingTaxes ?? []).filter((tax: Tax) =>
+        tax.applicability === TaxApplicability.Purchases ||
+        tax.applicability === TaxApplicability.Both
+    );
     const supplierOptions = (suppliersData?.items ?? []).filter((partner: BusinessPartnerDto) =>
         ['supplier', 'contractor', 'both'].includes((partner.partnerType ?? '').toLowerCase()) &&
         !partner.isBlacklisted
     );
+
+    useEffect(() => {
+        if (!paymentMethods?.length) return;
+
+        if (selectedPaymentMethodId) {
+            const selectedMethod = paymentMethods.find((method) => method.id === selectedPaymentMethodId);
+            if (selectedMethod) {
+                form.setValue('paymentMethod', toVendorPaymentMethod(selectedMethod.type));
+            }
+            return;
+        }
+
+        const preferredMethod =
+            paymentMethods.find((method) => method.type === PaymentMethodType.BankTransfer) ||
+            paymentMethods.find((method) => method.type === PaymentMethodType.EFT) ||
+            paymentMethods[0];
+
+        form.setValue('paymentMethodId', preferredMethod.id);
+        form.setValue('paymentMethod', toVendorPaymentMethod(preferredMethod.type));
+    }, [paymentMethods, selectedPaymentMethodId, form]);
 
     useEffect(() => {
         if (!selectedBankAccountId || !bankAccounts) return;
@@ -129,6 +202,17 @@ export default function NewVendorPaymentPage() {
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
     }, [selectedBankAccountId, bankAccounts, form]);
+
+    useEffect(() => {
+        if (!selectedWithholdingTax) {
+            form.setValue('withholdingTaxRate', 0);
+            form.setValue('withholdingTaxAccountId', undefined);
+            return;
+        }
+
+        form.setValue('withholdingTaxRate', Number(selectedWithholdingTax.rate) || 0);
+        form.setValue('withholdingTaxAccountId', selectedWithholdingTax.taxPayableAccountId ?? undefined);
+    }, [selectedWithholdingTax, form]);
 
     // Fetch outstanding invoices for selected supplier
     const { data: outstandingInvoices, isLoading: isLoadingInvoices } = useQuery({
@@ -155,15 +239,37 @@ export default function NewVendorPaymentPage() {
     const onSubmit = async (data: PaymentFormValues) => {
         setIsSubmitting(true);
         try {
+            const selectedPaymentMethod = paymentMethods?.find((method) => method.id === data.paymentMethodId);
+            if (data.paymentMethodId && !selectedPaymentMethod) {
+                form.setError('paymentMethodId', { type: 'manual', message: 'Selected payment method is not available' });
+                return;
+            }
+
+            if (selectedPaymentMethod?.requiresBankAccount && !data.bankAccountId) {
+                form.setError('bankAccountId', { type: 'manual', message: `${selectedPaymentMethod.name} requires a bank account` });
+                return;
+            }
+
+            if (selectedPaymentMethod?.requiresReference && !data.transactionReference?.trim()) {
+                form.setError('transactionReference', { type: 'manual', message: `${selectedPaymentMethod.name} requires a reference number` });
+                return;
+            }
+
             const paymentAllocations = Object.entries(allocations)
-                .filter(([, amount]) => amount > 0)
+                .filter(([invoiceId, amount]) =>
+                    amount > 0 ||
+                    Number(discountAllocations[invoiceId]) > 0 ||
+                    Number(withholdingAllocations[invoiceId]) > 0
+                )
                 .map(([invoiceId, amount]) => ({
                     vendorInvoiceId: invoiceId,
                     allocatedAmount: amount,
                     discountAmount: Number(discountAllocations[invoiceId]) || 0,
+                    withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
                 }));
 
             const totalAllocated = paymentAllocations.reduce((sum, allocation) => sum + allocation.allocatedAmount, 0);
+            const totalWithholdingTax = paymentAllocations.reduce((sum, allocation) => sum + (allocation.withholdingTaxAmount || 0), 0);
             if (totalAllocated > data.totalAmount) {
                 toast({
                     title: 'Allocation exceeds payment',
@@ -173,14 +279,50 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
-            await accountsPayableService.createPayment({
+            if (totalWithholdingTax > 0 && !data.withholdingTaxId) {
+                toast({
+                    title: 'WHT tax required',
+                    description: 'Select the configured withholding tax before recording WHT on a payment.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (totalWithholdingTax > 0 && !data.withholdingTaxAccountId) {
+                toast({
+                    title: 'WHT account missing',
+                    description: 'The selected withholding tax needs a payable account before this payment can be posted.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            const overSettledInvoice = outstandingInvoices?.find((invoice) => {
+                const invoiceSettlement =
+                    (Number(allocations[invoice.invoiceId]) || 0) +
+                    (Number(discountAllocations[invoice.invoiceId]) || 0) +
+                    (Number(withholdingAllocations[invoice.invoiceId]) || 0);
+
+                return invoiceSettlement - invoice.balanceAmount > 0.01;
+            });
+            if (overSettledInvoice) {
+                toast({
+                    title: 'Bill over-settled',
+                    description: `${overSettledInvoice.invoiceNumber} exceeds its outstanding balance after cash, discount, and WHT.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            const payment = await accountsPayableService.createPayment({
                 ...data,
                 paymentDate: data.paymentDate.toISOString(),
+                withholdingTaxAmount: totalWithholdingTax,
                 allocations: paymentAllocations.length > 0 ? paymentAllocations : undefined,
             });
 
             toast({ title: 'Success', description: 'Vendor payment recorded successfully' });
-            router.push('/finance/ap/payments');
+            router.push(`/finance/ap/payments/${payment.id}`);
         } catch (error: any) {
             toast({
                 title: 'Error',
@@ -195,6 +337,8 @@ export default function NewVendorPaymentPage() {
     const currentAmount = form.watch('totalAmount');
     const totalAllocated = Object.values(allocations).reduce((acc, curr) => acc + curr, 0);
     const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
+    const totalWithholdingTax = Object.values(withholdingAllocations).reduce((acc, curr) => acc + curr, 0);
+    const totalBillSettlement = totalAllocated + totalDiscounts + totalWithholdingTax;
     const remainingAmount = currentAmount - totalAllocated;
 
     const handleAutoAllocate = () => {
@@ -202,6 +346,8 @@ export default function NewVendorPaymentPage() {
         let remaining = currentAmount;
         const newAllocations: Record<string, number> = {};
         const newDiscountAllocations: Record<string, number> = {};
+        const newWithholdingAllocations: Record<string, number> = {};
+        const withholdingRate = selectedWithholdingTax ? Number(selectedWithholdingTax.rate || 0) : 0;
 
         // Allocate to oldest invoices first
         const sortedInvoices = [...outstandingInvoices].sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
@@ -209,16 +355,21 @@ export default function NewVendorPaymentPage() {
         for (const inv of sortedInvoices) {
             if (remaining <= 0) break;
             const discountAmount = Number(inv.discountAmount) || 0;
-            const netBalance = Math.max(inv.balanceAmount - discountAmount, 0);
+            const withholdingAmount = withholdingRate > 0 ? roundMoney(inv.balanceAmount * (withholdingRate / 100)) : 0;
+            const netBalance = Math.max(inv.balanceAmount - discountAmount - withholdingAmount, 0);
             const allocateAmount = Math.min(remaining, netBalance);
             newAllocations[inv.invoiceId] = allocateAmount;
             if (discountAmount > 0 && allocateAmount >= netBalance) {
                 newDiscountAllocations[inv.invoiceId] = discountAmount;
             }
+            if (withholdingAmount > 0 && allocateAmount >= netBalance) {
+                newWithholdingAllocations[inv.invoiceId] = withholdingAmount;
+            }
             remaining -= allocateAmount;
         }
         setAllocations(newAllocations);
         setDiscountAllocations(newDiscountAllocations);
+        setWithholdingAllocations(newWithholdingAllocations);
     };
 
     return (
@@ -343,6 +494,44 @@ export default function NewVendorPaymentPage() {
                                 )}
                             </div>
 
+                            <div className="space-y-2 rounded-md border p-3">
+                                <Label htmlFor="withholdingTax">Withholding Tax</Label>
+                                <Select
+                                    onValueChange={(val) => {
+                                        if (val === 'none') {
+                                            form.setValue('withholdingTaxId', undefined);
+                                            form.setValue('withholdingTaxAccountId', undefined);
+                                            form.setValue('withholdingTaxRate', 0);
+                                            setWithholdingAllocations({});
+                                            return;
+                                        }
+
+                                        form.setValue('withholdingTaxId', val);
+                                    }}
+                                    value={form.watch('withholdingTaxId') || 'none'}
+                                    disabled={isSubmitting}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="No WHT" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">No WHT</SelectItem>
+                                        {withholdingTaxOptions.map((tax) => (
+                                            <SelectItem key={tax.id} value={tax.id}>
+                                                {tax.code} - {tax.name} ({Number(tax.rate || 0)}%)
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {selectedWithholdingTax && (
+                                    <div className="text-xs text-muted-foreground">
+                                        {selectedWithholdingTax.taxPayableAccountId
+                                            ? `Posting to configured WHT payable account at ${Number(selectedWithholdingTax.rate || 0)}%.`
+                                            : 'This tax has no payable account configured; posting will be blocked until it is set.'}
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="space-y-2">
                                 <Label htmlFor="exchangeRate">Exchange Rate</Label>
                                 <Input
@@ -363,26 +552,36 @@ export default function NewVendorPaymentPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="paymentMethod">Payment Method</Label>
                                 <Select
-                                    onValueChange={(val: any) => form.setValue('paymentMethod', val)}
-                                    value={form.watch('paymentMethod')}
+                                    onValueChange={(val) => {
+                                        const method = paymentMethods?.find((item) => item.id === val);
+                                        form.setValue('paymentMethodId', val);
+                                        form.setValue('paymentMethod', toVendorPaymentMethod(method?.type));
+                                    }}
+                                    value={form.watch('paymentMethodId') || undefined}
                                     disabled={isSubmitting}
                                 >
                                     <SelectTrigger>
-                                        <SelectValue />
+                                        <SelectValue placeholder="Select payment method..." />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="BankTransfer">Bank Transfer</SelectItem>
-                                        <SelectItem value="Cheque">Cheque</SelectItem>
-                                        <SelectItem value="Cash">Cash</SelectItem>
-                                        <SelectItem value="WireTransfer">Wire Transfer</SelectItem>
-                                        <SelectItem value="MobileMoney">Mobile Money</SelectItem>
+                                        {paymentMethods?.map((method) => (
+                                            <SelectItem key={method.id} value={method.id}>
+                                                {method.name}
+                                            </SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
+                                {form.formState.errors.paymentMethodId && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.paymentMethodId.message}</p>
+                                )}
                             </div>
 
                             <div className="space-y-2">
                                 <Label htmlFor="reference">Reference #</Label>
                                 <Input id="reference" placeholder="e.g. Cheque No. / Receipt" {...form.register('transactionReference')} disabled={isSubmitting} />
+                                {form.formState.errors.transactionReference && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.transactionReference.message}</p>
+                                )}
                             </div>
 
                             <div className="space-y-2">
@@ -432,6 +631,16 @@ export default function NewVendorPaymentPage() {
                                                 Discounts taken: {formatCurrency(totalDiscounts, currentCurrencyCode)}
                                             </div>
                                         )}
+                                        {totalWithholdingTax > 0 && (
+                                            <div className="text-xs text-muted-foreground">
+                                                WHT withheld: {formatCurrency(totalWithholdingTax, currentCurrencyCode)}
+                                            </div>
+                                        )}
+                                        {(totalDiscounts > 0 || totalWithholdingTax > 0) && (
+                                            <div className="text-xs text-muted-foreground">
+                                                Total bill settlement: {formatCurrency(totalBillSettlement, currentCurrencyCode)}
+                                            </div>
+                                        )}
                                     </div>
                                     <span className={remainingAmount < 0 ? 'text-red-500' : 'text-green-600'}>
                                         {formatCurrency(remainingAmount, currentCurrencyCode)}
@@ -447,12 +656,16 @@ export default function NewVendorPaymentPage() {
                                                 <th className="p-3 text-right">Balance Due</th>
                                                 <th className="p-3 text-right w-[150px]">Allocate</th>
                                                 <th className="p-3 text-right w-[150px]">Discount</th>
+                                                <th className="p-3 text-right w-[150px]">WHT</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {outstandingInvoices.map((inv) => {
                                                 const availableDiscount = Number(inv.discountAmount) || 0;
                                                 const maxCashAllocation = Math.max(inv.balanceAmount - availableDiscount, 0);
+                                                const currentCashAllocation = Number(allocations[inv.invoiceId]) || 0;
+                                                const currentDiscountAllocation = Number(discountAllocations[inv.invoiceId]) || 0;
+                                                const maxWithholdingAllocation = Math.max(inv.balanceAmount - currentCashAllocation - currentDiscountAllocation, 0);
 
                                                 return (
                                                     <tr key={inv.invoiceId} className="border-t">
@@ -506,6 +719,23 @@ export default function NewVendorPaymentPage() {
                                                                     }));
                                                                 }}
                                                                 disabled={isSubmitting || availableDiscount <= 0}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                max={maxWithholdingAllocation}
+                                                                value={withholdingAllocations[inv.invoiceId] || ''}
+                                                                onChange={(e) => {
+                                                                    const val = Number(e.target.value);
+                                                                    setWithholdingAllocations(prev => ({
+                                                                        ...prev,
+                                                                        [inv.invoiceId]: val
+                                                                    }));
+                                                                }}
+                                                                disabled={isSubmitting || !selectedWithholdingTax}
                                                             />
                                                         </td>
                                                     </tr>

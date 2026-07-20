@@ -1543,7 +1543,16 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             if (!paymentTermId.HasValue || paymentTermId.Value == Guid.Empty)
             {
-                return null;
+                return await _unitOfWork.Repository<PaymentTerm>()
+                    .GetQueryable(pt =>
+                        pt.TenantId == TenantId &&
+                        pt.IsActive &&
+                        pt.IsDefault &&
+                        !pt.IsDeleted &&
+                        (pt.ApplicableTo == "All" || pt.ApplicableTo == "Customer" || pt.ApplicableTo == "Client"))
+                    .OrderBy(pt => pt.ApplicableTo == "Customer" ? 0 : 1)
+                    .ThenBy(pt => pt.DisplayOrder)
+                    .FirstOrDefaultAsync(cancellationToken);
             }
 
             var paymentTerm = await _unitOfWork.Repository<PaymentTerm>()

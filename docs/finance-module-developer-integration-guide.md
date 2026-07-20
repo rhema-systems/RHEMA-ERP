@@ -4,6 +4,121 @@ This guide is for backend, frontend, and integration developers who need to call
 
 This PR is an integration foundation, not production go-live approval. Production migration and accountant sign-off remain outside this PR.
 
+## Quick Integration Overview
+
+Use this section when briefing developers who need to connect invoicing, procurement, sales, maintenance, projects, or any other operational module into Finance.
+
+The Finance module is posting-engine driven. If another module creates a transaction with accounting impact, it must create or update its own source document first, then ask Finance to post that document through `IFinancePostingEngine.PostAsync(...)`. It must not create `JournalEntry`, `AccountTransaction`, `FinancePostingEvent`, AP/AR control-account rows, or settlement rows directly.
+
+Good codebase examples:
+
+- AR invoice posting: `src/ErpSystem.Api/Services/Finance/AR/InvoiceService.cs`
+- AP invoice posting: `src/ErpSystem.Api/Services/Finance/AP/VendorInvoiceService.cs`
+- AP GRV/receipt posting: `src/ErpSystem.Api/Services/Finance/AP/FinancePurchaseOrderReceiptPostingService.cs`
+- AP/AR subledger adjustment posting: `src/ErpSystem.Api/Services/Finance/SubledgerAdjustmentJournalService.cs`
+- Finance API frontend service: `frontend/src/services/finance/finance-data.service.ts`
+- AR frontend service: `frontend/src/services/ar-service.ts`
+- AP frontend service: `frontend/src/services/accountsPayableService.ts`
+
+### Required Posting Request Shape
+
+Every posting-capable integration should build a `FinancePostingRequestDto` with:
+
+- `SourceModule`
+- `SourceDocumentType`
+- `SourceDocumentId`
+- `SourceDocumentReference`
+- `PostingAction`
+- `PostingDate`
+- `JournalType`
+- `FunctionalCurrencyCode`
+- deterministic `IdempotencyKey`
+- balanced `FinancePostingLineDto` lines
+
+Source metadata is not optional. Audit trail, duplicate-posting protection, reversal planning, report drill-through, settlement diagnostics, and migration sign-off all depend on stable source metadata.
+
+### Account Resolution Rules
+
+Do not hard-code GL account IDs or account numbers inside integrating modules. Resolve accounts from Finance configuration, source-document setup, or validated source lines.
+
+Common Finance Settings fields:
+
+- `ControlAccountArId`
+- `ControlAccountApId`
+- `ControlAccountInventoryId`
+- `ControlAccountGRVAccrualId`
+- tax control accounts
+- discount allowed/received accounts
+- realized/unrealized FX accounts
+- suspense account
+- migration clearing account
+
+For AP/AR, the current standard model uses configured AP/AR control accounts. Partner-specific AP/AR control accounts are not the current integration path unless Finance explicitly extends that model.
+
+Control accounts should be touched only through the relevant subledger flow. A normal user-selected contra account should not be an AP/AR/inventory/tax control account.
+
+### AP and AR Subledger Rule
+
+If a transaction affects a customer or supplier balance, the integration must preserve both:
+
+- the posted GL position through `IFinancePostingEngine`
+- the AP/AR source or settlement data needed by aging, statements, detailed ledgers, allocation, reconciliation, and migration diagnostics
+
+Do not treat GL posting alone as enough for AP/AR. Customer and supplier reports depend on posted source documents, posted allocations, credit notes, withholding, settlement read-model facts, and subledger adjustments.
+
+### Invoicing Guidance
+
+For AR:
+
+- Use the Finance AR invoice flow for customer receivables.
+- Normal AR invoices post through `InvoiceService.PostAsync(...)` or the existing send/post lifecycle.
+- Use configured AR control and validated revenue/tax/inventory/COGS accounts.
+- Do not post normal AR invoices through the legacy subledger posting service.
+
+For AP:
+
+- Use the Finance AP vendor invoice flow for supplier liabilities.
+- Normal AP invoices post through `VendorInvoiceService.PostAsync(...)`.
+- Use configured AP control and validated expense, inventory, GRV accrual, tax, discount, and fixed-asset accounts where applicable.
+- PO/GRV integrations should follow the Finance purchase receipt to vendor invoice pattern instead of inventing a parallel invoice source.
+
+Opening balances are special:
+
+- Invoice-by-invoice customer/supplier opening balances should be loaded as opening AR/AP invoices when aging and allocation must operate at invoice level.
+- One-line customer/supplier opening balances can use AP/AR subledger adjustment journals.
+- Opening-balance AP/AR adjustments must use the configured migration clearing account as contra.
+- Opening balances are not evidence of production readiness until accountant-reviewed cutover evidence exists.
+
+### Frontend Integration Rules
+
+Frontend Finance work should use the existing service layer instead of ad hoc `fetch`/`axios` calls:
+
+- shared Finance APIs: `financeDataService`
+- AR APIs: `arService`
+- AP APIs: `accountsPayableService`
+
+Finance screens live under `frontend/src/app/finance/...`. Keep lifecycle and navigation consistent with existing screens: draft, submit, approve, post, view journal, reverse/void where applicable. When a posting creates a journal, route users to the resulting journal entry when practical.
+
+### Developer Checklist for New Integrations
+
+Before merging a feature that touches Finance:
+
+- Confirm the source document is tenant-scoped.
+- Confirm the source document has a stable ID and human-readable document number/reference.
+- Confirm the lifecycle status allows posting.
+- Confirm posting is idempotent with a deterministic idempotency key.
+- Confirm all accounts are active, same-tenant, and valid for direct posting unless they are controlled by a subledger flow.
+- Confirm the fiscal period is open/unlocked for the posting date.
+- Confirm the posting request is balanced in functional currency.
+- Confirm returned `JournalEntryId` and posting references are saved as repairable back-references.
+- Confirm AP/AR transactions update or feed the settlement/reporting read models expected by aging and statements.
+- Add regression tests proving the integration uses `IFinancePostingEngine`.
+- Add negative tests for cross-tenant account/source references and duplicate posting.
+
+### One-Sentence Rule
+
+Create the operational document in its owning module, then post it through the Finance posting engine with stable source metadata, configured accounts, tenant validation, idempotency, and subledger/reporting support where applicable.
+
 ## Integration Status
 
 - Ready for dev/UAT integration.

@@ -568,7 +568,16 @@ public class CustomerService : ICustomerService
         var normalizedPaymentTermId = NormalizeGuid(paymentTermId);
         if (!normalizedPaymentTermId.HasValue)
         {
-            return null;
+            return await _unitOfWork.Repository<PaymentTerm>()
+                .GetQueryable(pt =>
+                    pt.TenantId == TenantId &&
+                    pt.IsActive &&
+                    pt.IsDefault &&
+                    !pt.IsDeleted &&
+                    (pt.ApplicableTo == "All" || pt.ApplicableTo == "Customer" || pt.ApplicableTo == "Client"))
+                .OrderBy(pt => pt.ApplicableTo == "Customer" ? 0 : 1)
+                .ThenBy(pt => pt.DisplayOrder)
+                .FirstOrDefaultAsync(cancellationToken);
         }
 
         var paymentTerm = await _unitOfWork.Repository<PaymentTerm>()

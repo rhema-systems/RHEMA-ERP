@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -29,9 +30,8 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("FinancePurchaseOrder"),
         Normalize("FinancePurchaseOrderReceipt"),
         Normalize("VendorInvoice"),
-        Normalize("VendorPayment"),
         Normalize("PaymentBatch"),
-        Normalize("PurchaseReturn"),
+        Normalize("SupplierReturn"),
         Normalize("Quote"),
         Normalize("SalesOrder"),
         Normalize("DeliveryNote"),
@@ -47,9 +47,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("AllocationRule"),
         Normalize("CashTransaction"),
         Normalize("BankReconciliation"),
-        Normalize("Cheque"),
         Normalize("OpeningBalanceBatch"),
-        Normalize("ExchangeRate"),
         Normalize("FixedAsset"),
         Normalize("AssetDepreciationSchedule"),
         Normalize("FixedAssetDepreciationRun"),
@@ -63,33 +61,39 @@ public class FinanceApprovalsController : ControllerBase
 
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IAuthorizationService _authorizationService;
     private readonly IWorkflowService _workflowService;
     private readonly IWorkflowEntityDisplayService _displayService;
     private readonly IJournalEntryService _journalEntryService;
     private readonly IInvoiceService _invoiceService;
     private readonly IVendorInvoiceService? _vendorInvoiceService;
     private readonly IFinanceAuditService? _financeAuditService;
+    private readonly FinancePurchaseOrderReceiptPostingService _receiptPostingService;
     private readonly ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService _inventoryValuationService;
     private readonly ILogger<FinanceApprovalsController> _logger;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
         ICurrentUserService currentUserService,
+        IAuthorizationService authorizationService,
         IWorkflowService workflowService,
         IWorkflowEntityDisplayService displayService,
         IJournalEntryService journalEntryService,
         IInvoiceService invoiceService,
         ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService inventoryValuationService,
+        FinancePurchaseOrderReceiptPostingService receiptPostingService,
         ILogger<FinanceApprovalsController> logger,
         IVendorInvoiceService? vendorInvoiceService = null,
         IFinanceAuditService? financeAuditService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
+        _authorizationService = authorizationService;
         _workflowService = workflowService;
         _displayService = displayService;
         _journalEntryService = journalEntryService;
         _invoiceService = invoiceService;
+        _receiptPostingService = receiptPostingService;
         _vendorInvoiceService = vendorInvoiceService;
         _financeAuditService = financeAuditService;
         _inventoryValuationService = inventoryValuationService;
@@ -109,6 +113,10 @@ public class FinanceApprovalsController : ControllerBase
 
         var tenantId = TenantId;
         var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var canApproveByPermission = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.WorkflowApprove)).Succeeded;
+        var canRejectByPermission = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
 
         var approvals = await QueryPendingApprovals(tenantId)
             .AsNoTracking()
@@ -124,7 +132,27 @@ public class FinanceApprovalsController : ControllerBase
                 continue;
             }
 
-            results.Add(await MapApprovalAsync(approval, cancellationToken));
+            var submitterApprovalBlocked =
+                RequiresSubmitterApproverSeparation(entityType) &&
+                instance.InitiatedById == currentUserId.Value;
+            var approveDisabledReason = GetActionDisabledReason(
+                "approve",
+                FinancePermissions.WorkflowApprove,
+                canApproveByPermission,
+                submitterApprovalBlocked);
+            var rejectDisabledReason = GetActionDisabledReason(
+                "reject",
+                FinancePermissions.WorkflowReject,
+                canRejectByPermission,
+                submitterApprovalBlocked);
+
+            results.Add(await MapApprovalAsync(
+                approval,
+                canApproveByPermission && !submitterApprovalBlocked,
+                canRejectByPermission && !submitterApprovalBlocked,
+                approveDisabledReason,
+                rejectDisabledReason,
+                cancellationToken));
         }
 
         return Ok(results
@@ -188,7 +216,10 @@ public class FinanceApprovalsController : ControllerBase
                 new { approvalId, currentUserId },
                 comments,
                 cancellationToken);
-            return Forbid();
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Approval action not permitted",
+                detail: "This approval is not assigned to your user or any of your current roles.");
         }
 
         if (RequiresSubmitterApproverSeparation(entityType) && instance.InitiatedById == currentUserId.Value)
@@ -202,7 +233,10 @@ public class FinanceApprovalsController : ControllerBase
                 new { approvalId, currentUserId, reason = "Submitter self-approval is blocked for this high-risk Finance workflow." },
                 comments,
                 cancellationToken);
-            return Forbid();
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Approval action not permitted",
+                detail: "The submitter cannot approve or reject this high-risk finance workflow item.");
         }
 
         var workflowResult = await _workflowService.ProcessApprovalStepAsync(
@@ -249,7 +283,13 @@ public class FinanceApprovalsController : ControllerBase
                 !a.StepInstance.IsDeleted &&
                 !a.StepInstance.WorkflowInstance.IsDeleted);
 
-    private async Task<FinanceApprovalQueueItemDto> MapApprovalAsync(WorkflowApproval approval, CancellationToken cancellationToken)
+    private async Task<FinanceApprovalQueueItemDto> MapApprovalAsync(
+        WorkflowApproval approval,
+        bool canApprove,
+        bool canReject,
+        string? approveDisabledReason,
+        string? rejectDisabledReason,
+        CancellationToken cancellationToken)
     {
         var instance = approval.StepInstance.WorkflowInstance;
         var entityType = instance.EntityType.Code ?? instance.EntityType.Name;
@@ -278,6 +318,10 @@ public class FinanceApprovalsController : ControllerBase
                 : string.Join(" ", new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }.Where(x => !string.IsNullOrWhiteSpace(x))),
             ApproverRole = approval.ApproverRole,
             WorkflowName = instance.WorkflowDefinition?.Name,
+            CanApprove = canApprove,
+            CanReject = canReject,
+            ApproveDisabledReason = approveDisabledReason,
+            RejectDisabledReason = rejectDisabledReason,
             Metadata = facts.Metadata
         };
     }
@@ -296,6 +340,18 @@ public class FinanceApprovalsController : ControllerBase
         {
             var item = await _db.FinancePurchaseOrders.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.OrderNumber, null, MapFinancePurchaseOrderStatus(item.Status), item.OrderDate, item.TotalAmount, item.CurrencyCode);
+        }
+
+        if (key == Normalize("FinancePurchaseOrderReceipt"))
+        {
+            var item = await _db.FinancePurchaseOrderReceipts
+                .AsNoTracking()
+                .Include(x => x.FinancePurchaseOrder)
+                    .ThenInclude(x => x.Vendor)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null
+                ? FinanceApprovalFacts.Empty
+                : new(item.ReceiptNumber, item.FinancePurchaseOrder?.Vendor?.PartnerName, item.Status.ToString(), item.ReceiptDate, null, item.FinancePurchaseOrder?.CurrencyCode);
         }
 
         if (key == Normalize("VendorInvoice"))
@@ -322,6 +378,12 @@ public class FinanceApprovalsController : ControllerBase
             return item == null ? FinanceApprovalFacts.Empty : new(item.BatchNumber, item.Description, item.Status.ToString(), item.BatchDate, item.TotalAmount, null);
         }
 
+        if (key == Normalize("SupplierReturn"))
+        {
+            var item = await _db.SupplierReturns.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null ? FinanceApprovalFacts.Empty : new(item.ReturnNumber, item.VendorName, item.Status.ToString(), item.ReturnDate, item.TotalAmount, item.CurrencyCode);
+        }
+
         if (key == Normalize("CustomerPayment"))
         {
             var item = await _db.Set<CustomerPayment>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
@@ -338,6 +400,24 @@ public class FinanceApprovalsController : ControllerBase
         {
             var item = await _db.Set<UnitJournalEntry>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.EntryNumber, item.Description, item.Status.ToString(), item.EntryDate, null, null);
+        }
+
+        if (key == Normalize("UnitAccountBudget"))
+        {
+            var item = await _db.Set<UnitAccountBudget>()
+                .AsNoTracking()
+                .Include(x => x.UnitAccount)
+                .Include(x => x.FiscalPeriod)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null
+                ? FinanceApprovalFacts.Empty
+                : new(item.BudgetVersion, item.UnitAccount?.Name, item.Status, item.FiscalPeriod?.StartDate, item.BudgetQuantity, null);
+        }
+
+        if (key == Normalize("AllocationRule"))
+        {
+            var item = await _db.Set<AllocationRule>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null ? FinanceApprovalFacts.Empty : new(item.Code, item.Name, item.ApprovalStatus, item.LastRunDate, null, null);
         }
 
         if (key == Normalize("CashTransaction"))
@@ -435,6 +515,12 @@ public class FinanceApprovalsController : ControllerBase
             return item == null ? FinanceApprovalFacts.Empty : new(item.ReferenceNumber, item.Reason, item.Status.ToString(), item.DisposalDate, item.SaleProceeds, null);
         }
 
+        if (key == Normalize("AssetVerificationSession"))
+        {
+            var item = await _db.AssetVerificationSessions.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null ? FinanceApprovalFacts.Empty : new(item.ReferenceNumber, item.SessionName, item.Status.ToString(), item.ScheduledDate, null, null);
+        }
+
         if (key == Normalize("CapitalProject"))
         {
             var item = await _db.CapitalProjects.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
@@ -496,6 +582,18 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("FinancePurchaseOrderReceipt"))
+        {
+            await _receiptPostingService.ApproveAndPostAsync(
+                tenantId,
+                entityId,
+                userId,
+                _currentUserService.UserName,
+                comments,
+                cancellationToken);
+            return;
+        }
+
         if (key == Normalize("VendorPayment"))
         {
             var payment = await _db.Set<VendorPayment>().FirstOrDefaultAsync(
@@ -539,6 +637,18 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("SupplierReturn"))
+        {
+            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Approved, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("CustomerPayment"))
+        {
+            await UpdateIfFoundAsync(_db.Set<CustomerPayment>(), tenantId, entityId, item => item.Status = "Approved", cancellationToken);
+            return;
+        }
+
         if (key == Normalize("UnitJournalEntry"))
         {
             await UpdateIfFoundAsync(_db.Set<UnitJournalEntry>(), tenantId, entityId, item =>
@@ -547,6 +657,26 @@ public class FinanceApprovalsController : ControllerBase
                 item.ApprovedAt = now;
                 item.ApprovedBy = userId;
                 item.ApprovedByName = _currentUserService.UserName;
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("UnitAccountBudget"))
+        {
+            await UpdateIfFoundAsync(_db.Set<UnitAccountBudget>(), tenantId, entityId, item =>
+            {
+                item.Status = "Approved";
+                item.IsActive = true;
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("AllocationRule"))
+        {
+            await UpdateIfFoundAsync(_db.Set<AllocationRule>(), tenantId, entityId, item =>
+            {
+                item.ApprovalStatus = "Approved";
+                item.IsActive = true;
             }, cancellationToken);
             return;
         }
@@ -813,6 +943,24 @@ public class FinanceApprovalsController : ControllerBase
                 item.ApprovedAt = now;
                 item.Comments = comments ?? item.Comments;
             }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("AssetVerificationSession"))
+        {
+            await UpdateIfFoundAsync(_db.AssetVerificationSessions, tenantId, entityId, item => item.Status = VerificationSessionStatus.Approved, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("CapitalProject"))
+        {
+            await UpdateIfFoundAsync(_db.CapitalProjects, tenantId, entityId, item => item.Status = ProjectStatus.Approved, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("LeaseContract"))
+        {
+            await UpdateIfFoundAsync(_db.LeaseContracts, tenantId, entityId, item => item.Status = LeaseStatus.Active, cancellationToken);
         }
     }
 
@@ -834,6 +982,18 @@ public class FinanceApprovalsController : ControllerBase
                 item.Status = 10;
                 item.Remarks = AppendReason(item.Remarks, reason);
             }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("FinancePurchaseOrderReceipt"))
+        {
+            await _receiptPostingService.RejectAsync(
+                tenantId,
+                entityId,
+                userId,
+                _currentUserService.UserName,
+                reason,
+                cancellationToken);
             return;
         }
 
@@ -869,13 +1029,16 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("Invoice"))
         {
-            var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(
+            var invoice = await _db.Invoices.FirstOrDefaultAsync(
                 x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted,
                 cancellationToken);
             if (invoice == null)
             {
                 return;
             }
+
+            invoice.Status = InvoiceStatus.Rejected;
+            await _db.SaveChangesAsync(cancellationToken);
 
             await RecordCustomerInvoiceAuditAsync(
                 tenantId,
@@ -921,12 +1084,50 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("SupplierReturn"))
+        {
+            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Rejected, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("CustomerPayment"))
+        {
+            await UpdateIfFoundAsync(_db.Set<CustomerPayment>(), tenantId, entityId, item =>
+            {
+                item.Status = "Rejected";
+                item.Notes = AppendReason(item.Notes, reason);
+            }, cancellationToken);
+            return;
+        }
+
         if (key == Normalize("UnitJournalEntry"))
         {
             await UpdateIfFoundAsync(_db.Set<UnitJournalEntry>(), tenantId, entityId, item =>
             {
                 item.Status = UnitJournalEntryStatus.Rejected;
                 item.RejectionReason = reason;
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("UnitAccountBudget"))
+        {
+            await UpdateIfFoundAsync(_db.Set<UnitAccountBudget>(), tenantId, entityId, item =>
+            {
+                item.Status = "Rejected";
+                item.IsActive = false;
+                item.Notes = AppendReason(item.Notes, reason);
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("AllocationRule"))
+        {
+            await UpdateIfFoundAsync(_db.Set<AllocationRule>(), tenantId, entityId, item =>
+            {
+                item.ApprovalStatus = "Rejected";
+                item.IsActive = false;
+                item.Description = AppendReason(item.Description, reason);
             }, cancellationToken);
             return;
         }
@@ -1177,6 +1378,36 @@ public class FinanceApprovalsController : ControllerBase
             {
                 item.Status = AssetDisposalStatus.Rejected;
                 item.Comments = reason ?? item.Comments;
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("AssetVerificationSession"))
+        {
+            await UpdateIfFoundAsync(_db.AssetVerificationSessions, tenantId, entityId, item =>
+            {
+                item.Status = VerificationSessionStatus.Rejected;
+                item.Description = AppendReason(item.Description, reason);
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("CapitalProject"))
+        {
+            await UpdateIfFoundAsync(_db.CapitalProjects, tenantId, entityId, item =>
+            {
+                item.Status = ProjectStatus.Rejected;
+                item.Description = AppendReason(item.Description, reason);
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("LeaseContract"))
+        {
+            await UpdateIfFoundAsync(_db.LeaseContracts, tenantId, entityId, item =>
+            {
+                item.Status = LeaseStatus.Rejected;
+                item.Description = AppendReason(item.Description, reason);
             }, cancellationToken);
         }
     }
@@ -1473,6 +1704,25 @@ public class FinanceApprovalsController : ControllerBase
             or "ASSETVALUATION";
     }
 
+    private static string? GetActionDisabledReason(
+        string action,
+        string requiredPermission,
+        bool hasPermission,
+        bool submitterApprovalBlocked)
+    {
+        if (!hasPermission)
+        {
+            return $"You are assigned to this workflow step but your roles do not include {requiredPermission}.";
+        }
+
+        if (submitterApprovalBlocked)
+        {
+            return $"You cannot {action} this item because you submitted it and separation of duties is required.";
+        }
+
+        return null;
+    }
+
     private static string Normalize(string? value)
         => new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
@@ -1610,6 +1860,10 @@ public class FinanceApprovalsController : ControllerBase
         public string? SubmittedBy { get; set; }
         public string? ApproverRole { get; set; }
         public string? WorkflowName { get; set; }
+        public bool CanApprove { get; set; }
+        public bool CanReject { get; set; }
+        public string? ApproveDisabledReason { get; set; }
+        public string? RejectDisabledReason { get; set; }
         public Dictionary<string, string> Metadata { get; set; } = new();
     }
 

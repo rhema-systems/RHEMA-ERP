@@ -17,6 +17,7 @@ using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using FinancePaymentMethod = ErpSystem.Core.Entities.Finance.PaymentMethod;
 
 namespace ErpSystem.Api.Services.Finance.AR
 {
@@ -60,6 +61,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == id)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.Invoice)
+                .Include(p => p.ConfiguredPaymentMethod)
                 .FirstOrDefaultAsync(cancellationToken);
 
             var customer = payment == null
@@ -74,6 +76,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var payment = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.PaymentNumber == paymentNumber)
                 .Include(p => p.Allocations)
+                .Include(p => p.ConfiguredPaymentMethod)
                 .FirstOrDefaultAsync(cancellationToken);
 
             var customer = payment == null
@@ -101,6 +104,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (!string.IsNullOrWhiteSpace(query.PaymentMethod))
                 queryable = queryable.Where(p => p.PaymentMethod == query.PaymentMethod);
+
+            if (query.PaymentMethodId.HasValue)
+                queryable = queryable.Where(p => p.PaymentMethodId == query.PaymentMethodId.Value);
 
             if (!string.IsNullOrWhiteSpace(query.Status))
                 queryable = queryable.Where(p => p.Status == query.Status);
@@ -133,6 +139,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var payments = await queryable
                 .Skip((query.PageNumber - 1) * query.PageSize)
                 .Take(query.PageSize)
+                .Include(p => p.ConfiguredPaymentMethod)
                 .ToListAsync(cancellationToken);
             var customerIds = payments.Select(p => p.CustomerId).Distinct().ToList();
             var customerMap = customerIds.Count == 0
@@ -168,6 +175,18 @@ namespace ErpSystem.Api.Services.Finance.AR
             var paymentCurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode)
                 ? baseCurrencyCode
                 : dto.CurrencyCode.Trim().ToUpperInvariant();
+            var configuredPaymentMethod = dto.IsCreditNote
+                ? null
+                : await ResolveConfiguredPaymentMethodAsync(
+                    dto.PaymentMethodId,
+                    dto.BankAccountId,
+                    dto.TransactionReference ?? dto.CheckNumber,
+                    "customer payment",
+                    enforceReference: true,
+                    cancellationToken);
+            var paymentMethod = configuredPaymentMethod == null
+                ? dto.PaymentMethod
+                : MapConfiguredPaymentMethodToCustomerPaymentMethod(configuredPaymentMethod.Type);
 
             var now = DateTime.UtcNow;
             var payment = new CustomerPayment
@@ -179,7 +198,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 PaymentDate = dto.PaymentDate,
                 TotalAmount = dto.TotalAmount,
                 AllocatedAmount = 0,
-                PaymentMethod = dto.PaymentMethod,
+                PaymentMethod = paymentMethod,
+                PaymentMethodId = configuredPaymentMethod?.Id,
                 CurrencyCode = paymentCurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
                 BankAccountId = dto.BankAccountId,
@@ -247,10 +267,24 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (payment.Status != "Pending")
                 throw new InvalidOperationException("Only pending payments can be updated.");
 
+            var configuredPaymentMethod = payment.IsCreditNote
+                ? null
+                : await ResolveConfiguredPaymentMethodAsync(
+                    dto.PaymentMethodId ?? payment.PaymentMethodId,
+                    dto.BankAccountId,
+                    dto.TransactionReference ?? dto.CheckNumber,
+                    "customer payment",
+                    enforceReference: true,
+                    cancellationToken);
+            var paymentMethod = configuredPaymentMethod == null
+                ? dto.PaymentMethod
+                : MapConfiguredPaymentMethodToCustomerPaymentMethod(configuredPaymentMethod.Type);
+
             var now = DateTime.UtcNow;
             payment.PaymentDate = dto.PaymentDate;
             payment.TotalAmount = dto.TotalAmount;
-            payment.PaymentMethod = dto.PaymentMethod;
+            payment.PaymentMethod = paymentMethod;
+            payment.PaymentMethodId = configuredPaymentMethod?.Id;
             payment.BankAccountId = dto.BankAccountId;
             payment.CheckNumber = dto.CheckNumber;
             payment.TransactionReference = dto.TransactionReference;
@@ -580,6 +614,30 @@ namespace ErpSystem.Api.Services.Finance.AR
                 {
                     _logger.LogWarning("Invoice {InvoiceNumber} has no balance after posted credit notes, skipping", invoice.InvoiceNumber);
                     continue;
+                }
+
+                if (requestedDiscountAmount > 0m)
+                {
+                    if (invoice.EarlyPaymentDiscountPercentage <= 0m ||
+                        !invoice.EarlyPaymentDiscountDueDate.HasValue ||
+                        payment.PaymentDate.Date > invoice.EarlyPaymentDiscountDueDate.Value.Date)
+                    {
+                        throw new InvalidOperationException(
+                            $"Invoice '{invoice.InvoiceNumber}' is not eligible for an early-payment discount on {payment.PaymentDate:yyyy-MM-dd}.");
+                    }
+
+                    var maximumDiscount = RoundMoney(outstandingBalance * invoice.EarlyPaymentDiscountPercentage / 100m);
+                    if (RoundMoney(requestedDiscountAmount) > maximumDiscount)
+                    {
+                        throw new InvalidOperationException(
+                            $"Discount {requestedDiscountAmount:C} exceeds the eligible amount {maximumDiscount:C} for invoice '{invoice.InvoiceNumber}'.");
+                    }
+
+                    if (Math.Abs(RoundMoney(cashAmount + requestedDiscountAmount - outstandingBalance)) > 0.01m)
+                    {
+                        throw new InvalidOperationException(
+                            $"An early-payment discount may only be taken when invoice '{invoice.InvoiceNumber}' is fully settled by this allocation.");
+                    }
                 }
 
                 if (totalApplied > outstandingBalance)
@@ -1849,6 +1907,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Currency = currencyCode,
                 ExchangeRate = exchangeRate,
                 BaseAmount = baseAmount,
+                PaymentMethodId = payment.PaymentMethodId,
                 ReferenceNumber = payment.PaymentNumber,
                 PayeeOrPayer = customer.PartnerName,
                 Description = $"AR Customer Payment {payment.PaymentNumber} - {customer.PartnerName}",
@@ -1869,6 +1928,62 @@ namespace ErpSystem.Api.Services.Finance.AR
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
+        private async Task<FinancePaymentMethod?> ResolveConfiguredPaymentMethodAsync(
+            Guid? paymentMethodId,
+            Guid? bankAccountId,
+            string? referenceNumber,
+            string label,
+            bool enforceReference,
+            CancellationToken cancellationToken)
+        {
+            if (!paymentMethodId.HasValue)
+            {
+                return null;
+            }
+
+            var method = await _unitOfWork.Repository<FinancePaymentMethod>()
+                .GetQueryable(m => m.TenantId == TenantId && m.Id == paymentMethodId.Value && !m.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (method == null)
+            {
+                throw new InvalidOperationException($"The selected {label} payment method was not found for this tenant.");
+            }
+
+            if (!method.IsActive)
+            {
+                throw new InvalidOperationException($"The selected {label} payment method is inactive.");
+            }
+
+            if (method.RequiresBankAccount && !bankAccountId.HasValue)
+            {
+                throw new InvalidOperationException($"The selected {label} payment method requires a bank account.");
+            }
+
+            if (enforceReference && method.RequiresReference && string.IsNullOrWhiteSpace(referenceNumber))
+            {
+                throw new InvalidOperationException($"The selected {label} payment method requires a reference number.");
+            }
+
+            return method;
+        }
+
+        private static string MapConfiguredPaymentMethodToCustomerPaymentMethod(PaymentMethodType type)
+        {
+            return type switch
+            {
+                PaymentMethodType.Cash => "Cash",
+                PaymentMethodType.Cheque => "Cheque",
+                PaymentMethodType.EFT => "EFT",
+                PaymentMethodType.Card => "Card",
+                PaymentMethodType.MobileMoney => "Mobile Money",
+                PaymentMethodType.DirectDebit => "Direct Debit",
+                PaymentMethodType.StandingOrder => "Standing Order",
+                PaymentMethodType.BankTransfer => "Bank Transfer",
+                _ => "Other"
+            };
+        }
+
         private CustomerPaymentDto MapToDto(CustomerPayment payment, BusinessPartner? customer = null)
         {
             return new CustomerPaymentDto
@@ -1882,6 +1997,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 AllocatedAmount = payment.AllocatedAmount,
                 UnallocatedAmount = payment.UnallocatedAmount,
                 PaymentMethod = payment.PaymentMethod,
+                PaymentMethodId = payment.PaymentMethodId,
+                PaymentMethodName = payment.ConfiguredPaymentMethod?.Name,
                 CurrencyCode = payment.CurrencyCode,
                 ExchangeRate = payment.ExchangeRate,
                 BankAccountId = payment.BankAccountId,

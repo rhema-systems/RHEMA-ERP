@@ -71,7 +71,7 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
             };
 
             const result = await financePurchaseOrderService.createReceipt(receipt);
-            toast({ title: 'Success', description: 'GRV Created Successfully' });
+            toast({ title: 'GRV saved', description: 'The GRV was saved as a draft. Submit it for approval before invoice matching.' });
             router.push(`/finance/ap/receipts/${result.id}`);
         } catch (error: any) {
             toast({ title: 'Error', description: error.message || 'Failed to create GRV', variant: 'destructive' });
@@ -93,7 +93,7 @@ export default function ReceivePOPage({ params }: { params: { id: string } }) {
                     <h1 className="text-3xl font-bold tracking-tight">Receive PO: {po.orderNumber}</h1>
                 </div>
                 <Button onClick={handleReceive} disabled={submitting} className="bg-green-600">
-                    <Save className="mr-2 h-4 w-4" /> {submitting ? 'Saving...' : 'Submit GRV'}
+                    <Save className="mr-2 h-4 w-4" /> {submitting ? 'Saving...' : 'Save Draft GRV'}
                 </Button>
             </div>
 

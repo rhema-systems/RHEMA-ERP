@@ -61,6 +61,7 @@ export interface VendorInvoiceCreateRequest {
     currencyCode?: string;
     exchangeRate?: number;
     paymentTermsDays?: number;
+    paymentTermId?: string;
     earlyPaymentDiscountPercentage?: number;
     earlyPaymentDiscountDueDate?: string;
     taxGroupId?: string | null;
@@ -134,6 +135,8 @@ export interface VendorPayment {
     allocatedAmount: number;
     unallocatedAmount: number;
     paymentMethod: VendorPaymentMethod;
+    paymentMethodId?: string;
+    paymentMethodName?: string;
     currencyCode: string;
     exchangeRate: number;
     bankAccountId?: string;
@@ -146,6 +149,7 @@ export interface VendorPayment {
     status: VendorPaymentStatus;
     paymentBatchId?: string;
     paymentBatchNumber?: string;
+    journalEntryId?: string;
     notes?: string;
     createdAt: string;
     allocations: VendorPaymentAllocation[];
@@ -156,12 +160,18 @@ export interface VendorPaymentCreateRequest {
     paymentDate: string;
     totalAmount: number;
     paymentMethod?: VendorPaymentMethod;
+    paymentMethodId?: string;
     currencyCode?: string;
     exchangeRate?: number;
     bankAccountId?: string;
     chequeNumber?: string;
     transactionReference?: string;
     withholdingTaxRate?: number;
+    withholdingTaxAmount?: number;
+    withholdingTaxId?: string;
+    withholdingTaxAccountId?: string | null;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     notes?: string;
     allocations?: VendorPaymentAllocationCreateRequest[];
 }
@@ -197,6 +207,8 @@ export interface PaymentBatch {
     totalAmount: number;
     paymentCount: number;
     paymentMethod: VendorPaymentMethod;
+    paymentMethodId?: string;
+    paymentMethodName?: string;
     bankAccountId?: string;
     bankAccountName?: string;
     status: PaymentBatchStatus;
@@ -213,6 +225,7 @@ export interface PaymentBatchCreateRequest {
     dueDateFrom?: string;
     dueDateTo?: string;
     paymentMethod?: VendorPaymentMethod;
+    paymentMethodId?: string;
     bankAccountId?: string;
     notes?: string;
     invoiceIds: string[];

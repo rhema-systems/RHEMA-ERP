@@ -345,11 +345,9 @@ namespace ErpSystem.Web.Services
                     "Goods receipt approval before AP invoice matching and inventory/expense recognition."),
                 new("VendorInvoice", "Vendor Invoice", typeof(VendorInvoice).FullName, "Accounts Payable Invoice Approval",
                     "Supplier invoice approval workflow for AP controls before payment or posting."),
-                new("VendorPayment", "Vendor Payment", typeof(VendorPayment).FullName, "Vendor Payment Approval",
-                    "Supplier payment approval before authorization, clearing, or reconciliation."),
                 new("PaymentBatch", "Payment Batch", typeof(PaymentBatch).FullName, "Vendor Payment Batch Approval",
                     "Bulk supplier payment batch approval before processing."),
-                new("PurchaseReturn", "Supplier Return", typeof(PurchaseReturn).FullName, "Supplier Return Approval",
+                new("SupplierReturn", "Supplier Return", typeof(SupplierReturn).FullName, "Supplier Return Approval",
                     "Supplier return approval before goods are shipped back, debit notes are issued, or refunds are tracked."),
 
                 // Accounts Receivable
@@ -387,14 +385,8 @@ namespace ErpSystem.Web.Services
                     "Cash and bank transaction approval before posting, reconciliation, or clearing."),
                 new("BankReconciliation", "Bank Reconciliation", typeof(BankReconciliation).FullName, "Bank Reconciliation Approval",
                     "Bank reconciliation approval for month-end bank sign-off."),
-                new("Cheque", "Cheque", typeof(Cheque).FullName, "Cheque Approval",
-                    "Cheque approval before issue, clearing, cancellation, or voiding."),
                 new("OpeningBalanceBatch", "Opening Balance Batch", typeof(OpeningBalanceBatch).FullName, "Opening Balance Approval",
                     "Controlled migration opening-balance approval before posting to GL through the Finance posting engine."),
-
-                // FX
-                new("ExchangeRate", "Exchange Rate", typeof(ExchangeRate).FullName, "Exchange Rate Approval",
-                    "Exchange-rate approval before rates can be used by posting, settlement, or revaluation."),
 
                 // Fixed assets
                 new("FixedAsset", "Fixed Asset", typeof(FixedAsset).FullName, "Fixed Asset Approval",
@@ -6920,6 +6912,12 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Payments.Receive",
                     "Finance.CashBank.Transactions.Record",
                     "Finance.Workflow.Submit",
+                    // Accounts Officers are configured as first-stage finance workflow reviewers.
+                    // The generic permission opens the endpoint; the workflow assignment check
+                    // still limits them to approval records assigned to their user or role.
+                    "Finance.Workflow.Approve",
+                    "Finance.Workflow.Reject",
+                    "Finance.Migration.OpeningBalances.Prepare",
                     "Finance.Budgeting.Read",
                     "Finance.BudgetReturns.Submit"
                 },
@@ -6976,6 +6974,11 @@ namespace ErpSystem.Web.Services
                     "Finance.BankReconciliation.Perform",
                     "Finance.Reports.Run",
                     "Finance.Workflow.Submit",
+                    // Senior Accountants share the first-stage reviewer assignment with
+                    // Accounts Officers and therefore require the same action permissions.
+                    "Finance.Workflow.Approve",
+                    "Finance.Workflow.Reject",
+                    "Finance.Migration.OpeningBalances.Prepare",
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
@@ -7375,6 +7378,7 @@ namespace ErpSystem.Web.Services
         public static IServiceCollection AddDatabaseSeeding(this IServiceCollection services)
         {
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
+            services.AddScoped<PaymentTermBaselineSeeder>();
             return services;
         }
 

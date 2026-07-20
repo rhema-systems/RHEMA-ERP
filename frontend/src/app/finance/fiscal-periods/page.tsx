@@ -13,10 +13,15 @@ import { CalendarDays, Lock, Unlock, LockKeyhole, AlertTriangle, CheckCircle2, R
 import type { FiscalPeriod, ModuleDefinition } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { ModuleLockManager } from '@/components/finance/fiscal-periods/ModuleLockManager';
 
 export default function FiscalPeriodsPage() {
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canAdminister = hasPermission('Finance.Admin');
+    const canClose = hasPermission('Finance.PeriodClose');
+    const canReopen = hasPermission('Finance.PeriodReopen');
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
     const [modules, setModules] = useState<ModuleDefinition[]>([]);
     const [loading, setLoading] = useState(true);
@@ -274,7 +279,7 @@ export default function FiscalPeriodsPage() {
                                                 <td className="p-4">
                                                     <div className="flex flex-col gap-1">
                                                         {getStatusBadge(status)}
-                                                        {period.moduleLocks && period.moduleLocks.some(l => l.isLocked) && (
+                                                        {period.isPartiallyLocked && (
                                                             <Badge variant="outline" className="text-xs w-fit border-orange-200 text-orange-700 bg-orange-50">
                                                                 <Lock className="h-3 w-3 mr-1" />
                                                                 Partial Lock
@@ -285,14 +290,18 @@ export default function FiscalPeriodsPage() {
                                                 <td className="p-4 text-right">
                                                     <div className="flex justify-end gap-2">
                                                         {/* Module Lock Manager */}
-                                                        <ModuleLockManager
-                                                            period={period}
-                                                            modules={modules}
-                                                            onUpdate={loadData}
-                                                        />
+                                                        {(canAdminister || canClose || canReopen) && (
+                                                            <ModuleLockManager
+                                                                period={period}
+                                                                modules={modules}
+                                                                canLock={canClose || canAdminister}
+                                                                canReopen={canReopen || canAdminister}
+                                                                onUpdate={loadData}
+                                                            />
+                                                        )}
 
                                                         {/* Period Actions */}
-                                                        {status === 'Open' && (
+                                                        {canClose && status === 'Open' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
                                                                     <Button
@@ -350,7 +359,7 @@ export default function FiscalPeriodsPage() {
                                                                 </DialogContent>
                                                             </Dialog>
                                                         )}
-                                                        {status === 'Closed' && (
+                                                        {canReopen && status === 'Closed' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
                                                                     <Button

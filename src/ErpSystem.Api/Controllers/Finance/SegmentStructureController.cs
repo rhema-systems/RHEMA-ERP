@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using ErpSystem.Core.Services.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -78,17 +79,42 @@ namespace ErpSystem.Api.Controllers.Finance
         /// </remarks>
         /// <returns>List of reporting dimension segment structures.</returns>
         [HttpGet("reporting-dimensions")]
-        public async Task<ActionResult<List<SegmentStructureDto>>> GetReportingDimensions()
+        public async Task<ActionResult<List<SegmentStructureDto>>> GetReportingDimensions(CancellationToken cancellationToken)
         {
             try
             {
-                var segments = await _segmentStructureService.GetSegmentStructuresAsync();
+                var segments = await _segmentStructureService.GetSegmentStructuresAsync(cancellationToken);
                 var dimensions = segments.Where(s => s.IsReportingDimension && s.IsActive).ToList();
                 return Ok(dimensions);
             }
             catch (Exception ex)
             {
                 return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Retrieves valid account-backed choices for a financial-report dimension.
+        /// </summary>
+        [HttpGet("{id}/reporting-options")]
+        public async Task<ActionResult<ReportingSegmentOptionsDto>> GetReportingOptions(
+            Guid id,
+            [FromQuery] string? search = null,
+            [FromQuery] int take = 50,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var options = await _segmentStructureService.GetReportingOptionsAsync(
+                    id,
+                    search,
+                    take,
+                    cancellationToken);
+                return Ok(options);
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
             }
         }
 
@@ -166,6 +192,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="400">Invalid request data.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<SegmentStructureDto>> CreateSegmentStructure([FromBody] SegmentStructureCreateDto dto)
         {
             if (!ModelState.IsValid)
@@ -235,6 +262,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Segment structure not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("{id}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<SegmentStructureDto>> UpdateSegmentStructure(Guid id, [FromBody] SegmentStructureUpdateDto dto)
         {
             if (!ModelState.IsValid)
@@ -316,6 +344,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Segment structure not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("{id}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult> DeleteSegmentStructure(Guid id)
         {
             try
@@ -367,6 +396,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="400">Invalid reorder list.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("reorder")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult> ReorderSegments([FromBody] List<ReorderSegmentDto> reorderList)
         {
             if (reorderList == null || !reorderList.Any())
@@ -419,6 +449,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Account numbers regenerated successfully.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("regenerate")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult> RegenerateAccountNumbers()
         {
             try
@@ -530,6 +561,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Segment not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("{id}/values")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<SegmentLookupValueDto>> AddSegmentLookupValue(
             Guid id,
             [FromBody] SegmentLookupValueCreateDto dto)
@@ -588,6 +620,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Lookup value not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("{id}/values/{valueId}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<SegmentLookupValueDto>> UpdateSegmentLookupValue(
             Guid id,
             Guid valueId,
@@ -644,6 +677,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Lookup value not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("{id}/values/{valueId}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult> DeleteSegmentLookupValue(Guid id, Guid valueId)
         {
             try

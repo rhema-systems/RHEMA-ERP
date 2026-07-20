@@ -175,8 +175,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             var newRate = dto.Rate ?? tax.Rate;
             var newEffectiveFrom = (dto.EffectiveFrom ?? (dto.Rate.HasValue && dto.Rate.Value != tax.Rate ? DateTime.UtcNow : tax.EffectiveFrom)).Date;
             var newIsActive = dto.IsActive ?? tax.IsActive;
-            var newPayableAccountId = dto.TaxPayableAccountId ?? tax.TaxPayableAccountId;
-            var newReceivableAccountId = dto.TaxReceivableAccountId ?? tax.TaxReceivableAccountId;
+            Guid? newPayableAccountId = dto.ClearTaxPayableAccount
+                ? null
+                : dto.TaxPayableAccountId ?? tax.TaxPayableAccountId;
+            Guid? newReceivableAccountId = dto.ClearTaxReceivableAccount
+                ? null
+                : dto.TaxReceivableAccountId ?? tax.TaxReceivableAccountId;
 
             await ValidateTaxConfigurationAsync(
                 tax.Code,
@@ -208,8 +212,10 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             if (dto.IsActive.HasValue) tax.IsActive = dto.IsActive.Value;
             if (dto.IsInputTaxDeductible.HasValue) tax.IsInputTaxDeductible = dto.IsInputTaxDeductible.Value;
             if (dto.ThresholdAmount.HasValue) tax.ThresholdAmount = dto.ThresholdAmount;
-            if (dto.TaxPayableAccountId.HasValue) tax.TaxPayableAccountId = dto.TaxPayableAccountId;
-            if (dto.TaxReceivableAccountId.HasValue) tax.TaxReceivableAccountId = dto.TaxReceivableAccountId;
+            if (dto.ClearTaxPayableAccount) tax.TaxPayableAccountId = null;
+            else if (dto.TaxPayableAccountId.HasValue) tax.TaxPayableAccountId = dto.TaxPayableAccountId;
+            if (dto.ClearTaxReceivableAccount) tax.TaxReceivableAccountId = null;
+            else if (dto.TaxReceivableAccountId.HasValue) tax.TaxReceivableAccountId = dto.TaxReceivableAccountId;
 
             tax.UpdatedAt = DateTime.UtcNow;
             tax.UpdatedBy = UserName;

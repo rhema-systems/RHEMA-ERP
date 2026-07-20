@@ -233,6 +233,79 @@ public sealed class ControlledOpeningBalancePostingTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "Migration")]
+    public async Task SavedOpeningBalanceBatch_ShouldBeListedReloadedAndEditable()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId, withAudit: true);
+
+        var created = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
+        (await service.ValidateBatchAsync(created.Id)).IsValid.Should().BeTrue();
+
+        var listed = await service.GetBatchesAsync();
+        listed.Should().ContainSingle(batch => batch.Id == created.Id && batch.Status == "Validated");
+
+        var updated = await service.UpdateBatchAsync(created.Id, new UpdateOpeningBalanceBatchDto
+        {
+            SourceReference = "TB-REVISED",
+            Description = "Revised opening trial balance",
+            OpeningDate = new DateTime(2026, 1, 2),
+            FiscalPeriodId = fixture.Period.Id,
+            BookClassification = "IFRS",
+            Lines = new[]
+            {
+                new CreateOpeningBalanceLineDto { AccountId = fixture.Cash.Id, DebitAmount = 250m, Notes = "Revised debit" },
+                new CreateOpeningBalanceLineDto { AccountId = fixture.Equity.Id, CreditAmount = 250m, Notes = "Revised credit" }
+            }
+        });
+
+        updated.Status.Should().Be("Draft", "editing a validated batch must require validation again");
+        updated.SourceReference.Should().Be("TB-REVISED");
+        updated.Description.Should().Be("Revised opening trial balance");
+        updated.OpeningDate.Should().Be(new DateTime(2026, 1, 2));
+        updated.TotalDebit.Should().Be(250m);
+        updated.TotalCredit.Should().Be(250m);
+        updated.Lines.Should().HaveCount(2);
+        (await service.GetBatchAsync(created.Id))!.Description.Should().Be("Revised opening trial balance");
+        (await db.AuditLogs.CountAsync(log => log.TenantId == tenantId && log.Action == FinanceAuditEvents.OpeningBalanceBatchUpdated)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Migration")]
+    public async Task ApprovedOpeningBalanceBatch_ShouldNotBeEditable()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var created = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
+        await service.SubmitForApprovalAsync(created.Id);
+
+        var act = () => service.UpdateBatchAsync(created.Id, new UpdateOpeningBalanceBatchDto
+        {
+            OpeningDate = created.OpeningDate,
+            FiscalPeriodId = created.FiscalPeriodId,
+            BookClassification = created.BookClassification,
+            Lines = created.Lines.Select(line => new CreateOpeningBalanceLineDto
+            {
+                AccountId = line.AccountId,
+                DebitAmount = line.DebitAmount,
+                CreditAmount = line.CreditAmount
+            }).ToArray()
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cannot be edited*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Migration")]
     public async Task OpeningDateOutsideSelectedPeriod_ShouldFailValidation()
     {
         var tenantId = Guid.NewGuid();

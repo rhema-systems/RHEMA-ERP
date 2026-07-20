@@ -98,6 +98,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<TaxGroup> TaxGroups { get; set; }
     public DbSet<TaxGroupComponent> TaxGroupComponents { get; set; }
     public DbSet<ModuleDefinition> ModuleDefinitions { get; set; }
+    public DbSet<PeriodModuleLock> PeriodModuleLocks { get; set; }
     public DbSet<TransactionDocumentModuleMapping> TransactionDocumentModuleMappings { get; set; }
     public DbSet<FixedAssetCategory> FixedAssetCategories { get; set; }
     public DbSet<FixedAsset> FixedAssets { get; set; }
@@ -120,6 +121,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<LeaseContract> LeaseContracts { get; set; }
     public DbSet<LeaseScheduleLine> LeaseScheduleLines { get; set; }
     public DbSet<JournalEntry> JournalEntries { get; set; }
+    public DbSet<RecurringJournalTemplate> RecurringJournalTemplates { get; set; }
+    public DbSet<RecurringJournalTemplateLine> RecurringJournalTemplateLines { get; set; }
+    public DbSet<RecurringJournalOccurrence> RecurringJournalOccurrences { get; set; }
     public DbSet<FinancePostingEvent> FinancePostingEvents { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<FxRealizedSettlement> FxRealizedSettlements { get; set; }
@@ -1058,6 +1062,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.BankAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ConfiguredPaymentMethod)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentMethodId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.WithholdingTax)
                 .WithMany()
                 .HasForeignKey(e => e.WithholdingTaxId)
@@ -1080,6 +1088,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
         });
 
         builder.Entity<PaymentAllocation>(entity =>
@@ -1849,6 +1858,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.BankAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ConfiguredPaymentMethod)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentMethodId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.PaymentBatch)
                 .WithMany()
                 .HasForeignKey(e => e.PaymentBatchId)
@@ -1865,6 +1878,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
         });
 
         builder.Entity<VendorPaymentAllocation>(entity =>
@@ -1896,10 +1910,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<PaymentBatch>(entity =>
         {
             entity.ToTable("PaymentBatch");
+            entity.HasOne(e => e.ConfiguredPaymentMethod)
+                .WithMany()
+                .HasForeignKey(e => e.PaymentMethodId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
         });
 
         builder.Entity<PaymentBatchItem>(entity =>
@@ -2002,6 +2021,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(e => e.OriginalJournalEntry)
                 .WithMany()
                 .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.RecurringTemplate)
+                .WithMany()
+                .HasForeignKey(e => e.RecurringTemplateId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
@@ -2285,6 +2308,34 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecurringJournalTemplate>(entity =>
+        {
+            entity.ToTable("RecurringJournalTemplates");
+            entity.HasIndex(e => new { e.TenantId, e.TemplateNumber }).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.DefinitionKey, e.Version }).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.Status, e.NextDueDate });
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecurringJournalTemplateLine>(entity =>
+        {
+            entity.ToTable("RecurringJournalTemplateLines");
+            entity.HasIndex(e => new { e.TenantId, e.TemplateId, e.LineNumber }).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasOne(e => e.Template).WithMany(e => e.Lines).HasForeignKey(e => e.TemplateId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecurringJournalOccurrence>(entity =>
+        {
+            entity.ToTable("RecurringJournalOccurrences");
+            entity.HasIndex(e => new { e.TenantId, e.TemplateId, e.ScheduledDate }).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.Status, e.EffectiveDate });
+            entity.HasOne(e => e.Template).WithMany(e => e.Occurrences).HasForeignKey(e => e.TemplateId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.JournalEntry).WithOne(e => e.RecurringOccurrence).HasForeignKey<RecurringJournalOccurrence>(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<OpeningBalanceBatch>(entity =>
@@ -3122,6 +3173,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<TenantModule>(entity =>
         {
             entity.HasIndex(e => new { e.TenantId, e.ModuleName }).IsUnique();
+        });
+
+        builder.Entity<ModuleDefinition>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ModuleCode }).IsUnique();
+        });
+
+        builder.Entity<PeriodModuleLock>(entity =>
+        {
+            entity.ToTable("PeriodModuleLock");
+            entity.HasIndex(e => new { e.TenantId, e.FiscalPeriodId, e.ModuleDefinitionId }).IsUnique();
+            entity.HasIndex(e => new { e.IsLocked, e.ReopenExpiresAtUtc });
+        });
+
+        builder.Entity<TransactionDocumentModuleMapping>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.DocumentType }).IsUnique();
         });
 
         // Configure EmailSettings entity
@@ -9335,7 +9403,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(pt => pt.IsActive);
             entity.HasIndex(pt => pt.IsDefault);
             entity.HasIndex(pt => pt.ApplicableTo);
-            entity.HasIndex(pt => new { pt.TenantId, pt.Code }).IsUnique();
+            entity.HasIndex(pt => new { pt.TenantId, pt.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
         });
 
         builder.Entity<FinanceSettings>(entity =>

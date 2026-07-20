@@ -15,8 +15,16 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import { Account, FiscalYear, FiscalPeriod, PeriodType, CreateFiscalYearDto } from '@/types/finance';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useAuth } from '@/hooks/use-auth';
+import { usePathname } from 'next/navigation';
 
 export default function FiscalYearsPage() {
+    const pathname = usePathname() ?? '';
+    const administrationMode = pathname.startsWith('/administration/finance');
+    const { hasPermission } = useAuth();
+    const canAdminister = hasPermission('Finance.Admin');
+    const canClose = hasPermission('Finance.PeriodClose');
+    const canReopen = hasPermission('Finance.PeriodReopen');
     const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
@@ -39,8 +47,10 @@ export default function FiscalYearsPage() {
 
     useEffect(() => {
         loadData();
-        loadEquityAccounts();
-    }, []);
+        if (!administrationMode && canClose) {
+            loadEquityAccounts();
+        }
+    }, [administrationMode, canClose]);
 
     const loadEquityAccounts = async () => {
         try {
@@ -236,7 +246,7 @@ export default function FiscalYearsPage() {
             loadData();
         } catch (error: any) {
             console.error('Failed to delete fiscal year:', error?.message || error);
-            const errorMessage = error?.message || 'Failed to delete fiscal year. Ensure it is not closed and has no transactions.';
+            const errorMessage = error?.message || 'Failed to delete fiscal year. Ensure it is not closed and has no associated finance records.';
             toast({
                 title: 'Error',
                 description: errorMessage,
@@ -281,16 +291,19 @@ export default function FiscalYearsPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                         <Calendar className="h-8 w-8" />
-                        Fiscal Years
+                        {administrationMode ? 'Fiscal Calendar Setup' : 'Fiscal Years'}
                     </h1>
                     <p className="text-muted-foreground">
-                        Manage fiscal years and accounting periods
+                        {administrationMode
+                            ? 'Create fiscal years and generate their accounting periods'
+                            : 'Review fiscal years and perform controlled year-end close actions'}
                     </p>
                 </div>
                 <div className="flex gap-2">
                     <Button variant="outline" size="icon" onClick={loadData} disabled={isLoading}>
                         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
                     </Button>
+                    {administrationMode && canAdminister && (
                     <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                         <DialogTrigger asChild>
                             <Button onClick={resetForm}>
@@ -367,6 +380,7 @@ export default function FiscalYearsPage() {
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
+                    )}
                 </div>
             </div>
 
@@ -378,11 +392,13 @@ export default function FiscalYearsPage() {
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbLink href="/finance">Finance</BreadcrumbLink>
+                        <BreadcrumbLink href={administrationMode ? '/administration' : '/finance'}>
+                            {administrationMode ? 'Administration' : 'Finance'}
+                        </BreadcrumbLink>
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbPage>Fiscal Years</BreadcrumbPage>
+                        <BreadcrumbPage>{administrationMode ? 'Fiscal Calendar Setup' : 'Fiscal Years'}</BreadcrumbPage>
                     </BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
@@ -436,7 +452,7 @@ export default function FiscalYearsPage() {
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            {!year.isClosed && (
+                                            {!administrationMode && canClose && !year.isClosed && (
                                                 <Dialog>
                                                     <DialogTrigger asChild>
                                                         <Button variant="outline" size="sm">
@@ -503,7 +519,7 @@ export default function FiscalYearsPage() {
                                                     </DialogContent>
                                                 </Dialog>
                                             )}
-                                            {year.isClosed && (
+                                            {!administrationMode && canReopen && year.isClosed && (
                                                 <Dialog>
                                                     <DialogTrigger asChild>
                                                         <Button variant="outline" size="sm">
@@ -536,6 +552,7 @@ export default function FiscalYearsPage() {
                                                     </DialogContent>
                                                 </Dialog>
                                             )}
+                                            {administrationMode && canAdminister && (
                                             <Dialog>
                                                 <DialogTrigger asChild>
                                                     <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10">
@@ -546,7 +563,7 @@ export default function FiscalYearsPage() {
                                                     <DialogHeader>
                                                         <DialogTitle>Delete Fiscal Year {year.year}?</DialogTitle>
                                                         <DialogDescription>
-                                                            This action cannot be undone. You can only delete fiscal years that have no associated transactions.
+                                                            This action cannot be undone. You can only delete fiscal years that have no journal entries, ledger transactions, budgets, opening balances, or other dependent finance records.
                                                         </DialogDescription>
                                                     </DialogHeader>
                                                     <DialogFooter>
@@ -557,6 +574,7 @@ export default function FiscalYearsPage() {
                                                     </DialogFooter>
                                                 </DialogContent>
                                             </Dialog>
+                                            )}
                                         </div>
                                     </div>
 

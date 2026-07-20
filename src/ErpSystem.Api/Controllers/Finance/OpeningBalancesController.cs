@@ -32,6 +32,17 @@ public sealed class OpeningBalancesController : ControllerBase
         return batch == null ? NotFound() : Ok(batch);
     }
 
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyList<OpeningBalanceBatchDto>>> List(CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.GetBatchesAsync(cancellationToken));
+
+    [HttpPut("{batchId:guid}")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> Update(
+        Guid batchId,
+        [FromBody] UpdateOpeningBalanceBatchDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.UpdateBatchAsync(batchId, dto, cancellationToken));
+
     [HttpPost("{batchId:guid}/validate")]
     public async Task<ActionResult<OpeningBalanceValidationResultDto>> Validate(
         Guid batchId,

@@ -3,6 +3,11 @@ namespace ErpSystem.Core.DTOs.Finance;
 public sealed class FinancePostingRequestDto
 {
     public string SourceModule { get; set; } = string.Empty;
+    /// <summary>
+    /// Immutable top-level application module that originated this posting.
+    /// If omitted, the engine derives it from the legacy SourceModule value.
+    /// </summary>
+    public string? OriginModuleCode { get; set; }
     public string SourceDocumentType { get; set; } = string.Empty;
     public Guid SourceDocumentId { get; set; }
     public Guid? SourceDocumentTenantId { get; set; }
@@ -65,6 +70,7 @@ public sealed class FinancePostingResultDto
     public string FunctionalCurrencyCode { get; set; } = string.Empty;
     public DateTime PostingDate { get; set; }
     public string SourceModule { get; set; } = string.Empty;
+    public string OriginModuleCode { get; set; } = string.Empty;
     public string SourceDocumentType { get; set; } = string.Empty;
     public Guid SourceDocumentId { get; set; }
     public string PostingAction { get; set; } = string.Empty;

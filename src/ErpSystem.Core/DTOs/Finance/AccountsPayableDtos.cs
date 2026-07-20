@@ -284,6 +284,8 @@ public class VendorPaymentDto
     public decimal AllocatedAmount { get; set; }
     public decimal UnallocatedAmount { get; set; }
     public VendorPaymentMethod PaymentMethod { get; set; }
+    public Guid? PaymentMethodId { get; set; }
+    public string? PaymentMethodName { get; set; }
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; }
     public Guid? BankAccountId { get; set; }
@@ -319,6 +321,7 @@ public class VendorPaymentCreateDto
     public decimal TotalAmount { get; set; }
 
     public VendorPaymentMethod PaymentMethod { get; set; } = VendorPaymentMethod.BankTransfer;
+    public Guid? PaymentMethodId { get; set; }
 
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; } = 1.0m;
@@ -328,6 +331,7 @@ public class VendorPaymentCreateDto
     public string? TransactionReference { get; set; }
 
     public decimal WithholdingTaxRate { get; set; }
+    public decimal? WithholdingTaxAmount { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
@@ -349,6 +353,7 @@ public class VendorPaymentQueryDto
     public Guid? SupplierId { get; set; }
     public VendorPaymentStatus? Status { get; set; }
     public VendorPaymentMethod? PaymentMethod { get; set; }
+    public Guid? PaymentMethodId { get; set; }
     public Guid? PaymentBatchId { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
@@ -442,6 +447,8 @@ public class PaymentBatchDto
     public decimal TotalAmount { get; set; }
     public int PaymentCount { get; set; }
     public VendorPaymentMethod PaymentMethod { get; set; }
+    public Guid? PaymentMethodId { get; set; }
+    public string? PaymentMethodName { get; set; }
     public Guid? BankAccountId { get; set; }
     public string? BankAccountName { get; set; }
     public PaymentBatchStatus Status { get; set; }
@@ -463,6 +470,7 @@ public class PaymentBatchCreateDto
     public DateTime? DueDateTo { get; set; }
 
     public VendorPaymentMethod PaymentMethod { get; set; } = VendorPaymentMethod.BankTransfer;
+    public Guid? PaymentMethodId { get; set; }
     public Guid? BankAccountId { get; set; }
 
     public string? Notes { get; set; }

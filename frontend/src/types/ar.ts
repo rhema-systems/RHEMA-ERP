@@ -127,6 +127,8 @@ export interface CustomerPayment {
     allocatedAmount: number;
     unallocatedAmount: number;
     paymentMethod: string;
+    paymentMethodId?: string;
+    paymentMethodName?: string;
     referenceNumber?: string;
     paymentReference: string;
     amount: number;
@@ -147,6 +149,7 @@ export interface PaymentCreateRequest {
     paymentDate: string;
     totalAmount: number;
     paymentMethod: string;
+    paymentMethodId?: string;
     referenceNumber?: string;
     bankAccountId?: string;
     checkNumber?: string;

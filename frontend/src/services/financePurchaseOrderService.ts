@@ -72,6 +72,13 @@ export interface FinancePurchaseOrderReceipt {
     receiptNumber?: string;
     receiptDate: string;
     remarks?: string;
+    status?: number | string;
+    statusName?: string;
+    workflowInstanceId?: string | null;
+    submittedAt?: string | null;
+    approvedAt?: string | null;
+    rejectedAt?: string | null;
+    rejectionReason?: string | null;
     items: FinancePurchaseOrderReceiptItem[];
 
     // UI helpers
@@ -164,6 +171,13 @@ const normalizeReceipt = (receipt: any): FinancePurchaseOrderReceipt => ({
     receiptNumber: receipt.receiptNumber,
     receiptDate: receipt.receiptDate,
     remarks: receipt.remarks || receipt.notes,
+    status: receipt.status ?? receipt.statusName,
+    statusName: receipt.statusName,
+    workflowInstanceId: receipt.workflowInstanceId || null,
+    submittedAt: receipt.submittedAt || null,
+    approvedAt: receipt.approvedAt || null,
+    rejectedAt: receipt.rejectedAt || null,
+    rejectionReason: receipt.rejectionReason || null,
     items: Array.isArray(receipt.items)
         ? receipt.items.map((item: any) => ({
             id: item.id,
@@ -286,6 +300,11 @@ export const financePurchaseOrderService = {
         };
 
         const response = await apiService.post<any>('/finance/ap/purchase-receipts', payload);
+        return normalizeReceipt(response);
+    },
+
+    submitReceiptForApproval: async (id: string): Promise<FinancePurchaseOrderReceipt> => {
+        const response = await apiService.post<any>(`/finance/ap/purchase-receipts/${id}/submit-for-approval`, {});
         return normalizeReceipt(response);
     },
 

@@ -208,6 +208,9 @@ namespace ErpSystem.Core.Entities.Finance
         PartiallyPaid = 3,
         Paid = 4,
         Overdue = 5,
-        Cancelled = 6
+        Cancelled = 6,
+        PendingApproval = 7,
+        Approved = 8,
+        Rejected = 9
     }
 }

@@ -85,6 +85,25 @@ namespace ErpSystem.Core.DTOs.Finance
     }
 
     /// <summary>
+    /// A valid reporting value derived from active tenant GL account combinations.
+    /// </summary>
+    public class ReportingSegmentOptionDto
+    {
+        public string SegmentValue { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public int AccountCombinationCount { get; set; }
+    }
+
+    /// <summary>
+    /// Bounded option response used by async financial-report segment selectors.
+    /// </summary>
+    public class ReportingSegmentOptionsDto
+    {
+        public List<ReportingSegmentOptionDto> Items { get; set; } = new();
+        public bool HasMore { get; set; }
+    }
+
+    /// <summary>
     /// DTO for validating a segmented account number
     /// </summary>
     public class SegmentedAccountValidationDto

@@ -62,6 +62,76 @@ public abstract class FinanceReportDocumentBuilderBase : IDocumentBuilder
     protected bool BoolOption(DocumentRenderRequestDto request, string key, bool fallback)
         => bool.TryParse(Option(request, key), out var value) ? value : fallback;
 
+    protected List<FinanceSegmentFilterDto> SegmentFiltersOption(DocumentRenderRequestDto request)
+    {
+        const string prefix = "segmentFilters[";
+        var filtersByIndex = new SortedDictionary<int, FinanceSegmentFilterDto>();
+
+        foreach (var option in request.Options ?? new Dictionary<string, string>())
+        {
+            if (!option.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var closingBracket = option.Key.IndexOf(']', prefix.Length);
+            if (closingBracket < 0
+                || !int.TryParse(option.Key[prefix.Length..closingBracket], out var index)
+                || closingBracket + 2 >= option.Key.Length
+                || option.Key[closingBracket + 1] != '.')
+            {
+                continue;
+            }
+
+            if (!filtersByIndex.TryGetValue(index, out var filter))
+            {
+                filter = new FinanceSegmentFilterDto();
+                filtersByIndex[index] = filter;
+            }
+
+            var propertyName = option.Key[(closingBracket + 2)..];
+            switch (propertyName.ToLowerInvariant())
+            {
+                case "segmentstructureid" when Guid.TryParse(option.Value, out var segmentStructureId):
+                    filter.SegmentStructureId = segmentStructureId;
+                    break;
+                case "segmentcode":
+                    filter.SegmentCode = option.Value;
+                    break;
+                case "segmentposition" when int.TryParse(option.Value, out var segmentPosition):
+                    filter.SegmentPosition = segmentPosition;
+                    break;
+                case "segmentvalue":
+                    filter.SegmentValue = option.Value;
+                    break;
+            }
+        }
+
+        return filtersByIndex.Values
+            .Where(filter => !string.IsNullOrWhiteSpace(filter.SegmentValue))
+            .ToList();
+    }
+
+    protected static string SegmentFilterSubtitle(IReadOnlyCollection<FinanceSegmentFilterDto> segmentFilters)
+    {
+        if (segmentFilters.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var labels = segmentFilters.Select(filter =>
+        {
+            var dimension = !string.IsNullOrWhiteSpace(filter.SegmentCode)
+                ? filter.SegmentCode.Trim()
+                : filter.SegmentPosition.HasValue
+                    ? $"Segment {filter.SegmentPosition.Value}"
+                    : "Segment";
+            return $"{dimension}={filter.SegmentValue.Trim()}";
+        });
+
+        return $" | Segments: {string.Join(", ", labels)}";
+    }
+
     protected static string Money(decimal amount, string currency)
         => $"{currency} {amount:N2}";
 
@@ -231,11 +301,13 @@ public sealed class TrialBalanceDocumentBuilder : FinanceReportDocumentBuilderBa
 
     protected override async Task<FinanceReportDocumentModel> BuildReportAsync(DocumentRenderRequestDto request, CancellationToken cancellationToken)
     {
+        var segmentFilters = SegmentFiltersOption(request);
         var report = await LedgerService.GenerateTrialBalanceAsync(new TrialBalanceRequestDto
         {
             AsAtDate = DateOption(request, "asAtDate", DateTime.UtcNow),
             BookClassification = Option(request, "bookClassification") ?? "IFRS",
-            IncludeZeroBalances = BoolOption(request, "includeZeroBalances", false)
+            IncludeZeroBalances = BoolOption(request, "includeZeroBalances", false),
+            SegmentFilters = segmentFilters
         });
 
         var lines = report.Lines.Select(line => Line(line.AccountName, line.AccountNumber ?? line.AccountCode, line.DebitBalance - line.CreditBalance)).ToList();
@@ -247,7 +319,7 @@ public sealed class TrialBalanceDocumentBuilder : FinanceReportDocumentBuilderBa
             new FinanceReportSummary("Difference", report.Difference)
         };
 
-        return Model(report.CompanyName, ReportTitle, $"As at {report.AsAtDate:dd MMM yyyy} | Book: {report.BookClassification}", report.CurrencyCode, sections, summaries);
+        return Model(report.CompanyName, ReportTitle, $"As at {report.AsAtDate:dd MMM yyyy} | Book: {report.BookClassification}{SegmentFilterSubtitle(segmentFilters)}", report.CurrencyCode, sections, summaries);
     }
 }
 
@@ -259,12 +331,14 @@ public sealed class IncomeStatementDocumentBuilder : FinanceReportDocumentBuilde
 
     protected override async Task<FinanceReportDocumentModel> BuildReportAsync(DocumentRenderRequestDto request, CancellationToken cancellationToken)
     {
+        var segmentFilters = SegmentFiltersOption(request);
         var report = await LedgerService.GenerateIncomeStatementAsync(new IncomeStatementRequestDto
         {
             PeriodStart = DateOption(request, "periodStart", new DateTime(DateTime.UtcNow.Year, 1, 1)),
             PeriodEnd = DateOption(request, "periodEnd", DateTime.UtcNow),
             BookClassification = Option(request, "bookClassification") ?? "IFRS",
-            IncludeAccountDetails = BoolOption(request, "includeAccountDetails", true)
+            IncludeAccountDetails = BoolOption(request, "includeAccountDetails", true),
+            SegmentFilters = segmentFilters
         });
 
         var sections = report.Sections
@@ -283,7 +357,7 @@ public sealed class IncomeStatementDocumentBuilder : FinanceReportDocumentBuilde
             new FinanceReportSummary("Net Profit", report.NetProfit)
         };
 
-        return Model(report.CompanyName, ReportTitle, $"{report.PeriodStart:dd MMM yyyy} to {report.PeriodEnd:dd MMM yyyy} | Book: {report.BookClassification}", report.CurrencyCode, sections, summaries);
+        return Model(report.CompanyName, ReportTitle, $"{report.PeriodStart:dd MMM yyyy} to {report.PeriodEnd:dd MMM yyyy} | Book: {report.BookClassification}{SegmentFilterSubtitle(segmentFilters)}", report.CurrencyCode, sections, summaries);
     }
 }
 
@@ -295,11 +369,13 @@ public sealed class BalanceSheetDocumentBuilder : FinanceReportDocumentBuilderBa
 
     protected override async Task<FinanceReportDocumentModel> BuildReportAsync(DocumentRenderRequestDto request, CancellationToken cancellationToken)
     {
+        var segmentFilters = SegmentFiltersOption(request);
         var report = await LedgerService.GenerateBalanceSheetAsync(new BalanceSheetRequestDto
         {
             AsAtDate = DateOption(request, "asAtDate", DateTime.UtcNow),
             BookClassification = Option(request, "bookClassification") ?? "IFRS",
-            IncludeAccountDetails = BoolOption(request, "includeAccountDetails", true)
+            IncludeAccountDetails = BoolOption(request, "includeAccountDetails", true),
+            SegmentFilters = segmentFilters
         });
 
         var sections = report.Sections
@@ -320,7 +396,7 @@ public sealed class BalanceSheetDocumentBuilder : FinanceReportDocumentBuilderBa
             new FinanceReportSummary("Total Equity", report.TotalEquity)
         };
 
-        return Model(report.CompanyName, ReportTitle, $"As at {report.AsAtDate:dd MMM yyyy} | Book: {report.BookClassification}", report.CurrencyCode, sections, summaries);
+        return Model(report.CompanyName, ReportTitle, $"As at {report.AsAtDate:dd MMM yyyy} | Book: {report.BookClassification}{SegmentFilterSubtitle(segmentFilters)}", report.CurrencyCode, sections, summaries);
     }
 }
 

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -209,6 +210,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="400">Invalid data or duplicate code</response>
         /// <response code="500">Internal server error</response>
         [HttpPost]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult<UnitTypeDto>> CreateUnitType([FromBody] CreateUnitTypeDto dto)
         {
             if (!ModelState.IsValid)
@@ -258,6 +260,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Unit type not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPut("{id:guid}")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult<UnitTypeDto>> UpdateUnitType(Guid id, [FromBody] UpdateUnitTypeDto dto)
         {
             if (!ModelState.IsValid)
@@ -306,6 +309,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Unit type not found</response>
         /// <response code="500">Internal server error</response>
         [HttpDelete("{id:guid}")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult> DeleteUnitType(Guid id)
         {
             try
@@ -354,6 +358,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Unit type not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPatch("{id:guid}/activate")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult> ActivateUnitType(Guid id)
         {
             try
@@ -400,6 +405,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Unit type not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPatch("{id:guid}/deactivate")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult> DeactivateUnitType(Guid id)
         {
             try

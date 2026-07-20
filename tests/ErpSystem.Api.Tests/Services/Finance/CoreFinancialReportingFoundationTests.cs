@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.AR;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Api.Services.Finance.Segments;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -113,6 +114,46 @@ public sealed class CoreFinancialReportingFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task CashFlow_ShouldTranslateCashNameFilterAndUseSelectedBook()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Petty Cash");
+        cash.CashFlowClassification = "Operating";
+        var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Revenue", category: "Revenue");
+        revenue.CashFlowClassification = "Operating";
+        SeedJournal(db, tenantId, period.Id, "JE-MGMT-CASH", "Posted", (cash.Id, 100m, 0m), (revenue.Id, 0m, 100m));
+
+        foreach (var journal in db.JournalEntries.Local)
+        {
+            journal.BookClassification = "MANAGEMENT";
+        }
+
+        foreach (var transaction in db.AccountTransactions.Local)
+        {
+            transaction.BookClassification = "MANAGEMENT";
+        }
+
+        await db.SaveChangesAsync();
+        var service = CreateGeneralLedgerService(db, tenantId);
+
+        var report = await service.GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = new DateTime(2026, 7, 1),
+            PeriodEnd = new DateTime(2026, 7, 31),
+            BookClassification = "MANAGEMENT",
+            IncludeAccountDetails = true
+        });
+
+        report.CashAtBeginning.Should().Be(0m);
+        report.CashAtEnd.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
     [Trait("Category", "TenantIsolation")]
     public async Task Reports_ShouldRejectCrossTenantAccountFilter()
     {
@@ -160,6 +201,138 @@ public sealed class CoreFinancialReportingFoundationTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("One or more report segment filters do not belong to the current tenant or are not reporting dimensions.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task Reports_ShouldRejectMalformedOrUnknownNonLookupSegmentValues()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var account = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Cash");
+        var naturalAccount = SeedSegment(db, tenantId, "ACCT", "Natural Account", "1000");
+        naturalAccount.DataType = "Numeric";
+        naturalAccount.IsNaturalAccount = true;
+        SeedAccountSegmentValue(db, tenantId, account, naturalAccount, "1000", "Cash");
+        await db.SaveChangesAsync();
+        var service = CreateGeneralLedgerService(db, tenantId);
+
+        Func<string, Task> runWithValue = value => service.GenerateTrialBalanceAsync(new TrialBalanceRequestDto
+        {
+            AsAtDate = new DateTime(2026, 7, 31),
+            SegmentFilters = new List<FinanceSegmentFilterDto>
+            {
+                new() { SegmentStructureId = naturalAccount.Id, SegmentValue = value }
+            }
+        });
+
+        Func<Task> invalidLength = () => runWithValue("10");
+        Func<Task> invalidDataType = () => runWithValue("ABCD");
+        Func<Task> unknownValue = () => runWithValue("9999");
+
+        await invalidLength.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must be exactly 4 characters*");
+        await invalidDataType.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must contain only numbers*");
+        await unknownValue.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*is not used by an active GL account*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task NaturalAccountSegmentFilter_ShouldApplyAcrossAllThreeCoreReports()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Cash");
+        var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Sales", category: "Revenue");
+        var expense = SeedAccount(db, tenantId, AccountType.Expense, "5000", "Rent", category: "Operating Expenses");
+        var naturalAccount = SeedSegment(db, tenantId, "ACCT", "Natural Account", "1000");
+        naturalAccount.DataType = "Numeric";
+        naturalAccount.IsNaturalAccount = true;
+        SeedAccountSegmentValue(db, tenantId, cash, naturalAccount, "1000", "Cash");
+        SeedAccountSegmentValue(db, tenantId, revenue, naturalAccount, "4000", "Sales");
+        SeedAccountSegmentValue(db, tenantId, expense, naturalAccount, "5000", "Rent");
+        SeedJournal(db, tenantId, period.Id, "JE-SALE", "Posted", (cash.Id, 200m, 0m), (revenue.Id, 0m, 200m));
+        SeedJournal(db, tenantId, period.Id, "JE-EXP", "Posted", (expense.Id, 50m, 0m), (cash.Id, 0m, 50m));
+        await db.SaveChangesAsync();
+        var service = CreateGeneralLedgerService(db, tenantId);
+
+        var cashFilter = new List<FinanceSegmentFilterDto>
+        {
+            new() { SegmentStructureId = naturalAccount.Id, SegmentCode = "ACCT", SegmentPosition = 1, SegmentValue = "1000" }
+        };
+        var revenueFilter = new List<FinanceSegmentFilterDto>
+        {
+            new() { SegmentStructureId = naturalAccount.Id, SegmentCode = "ACCT", SegmentPosition = 1, SegmentValue = "4000" }
+        };
+
+        var trialBalance = await service.GenerateTrialBalanceAsync(new TrialBalanceRequestDto
+        {
+            AsAtDate = new DateTime(2026, 7, 31),
+            IncludeZeroBalances = true,
+            SegmentFilters = cashFilter
+        });
+        var incomeStatement = await service.GenerateIncomeStatementAsync(new IncomeStatementRequestDto
+        {
+            PeriodStart = new DateTime(2026, 7, 1),
+            PeriodEnd = new DateTime(2026, 7, 31),
+            SegmentFilters = revenueFilter
+        });
+        var balanceSheet = await service.GenerateBalanceSheetAsync(new BalanceSheetRequestDto
+        {
+            AsAtDate = new DateTime(2026, 7, 31),
+            SegmentFilters = cashFilter
+        });
+
+        trialBalance.Lines.Should().ContainSingle(line => line.AccountId == cash.Id);
+        incomeStatement.TotalRevenue.Should().Be(200m);
+        incomeStatement.TotalOperatingExpenses.Should().Be(0m);
+        balanceSheet.TotalAssets.Should().Be(150m);
+        balanceSheet.TotalLiabilities.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "TenantIsolation")]
+    public async Task ReportingOptions_ShouldReturnDistinctActiveTenantAccountValues()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var segment = SeedSegment(db, tenantId, "ACCT", "Natural Account", "1000");
+        var otherSegment = SeedSegment(db, otherTenantId, "ACCT", "Natural Account", "1000");
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Cash at Bank");
+        var sales = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Sales Revenue");
+        var inactive = SeedAccount(db, tenantId, AccountType.Expense, "5000", "Inactive Expense");
+        inactive.Status = AccountStatus.Inactive;
+        var otherCash = SeedAccount(db, otherTenantId, AccountType.Asset, "1000", "Other Tenant Cash");
+        SeedAccountSegmentValue(db, tenantId, cash, segment, "1000", "Cash");
+        SeedAccountSegmentValue(db, tenantId, sales, segment, "4000", "Sales");
+        SeedAccountSegmentValue(db, tenantId, inactive, segment, "5000", "Inactive Expense");
+        SeedAccountSegmentValue(db, otherTenantId, otherCash, otherSegment, "1000", "Other Cash");
+        await db.SaveChangesAsync();
+
+        var service = new SegmentStructureService(
+            new UnitOfWork(db),
+            CreateCurrentUser(tenantId).Object,
+            Mock.Of<ILogger<SegmentStructureService>>());
+
+        var firstPage = await service.GetReportingOptionsAsync(segment.Id, null, 1);
+        var salesSearch = await service.GetReportingOptionsAsync(segment.Id, "Sales", 10);
+
+        firstPage.Items.Should().ContainSingle();
+        firstPage.Items[0].SegmentValue.Should().Be("1000");
+        firstPage.HasMore.Should().BeTrue();
+        salesSearch.Items.Should().ContainSingle(item =>
+            item.SegmentValue == "4000" && item.Description == "Sales");
     }
 
     [Fact]
@@ -415,6 +588,27 @@ public sealed class CoreFinancialReportingFoundationTests
         };
         db.AccountSegmentStructures.Add(segment);
         return segment;
+    }
+
+    private static void SeedAccountSegmentValue(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Account account,
+        AccountSegmentStructure segment,
+        string value,
+        string description)
+    {
+        db.AccountSegmentValues.Add(new AccountSegmentValue
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = account.Id,
+            SegmentStructureId = segment.Id,
+            SegmentValue = value,
+            SegmentValueDescription = description,
+            SegmentPosition = segment.SegmentPosition,
+            EffectiveDate = new DateTime(2026, 1, 1)
+        });
     }
 
     private static void SeedJournal(

@@ -10,6 +10,9 @@ public class FinancePostingEvent : TenantEntity
     [MaxLength(50)]
     public string SourceModule { get; set; } = string.Empty;
 
+    [MaxLength(10)]
+    public string? OriginModuleCode { get; set; }
+
     [Required]
     [MaxLength(100)]
     public string SourceDocumentType { get; set; } = string.Empty;

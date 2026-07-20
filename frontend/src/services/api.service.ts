@@ -308,6 +308,7 @@ class ApiService {
             : undefined);
 
       const errorMessage = errorData.message ||
+        errorData.detail ||
         errorData.title ||
         firstValidationError ||
         errorData.error ||
@@ -768,6 +769,14 @@ class ApiService {
   // Standard HTTP methods
   public async get<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
     return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' });
+  }
+
+  public async getWithSignal<T = any>(
+    endpoint: string,
+    query: Record<string, unknown> | undefined,
+    signal: AbortSignal
+  ): Promise<T> {
+    return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET', signal });
   }
 
   // Silent GET method - doesn't log errors to console (useful for expected 404s)

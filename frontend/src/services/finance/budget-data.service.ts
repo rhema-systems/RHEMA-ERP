@@ -20,6 +20,7 @@ import type {
 
 import { apiService } from '@/services/api.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import type { FiscalYear } from '@/types/finance';
 
 // =============================================================================
 // BUDGET DATA SERVICE
@@ -28,10 +29,10 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 class BudgetDataService {
     // ===== BUDGET SCENARIOS =====
 
-    async getScenarios(): Promise<BudgetScenario[]> {
-        const fiscalYears = await financeDataService.getFiscalYears();
+    async getScenarios(fiscalYears?: FiscalYear[]): Promise<BudgetScenario[]> {
+        const years = fiscalYears ?? (await financeDataService.getFiscalYears());
         const scenarioGroups = await Promise.all(
-            fiscalYears.map((fy) => apiService.get<BudgetScenario[]>(`/budget/scenarios/year/${fy.id}`))
+            years.map((fy) => apiService.get<BudgetScenario[]>(`/budget/scenarios/year/${fy.id}`))
         );
         return scenarioGroups.flat();
     }

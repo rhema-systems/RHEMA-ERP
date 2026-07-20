@@ -236,10 +236,11 @@ public sealed class JournalEntryLifecycleBatch5Tests
         reversal.TotalCredit.Should().Be(100m);
 
         var original = await db.JournalEntries.Include(j => j.Transactions).SingleAsync(j => j.Id == journal.Id);
-        original.PostingStatus.Should().Be("Reversed");
+        original.PostingStatus.Should().Be("Posted");
         original.IsReversed.Should().BeTrue();
         original.ReversalJournalEntryId.Should().Be(reversal.Id);
         original.Transactions.Should().OnlyContain(t => t.IsReversed && t.ReversalTransactionId.HasValue);
+        original.Transactions.Should().OnlyContain(t => t.PostingStatus == "Posted");
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentId == journal.Id && e.PostingAction == "Reverse")).Should().Be(1);
     }
 

@@ -201,6 +201,7 @@ public class CashTransactionService : ICashTransactionService
     {
         var tenantId = TenantId;
         await ValidateBankAccountAsync(dto.BankAccountId, tenantId, "receipt");
+        await ValidatePaymentMethodAsync(dto.PaymentMethodId, tenantId, dto.ReferenceNumber, dto.BankAccountId, "receipt");
         if (dto.GLAccountId.HasValue)
         {
             await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "receipt");
@@ -260,6 +261,7 @@ public class CashTransactionService : ICashTransactionService
     {
         var tenantId = TenantId;
         await ValidateBankAccountAsync(dto.BankAccountId, tenantId, "payment");
+        await ValidatePaymentMethodAsync(dto.PaymentMethodId, tenantId, dto.ReferenceNumber, dto.BankAccountId, "payment");
         if (dto.GLAccountId.HasValue)
         {
             await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "payment");
@@ -1451,6 +1453,38 @@ public class CashTransactionService : ICashTransactionService
         if (!exists)
         {
             throw new InvalidOperationException($"The {label} bank account was not found for this tenant.");
+        }
+    }
+
+    private async Task ValidatePaymentMethodAsync(Guid? paymentMethodId, Guid tenantId, string? referenceNumber, Guid bankAccountId, string label)
+    {
+        if (!paymentMethodId.HasValue)
+        {
+            return;
+        }
+
+        var method = await _context.PaymentMethods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.Id == paymentMethodId.Value && !m.IsDeleted);
+
+        if (method == null)
+        {
+            throw new InvalidOperationException($"The selected {label} payment method was not found for this tenant.");
+        }
+
+        if (!method.IsActive)
+        {
+            throw new InvalidOperationException($"The selected {label} payment method is inactive.");
+        }
+
+        if (method.RequiresBankAccount && bankAccountId == Guid.Empty)
+        {
+            throw new InvalidOperationException($"The selected {label} payment method requires a bank account.");
+        }
+
+        if (method.RequiresReference && string.IsNullOrWhiteSpace(referenceNumber))
+        {
+            throw new InvalidOperationException($"The selected {label} payment method requires a reference number.");
         }
     }
 

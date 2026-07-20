@@ -410,12 +410,17 @@ export default function FinanceSettingsPage() {
                             Used as the offset account for opening-balance migration postings.
                         </p>
                     </div>
-                    <div className="rounded-md border p-3">
+                    <div className="rounded-md border border-dashed bg-muted/20 p-3">
                         <div className="flex items-center justify-between">
                             <div className="space-y-1">
-                                <Label htmlFor="openingBalanceAutoRouting">Opening Balance Auto-Routing</Label>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Advanced / Legacy Manual GL Opening Balance
+                                </p>
+                                <Label htmlFor="openingBalanceAutoRouting">Manual GL Opening Balance Auto-Routing</Label>
                                 <p className="text-sm text-muted-foreground">
-                                    When enabled, Opening Balance postings in GL/Subledger auto-route balancing/offset lines to Migration Clearing Account.
+                                    Applies only to manual GL journals with type Opening Balance. Controlled OpeningBalanceBatch,
+                                    AR opening invoices, AP opening bills, and subledger opening adjustments use explicit balanced
+                                    postings and do not read this toggle.
                                 </p>
                             </div>
                             <Switch

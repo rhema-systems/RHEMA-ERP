@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -20,7 +21,7 @@ namespace ErpSystem.Api.Controllers.Finance
     [Authorize]
     public class TaxConfigurationController : ControllerBase
     {
-        private const string TaxSetupRoles = "SuperAdmin,TenantAdmin,Financial Controller";
+        private const string TaxSetupPolicy = FinancePermissions.ConfigureTaxPolicy;
 
         private readonly ITaxConfigurationService _taxConfigService;
         private readonly ITaxCalculationEngine _taxCalculationEngine;
@@ -205,7 +206,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("taxes")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxDto>> CreateTax([FromBody] CreateTaxDto dto)
         {
             try
@@ -251,7 +252,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("taxes/{id}")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxDto>> UpdateTax(Guid id, [FromBody] UpdateTaxDto dto)
         {
             try
@@ -293,7 +294,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("taxes/{id}")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> DeleteTax(Guid id)
         {
             try
@@ -516,7 +517,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("groups")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupDto>> CreateTaxGroup([FromBody] CreateTaxGroupDto dto)
         {
             try
@@ -561,7 +562,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("groups/{id}")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupDto>> UpdateTaxGroup(Guid id, [FromBody] UpdateTaxGroupDto dto)
         {
             try
@@ -604,7 +605,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("groups/{id}")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> DeleteTaxGroup(Guid id)
         {
             try
@@ -654,7 +655,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("groups/{groupId}/components")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupComponentDto>> AddComponentToGroup(Guid groupId, [FromBody] AddTaxGroupComponentDto dto)
         {
             try
@@ -699,7 +700,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("groups/components/{componentId}")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupComponentDto>> UpdateComponent(Guid componentId, [FromBody] UpdateTaxGroupComponentDto dto)
         {
             try
@@ -742,7 +743,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("groups/components/{componentId}")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> RemoveComponentFromGroup(Guid componentId)
         {
             try
@@ -788,7 +789,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("groups/{groupId}/reorder")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> ReorderComponents(Guid groupId, [FromBody] List<Guid> orderedComponentIds)
         {
             try
@@ -981,7 +982,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("seed/ghana")]
-        [Authorize(Roles = TaxSetupRoles)]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> SeedGhanaTaxes()
         {
             try

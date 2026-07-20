@@ -33,6 +33,54 @@ public sealed class ArCreditNotePostingMigrationTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    [Trait("Category", "SalesReturns")]
+    public async Task ReturnOrder_ShouldRejectDeliveryNoteFromAnotherSalesOrderForSameBusinessPartner()
+    {
+        var tenantId = Guid.NewGuid();
+        var businessPartnerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var selectedOrder = new SalesOrder
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerId = businessPartnerId,
+            DocumentNumber = "SO-SELECTED"
+        };
+        var otherOrder = new SalesOrder
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerId = businessPartnerId,
+            DocumentNumber = "SO-OTHER"
+        };
+        var deliveryNote = new DeliveryNote
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SalesOrderId = otherOrder.Id,
+            BusinessPartnerId = businessPartnerId,
+            DocumentNumber = "DN-OTHER-ORDER"
+        };
+        db.SalesOrders.AddRange(selectedOrder, otherOrder);
+        db.DeliveryNotes.Add(deliveryNote);
+        await db.SaveChangesAsync();
+        var (service, _) = CreateReturnOrderService(db, tenantId);
+
+        var act = () => service.CreateReturnOrderAsync(new CreateReturnOrderDto
+        {
+            SalesOrderId = selectedOrder.Id,
+            DeliveryNoteId = deliveryNote.Id,
+            ReasonCode = ReturnReasonCode.CustomerChanged,
+            ReasonDescription = "Wrong fulfillment selected"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Return order delivery note must belong to the selected source sales order.");
+        (await db.ReturnOrders.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "AccountsReceivable")]
     public async Task ApprovedSalesCreditNote_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent()
     {
@@ -416,9 +464,14 @@ public sealed class ArCreditNotePostingMigrationTests
         reversed.ReversalPostingEventId.Should().NotBeNull();
         reversed.ReversalReason.Should().Be("Correct approved credit note");
 
-        var originalJournal = await db.JournalEntries.SingleAsync(j => j.Id == posted.JournalEntryId);
-        originalJournal.PostingStatus.Should().Be("Reversed");
+        var originalJournal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == posted.JournalEntryId);
+        originalJournal.PostingStatus.Should().Be("Posted");
+        originalJournal.IsReversed.Should().BeTrue();
         originalJournal.ReversalJournalEntryId.Should().Be(reversed.ReversalJournalEntryId);
+        originalJournal.Transactions.Should().OnlyContain(t =>
+            t.PostingStatus == "Posted" && t.IsReversed && t.ReversalTransactionId.HasValue);
         var reversalJournal = await db.JournalEntries
             .Include(j => j.Transactions)
             .SingleAsync(j => j.Id == reversed.ReversalJournalEntryId);

@@ -48,6 +48,10 @@ export interface ApprovalQueueItem {
     amount?: number | null;
     currencyCode?: string | null;
     submittedBy?: string | null;
+    canApprove?: boolean;
+    canReject?: boolean;
+    approveDisabledReason?: string | null;
+    rejectDisabledReason?: string | null;
     metadata?: Array<{
         label: string;
         value: React.ReactNode;
@@ -217,6 +221,15 @@ export function ApprovalWorkbench({
     const activeState = activeDefinition ? queues[activeDefinition.id] : null;
 
     const handleApprove = async (definition: ApprovalQueueDefinition, item: ApprovalQueueItem) => {
+        if (item.canApprove === false) {
+            toast({
+                title: 'Approval unavailable',
+                description: item.approveDisabledReason || 'Your current roles do not authorize this approval.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
         const key = `${definition.id}:${item.id}:approve`;
 
         try {
@@ -252,6 +265,16 @@ export function ApprovalWorkbench({
         }
 
         const { definition, item } = rejectTarget;
+        if (item.canReject === false) {
+            toast({
+                title: 'Rejection unavailable',
+                description: item.rejectDisabledReason || 'Your current roles do not authorize this rejection.',
+                variant: 'destructive',
+            });
+            setRejectTarget(null);
+            return;
+        }
+
         const key = `${definition.id}:${item.id}:reject`;
 
         try {
@@ -409,6 +432,10 @@ export function ApprovalWorkbench({
                                 const amountText = formatAmount(row.amount, row.currencyCode);
                                 const approveKey = `${definition.id}:${row.id}:approve`;
                                 const rejectKey = `${definition.id}:${row.id}:reject`;
+                                const restrictionMessages = Array.from(new Set([
+                                    row.canApprove === false ? row.approveDisabledReason : null,
+                                    definition.reject && row.canReject === false ? row.rejectDisabledReason : null,
+                                ].filter((message): message is string => Boolean(message))));
 
                                 return (
                                     <div key={`${row.queueId}:${row.id}`} className="rounded-xl border bg-card p-4 shadow-sm transition-colors hover:bg-muted/30">
@@ -449,6 +476,16 @@ export function ApprovalWorkbench({
                                                         <div className="text-lg font-semibold">{amountText}</div>
                                                     </div>
                                                 )}
+                                                {restrictionMessages.length > 0 && (
+                                                    <div className="max-w-md rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                                        {restrictionMessages.map(message => (
+                                                            <div key={message} className="flex items-start gap-2">
+                                                                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                                                <span>{message}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                                 <div className="flex flex-wrap gap-2">
                                                     <Button variant="outline" asChild>
                                                         <Link href={row.detailHref}>
@@ -456,7 +493,11 @@ export function ApprovalWorkbench({
                                                             Review
                                                         </Link>
                                                     </Button>
-                                                    <Button onClick={() => handleApprove(definition, row)} disabled={actionKey !== null}>
+                                                    <Button
+                                                        onClick={() => handleApprove(definition, row)}
+                                                        disabled={actionKey !== null || row.canApprove === false}
+                                                        title={row.canApprove === false ? row.approveDisabledReason || 'Approval unavailable' : undefined}
+                                                    >
                                                         {actionKey === approveKey ? (
                                                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                                         ) : (
@@ -468,7 +509,8 @@ export function ApprovalWorkbench({
                                                         <Button
                                                             variant="destructive"
                                                             onClick={() => setRejectTarget({ definition, item: row })}
-                                                            disabled={actionKey !== null}
+                                                            disabled={actionKey !== null || row.canReject === false}
+                                                            title={row.canReject === false ? row.rejectDisabledReason || 'Rejection unavailable' : undefined}
                                                         >
                                                             {actionKey === rejectKey ? (
                                                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

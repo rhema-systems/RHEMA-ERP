@@ -83,6 +83,81 @@ public sealed class FiscalYearCloseTests
     [Fact]
     [Trait("Batch", "FinanceReviewHardening")]
     [Trait("Category", "YearEndClose")]
+    public async Task CloseFiscalYearAsync_ShouldFailWhenDraftJournalRemainsInClosedPeriod()
+    {
+        var fixture = await FixtureWithPostedActivityAsync();
+        var periodId = await fixture.Db.FiscalPeriods
+            .Where(p => p.FiscalYearId == fixture.FiscalYear.Id)
+            .Select(p => p.Id)
+            .SingleAsync();
+
+        fixture.Db.JournalEntries.Add(new JournalEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.FiscalYear.TenantId,
+            JournalEntryNumber = "JE-DRAFT-001",
+            Description = "Unposted year-end adjustment",
+            EntryDate = new DateTime(2026, 12, 31),
+            FiscalPeriodId = periodId,
+            PostingStatus = "Draft",
+            ApprovalStatus = "Draft"
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
+        {
+            FiscalYearId = fixture.FiscalYear.Id,
+            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
+        });
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("unposted journal entries");
+        result.Errors.Should().ContainSingle(e => e.Contains("1 journal entry is not posted"));
+        (await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id))
+            .IsClosed.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceReviewHardening")]
+    [Trait("Category", "YearEndClose")]
+    public async Task CloseFiscalYearAsync_ShouldFailWhenUnpostedTransactionLineRemains()
+    {
+        var fixture = await FixtureWithPostedActivityAsync();
+        var periodId = await fixture.Db.FiscalPeriods
+            .Where(p => p.FiscalYearId == fixture.FiscalYear.Id)
+            .Select(p => p.Id)
+            .SingleAsync();
+
+        fixture.Db.AccountTransactions.Add(new AccountTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.FiscalYear.TenantId,
+            AccountId = fixture.Expense.Id,
+            JournalEntryId = Guid.NewGuid(),
+            FiscalPeriodId = periodId,
+            TransactionDate = new DateTime(2026, 12, 31),
+            PostingStatus = "Draft",
+            FunctionalCurrencyCode = "GHS",
+            DebitAmount = 25m
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
+        {
+            FiscalYearId = fixture.FiscalYear.Id,
+            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
+        });
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("unposted transaction lines");
+        result.Errors.Should().ContainSingle(e => e.Contains("1 account transaction line is not posted"));
+        (await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id))
+            .IsClosed.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceReviewHardening")]
+    [Trait("Category", "YearEndClose")]
     public async Task CloseFiscalYearAsync_ShouldRejectSecondCloseWithoutReopen()
     {
         var fixture = await FixtureWithPostedActivityAsync();

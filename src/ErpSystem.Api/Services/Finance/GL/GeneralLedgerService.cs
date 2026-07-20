@@ -869,6 +869,50 @@ namespace ErpSystem.Api.Services.Finance.GL
                         throw new InvalidOperationException($"Segment value '{value}' is not valid for reporting dimension '{structure.SegmentName}'.");
                     }
                 }
+                else
+                {
+                    if (value.Length != structure.SegmentLength)
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' must be exactly {structure.SegmentLength} characters for reporting dimension '{structure.SegmentName}'.");
+                    }
+
+                    if (structure.DataType.Equals("Numeric", StringComparison.OrdinalIgnoreCase) &&
+                        value.Any(character => !char.IsDigit(character)))
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' must contain only numbers for reporting dimension '{structure.SegmentName}'.");
+                    }
+
+                    if (structure.DataType.Equals("Alphanumeric", StringComparison.OrdinalIgnoreCase) &&
+                        value.Any(character => !char.IsLetterOrDigit(character)))
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' must contain only letters and numbers for reporting dimension '{structure.SegmentName}'.");
+                    }
+
+                    var now = DateTime.UtcNow;
+                    var valueExistsOnActiveAccount = await _context.AccountSegmentValues
+                        .AsNoTracking()
+                        .AnyAsync(segmentValue =>
+                            segmentValue.TenantId == tenantId &&
+                            segmentValue.SegmentStructureId == structure.Id &&
+                            segmentValue.SegmentValue == value &&
+                            !segmentValue.IsDeleted &&
+                            segmentValue.EffectiveDate <= now &&
+                            (segmentValue.EndDate == null || segmentValue.EndDate > now) &&
+                            segmentValue.Account.TenantId == tenantId &&
+                            !segmentValue.Account.IsDeleted &&
+                            segmentValue.Account.Status == AccountStatus.Active &&
+                            (segmentValue.Account.EffectiveDate == null || segmentValue.Account.EffectiveDate <= now) &&
+                            (segmentValue.Account.ExpirationDate == null || segmentValue.Account.ExpirationDate > now));
+
+                    if (!valueExistsOnActiveAccount)
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' is not used by an active GL account for reporting dimension '{structure.SegmentName}'.");
+                    }
+                }
 
                 resolved.Add(new NormalizedSegmentFilter(structure.Id, value));
             }
@@ -1000,13 +1044,17 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
         }
 
-        private async Task<decimal> CalculateAccountBalanceAsOf(Guid tenantId, Guid accountId, DateTime asAtDate)
+        private async Task<decimal> CalculateAccountBalanceAsOf(
+            Guid tenantId,
+            Guid accountId,
+            DateTime asAtDate,
+            string bookClassification)
         {
             var balances = await CalculatePostedRawBalancesAsOfAsync(
                 tenantId,
                 new[] { accountId },
                 asAtDate,
-                "IFRS");
+                bookClassification);
 
             return balances.GetValueOrDefault(accountId);
         }
@@ -1438,10 +1486,15 @@ namespace ErpSystem.Api.Services.Finance.GL
             return section;
         }
 
-        private async Task<decimal> CalculateAccountActivityForPeriod(Guid tenantId, Guid accountId, DateTime periodStart, DateTime periodEnd)
+        private async Task<decimal> CalculateAccountActivityForPeriod(
+            Guid tenantId,
+            Guid accountId,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification)
         {
             var endExclusive = periodEnd.Date.AddDays(1);
-            var transactions = await BuildPostedLedgerQuery(tenantId, "IFRS")
+            var transactions = await BuildPostedLedgerQuery(tenantId, bookClassification)
                 .Where(t => t.AccountId == accountId
                     && t.TransactionDate >= periodStart.Date
                     && t.TransactionDate < endExclusive)
@@ -1860,7 +1913,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             var accountActivity = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
-                var activity = await CalculateAccountActivityForPeriod(tenantId, account.Id, request.PeriodStart, request.PeriodEnd);
+                var activity = await CalculateAccountActivityForPeriod(
+                    tenantId,
+                    account.Id,
+                    request.PeriodStart,
+                    request.PeriodEnd,
+                    request.BookClassification);
                 if (Math.Abs(activity) > 0.01m)
                 {
                     accountActivity[account.Id] = activity;
@@ -1911,7 +1969,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var cashAccounts = await _context.Accounts
                 .Where(a => a.TenantId == tenantId 
                     && !a.IsDeleted 
-                    && (a.AccountCategory == "Cash" || a.AccountName.Contains("Cash", StringComparison.OrdinalIgnoreCase)))
+                    && (a.AccountCategory == "Cash" || EF.Functions.Like(a.AccountName, "%Cash%")))
                 .ToListAsync();
 
             decimal cashAtBeginning = 0;
@@ -1919,8 +1977,16 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             foreach (var cashAccount in cashAccounts)
             {
-                cashAtBeginning += await CalculateAccountBalanceAsOf(tenantId, cashAccount.Id, request.PeriodStart.AddDays(-1));
-                cashAtEnd += await CalculateAccountBalanceAsOf(tenantId, cashAccount.Id, request.PeriodEnd);
+                cashAtBeginning += await CalculateAccountBalanceAsOf(
+                    tenantId,
+                    cashAccount.Id,
+                    request.PeriodStart.AddDays(-1),
+                    request.BookClassification);
+                cashAtEnd += await CalculateAccountBalanceAsOf(
+                    tenantId,
+                    cashAccount.Id,
+                    request.PeriodEnd,
+                    request.BookClassification);
             }
 
             cashFlowStatement.CashAtBeginning = cashAtBeginning;
@@ -2248,6 +2314,47 @@ namespace ErpSystem.Api.Services.Finance.GL
                 };
             }
 
+            var periodIds = fiscalYear.FiscalPeriods.Select(p => p.Id).ToList();
+            var unpostedJournalEntries = await _context.JournalEntries
+                .CountAsync(je => je.TenantId == tenantId
+                    && periodIds.Contains(je.FiscalPeriodId)
+                    && !je.IsDeleted
+                    && je.PostingStatus != "Posted"
+                    && je.PostingStatus != "Reversed");
+
+            if (unpostedJournalEntries > 0)
+            {
+                return new PeriodCloseResultDto
+                {
+                    Success = false,
+                    Message = "Cannot close fiscal year - unposted journal entries remain",
+                    Errors = new List<string>
+                    {
+                        $"{unpostedJournalEntries} journal entr{(unpostedJournalEntries == 1 ? "y is" : "ies are")} not posted. Post or remove all draft, submitted, and approved entries before closing the year."
+                    }
+                };
+            }
+
+            var unpostedTransactionLines = await _context.AccountTransactions
+                .CountAsync(t => t.TenantId == tenantId
+                    && periodIds.Contains(t.FiscalPeriodId)
+                    && !t.IsDeleted
+                    && t.PostingStatus != "Posted"
+                    && t.PostingStatus != "Reversed");
+
+            if (unpostedTransactionLines > 0)
+            {
+                return new PeriodCloseResultDto
+                {
+                    Success = false,
+                    Message = "Cannot close fiscal year - unposted transaction lines remain",
+                    Errors = new List<string>
+                    {
+                        $"{unpostedTransactionLines} account transaction line{(unpostedTransactionLines == 1 ? " is" : "s are")} not posted. Resolve the ledger data before closing the year."
+                    }
+                };
+            }
+
             // Keep the closing journal posting and the fiscal-year state flip in one commit so a
             // failure between them cannot leave a posted closing entry on an open year.
             await using var dbTransaction = await _context.Database.BeginTransactionAsync();
@@ -2478,6 +2585,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Where(t => t.TenantId == tenantId
                     && periodIds.Contains(t.FiscalPeriodId)
                     && !t.IsDeleted
+                    && (t.PostingStatus == "Posted" || t.PostingStatus == "Reversed")
                     && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
                 .ToListAsync();
 

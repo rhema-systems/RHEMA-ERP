@@ -86,6 +86,12 @@ export interface CreateCurrencyDto {
   countryName?: string;
   isActive: boolean;
   isBaseCurrency: boolean;
+  createInitialExchangeRate?: boolean;
+  initialExchangeRate?: number;
+  initialExchangeRateDate?: string;
+  initialExchangeRateType?: string;
+  initialExchangeRateSource?: string;
+  initialExchangeRateSourceReference?: string;
 }
 
 export interface UpdateCurrencyDto extends CreateCurrencyDto {}
@@ -96,8 +102,13 @@ export interface CreateExchangeRateDto {
   targetCurrencyCode: string;
   rate: number;
   effectiveDate: string;
+  expiryDate?: string;
   rateType: ExchangeRateType;
   rateSource: string;
+  sourceName?: string;
+  sourceReference?: string;
+  isActive?: boolean;
+  approvalStatus?: string;
   comments?: string;
 }
 
@@ -514,12 +525,13 @@ class FinanceService {
   }
 
   /**
-   * Bulk upload exchange rates
+   * Bulk upload exchange rates.
+   *
+   * The Finance API accepts the parsed DTO list as JSON. File parsing stays in the
+   * upload UI so CSV/XLSX validation can report row-level guidance before posting.
    */
-  async bulkUploadExchangeRates(file: File): Promise<{ imported: number; errors: string[] }> {
-    const formData = new FormData();
-    formData.append('file', file);
-    return apiService.post(`${this.baseUrl}/exchange-rates/bulk`, formData);
+  async bulkUploadExchangeRates(rates: CreateExchangeRateDto[]): Promise<ExchangeRate[]> {
+    return apiService.post<ExchangeRate[]>(`${this.baseUrl}/exchange-rates/bulk`, rates);
   }
 
   /**

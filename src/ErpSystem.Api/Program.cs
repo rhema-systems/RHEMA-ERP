@@ -3,6 +3,7 @@ using ErpSystem.Api.Data;
 using ErpSystem.Api.Extensions;
 using ErpSystem.Api.Middleware;
 using ErpSystem.Data;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Web.Middleware;
 using ErpSystem.Web.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -444,6 +445,24 @@ if (!skipStartupInitialization)
         }
     }
 
+    if (databaseInitializationSucceeded)
+    {
+        app.Logger.LogInformation("Starting baseline payment-term seeding...");
+        try
+        {
+            await SeedPaymentTermBaselineAsync(app);
+            app.Logger.LogInformation("Baseline payment-term seeding completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Baseline payment-term seeding failed");
+            if (failFastOnDatabaseInitializationError)
+            {
+                throw;
+            }
+        }
+    }
+
     // Seed demo/basic data in Development to make local testing easier.
     if (app.Environment.IsDevelopment() && seedDevelopmentData && databaseInitializationSucceeded)
     {
@@ -551,6 +570,13 @@ async Task SeedWorkflowDefinitionsAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
     await seedingService.SeedWorkflowDefinitionsAsync();
+}
+
+async Task SeedPaymentTermBaselineAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<PaymentTermBaselineSeeder>();
+    await seeder.SeedAllActiveTenantsAsync();
 }
 
 static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(
@@ -714,6 +740,16 @@ BEGIN
     BEGIN
         ALTER TABLE [dbo].[FinanceSettings] ADD [ControlAccountGRVAccrualId] uniqueidentifier NULL;
     END;
+
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'SupplierAdvanceAccountId') IS NULL
+    BEGIN
+        ALTER TABLE [dbo].[FinanceSettings] ADD [SupplierAdvanceAccountId] uniqueidentifier NULL;
+    END;
+
+    IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'CustomerAdvanceAccountId') IS NULL
+    BEGIN
+        ALTER TABLE [dbo].[FinanceSettings] ADD [CustomerAdvanceAccountId] uniqueidentifier NULL;
+    END;
 END
 """, cancellationToken);
 
@@ -790,6 +826,30 @@ BEGIN
                 ADD CONSTRAINT [FK_FinanceSettings_Accounts_ControlAccountGRVAccrualId]
                 FOREIGN KEY ([ControlAccountGRVAccrualId]) REFERENCES [dbo].[Accounts] ([Id]);
         END;
+
+        IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'SupplierAdvanceAccountId') IS NOT NULL
+           AND NOT EXISTS (
+                SELECT 1 FROM sys.foreign_keys
+                WHERE [name] = N'FK_FinanceSettings_Accounts_SupplierAdvanceAccountId'
+                  AND [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+           )
+        BEGIN
+            ALTER TABLE [dbo].[FinanceSettings]
+                ADD CONSTRAINT [FK_FinanceSettings_Accounts_SupplierAdvanceAccountId]
+                FOREIGN KEY ([SupplierAdvanceAccountId]) REFERENCES [dbo].[Accounts] ([Id]);
+        END;
+
+        IF COL_LENGTH(N'[dbo].[FinanceSettings]', N'CustomerAdvanceAccountId') IS NOT NULL
+           AND NOT EXISTS (
+                SELECT 1 FROM sys.foreign_keys
+                WHERE [name] = N'FK_FinanceSettings_Accounts_CustomerAdvanceAccountId'
+                  AND [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
+           )
+        BEGIN
+            ALTER TABLE [dbo].[FinanceSettings]
+                ADD CONSTRAINT [FK_FinanceSettings_Accounts_CustomerAdvanceAccountId]
+                FOREIGN KEY ([CustomerAdvanceAccountId]) REFERENCES [dbo].[Accounts] ([Id]);
+        END;
     END;
 END
 """, cancellationToken);
@@ -798,35 +858,237 @@ END
 IF OBJECT_ID(N'[dbo].[FinanceSettings]', N'U') IS NOT NULL
    AND OBJECT_ID(N'[dbo].[Accounts]', N'U') IS NOT NULL
 BEGIN
-        UPDATE fs
-            SET [DiscountAllowedAccountId] = '00000005-4210-0000-0000-000000000001'
+        DECLARE @DefaultFinanceTenantId uniqueidentifier;
+
+        SELECT TOP (1) @DefaultFinanceTenantId = fs.[TenantId]
         FROM [dbo].[FinanceSettings] fs
+        WHERE ISNULL(fs.[IsDeleted], 0) = 0
+        ORDER BY fs.[CreatedAt], fs.[Id];
+
+        IF @DefaultFinanceTenantId IS NOT NULL
+        BEGIN
+            DECLARE @FinanceDefaultAccounts TABLE
+            (
+                [Id] uniqueidentifier NOT NULL,
+                [AccountCode] nvarchar(50) NOT NULL,
+                [AccountNumber] nvarchar(100) NOT NULL,
+                [AccountName] nvarchar(200) NOT NULL,
+                [AccountType] int NOT NULL,
+                [AccountCategory] nvarchar(100) NULL,
+                [AccountSubCategory] nvarchar(100) NULL,
+                [Description] nvarchar(1000) NULL,
+                [IsMultiCurrency] bit NOT NULL,
+                [AllowDirectPosting] bit NOT NULL,
+                [IsControlAccount] bit NOT NULL,
+                [BudgetTrackingEnabled] bit NOT NULL
+            );
+
+            INSERT INTO @FinanceDefaultAccounts
+                ([Id], [AccountCode], [AccountNumber], [AccountName], [AccountType], [AccountCategory], [AccountSubCategory], [Description], [IsMultiCurrency], [AllowDirectPosting], [IsControlAccount], [BudgetTrackingEnabled])
+            VALUES
+                ('00000005-2110-0000-0000-000000000001', N'2110', N'000-2110-0000', N'GRV Accrual Control', 2, N'Current Liabilities', N'Goods Received Not Invoiced', N'Dedicated control account credited when goods are received before supplier invoicing, then cleared when the AP invoice is posted.', 0, 0, 1, 0),
+                ('00000005-4210-0000-0000-000000000001', N'4210', N'000-4210-0000', N'Sales Discounts Allowed', 4, N'Revenue Deductions', N'Contra Revenue', N'Contra-revenue account debited for customer trade and settlement discounts allowed.', 1, 1, 0, 1),
+                ('00000005-4910-0000-0000-000000000001', N'4910', N'000-4910-0000', N'Purchase Discounts Received', 4, N'Other Income', N'Supplier Discounts', N'Income account credited for supplier trade and settlement discounts received.', 1, 1, 0, 0);
+
+            -- Backfills accounts introduced after early finance seeds so existing local/UAT databases do not need a rebuild.
+            INSERT INTO [dbo].[Accounts]
+                ([Id], [AccountCode], [AccountNumber], [AccountName], [AccountType], [AccountCategory], [AccountSubCategory], [Description],
+                 [ParentAccountId], [IsSegmented], [CurrencyCode], [IsMultiCurrency], [IsIFRSClassified], [IsBaseClassified], [IsLocalClassified],
+                 [IFRSLineItem], [BaseLineItem], [LocalLineItem], [AllowDirectPosting], [IsControlAccount], [RequireDepartmentCode], [RequireProjectCode],
+                 [BudgetTrackingEnabled], [Status], [Balance], [DebitBalance], [CreditBalance], [OpeningBalance], [LastTransactionDate],
+                 [EstateModuleLinkId], [PayrollModuleLinkId], [ProcurementModuleLinkId], [TaxReportingCategory], [CashFlowClassification], [IsSystemAccount],
+                 [InactivatedDate], [InactivationReason], [CreatedAt], [UpdatedAt], [CreatedBy], [UpdatedBy], [CreatedById], [LastModifiedById],
+                 [IsDeleted], [DeletedAt], [DeletedBy], [TenantId], [ReferenceNumber], [EffectiveDate], [ExpirationDate], [Metadata], [Tags], [Priority])
+            SELECT
+                seed.[Id],
+                seed.[AccountCode],
+                seed.[AccountNumber],
+                seed.[AccountName],
+                seed.[AccountType],
+                seed.[AccountCategory],
+                seed.[AccountSubCategory],
+                seed.[Description],
+                NULL,
+                1,
+                N'GHS',
+                seed.[IsMultiCurrency],
+                1,
+                1,
+                1,
+                NULL,
+                NULL,
+                NULL,
+                seed.[AllowDirectPosting],
+                seed.[IsControlAccount],
+                0,
+                0,
+                seed.[BudgetTrackingEnabled],
+                1,
+                0,
+                0,
+                0,
+                0,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                1,
+                NULL,
+                NULL,
+                SYSUTCDATETIME(),
+                NULL,
+                N'System',
+                NULL,
+                NULL,
+                NULL,
+                0,
+                NULL,
+                NULL,
+                @DefaultFinanceTenantId,
+                seed.[AccountCode],
+                NULL,
+                NULL,
+                NULL,
+                N'finance-default,system',
+                5
+            FROM @FinanceDefaultAccounts seed
+            WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM [dbo].[Accounts] existing
+                    WHERE existing.[Id] = seed.[Id]
+                )
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM [dbo].[Accounts] existing
+                    WHERE existing.[TenantId] = @DefaultFinanceTenantId
+                      AND existing.[AccountCode] = seed.[AccountCode]
+                      AND ISNULL(existing.[IsDeleted], 0) = 0
+                );
+
+            IF OBJECT_ID(N'[dbo].[AccountSegmentValues]', N'U') IS NOT NULL
+               AND OBJECT_ID(N'[dbo].[AccountSegmentStructures]', N'U') IS NOT NULL
+            BEGIN
+                ;WITH SeededAccounts AS
+                (
+                    SELECT a.[Id], a.[TenantId], a.[AccountCode], a.[AccountName]
+                    FROM [dbo].[Accounts] a
+                    INNER JOIN @FinanceDefaultAccounts seed ON seed.[AccountCode] = a.[AccountCode]
+                    WHERE a.[TenantId] = @DefaultFinanceTenantId
+                      AND ISNULL(a.[IsDeleted], 0) = 0
+                ),
+                TargetSegments AS
+                (
+                    SELECT s.[Id], s.[TenantId], s.[SegmentCode], s.[SegmentPosition], s.[IsNaturalAccount]
+                    FROM [dbo].[AccountSegmentStructures] s
+                    WHERE s.[TenantId] = @DefaultFinanceTenantId
+                      AND ISNULL(s.[IsDeleted], 0) = 0
+                      AND (
+                            (s.[SegmentCode] = N'DEPT' AND s.[SegmentPosition] = 1)
+                         OR (s.[IsNaturalAccount] = 1)
+                         OR (s.[SegmentCode] = N'PROJ' AND s.[SegmentPosition] = 3)
+                      )
+                )
+                INSERT INTO [dbo].[AccountSegmentValues]
+                    ([Id], [AccountId], [SegmentStructureId], [SegmentValue], [SegmentLookupValueId], [SegmentValueDescription],
+                     [SegmentPosition], [IsLocked], [EffectiveDate], [EndDate], [CreatedAt], [UpdatedAt], [CreatedBy], [UpdatedBy],
+                     [CreatedById], [LastModifiedById], [IsDeleted], [DeletedAt], [DeletedBy], [TenantId])
+                SELECT
+                    NEWID(),
+                    account.[Id],
+                    segment.[Id],
+                    CASE
+                        WHEN segment.[SegmentCode] = N'DEPT' THEN N'000'
+                        WHEN segment.[IsNaturalAccount] = 1 THEN account.[AccountCode]
+                        WHEN segment.[SegmentCode] = N'PROJ' THEN N'0000'
+                    END,
+                    lookupValue.[Id],
+                    CASE
+                        WHEN segment.[IsNaturalAccount] = 1 THEN account.[AccountName]
+                        ELSE lookupValue.[Description]
+                    END,
+                    segment.[SegmentPosition],
+                    0,
+                    SYSUTCDATETIME(),
+                    NULL,
+                    SYSUTCDATETIME(),
+                    NULL,
+                    N'System',
+                    NULL,
+                    NULL,
+                    NULL,
+                    0,
+                    NULL,
+                    NULL,
+                    account.[TenantId]
+                FROM SeededAccounts account
+                INNER JOIN TargetSegments segment ON segment.[TenantId] = account.[TenantId]
+                OUTER APPLY
+                (
+                    SELECT TOP (1) lookup.[Id], lookup.[Description]
+                    FROM [dbo].[SegmentLookupValues] lookup
+                    WHERE lookup.[TenantId] = account.[TenantId]
+                      AND lookup.[SegmentStructureId] = segment.[Id]
+                      AND lookup.[SegmentValue] = CASE
+                            WHEN segment.[SegmentCode] = N'DEPT' THEN N'000'
+                            WHEN segment.[SegmentCode] = N'PROJ' THEN N'0000'
+                            ELSE account.[AccountCode]
+                          END
+                      AND ISNULL(lookup.[IsDeleted], 0) = 0
+                ) lookupValue
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM [dbo].[AccountSegmentValues] existing
+                    WHERE existing.[AccountId] = account.[Id]
+                      AND existing.[SegmentStructureId] = segment.[Id]
+                      AND ISNULL(existing.[IsDeleted], 0) = 0
+                );
+            END;
+        END;
+
+        UPDATE fs
+            SET [DiscountAllowedAccountId] = account.[Id]
+        FROM [dbo].[FinanceSettings] fs
+        CROSS APPLY (
+            SELECT TOP (1) a.[Id]
+            FROM [dbo].[Accounts] a
+            WHERE a.[TenantId] = fs.[TenantId]
+              AND ISNULL(a.[IsDeleted], 0) = 0
+              AND (a.[Id] = '00000005-4210-0000-0000-000000000001' OR a.[AccountCode] = N'4210')
+            ORDER BY CASE WHEN a.[Id] = '00000005-4210-0000-0000-000000000001' THEN 0 ELSE 1 END
+        ) account
         WHERE fs.[DiscountAllowedAccountId] IS NULL
-          AND EXISTS (
-              SELECT 1 FROM [dbo].[Accounts] a
-              WHERE a.[Id] = '00000005-4210-0000-0000-000000000001'
-                AND a.[TenantId] = fs.[TenantId]
-          );
+          AND ISNULL(fs.[IsDeleted], 0) = 0;
 
         UPDATE fs
-            SET [DiscountReceivedAccountId] = '00000005-4910-0000-0000-000000000001'
+            SET [DiscountReceivedAccountId] = account.[Id]
         FROM [dbo].[FinanceSettings] fs
+        CROSS APPLY (
+            SELECT TOP (1) a.[Id]
+            FROM [dbo].[Accounts] a
+            WHERE a.[TenantId] = fs.[TenantId]
+              AND ISNULL(a.[IsDeleted], 0) = 0
+              AND (a.[Id] = '00000005-4910-0000-0000-000000000001' OR a.[AccountCode] = N'4910')
+            ORDER BY CASE WHEN a.[Id] = '00000005-4910-0000-0000-000000000001' THEN 0 ELSE 1 END
+        ) account
         WHERE fs.[DiscountReceivedAccountId] IS NULL
-          AND EXISTS (
-              SELECT 1 FROM [dbo].[Accounts] a
-              WHERE a.[Id] = '00000005-4910-0000-0000-000000000001'
-                AND a.[TenantId] = fs.[TenantId]
-          );
+          AND ISNULL(fs.[IsDeleted], 0) = 0;
 
         UPDATE fs
-            SET [ControlAccountGRVAccrualId] = '00000005-2100-0000-0000-000000000001'
+            SET [ControlAccountGRVAccrualId] = account.[Id]
         FROM [dbo].[FinanceSettings] fs
-        WHERE fs.[ControlAccountGRVAccrualId] IS NULL
-          AND EXISTS (
-              SELECT 1 FROM [dbo].[Accounts] a
-              WHERE a.[Id] = '00000005-2100-0000-0000-000000000001'
-                AND a.[TenantId] = fs.[TenantId]
-          );
+        CROSS APPLY (
+            SELECT TOP (1) a.[Id]
+            FROM [dbo].[Accounts] a
+            WHERE a.[TenantId] = fs.[TenantId]
+              AND ISNULL(a.[IsDeleted], 0) = 0
+              AND (a.[Id] = '00000005-2110-0000-0000-000000000001' OR a.[AccountCode] = N'2110')
+            ORDER BY CASE WHEN a.[Id] = '00000005-2110-0000-0000-000000000001' THEN 0 ELSE 1 END
+        ) account
+        WHERE (fs.[ControlAccountGRVAccrualId] IS NULL
+            OR fs.[ControlAccountGRVAccrualId] = '00000005-2100-0000-0000-000000000001')
+          AND ISNULL(fs.[IsDeleted], 0) = 0;
 END
 """, cancellationToken);
 }

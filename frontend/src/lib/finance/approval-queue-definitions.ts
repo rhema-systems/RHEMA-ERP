@@ -25,6 +25,10 @@ interface FinanceWorkflowApprovalQueueItem {
     submittedBy?: string | null;
     approverRole?: string | null;
     workflowName?: string | null;
+    canApprove: boolean;
+    canReject: boolean;
+    approveDisabledReason?: string | null;
+    rejectDisabledReason?: string | null;
     metadata?: Record<string, string>;
 }
 
@@ -67,6 +71,10 @@ function toWorkflowApprovalItem(row: FinanceWorkflowApprovalQueueItem): Approval
         amount: Number.isFinite(amount) ? amount : null,
         currencyCode: row.currencyCode || 'GHS',
         submittedBy: row.submittedBy,
+        canApprove: row.canApprove,
+        canReject: row.canReject,
+        approveDisabledReason: row.approveDisabledReason,
+        rejectDisabledReason: row.rejectDisabledReason,
         metadata: toMetadata(row),
     };
 }

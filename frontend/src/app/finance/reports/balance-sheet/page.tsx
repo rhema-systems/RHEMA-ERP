@@ -13,6 +13,14 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import type { BalanceSheetCategoryDto, BalanceSheetReportDto, BalanceSheetSectionDto, FinanceSettings, FinancialStatementLineItemDto } from '@/types/finance';
 import { Download, Loader2, Printer } from 'lucide-react';
 import { DEFAULT_ACCOUNTING_BOOKS } from '@/lib/finance/accounting-books';
+import { ReportSegmentFilters } from '@/components/finance/reports/ReportSegmentFilters';
+import { AppliedReportSegmentFilters } from '@/components/finance/reports/AppliedReportSegmentFilters';
+import {
+    buildFinanceSegmentFilters,
+    toFinanceSegmentFilterQueryParameters,
+    type ReportSegmentSelections,
+} from '@/lib/finance/report-segment-filters';
+import type { FinanceSegmentFilterDto, SegmentStructure } from '@/types/finance';
 
 export default function BalanceSheetPage() {
     const [asAtDate, setAsAtDate] = useState(new Date().toISOString().split('T')[0]);
@@ -22,6 +30,10 @@ export default function BalanceSheetPage() {
     const [running, setRunning] = useState(false);
     const [actionLoading, setActionLoading] = useState<'print' | 'export' | null>(null);
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
+    const [reportingDimensions, setReportingDimensions] = useState<SegmentStructure[]>([]);
+    const [segmentSelections, setSegmentSelections] = useState<ReportSegmentSelections>({});
+    const [appliedSegmentFilters, setAppliedSegmentFilters] = useState<FinanceSegmentFilterDto[]>([]);
+    const [segmentLoadError, setSegmentLoadError] = useState<string | null>(null);
     const [report, setReport] = useState<BalanceSheetReportDto | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -32,14 +44,23 @@ export default function BalanceSheetPage() {
     const loadInitialReport = async () => {
         try {
             setLoading(true);
-            const settingsData = await financeDataService.getFinanceSettings();
-            const books = await financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS);
+            const [settingsData, books, dimensions] = await Promise.all([
+                financeDataService.getFinanceSettings(),
+                financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS),
+                financeDataService.getReportingDimensions().catch((err) => {
+                    console.error('Error loading reporting dimensions:', err);
+                    setSegmentLoadError('GL segment filters could not be loaded.');
+                    return [] as SegmentStructure[];
+                }),
+            ]);
             setSettings(settingsData);
             if (books.length > 0) setAccountingBooks(books);
+            setReportingDimensions(dimensions);
             const data = await financeDataService.getBalanceSheet({
                 asAtDate,
                 bookClassification,
                 includeAccountDetails: true,
+                segmentFilters: [],
             });
             setReport(data);
         } catch (err) {
@@ -54,12 +75,15 @@ export default function BalanceSheetPage() {
         try {
             setRunning(true);
             setError(null);
+            const segmentFilters = buildFinanceSegmentFilters(reportingDimensions, segmentSelections);
             const data = await financeDataService.getBalanceSheet({
                 asAtDate,
                 bookClassification,
                 includeAccountDetails: true,
+                segmentFilters,
             });
             setReport(data);
+            setAppliedSegmentFilters(segmentFilters);
         } catch (err) {
             console.error('Error loading balance sheet report:', err);
             setError('Could not generate the balance sheet.');
@@ -74,11 +98,18 @@ export default function BalanceSheetPage() {
         maximumFractionDigits: 2,
     }).format(amount || 0);
 
-    const reportParameters = () => ({
-        asAtDate,
-        bookClassification,
-        includeAccountDetails: true,
-    });
+    const reportParameters = () => {
+        return {
+            asAtDate,
+            bookClassification,
+            includeAccountDetails: true,
+            ...toFinanceSegmentFilterQueryParameters(appliedSegmentFilters),
+        };
+    };
+
+    const updateSegmentSelection = (segmentStructureId: string, value: string) => {
+        setSegmentSelections((current) => ({ ...current, [segmentStructureId]: value }));
+    };
 
     const printReport = async () => {
         try {
@@ -170,12 +201,24 @@ export default function BalanceSheetPage() {
                                 </SelectContent>
                             </Select>
                         </div>
+                        <ReportSegmentFilters
+                            dimensions={reportingDimensions}
+                            selections={segmentSelections}
+                            onSelectionChange={updateSegmentSelection}
+                            disabled={running}
+                        />
                         <Button onClick={runReport} disabled={running}>
                             {running && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Run Report
                         </Button>
                     </div>
+                    {segmentLoadError && <div className="mt-4 text-sm text-amber-700">{segmentLoadError}</div>}
                     {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
+                    <AppliedReportSegmentFilters
+                        dimensions={reportingDimensions}
+                        appliedFilters={appliedSegmentFilters}
+                        pendingFilters={buildFinanceSegmentFilters(reportingDimensions, segmentSelections)}
+                    />
                 </CardContent>
             </Card>
 

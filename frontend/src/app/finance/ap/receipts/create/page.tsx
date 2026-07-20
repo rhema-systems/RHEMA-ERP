@@ -167,10 +167,10 @@ export default function CreateReceiptPage() {
             };
 
             const result = await financePurchaseOrderService.createReceipt(payload);
-            toast({ title: 'Success', description: `GRV ${result.receiptNumber} posted successfully` });
+            toast({ title: 'GRV saved', description: `GRV ${result.receiptNumber} was saved as a draft. Submit it for approval before invoice matching.` });
             router.push(`/finance/ap/receipts/${result.id}`);
         } catch (error: any) {
-            toast({ title: 'Error', description: error.message || 'Failed to post GRV', variant: 'destructive' });
+            toast({ title: 'Error', description: error.message || 'Failed to save GRV', variant: 'destructive' });
         } finally {
             setSubmitting(false);
         }
@@ -199,7 +199,7 @@ export default function CreateReceiptPage() {
                     className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold shadow-md px-5"
                 >
                     <Save className="h-4 w-4 mr-2" />
-                    {submitting ? 'Saving Receipt...' : 'Confirm & Save GRV'}
+                    {submitting ? 'Saving Receipt...' : 'Save Draft GRV'}
                 </Button>
             </div>
 

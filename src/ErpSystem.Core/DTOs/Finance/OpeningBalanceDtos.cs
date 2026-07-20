@@ -29,6 +29,16 @@ public sealed class CreateOpeningBalanceLineDto
     public string? Notes { get; set; }
 }
 
+public sealed class UpdateOpeningBalanceBatchDto
+{
+    public string? SourceReference { get; set; }
+    public string? Description { get; set; }
+    public DateTime OpeningDate { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public IReadOnlyList<CreateOpeningBalanceLineDto> Lines { get; set; } = Array.Empty<CreateOpeningBalanceLineDto>();
+}
+
 public sealed class SubmitOpeningBalanceBatchDto
 {
     public string? Comment { get; set; }
@@ -63,6 +73,8 @@ public sealed class OpeningBalanceBatchDto
     public DateTime? ApprovedAt { get; set; }
     public DateTime? PostedAt { get; set; }
     public string? FailureReason { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
     public IReadOnlyList<OpeningBalanceLineDto> Lines { get; set; } = Array.Empty<OpeningBalanceLineDto>();
 }
 

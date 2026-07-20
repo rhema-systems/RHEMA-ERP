@@ -59,6 +59,8 @@ export interface SalesOrderDetailDto {
   totalAmount: number;
   currency: string;
   paymentTerms?: string;
+  paymentTermId?: string;
+  paymentTermsDays?: number;
   salesRepId?: string;
   salesRepName?: string;
   propertyReference?: string;
@@ -119,6 +121,7 @@ export interface CreateSalesOrderDto {
   priority?: string;
   expectedDeliveryDate?: string;
   paymentTerms?: string;
+  paymentTermId?: string;
   currency?: string;
   salesRepId?: string;
   propertyReference?: string;
@@ -161,6 +164,7 @@ export interface UpdateSalesOrderDto {
   expectedDeliveryDate?: string;
   priority?: string;
   paymentTerms?: string;
+  paymentTermId?: string;
   salesRepId?: string;
   propertyReference?: string;
   propertyType?: string;

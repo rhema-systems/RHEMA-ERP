@@ -85,6 +85,59 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 .Include(lv => lv.SegmentStructure)
                 .ToListAsync(cancellationToken);
 
+            var naturalAccountSegment = segments.FirstOrDefault(s => s.IsNaturalAccount);
+            if (naturalAccountSegment != null)
+            {
+                var naturalSelection = request.SegmentSelections
+                    .FirstOrDefault(s => s.SegmentStructureId == naturalAccountSegment.Id);
+
+                if (naturalSelection?.SelectedLookupValueIds.Any() == true)
+                {
+                    var naturalAccounts = await _unitOfWork.Repository<Account>()
+                        .GetQueryable(a =>
+                            a.TenantId == TenantId &&
+                            naturalSelection.SelectedLookupValueIds.Contains(a.Id) &&
+                            !a.IsDeleted &&
+                            a.Status == AccountStatus.Active)
+                        .Include(a => a.SegmentValues)
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var account in naturalAccounts)
+                    {
+                        var segmentValue = account.SegmentValues
+                            .FirstOrDefault(sv => sv.SegmentStructureId == naturalAccountSegment.Id && !sv.IsDeleted)
+                            ?.SegmentValue;
+
+                        if (string.IsNullOrWhiteSpace(segmentValue))
+                        {
+                            segmentValue = account.AccountCode;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(segmentValue))
+                        {
+                            segmentValue = account.AccountNumber;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(segmentValue))
+                        {
+                            continue;
+                        }
+
+                        lookupValues.Add(new SegmentLookupValue
+                        {
+                            Id = account.Id,
+                            TenantId = TenantId,
+                            SegmentStructureId = naturalAccountSegment.Id,
+                            SegmentStructure = naturalAccountSegment,
+                            SegmentValue = segmentValue,
+                            Description = account.AccountName,
+                            DisplayOrder = 1,
+                            IsActive = true
+                        });
+                    }
+                }
+            }
+
             // 4. Build segment value lists for Cartesian product (ordered by SegmentPosition)
             var segmentValueLists = new List<List<SegmentLookupValue>>();
             
@@ -140,9 +193,6 @@ namespace ErpSystem.Api.Services.Finance.Segments
             // 7. Build preview DTOs
             var previews = new List<AccountCombinationPreviewDto>();
             
-            // Find the natural account segment for name generation
-            var naturalAccountSegment = segments.FirstOrDefault(s => s.IsNaturalAccount);
-
             foreach (var combination in combinations)
             {
                 var orderedValues = combination.OrderBy(lv => lv.SegmentStructure.SegmentPosition).ToList();

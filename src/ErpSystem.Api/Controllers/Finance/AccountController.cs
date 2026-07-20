@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -80,6 +81,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated.</response>
         /// <response code="500">Internal server error during account creation.</response>
         [HttpPost]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<IActionResult> CreateAccount([FromBody] AccountCreateDto accountDto)
         {
             try
@@ -213,6 +215,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No account exists with the specified ID.</response>
         /// <response code="500">Internal server error during account update.</response>
         [HttpPut("{id}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<AccountDto>> UpdateAccount(
             Guid id,
             [FromBody] AccountUpdateDto accountDto,
@@ -283,6 +286,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No account exists with the specified ID.</response>
         /// <response code="500">Internal server error during deletion.</response>
         [HttpDelete("{id}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<IActionResult> DeleteAccount(Guid id)
         {
             try
@@ -425,6 +429,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated.</response>
         /// <response code="500">Internal server error during bulk creation.</response>
         [HttpPost("combinations/bulk-create")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<BulkCreationResultDto>> BulkCreateAccounts(
             [FromBody] BulkCreateAccountsRequestDto request)
         {
@@ -486,6 +491,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Account or currency not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("{accountId}/currencies")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<CurrencyLinkDto>> AddCurrencyLink(Guid accountId, [FromBody] AddCurrencyLinkDto dto)
         {
             if (accountId != dto.AccountId)
@@ -540,6 +546,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Account or currency link not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("{accountId}/currencies/{currencyCode}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<CurrencyLinkRemovalResultDto>> RemoveCurrencyLink(
             Guid accountId,
             string currencyCode,
@@ -596,6 +603,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Account or currency link not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPatch("{accountId}/currencies/{currencyCode}/inactivate")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<CurrencyLinkDto>> InactivateCurrencyLink(Guid accountId, string currencyCode)
         {
             try

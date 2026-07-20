@@ -12,6 +12,14 @@ public interface IOpeningBalanceService
         Guid batchId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<OpeningBalanceBatchDto>> GetBatchesAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<OpeningBalanceBatchDto> UpdateBatchAsync(
+        Guid batchId,
+        UpdateOpeningBalanceBatchDto dto,
+        CancellationToken cancellationToken = default);
+
     Task<OpeningBalanceValidationResultDto> ValidateBatchAsync(
         Guid batchId,
         CancellationToken cancellationToken = default);

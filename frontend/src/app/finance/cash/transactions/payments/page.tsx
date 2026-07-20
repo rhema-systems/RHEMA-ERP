@@ -101,6 +101,7 @@ export default function RecordPaymentPage() {
         const params = new URLSearchParams();
 
         if (values.bankAccountId) params.set('bankAccountId', values.bankAccountId);
+        if (values.paymentMethodId) params.set('paymentMethodId', values.paymentMethodId);
         if (values.amount > 0) params.set('amount', String(values.amount));
         if (values.referenceNumber) params.set('referenceNumber', values.referenceNumber);
         if (values.description) params.set('description', values.description);
@@ -129,6 +130,13 @@ export default function RecordPaymentPage() {
     const onSubmit = async (data: PaymentFormValues) => {
         setIsSubmitting(true);
         try {
+            const selectedPaymentMethod = paymentMethods?.find((method) => method.id === data.paymentMethodId);
+            if (selectedPaymentMethod?.requiresReference && !data.referenceNumber?.trim()) {
+                form.setError('referenceNumber', { type: 'manual', message: `${selectedPaymentMethod.name} requires a reference number` });
+                setIsSubmitting(false);
+                return;
+            }
+
             const payload: CreateCashPaymentDto = {
                 transactionDate: data.transactionDate.toISOString(),
                 bankAccountId: data.bankAccountId,
@@ -237,6 +245,7 @@ export default function RecordPaymentPage() {
                                     <div className="space-y-2">
                                         <Label>Reference Number</Label>
                                         <Input {...form.register('referenceNumber')} placeholder="e.g. CHQ-001" />
+                                        {form.formState.errors.referenceNumber && <p className="text-sm text-red-500">{form.formState.errors.referenceNumber.message}</p>}
                                     </div>
                                 </div>
 

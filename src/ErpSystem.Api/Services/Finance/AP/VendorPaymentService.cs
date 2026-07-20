@@ -17,6 +17,7 @@ using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using FinancePaymentMethod = ErpSystem.Core.Entities.Finance.PaymentMethod;
 
 namespace ErpSystem.Api.Services.Finance.AP
 {
@@ -73,6 +74,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
                 .Include(p => p.BankAccount)
+                .Include(p => p.ConfiguredPaymentMethod)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return payment == null ? null : MapToDto(payment);
@@ -106,6 +108,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (query.PaymentMethod.HasValue)
                 queryable = queryable.Where(p => p.PaymentMethod == query.PaymentMethod.Value);
 
+            if (query.PaymentMethodId.HasValue)
+                queryable = queryable.Where(p => p.PaymentMethodId == query.PaymentMethodId.Value);
+
             if (query.PaymentBatchId.HasValue)
                 queryable = queryable.Where(p => p.PaymentBatchId == query.PaymentBatchId.Value);
 
@@ -136,6 +141,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Take(query.PageSize)
                 .Include(p => p.Supplier)
                 .Include(p => p.BankAccount)
+                .Include(p => p.ConfiguredPaymentMethod)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
                 .ToListAsync(cancellationToken);
@@ -163,12 +169,33 @@ namespace ErpSystem.Api.Services.Finance.AP
             var paymentCurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode)
                 ? baseCurrencyCode
                 : dto.CurrencyCode.Trim().ToUpperInvariant();
+            var configuredPaymentMethod = await ResolveConfiguredPaymentMethodAsync(
+                dto.PaymentMethodId,
+                dto.BankAccountId,
+                dto.TransactionReference ?? dto.ChequeNumber,
+                "vendor payment",
+                enforceReference: true,
+                cancellationToken);
+            var paymentMethod = configuredPaymentMethod == null
+                ? dto.PaymentMethod
+                : MapConfiguredPaymentMethodToVendorPaymentMethod(configuredPaymentMethod.Type);
 
-            // Calculate WHT
+            // Calculate WHT. Prefer the explicit settlement amount from the payment UI,
+            // then allocation-level WHT, then the legacy rate-on-cash fallback.
+            var allocationWhtAmount = dto.Allocations?
+                .Sum(a => Math.Max(a.WithholdingTaxAmount, 0m)) ?? 0m;
             decimal whtAmount = 0;
-            if (dto.WithholdingTaxRate > 0)
+            if (dto.WithholdingTaxAmount.GetValueOrDefault() > 0)
             {
-                whtAmount = dto.TotalAmount * (dto.WithholdingTaxRate / 100);
+                whtAmount = RoundMoney(dto.WithholdingTaxAmount.Value);
+            }
+            else if (allocationWhtAmount > 0m)
+            {
+                whtAmount = RoundMoney(allocationWhtAmount);
+            }
+            else if (dto.WithholdingTaxRate > 0)
+            {
+                whtAmount = RoundMoney(dto.TotalAmount * (dto.WithholdingTaxRate / 100));
             }
 
             var payment = new VendorPayment
@@ -180,7 +207,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentDate = dto.PaymentDate,
                 TotalAmount = dto.TotalAmount,
                 AllocatedAmount = 0,
-                PaymentMethod = dto.PaymentMethod,
+                PaymentMethod = paymentMethod,
+                PaymentMethodId = configuredPaymentMethod?.Id,
                 CurrencyCode = paymentCurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
                 BankAccountId = dto.BankAccountId,
@@ -210,6 +238,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .GetQueryable(p => p.Id == payment.Id)
                     .Include(p => p.Supplier)
                     .Include(p => p.BankAccount)
+                    .Include(p => p.ConfiguredPaymentMethod)
                     .Include(p => p.Allocations)
                         .ThenInclude(a => a.VendorInvoice)
                     .FirstOrDefaultAsync(cancellationToken);
@@ -376,12 +405,51 @@ namespace ErpSystem.Api.Services.Finance.AP
                     continue;
                 }
 
+                if (invoice.SupplierId != payment.SupplierId)
+                {
+                    throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' does not belong to this payment's supplier.");
+                }
+
+                var requestedCashAmount = Math.Max(alloc.AllocatedAmount, 0m);
+                var requestedDiscountAmount = Math.Max(alloc.DiscountAmount, 0m);
+                var requestedWithholdingAmount = Math.Max(alloc.WithholdingTaxAmount, 0m);
+                if (requestedDiscountAmount > 0m)
+                {
+                    if (invoice.EarlyPaymentDiscountPercentage <= 0m ||
+                        !invoice.EarlyPaymentDiscountDueDate.HasValue ||
+                        payment.PaymentDate.Date > invoice.EarlyPaymentDiscountDueDate.Value.Date)
+                    {
+                        throw new InvalidOperationException(
+                            $"Invoice '{invoice.InvoiceNumber}' is not eligible for an early-payment discount on {payment.PaymentDate:yyyy-MM-dd}.");
+                    }
+
+                    var maximumDiscount = RoundMoney(balance * invoice.EarlyPaymentDiscountPercentage / 100m);
+                    if (RoundMoney(requestedDiscountAmount) > maximumDiscount)
+                    {
+                        throw new InvalidOperationException(
+                            $"Discount {requestedDiscountAmount:C} exceeds the eligible amount {maximumDiscount:C} for invoice '{invoice.InvoiceNumber}'.");
+                    }
+
+                    if (Math.Abs(RoundMoney(requestedCashAmount + requestedDiscountAmount + requestedWithholdingAmount - balance)) > 0.01m)
+                    {
+                        throw new InvalidOperationException(
+                            $"An early-payment discount may only be taken when invoice '{invoice.InvoiceNumber}' is fully settled by this allocation.");
+                    }
+
+                    var availableCash = Math.Max(payment.TotalAmount - payment.AllocatedAmount, 0m);
+                    if (requestedCashAmount > availableCash)
+                    {
+                        throw new InvalidOperationException("The payment does not have enough unallocated cash to complete the discounted settlement.");
+                    }
+                }
+
                 // Cannot allocate more cash than remaining balance or unallocated payment amount.
                 var maxAllocatable = Math.Min(balance, Math.Max(payment.TotalAmount - payment.AllocatedAmount, 0m));
                 var allocAmount = Math.Min(Math.Max(alloc.AllocatedAmount, 0m), maxAllocatable);
                 var discountAmount = Math.Min(Math.Max(alloc.DiscountAmount, 0m), Math.Max(balance - allocAmount, 0m));
+                var withholdingTaxAmount = Math.Min(requestedWithholdingAmount, Math.Max(balance - allocAmount - discountAmount, 0m));
 
-                if (allocAmount <= 0 && discountAmount <= 0)
+                if (allocAmount <= 0 && discountAmount <= 0 && withholdingTaxAmount <= 0)
                 {
                     result.Warnings.Add($"No funds available to allocate to invoice '{invoice.InvoiceNumber}'.");
                     continue;
@@ -395,7 +463,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorInvoiceId = alloc.VendorInvoiceId,
                     AllocatedAmount = allocAmount,
                     DiscountAmount = discountAmount,
-                    WithholdingTaxAmount = alloc.WithholdingTaxAmount,
+                    WithholdingTaxAmount = withholdingTaxAmount,
                     AllocationDate = now,
                     Notes = alloc.Notes,
                     CreatedAt = now,
@@ -405,8 +473,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(allocation);
                 createdAllocations.Add(allocation);
 
-                // Update invoice paid amount. Supplier discounts reduce the payable balance but are not cash.
-                invoice.PaidAmount += allocAmount + discountAmount;
+                // Update invoice paid amount. Supplier discounts and WHT settle the payable balance but are not cash.
+                invoice.PaidAmount += allocAmount + discountAmount + withholdingTaxAmount;
                 if (invoice.PaidAmount >= invoice.TotalAmount)
                     invoice.Status = VendorInvoiceStatus.Paid;
                 else if (invoice.PaidAmount > 0)
@@ -427,7 +495,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     InvoiceNumber = invoice.InvoiceNumber,
                     AllocatedAmount = allocAmount,
                     DiscountAmount = discountAmount,
-                    WithholdingTaxAmount = alloc.WithholdingTaxAmount,
+                    WithholdingTaxAmount = withholdingTaxAmount,
                     AllocationDate = now,
                     Notes = alloc.Notes
                 });
@@ -661,7 +729,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(reversal);
 
             // Restore invoice balance
-            allocation.VendorInvoice.PaidAmount -= allocation.AllocatedAmount + allocation.DiscountAmount;
+            allocation.VendorInvoice.PaidAmount -= allocation.AllocatedAmount + allocation.DiscountAmount + allocation.WithholdingTaxAmount;
             if (allocation.VendorInvoice.PaidAmount <= 0)
             {
                 allocation.VendorInvoice.PaidAmount = 0;
@@ -895,6 +963,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (!invoices.Any())
                 throw new InvalidOperationException("No approved outstanding invoices found for the provided IDs.");
 
+            var configuredPaymentMethod = await ResolveConfiguredPaymentMethodAsync(
+                dto.PaymentMethodId,
+                dto.BankAccountId,
+                referenceNumber: null,
+                label: "payment batch",
+                enforceReference: false,
+                cancellationToken);
+            var paymentMethod = configuredPaymentMethod == null
+                ? dto.PaymentMethod
+                : MapConfiguredPaymentMethodToVendorPaymentMethod(configuredPaymentMethod.Type);
+
             var batch = new PaymentBatch
             {
                 Id = Guid.NewGuid(),
@@ -904,7 +983,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 BatchDate = dto.BatchDate,
                 DueDateFrom = dto.DueDateFrom,
                 DueDateTo = dto.DueDateTo,
-                PaymentMethod = dto.PaymentMethod,
+                PaymentMethod = paymentMethod,
+                PaymentMethodId = configuredPaymentMethod?.Id,
                 BankAccountId = dto.BankAccountId,
                 Status = PaymentBatchStatus.PendingApproval,
                 CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId,
@@ -934,7 +1014,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PaymentDate = dto.BatchDate,
                     TotalAmount = supplierTotal,
                     AllocatedAmount = 0,
-                    PaymentMethod = dto.PaymentMethod,
+                    PaymentMethod = paymentMethod,
+                    PaymentMethodId = configuredPaymentMethod?.Id,
                     CurrencyCode = group
                         .Select(i => i.CurrencyCode)
                         .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code))?
@@ -998,6 +1079,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .ThenInclude(i => i.VendorPayment)
                         .ThenInclude(p => p.Supplier)
                 .Include(b => b.BankAccount)
+                .Include(b => b.ConfiguredPaymentMethod)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return batch == null ? null : MapBatchToDto(batch);
@@ -1036,6 +1118,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(b => b.Items)
                     .ThenInclude(i => i.VendorPayment)
                         .ThenInclude(p => p.Supplier)
+                .Include(b => b.ConfiguredPaymentMethod)
                 .ToListAsync(cancellationToken);
 
             return new PagedResult<PaymentBatchDto>
@@ -1825,6 +1908,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Currency = currencyCode,
                 ExchangeRate = exchangeRate,
                 BaseAmount = baseAmount,
+                PaymentMethodId = payment.PaymentMethodId,
                 ReferenceNumber = payment.PaymentNumber,
                 PayeeOrPayer = supplier.Name,
                 Description = $"AP Vendor Payment {payment.PaymentNumber} - {supplier.Name}",
@@ -1842,6 +1926,59 @@ namespace ErpSystem.Api.Services.Finance.AP
             bankAccount.UpdatedBy = UserName;
             await bankAccountRepository.UpdateAsync(bankAccount);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        private async Task<FinancePaymentMethod?> ResolveConfiguredPaymentMethodAsync(
+            Guid? paymentMethodId,
+            Guid? bankAccountId,
+            string? referenceNumber,
+            string label,
+            bool enforceReference,
+            CancellationToken cancellationToken)
+        {
+            if (!paymentMethodId.HasValue)
+            {
+                return null;
+            }
+
+            var method = await _unitOfWork.Repository<FinancePaymentMethod>()
+                .GetQueryable(m => m.TenantId == TenantId && m.Id == paymentMethodId.Value && !m.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (method == null)
+            {
+                throw new InvalidOperationException($"The selected {label} payment method was not found for this tenant.");
+            }
+
+            if (!method.IsActive)
+            {
+                throw new InvalidOperationException($"The selected {label} payment method is inactive.");
+            }
+
+            if (method.RequiresBankAccount && !bankAccountId.HasValue)
+            {
+                throw new InvalidOperationException($"The selected {label} payment method requires a bank account.");
+            }
+
+            if (enforceReference && method.RequiresReference && string.IsNullOrWhiteSpace(referenceNumber))
+            {
+                throw new InvalidOperationException($"The selected {label} payment method requires a reference number.");
+            }
+
+            return method;
+        }
+
+        private static VendorPaymentMethod MapConfiguredPaymentMethodToVendorPaymentMethod(PaymentMethodType type)
+        {
+            return type switch
+            {
+                PaymentMethodType.Cash => VendorPaymentMethod.Cash,
+                PaymentMethodType.Cheque => VendorPaymentMethod.Cheque,
+                PaymentMethodType.MobileMoney => VendorPaymentMethod.MobileMoney,
+                PaymentMethodType.DirectDebit => VendorPaymentMethod.DirectDebit,
+                PaymentMethodType.EFT or PaymentMethodType.BankTransfer or PaymentMethodType.StandingOrder => VendorPaymentMethod.BankTransfer,
+                _ => VendorPaymentMethod.Other
+            };
         }
 
         private async Task<string> GeneratePaymentNumberAsync(CancellationToken cancellationToken)
@@ -1879,6 +2016,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 AllocatedAmount = payment.AllocatedAmount,
                 UnallocatedAmount = payment.UnallocatedAmount,
                 PaymentMethod = payment.PaymentMethod,
+                PaymentMethodId = payment.PaymentMethodId,
+                PaymentMethodName = payment.ConfiguredPaymentMethod?.Name,
                 CurrencyCode = payment.CurrencyCode,
                 ExchangeRate = payment.ExchangeRate,
                 BankAccountId = payment.BankAccountId,
@@ -1927,6 +2066,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TotalAmount = batch.TotalAmount,
                 PaymentCount = batch.PaymentCount,
                 PaymentMethod = batch.PaymentMethod,
+                PaymentMethodId = batch.PaymentMethodId,
+                PaymentMethodName = batch.ConfiguredPaymentMethod?.Name,
                 BankAccountId = batch.BankAccountId,
                 BankAccountName = batch.BankAccount?.AccountName,
                 Status = batch.Status,

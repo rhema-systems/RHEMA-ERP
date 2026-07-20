@@ -207,6 +207,8 @@ export interface UpdateTaxTypeDto {
     isActive?: boolean;
     taxPayableAccountId?: string | null;
     taxReceivableAccountId?: string | null;
+    clearTaxPayableAccount?: boolean;
+    clearTaxReceivableAccount?: boolean;
 }
 
 // Alias

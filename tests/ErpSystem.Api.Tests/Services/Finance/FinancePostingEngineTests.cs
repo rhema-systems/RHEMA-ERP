@@ -58,6 +58,8 @@ public sealed class FinancePostingEngineTests
         var postingEvent = await db.FinancePostingEvents.SingleAsync(e => e.Id == result.PostingEventId);
         postingEvent.TenantId.Should().Be(tenantId);
         postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
+        postingEvent.OriginModuleCode.Should().Be("FIN");
+        journal.OriginModuleCode.Should().Be("FIN");
 
         cashAccount.Balance.Should().Be(100m);
         revenueAccount.Balance.Should().Be(100m);
@@ -219,6 +221,105 @@ public sealed class FinancePostingEngineTests
     }
 
     [Fact]
+    [Trait("Category", "ModuleLocks")]
+    public async Task PostAsync_ShouldRejectPosting_WhenOriginModuleIsLocked()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId);
+        var financeModule = SeedModule(db, tenantId, "FIN", "Finance");
+        db.PeriodModuleLocks.Add(new PeriodModuleLock
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalPeriodId = period.Id,
+            ModuleDefinitionId = financeModule.Id,
+            IsLocked = true,
+            LockedDate = DateTime.UtcNow,
+            LockReason = "Month-end processing"
+        });
+        var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db, tenantId)
+            .PostAsync(CreateRequest(tenantId, debitAccount.Id, creditAccount.Id));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posting blocked: Finance is locked for FY2026*Reason: Month-end processing");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "ModuleLocks")]
+    public async Task PostAsync_ShouldAllowOnlyUnexpiredReopenedModule_DuringPartialLock()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId);
+        period.IsGlobalLockSuspended = true;
+        var financeModule = SeedModule(db, tenantId, "FIN", "Finance");
+        var salesModule = SeedModule(db, tenantId, "SALES", "Sales");
+        db.PeriodModuleLocks.AddRange(
+            new PeriodModuleLock
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, FiscalPeriodId = period.Id,
+                ModuleDefinitionId = financeModule.Id, IsLocked = true, LockReason = "Global close"
+            },
+            new PeriodModuleLock
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, FiscalPeriodId = period.Id,
+                ModuleDefinitionId = salesModule.Id, IsLocked = false,
+                ReopenExpiresAtUtc = DateTime.UtcNow.AddHours(4), UnlockReason = "Authorized Sales correction"
+            });
+        var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.SourceModule = "AR";
+        request.OriginModuleCode = "SALES";
+        var result = await CreateService(db, tenantId).PostAsync(request);
+
+        result.OriginModuleCode.Should().Be("SALES");
+        (await db.JournalEntries.SingleAsync()).OriginModuleCode.Should().Be("SALES");
+    }
+
+    [Fact]
+    [Trait("Category", "ModuleLocks")]
+    public async Task PostAsync_ShouldFailClosed_WhenTemporaryReopeningHasExpired()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId);
+        period.IsGlobalLockSuspended = true;
+        var salesModule = SeedModule(db, tenantId, "SALES", "Sales");
+        db.PeriodModuleLocks.Add(new PeriodModuleLock
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalPeriodId = period.Id,
+            ModuleDefinitionId = salesModule.Id,
+            IsLocked = false,
+            ReopenExpiresAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            UnlockReason = "Correction window"
+        });
+        var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.OriginModuleCode = "SALES";
+        var act = () => CreateService(db, tenantId).PostAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posting blocked: Sales is locked for FY2026*Temporary reopening expired*");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-PeriodClose")]
     [Trait("Category", "PostingEngine")]
     public async Task PostAsync_ShouldAuditPostingBlockedByClosedPeriod_WhenFinanceAuditIsConfigured()
@@ -269,6 +370,69 @@ public sealed class FinancePostingEngineTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Cannot post to inactive GL account(s): 4000.");
+    }
+
+    [Fact]
+    [Trait("Category", "PostingEngine")]
+    public async Task PostAsync_ShouldRejectForeignCurrency_WhenMultiCurrencyAccountMissingActiveCurrencyLink()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var cashAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset, isMultiCurrency: true);
+        var revenueAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        SeedExchangeRate(db, tenantId, "USD", 15m);
+        await db.SaveChangesAsync();
+
+        var request = CreateForeignCurrencyRequest(tenantId, cashAccount.Id, revenueAccount.Id);
+
+        var act = () => CreateService(db, tenantId).PostAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Account '1000' does not have an active USD currency link*");
+    }
+
+    [Fact]
+    [Trait("Category", "PostingEngine")]
+    public async Task PostAsync_ShouldUpdateAccountCurrencyLinkBalanceAndHistory_WhenForeignCurrencyPosts()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var cashAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset, isMultiCurrency: true);
+        var revenueAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var exchangeRate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        var usdLink = new AccountCurrencyLink
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = cashAccount.Id,
+            LinkedCurrencyCode = "USD",
+            IsActive = true,
+            EffectiveDate = new DateTime(2026, 1, 1),
+            RevaluationRequired = true,
+            TransactionRateType = "Daily",
+            RevaluationRateType = "Month-End"
+        };
+        db.AccountCurrencyLinks.Add(usdLink);
+        await db.SaveChangesAsync();
+
+        await CreateService(db, tenantId).PostAsync(CreateForeignCurrencyRequest(tenantId, cashAccount.Id, revenueAccount.Id));
+
+        usdLink.ForeignCurrencyBalance.Should().Be(100m);
+        usdLink.BaseCurrencyEquivalent.Should().Be(1500m);
+        usdLink.CurrentExchangeRate.Should().Be(15m);
+        usdLink.RateEffectiveDate.Should().Be(new DateTime(2026, 7, 4));
+        usdLink.HasTransactionHistory.Should().BeTrue();
+        usdLink.TransactionCount.Should().Be(1);
+        usdLink.FirstTransactionDate.Should().Be(new DateTime(2026, 7, 4));
+        usdLink.LastTransactionDate.Should().Be(new DateTime(2026, 7, 4));
+        exchangeRate.HasBeenUsedInTransactions.Should().BeTrue();
+        exchangeRate.TransactionCount.Should().Be(1);
+        cashAccount.Balance.Should().Be(1500m);
+        revenueAccount.Balance.Should().Be(1500m);
     }
 
     [Fact]
@@ -392,6 +556,14 @@ public sealed class FinancePostingEngineTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrency = "GHS",
+            CoaType = "Segmented",
+            AccountSeparator = "-"
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -428,7 +600,9 @@ public sealed class FinancePostingEngineTests
         Guid tenantId,
         string accountNumber,
         AccountType accountType,
-        AccountStatus status = AccountStatus.Active)
+        AccountStatus status = AccountStatus.Active,
+        string currencyCode = "GHS",
+        bool isMultiCurrency = false)
     {
         var account = new Account
         {
@@ -439,12 +613,57 @@ public sealed class FinancePostingEngineTests
             AccountName = $"Account {accountNumber}",
             AccountType = accountType,
             Status = status,
-            CurrencyCode = "GHS",
+            CurrencyCode = currencyCode,
+            IsMultiCurrency = isMultiCurrency,
             AllowDirectPosting = true
         };
 
         db.Accounts.Add(account);
         return account;
+    }
+
+    private static ModuleDefinition SeedModule(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string moduleCode,
+        string moduleName)
+    {
+        var module = new ModuleDefinition
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ModuleCode = moduleCode,
+            ModuleName = moduleName,
+            IsActive = true,
+            IsSystem = true
+        };
+        db.ModuleDefinitions.Add(module);
+        return module;
+    }
+
+    private static ExchangeRate SeedExchangeRate(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string targetCurrencyCode,
+        decimal rate)
+    {
+        var exchangeRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = targetCurrencyCode,
+            Rate = rate,
+            InverseRate = decimal.Round(1m / rate, 6, MidpointRounding.AwayFromZero),
+            EffectiveDate = new DateTime(2026, 7, 4),
+            RateType = ExchangeRateType.Daily,
+            RateSource = "Unit Test",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved
+        };
+
+        db.ExchangeRates.Add(exchangeRate);
+        return exchangeRate;
     }
 
     private static FinancePostingRequestDto CreateRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
@@ -475,6 +694,42 @@ public sealed class FinancePostingEngineTests
                     AccountId = creditAccountId,
                     Description = "Revenue",
                     CreditAmount = 100m
+                }
+            }
+        };
+    }
+
+    private static FinancePostingRequestDto CreateForeignCurrencyRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
+    {
+        return new FinancePostingRequestDto
+        {
+            SourceModule = "TEST",
+            SourceDocumentType = "ForeignCurrencyDocument",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentTenantId = tenantId,
+            PostingAction = "Post",
+            SourceDocumentReference = "FX-001",
+            Description = "Foreign currency posting engine test",
+            PostingDate = new DateTime(2026, 7, 4),
+            JournalType = "System Generated",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = "GHS",
+            Lines = new[]
+            {
+                new FinancePostingLineDto
+                {
+                    AccountId = debitAccountId,
+                    Description = "USD cash",
+                    DebitAmount = 1500m,
+                    TransactionCurrency = "USD",
+                    TransactionDebitAmount = 100m,
+                    ForeignCurrencyAmount = 100m
+                },
+                new FinancePostingLineDto
+                {
+                    AccountId = creditAccountId,
+                    Description = "Revenue",
+                    CreditAmount = 1500m
                 }
             }
         };

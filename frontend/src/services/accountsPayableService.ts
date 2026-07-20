@@ -51,6 +51,7 @@ export interface VendorPaymentQuery {
     supplierId?: string;
     status?: string;
     paymentMethod?: string;
+    paymentMethodId?: string;
     paymentBatchId?: string;
     fromDate?: string;
     toDate?: string;
@@ -132,6 +133,7 @@ class AccountsPayableService {
         if (query.supplierId) params.append('SupplierId', query.supplierId);
         if (query.status) params.append('Status', query.status);
         if (query.paymentMethod) params.append('PaymentMethod', query.paymentMethod);
+        if (query.paymentMethodId) params.append('PaymentMethodId', query.paymentMethodId);
         if (query.paymentBatchId) params.append('PaymentBatchId', query.paymentBatchId);
         if (query.fromDate) params.append('FromDate', query.fromDate);
         if (query.toDate) params.append('ToDate', query.toDate);
@@ -147,6 +149,10 @@ class AccountsPayableService {
 
     public async createPayment(data: VendorPaymentCreateRequest): Promise<VendorPayment> {
         return apiService.post<VendorPayment>(`${this.baseUrl}/payments`, data);
+    }
+
+    public async postPayment(id: string): Promise<VendorPayment> {
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/post`, {});
     }
 
     public async allocatePayment(paymentId: string, data: VendorPaymentAllocationCreateRequest): Promise<any> {
@@ -193,7 +199,7 @@ class AccountsPayableService {
     public async getAgingReport(asOfDate?: string): Promise<ApAgingReport> {
         const params = new URLSearchParams();
         if (asOfDate) params.append('AsOfDate', asOfDate);
-        return apiService.get<ApAgingReport>(`${this.baseUrl}/reports/aging?${params.toString()}`);
+        return apiService.silentGet<ApAgingReport>(`${this.baseUrl}/reports/aging?${params.toString()}`);
     }
 
     public async getCashRequirementForecast(asOfDate?: string): Promise<CashRequirementForecast> {

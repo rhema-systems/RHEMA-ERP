@@ -44,6 +44,7 @@ export interface UpdatePaymentTermDto extends CreatePaymentTermDto {
 export interface CurrencyListDto {
   id: string;
   code: string;
+  numericCode?: string;
   name: string;
   symbol: string;
   decimalPlaces: number;
@@ -67,11 +68,18 @@ export interface CurrencyDetailDto extends CurrencyListDto {
 
 export interface CreateCurrencyDto {
   code: string;
+  numericCode?: string;
   name: string;
   symbol: string;
   decimalPlaces?: number;
   exchangeRate?: number;
   exchangeRateDate?: string | Date;
+  createInitialExchangeRate?: boolean;
+  initialExchangeRate?: number;
+  initialExchangeRateDate?: string | Date;
+  initialExchangeRateType?: string;
+  initialExchangeRateSource?: string;
+  initialExchangeRateSourceReference?: string;
   isBaseCurrency?: boolean;
   isActive?: boolean;
   displayOrder?: number;
@@ -87,6 +95,7 @@ type CurrencyApiDto = Partial<{
   id: string;
   code: string;
   currencyCode: string;
+  numericCode: string;
   name: string;
   currencyName: string;
   symbol: string;
@@ -108,10 +117,69 @@ type CurrencyApiDto = Partial<{
   updatedBy: string;
 }>;
 
+const ISO_4217_NUMERIC_CODES: Record<string, string> = {
+  AED: '784',
+  ARS: '032',
+  AUD: '036',
+  BDT: '050',
+  BHD: '048',
+  BRL: '986',
+  CAD: '124',
+  CHF: '756',
+  CLP: '152',
+  CNY: '156',
+  COP: '170',
+  CZK: '203',
+  DKK: '208',
+  EGP: '818',
+  ETB: '230',
+  EUR: '978',
+  GBP: '826',
+  GHS: '936',
+  HKD: '344',
+  HUF: '348',
+  IDR: '360',
+  ILS: '376',
+  INR: '356',
+  JPY: '392',
+  KES: '404',
+  KRW: '410',
+  KWD: '414',
+  LKR: '144',
+  MAD: '504',
+  MXN: '484',
+  MYR: '458',
+  NGN: '566',
+  NOK: '578',
+  NZD: '554',
+  OMR: '512',
+  PEN: '604',
+  PHP: '608',
+  PKR: '586',
+  PLN: '985',
+  QAR: '634',
+  RON: '946',
+  RUB: '643',
+  RWF: '646',
+  SAR: '682',
+  SEK: '752',
+  SGD: '702',
+  THB: '764',
+  TRY: '949',
+  TZS: '834',
+  UGX: '800',
+  USD: '840',
+  VND: '704',
+  XAF: '950',
+  XOF: '952',
+  ZAR: '710',
+};
+
 function normalizeCurrencyDto(currency: CurrencyApiDto): CurrencyDetailDto {
   return {
     id: currency.id ?? '',
     code: currency.code ?? currency.currencyCode ?? '',
+    numericCode: currency.numericCode,
     name: currency.name ?? currency.currencyName ?? '',
     symbol: currency.symbol ?? currency.currencySymbol ?? '',
     decimalPlaces: typeof currency.decimalPlaces === 'number' ? currency.decimalPlaces : 2,
@@ -131,6 +199,80 @@ function normalizeCurrencyDto(currency: CurrencyApiDto): CurrencyDetailDto {
 
 function normalizeCurrencyList(currencies: CurrencyApiDto[]): CurrencyListDto[] {
   return currencies.map(normalizeCurrencyDto);
+}
+
+function toDateOnly(value?: string | Date): string | undefined {
+  if (!value) return undefined;
+
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0];
+  }
+
+  return value.split('T')[0];
+}
+
+function getNumericCode(currencyCode: string, provided?: string): string {
+  const normalized = currencyCode.trim().toUpperCase();
+  const numericCode = provided?.trim() || ISO_4217_NUMERIC_CODES[normalized];
+
+  if (!numericCode) {
+    throw new Error(`Missing ISO 4217 numeric code for ${normalized}.`);
+  }
+
+  return numericCode;
+}
+
+function buildCreateCurrencyPayload(data: CreateCurrencyDto) {
+  const currencyCode = data.code.trim().toUpperCase();
+  const createInitialExchangeRate = data.createInitialExchangeRate === true && data.isBaseCurrency !== true;
+  const initialExchangeRate = data.initialExchangeRate ?? data.exchangeRate;
+  const initialExchangeRateDate = data.initialExchangeRateDate ?? data.exchangeRateDate ?? new Date();
+
+  return {
+    currencyCode,
+    numericCode: getNumericCode(currencyCode, data.numericCode),
+    currencyName: data.name.trim(),
+    currencySymbol: data.symbol?.trim() || undefined,
+    decimalPlaces: data.decimalPlaces ?? 2,
+    roundingMethod: 'Standard',
+    roundingPrecision: 0.01,
+    symbolPosition: 'Before',
+    decimalSeparator: '.',
+    thousandsSeparator: ',',
+    digitGrouping: 3,
+    isBaseCurrency: data.isBaseCurrency ?? false,
+    isActive: data.isActive ?? true,
+    countryName: data.country?.trim() || undefined,
+    createInitialExchangeRate,
+    // Keep initial FX on the backend ExchangeRate model, not the Currency master record.
+    initialExchangeRate: createInitialExchangeRate ? initialExchangeRate : undefined,
+    initialExchangeRateDate: createInitialExchangeRate ? toDateOnly(initialExchangeRateDate) : undefined,
+    initialExchangeRateType: createInitialExchangeRate ? (data.initialExchangeRateType || 'Daily') : undefined,
+    initialExchangeRateSource: createInitialExchangeRate
+      ? data.initialExchangeRateSource?.trim() || 'Manual Entry'
+      : undefined,
+    initialExchangeRateSourceReference: createInitialExchangeRate
+      ? data.initialExchangeRateSourceReference?.trim() || undefined
+      : undefined,
+  };
+}
+
+function buildUpdateCurrencyPayload(data: UpdateCurrencyDto) {
+  return {
+    currencyName: data.name.trim(),
+    currencySymbol: data.symbol?.trim() || undefined,
+    roundingMethod: 'Standard',
+    roundingPrecision: 0.01,
+    symbolPosition: 'Before',
+    thousandsSeparator: ',',
+    digitGrouping: 3,
+    currencyClassification: 'Regional',
+    geographicRegion: data.country?.trim() || undefined,
+    autoRetrieveExchangeRate: false,
+    exchangeRateUpdateFrequency: 'Daily',
+    defaultRateType: 'Daily',
+    isActive: data.isActive ?? true,
+  };
 }
 
 // Payment Term Service
@@ -199,46 +341,26 @@ export const paymentTermService = {
 export const currencyService = {
   // Get all currencies
   getAll: async (): Promise<CurrencyListDto[]> => {
-    const res = await api.get<any[]>('/finance/Currencies');
-    return res.map(c => ({
-      ...c,
-      code: c.code || c.currencyCode,
-      name: c.name || c.currencyName,
-      symbol: c.symbol || c.currencySymbol
-    })) as CurrencyListDto[];
+    const res = await api.get<CurrencyApiDto[]>('/finance/Currencies');
+    return normalizeCurrencyList(res ?? []);
   },
 
   // Get active currencies
   getActive: async (): Promise<CurrencyListDto[]> => {
-    const res = await api.get<any[]>('/finance/Currencies/active');
-    return res.map(c => ({
-      ...c,
-      code: c.code || c.currencyCode,
-      name: c.name || c.currencyName,
-      symbol: c.symbol || c.currencySymbol
-    })) as CurrencyListDto[];
+    const res = await api.get<CurrencyApiDto[]>('/finance/Currencies/active');
+    return normalizeCurrencyList(res ?? []);
   },
 
   // Get currency by ID
   getById: async (id: string): Promise<CurrencyDetailDto> => {
-    const c = await api.get<any>(`/finance/Currencies/${id}`);
-    return {
-      ...c,
-      code: c.code || c.currencyCode,
-      name: c.name || c.currencyName,
-      symbol: c.symbol || c.currencySymbol
-    } as CurrencyDetailDto;
+    const response = await api.get<CurrencyApiDto>(`/finance/Currencies/${id}`);
+    return normalizeCurrencyDto(response ?? {});
   },
 
   // Get currency by code
   getByCode: async (code: string): Promise<CurrencyDetailDto> => {
-    const c = await api.get<any>(`/finance/Currencies/code/${code}`);
-    return {
-      ...c,
-      code: c.code || c.currencyCode,
-      name: c.name || c.currencyName,
-      symbol: c.symbol || c.currencySymbol
-    } as CurrencyDetailDto;
+    const response = await api.get<CurrencyApiDto>(`/finance/Currencies/code/${code}`);
+    return normalizeCurrencyDto(response ?? {});
   },
 
   // Get base currency
@@ -253,27 +375,13 @@ export const currencyService = {
 
   // Create currency
   create: async (data: CreateCurrencyDto): Promise<CurrencyDetailDto> => {
-    // Convert Date object to ISO string for API
-    const apiData = {
-      ...data,
-      exchangeRateDate: data.exchangeRateDate instanceof Date
-        ? data.exchangeRateDate.toISOString()
-        : data.exchangeRateDate
-    };
-    const response = await api.post<CurrencyApiDto>('/finance/Currencies', apiData);
+    const response = await api.post<CurrencyApiDto>('/finance/Currencies', buildCreateCurrencyPayload(data));
     return normalizeCurrencyDto(response ?? {});
   },
 
   // Update currency
   update: async (id: string, data: UpdateCurrencyDto): Promise<CurrencyDetailDto> => {
-    // Convert Date object to ISO string for API
-    const apiData = {
-      ...data,
-      exchangeRateDate: data.exchangeRateDate instanceof Date
-        ? data.exchangeRateDate.toISOString()
-        : data.exchangeRateDate
-    };
-    const response = await api.put<CurrencyApiDto>(`/finance/Currencies/${id}`, apiData);
+    const response = await api.put<CurrencyApiDto>(`/finance/Currencies/${id}`, buildUpdateCurrencyPayload(data));
     return normalizeCurrencyDto(response ?? {});
   },
 
@@ -284,7 +392,7 @@ export const currencyService = {
 
   // Update exchange rate
   updateExchangeRate: async (id: string, exchangeRate: number): Promise<void> => {
-    await api.post(`/finance/Currencies/${id}/exchange-rate`, { exchangeRate });
+    await api.put(`/finance/Currencies/${id}/exchange-rate`, { rate: exchangeRate });
   },
 
   // Set as base currency

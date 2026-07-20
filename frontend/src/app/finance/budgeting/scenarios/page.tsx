@@ -12,6 +12,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar, Plus, ChevronRight, Calculator, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { BudgetScenario, CreateBudgetScenarioDto } from '@/types/budget';
@@ -19,6 +20,8 @@ import type { FiscalYear } from '@/types/finance';
 
 export default function BudgetScenariosPage() {
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canCreateScenario = hasPermission('Finance.Budgeting.Write');
     const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
     const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -37,12 +40,11 @@ export default function BudgetScenariosPage() {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const [scenariosData, fiscalYearsData] = await Promise.all([
-                budgetDataService.getScenarios(),
-                financeDataService.getFiscalYears(),
-            ]);
-            setScenarios(scenariosData);
+            const fiscalYearsData = await financeDataService.getFiscalYears();
             setFiscalYears(fiscalYearsData);
+
+            const scenariosData = await budgetDataService.getScenarios(fiscalYearsData);
+            setScenarios(scenariosData);
         } catch (error) {
             console.error('Failed to load budget data:', error);
             toast({
@@ -56,6 +58,15 @@ export default function BudgetScenariosPage() {
     };
 
     const handleCreate = async () => {
+        if (!canCreateScenario) {
+            toast({
+                title: 'Permission Required',
+                description: 'You do not have permission to create budget scenarios.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
         if (!formData.name || !formData.fiscalYearId) {
             toast({
                 title: 'Validation Error',
@@ -129,76 +140,78 @@ export default function BudgetScenariosPage() {
                     <Button variant="outline" size="icon" onClick={loadData} disabled={isLoading}>
                         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
                     </Button>
-                    <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                        <DialogTrigger asChild>
-                            <Button>
-                                <Plus className="mr-2 h-4 w-4" />
-                                New Scenario
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Create Budget Scenario</DialogTitle>
-                                <DialogDescription>
-                                    Create a new budget version for a specific fiscal year.
-                                </DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-4 py-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="name">Scenario Name <span className="text-red-500">*</span></Label>
-                                    <Input
-                                        id="name"
-                                        placeholder="e.g. FY2026 Original Budget"
-                                        value={formData.name}
-                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="fiscalYear">Fiscal Year <span className="text-red-500">*</span></Label>
-                                    <Select
-                                        value={formData.fiscalYearId}
-                                        onValueChange={(value) => setFormData({ ...formData, fiscalYearId: value })}
-                                    >
-                                        <SelectTrigger id="fiscalYear">
-                                            <SelectValue placeholder="Select Fiscal Year" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {fiscalYears.map((fy) => (
-                                                <SelectItem key={fy.id} value={fy.id}>
-                                                    {fy.fiscalYearName} ({fy.fiscalYearCode})
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="description">Description</Label>
-                                    <Input
-                                        id="description"
-                                        placeholder="Optional description"
-                                        value={formData.description || ''}
-                                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="currency">Base Currency</Label>
-                                    <Input
-                                        id="currency"
-                                        value={formData.baseCurrencyCode}
-                                        disabled
-                                        className="bg-muted"
-                                    />
-                                    <p className="text-xs text-muted-foreground">Budgeting always uses the system base currency for consolidation.</p>
-                                </div>
-                            </div>
-                            <DialogFooter>
-                                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                                    Cancel
+                    {canCreateScenario && (
+                        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    New Scenario
                                 </Button>
-                                <Button onClick={handleCreate}>Create Scenario</Button>
-                            </DialogFooter>
-                        </DialogContent>
-                    </Dialog>
+                            </DialogTrigger>
+                            <DialogContent>
+                                <DialogHeader>
+                                    <DialogTitle>Create Budget Scenario</DialogTitle>
+                                    <DialogDescription>
+                                        Create a new budget version for a specific fiscal year.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="space-y-4 py-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="name">Scenario Name <span className="text-red-500">*</span></Label>
+                                        <Input
+                                            id="name"
+                                            placeholder="e.g. FY2026 Original Budget"
+                                            value={formData.name}
+                                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="fiscalYear">Fiscal Year <span className="text-red-500">*</span></Label>
+                                        <Select
+                                            value={formData.fiscalYearId}
+                                            onValueChange={(value) => setFormData({ ...formData, fiscalYearId: value })}
+                                        >
+                                            <SelectTrigger id="fiscalYear">
+                                                <SelectValue placeholder="Select Fiscal Year" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {fiscalYears.map((fy) => (
+                                                    <SelectItem key={fy.id} value={fy.id}>
+                                                        {fy.fiscalYearName} ({fy.fiscalYearCode})
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="description">Description</Label>
+                                        <Input
+                                            id="description"
+                                            placeholder="Optional description"
+                                            value={formData.description || ''}
+                                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="currency">Base Currency</Label>
+                                        <Input
+                                            id="currency"
+                                            value={formData.baseCurrencyCode}
+                                            disabled
+                                            className="bg-muted"
+                                        />
+                                        <p className="text-xs text-muted-foreground">Budgeting always uses the system base currency for consolidation.</p>
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                                        Cancel
+                                    </Button>
+                                    <Button onClick={handleCreate}>Create Scenario</Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
+                    )}
                 </div>
             </div>
 
@@ -230,7 +243,9 @@ export default function BudgetScenariosPage() {
                 <CardContent>
                     {scenarios.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground">
-                            No budget scenarios found. Create one to get started.
+                            {canCreateScenario
+                                ? 'No budget scenarios found. Create one to get started.'
+                                : 'No budget scenarios found.'}
                         </div>
                     ) : (
                         <div className="space-y-4">

@@ -12,7 +12,9 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
   const pathname = usePathname() ?? '';
 
   let requiredPermissions: string[] | undefined;
-  if (pathname.startsWith('/administration/project-management')) {
+  if (pathname.startsWith('/administration/finance')) {
+    requiredPermissions = ['Finance.Admin'];
+  } else if (pathname.startsWith('/administration/project-management')) {
     requiredPermissions = ['admin.project-management'];
   } else if (
     pathname.startsWith('/administration/fleet-management') ||

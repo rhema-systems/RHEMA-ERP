@@ -52,6 +52,7 @@ import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
+import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
@@ -77,6 +78,7 @@ const invoiceSchema = z.object({
     purchaseOrderId: z.string().optional(),
     invoiceDate: z.date(),
     dueDate: z.date(),
+    paymentTermId: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001).optional().default(1.0),
     exchangeRateDate: z.date().optional(),
@@ -98,6 +100,7 @@ export default function CreateVendorInvoicePage() {
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
 
     // Supplier combobox state
     const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
@@ -157,6 +160,12 @@ export default function CreateVendorInvoicePage() {
         queryFn: () => inventoryManagementService.getWarehouses(),
     });
 
+    useEffect(() => {
+        paymentTermService.getByApplicableTo('Supplier')
+            .then((terms) => setPaymentTerms(terms || []))
+            .catch(() => setPaymentTerms([]));
+    }, []);
+
     // Filtering logic
     const filteredSuppliers = suppliersData?.items?.filter((supplier: any) => {
         if (!supplierSearch) return true;
@@ -194,6 +203,7 @@ export default function CreateVendorInvoicePage() {
             supplierInvoiceNumber: '',
             invoiceDate: new Date(),
             dueDate: addDays(new Date(), 30),
+            paymentTermId: '',
             currencyCode: 'GHS',
             exchangeRate: 1.0,
             exchangeRateDate: new Date(),
@@ -386,6 +396,12 @@ export default function CreateVendorInvoicePage() {
         const supplier = suppliersData.items.find(s => s.id === supplierId);
         if (supplier) {
             setSelectedSupplier(supplier);
+            const selectedTerm = paymentTerms.find(term => term.id === supplier.paymentTermId)
+                || paymentTerms.find(term => term.isDefault);
+            if (selectedTerm) {
+                form.setValue('paymentTermId', selectedTerm.id);
+                form.setValue('dueDate', addDays(form.getValues('invoiceDate'), selectedTerm.dueDays));
+            }
             if (supplier.currency) {
                 form.setValue('currencyCode', supplier.currency);
                 if (supplier.currency === 'GHS') {
@@ -414,7 +430,7 @@ export default function CreateVendorInvoicePage() {
         if (preselectedSupplierId && suppliersData?.items) {
             onSupplierChange(preselectedSupplierId);
         }
-    }, [preselectedSupplierId, suppliersData]);
+    }, [preselectedSupplierId, suppliersData, paymentTerms]);
 
     const getAccountDisplay = (accountId: string | undefined) => {
         if (!accountId) return null;
@@ -670,6 +686,31 @@ export default function CreateVendorInvoicePage() {
                             <Label htmlFor="isOpeningBalance" className="font-medium">
                                 Opening Balance
                             </Label>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Payment Terms</Label>
+                            <Controller
+                                control={form.control}
+                                name="paymentTermId"
+                                render={({ field }) => (
+                                    <Select
+                                        value={field.value || ''}
+                                        onValueChange={(value) => {
+                                            field.onChange(value);
+                                            const term = paymentTerms.find(candidate => candidate.id === value);
+                                            if (term) form.setValue('dueDate', addDays(form.getValues('invoiceDate'), term.dueDays));
+                                        }}
+                                    >
+                                        <SelectTrigger><SelectValue placeholder="Select payment terms" /></SelectTrigger>
+                                        <SelectContent>
+                                            {paymentTerms.map(term => (
+                                                <SelectItem key={term.id} value={term.id}>{term.code} - {term.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            />
                         </div>
 
                         <div className="space-y-2">

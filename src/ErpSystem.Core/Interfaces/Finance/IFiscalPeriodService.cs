@@ -97,7 +97,12 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// <summary>
         /// Unlocks a period for a specific module.
         /// </summary>
-        Task<FiscalPeriodDto> UnlockPeriodForModuleAsync(Guid periodId, string moduleCode, string reason, CancellationToken cancellationToken = default);
+        Task<FiscalPeriodDto> UnlockPeriodForModuleAsync(
+            Guid periodId,
+            string moduleCode,
+            string reason,
+            DateTime reopenUntilUtc,
+            CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Checks if a period is locked for a specific module (checks both global and module lock).

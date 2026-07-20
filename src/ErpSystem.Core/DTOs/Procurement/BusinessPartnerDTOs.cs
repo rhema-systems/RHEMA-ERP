@@ -44,6 +44,7 @@ public class BusinessPartnerDto
     public decimal? CreditLimit { get; set; }
     public decimal? OutstandingBalance { get; set; }
     public bool IsOnCreditHold { get; set; }
+    public Guid? PaymentTermId { get; set; }
     
     // Parent Business Partner
     public Guid? ParentId { get; set; }
@@ -228,6 +229,8 @@ public class CreateBusinessPartnerDto
     [MaxLength(50)]
     public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.
 
+    public Guid? PaymentTermId { get; set; }
+
 
     public decimal? DefaultDiscount { get; set; }
 
@@ -331,6 +334,8 @@ public class UpdateBusinessPartnerDto
 
     [MaxLength(50)]
     public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.
+
+    public Guid? PaymentTermId { get; set; }
 
 
     public decimal? DefaultDiscount { get; set; }

@@ -172,8 +172,11 @@ public class BudgetService : IBudgetService
 
         if (dto.SegmentValueId.HasValue)
         {
-            var segmentExists = await _context.AccountSegmentValues
-                .AnyAsync(s => s.TenantId == tenantId && s.Id == dto.SegmentValueId.Value && !s.IsDeleted);
+            var segmentExists = await _context.SegmentLookupValues
+                .AnyAsync(s => s.TenantId == tenantId
+                    && s.Id == dto.SegmentValueId.Value
+                    && s.IsActive
+                    && !s.IsDeleted);
             if (!segmentExists)
                 throw new InvalidOperationException("Segment value not found for the current tenant.");
         }
@@ -521,7 +524,7 @@ public class BudgetService : IBudgetService
             BudgetScenarioId = r.BudgetScenarioId,
             BudgetScenarioName = r.BudgetScenario?.Name ?? "",
             SegmentValueId = r.SegmentValueId,
-            SegmentValueName = r.SegmentValue?.SegmentValueDescription,
+            SegmentValueName = r.SegmentValue?.Description,
             SegmentValueCode = r.SegmentValue?.SegmentValue,
             AssignedToUserId = r.AssignedToUserId,
             ApproverUserId = r.ApproverUserId,

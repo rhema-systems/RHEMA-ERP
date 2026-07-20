@@ -93,6 +93,8 @@ export interface FiscalPeriod {
     isOpen?: boolean;
     isClosed: boolean;
     isLocked: boolean;
+    isGlobalLockSuspended?: boolean;
+    isPartiallyLocked?: boolean;
     closedDate?: string;
     closedByUserId?: string;
     closingNotes?: string;
@@ -113,6 +115,10 @@ export interface PeriodModuleLock {
     lockReason?: string;
     unlockedDate?: string;
     unlockedByUserName?: string;
+    unlockReason?: string;
+    reopenExpiresAtUtc?: string;
+    autoRelockedDate?: string;
+    isTemporaryReopening?: boolean;
 }
 
 export interface ModuleDefinition {
@@ -230,6 +236,7 @@ export interface SegmentStructure {
     canBeModified?: boolean;
     description?: string;
     lookupValues?: SegmentLookupValue[];
+    lookupValueCount?: number;
     lookupValuesCount?: number;
     createdAt: string;
     updatedAt: string;
@@ -247,6 +254,17 @@ export interface SegmentLookupValue {
     displayOrder: number;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface ReportingSegmentOption {
+    segmentValue: string;
+    description: string;
+    accountCombinationCount: number;
+}
+
+export interface ReportingSegmentOptionsResponse {
+    items: ReportingSegmentOption[];
+    hasMore: boolean;
 }
 
 /**
@@ -516,6 +534,12 @@ export interface CreateCurrencyDto {
     countryName?: string;
     isActive: boolean;
     isBaseCurrency: boolean;
+    createInitialExchangeRate?: boolean;
+    initialExchangeRate?: number;
+    initialExchangeRateDate?: string;
+    initialExchangeRateType?: string;
+    initialExchangeRateSource?: string;
+    initialExchangeRateSourceReference?: string;
 }
 
 export interface UpdateCurrencyDto extends CreateCurrencyDto { }
@@ -526,8 +550,13 @@ export interface CreateExchangeRateDto {
     targetCurrencyCode: string;
     rate: number;
     effectiveDate: string;
+    expiryDate?: string;
     rateType: ExchangeRateType;
     rateSource: string;
+    sourceName?: string;
+    sourceReference?: string;
+    isActive?: boolean;
+    approvalStatus?: string;
     comments?: string;
 }
 
@@ -659,6 +688,7 @@ export interface UpdateAccountDto extends Partial<CreateAccountDto> {
 // Account Currency Link
 export interface AddCurrencyLinkDto {
     accountId: string;
+    currencyCode?: string;
     linkedCurrencyCode: string;
     revaluationRequired: boolean;
     revaluationFrequency: string;
@@ -784,6 +814,15 @@ export interface CreateOpeningBalanceLineDto {
     notes?: string;
 }
 
+export interface UpdateOpeningBalanceBatchDto {
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    lines: CreateOpeningBalanceLineDto[];
+}
+
 export interface OpeningBalanceBatch {
     id: string;
     tenantId: string;
@@ -807,6 +846,8 @@ export interface OpeningBalanceBatch {
     approvedAt?: string;
     postedAt?: string;
     failureReason?: string;
+    createdAt: string;
+    updatedAt?: string;
     lines: OpeningBalanceLine[];
 }
 
@@ -849,10 +890,18 @@ export interface OpeningBalanceDiagnostic {
 }
 
 // Reports
+export interface FinanceSegmentFilterDto {
+    segmentStructureId?: string;
+    segmentCode?: string;
+    segmentPosition?: number;
+    segmentValue: string;
+}
+
 export interface TrialBalanceRequestDto {
     asAtDate?: string;
     bookClassification?: string;
     includeZeroBalances?: boolean;
+    segmentFilters?: FinanceSegmentFilterDto[];
 }
 
 export interface TrialBalanceReportDto {
@@ -939,12 +988,14 @@ export interface IncomeStatementRequestDto {
     periodEnd: string;
     bookClassification?: string;
     includeAccountDetails?: boolean;
+    segmentFilters?: FinanceSegmentFilterDto[];
 }
 
 export interface BalanceSheetRequestDto {
     asAtDate: string;
     bookClassification?: string;
     includeAccountDetails?: boolean;
+    segmentFilters?: FinanceSegmentFilterDto[];
 }
 
 export interface CashFlowStatementRequestDto {

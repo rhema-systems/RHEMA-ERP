@@ -8,9 +8,11 @@ using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Shared;
 
@@ -201,22 +203,118 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (fiscalYear.IsClosed)
                 throw new InvalidOperationException("Cannot delete a closed fiscal year.");
 
-            // Check for any transactions in periods
             var periodIds = fiscalYear.FiscalPeriods.Select(p => p.Id).ToList();
-            if (periodIds.Any())
-            {
-                var hasTransactions = await _unitOfWork.Repository<JournalEntry>()
-                    .GetQueryable(je => periodIds.Contains(je.FiscalPeriodId))
-                    .AnyAsync(cancellationToken);
 
-                if (hasTransactions)
-                    throw new InvalidOperationException("Cannot delete fiscal year because it has associated transactions.");
+            var dependencies = await GetFiscalYearDeletionDependenciesAsync(
+                fiscalYear.Id,
+                periodIds,
+                cancellationToken);
+
+            if (dependencies.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot delete fiscal year because it has associated records: {string.Join(", ", dependencies)}.");
             }
-            
+
+            // Fiscal years and periods are soft-deleted. Mark the generated child periods too,
+            // otherwise they remain queryable after their parent year disappears.
+            var moduleLocks = periodIds.Count == 0
+                ? new List<PeriodModuleLock>()
+                : await _unitOfWork.Repository<PeriodModuleLock>()
+                    .GetQueryable(l => l.TenantId == TenantId && periodIds.Contains(l.FiscalPeriodId))
+                    .ToListAsync(cancellationToken);
+
+            if (moduleLocks.Count > 0)
+                await _unitOfWork.Repository<PeriodModuleLock>().DeleteRangeAsync(moduleLocks);
+
+            if (fiscalYear.FiscalPeriods.Count > 0)
+                await _unitOfWork.Repository<FiscalPeriod>().DeleteRangeAsync(fiscalYear.FiscalPeriods);
+
             await _unitOfWork.Repository<FiscalYear>().DeleteAsync(fiscalYear);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Fiscal year {Code} deleted by {User}", fiscalYear.FiscalYearCode, UserName);
+        }
+
+        private async Task<List<string>> GetFiscalYearDeletionDependenciesAsync(
+            Guid fiscalYearId,
+            IReadOnlyCollection<Guid> periodIds,
+            CancellationToken cancellationToken)
+        {
+            var dependencies = new List<string>();
+
+            if (await _unitOfWork.Repository<FiscalYear>()
+                .GetQueryable(fy => fy.TenantId == TenantId && fy.NextFiscalYearId == fiscalYearId)
+                .AnyAsync(cancellationToken))
+                dependencies.Add("linked fiscal years");
+
+            if (await _unitOfWork.Repository<BudgetScenario>()
+                .GetQueryable(b => b.TenantId == TenantId && b.FiscalYearId == fiscalYearId)
+                .AnyAsync(cancellationToken))
+                dependencies.Add("budget scenarios");
+
+            if (periodIds.Count == 0)
+                return dependencies;
+
+            if (await _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(e => e.TenantId == TenantId && periodIds.Contains(e.FiscalPeriodId))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("journal entries");
+
+            // Check transaction lines independently. This protects against legacy/orphaned
+            // lines even when their journal header is missing or soft-deleted.
+            if (await _unitOfWork.Repository<AccountTransaction>()
+                .GetQueryable(t => t.TenantId == TenantId && periodIds.Contains(t.FiscalPeriodId))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("account transactions");
+
+            if (await _unitOfWork.Repository<BudgetEntry>()
+                .GetQueryable(b => b.TenantId == TenantId && periodIds.Contains(b.FiscalPeriodId))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("budget entries");
+
+            if (await _unitOfWork.Repository<FxRevaluationBatch>()
+                .GetQueryable(b => b.TenantId == TenantId && periodIds.Contains(b.FiscalPeriodId))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("foreign-currency revaluation batches");
+
+            if (await _unitOfWork.Repository<OpeningBalanceBatch>()
+                .GetQueryable(b => b.TenantId == TenantId && periodIds.Contains(b.FiscalPeriodId))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("opening-balance batches");
+
+            if (await _unitOfWork.Repository<AssetDepreciationSchedule>()
+                .GetQueryable(s => s.TenantId == TenantId && periodIds.Contains(s.FiscalPeriodId))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("asset depreciation schedules");
+
+            if (await _unitOfWork.Repository<FixedAssetDepreciationRun>()
+                .GetQueryable(r => r.TenantId == TenantId && periodIds.Contains(r.FiscalPeriodId))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("asset depreciation runs");
+
+            if (await _unitOfWork.Repository<AssetDisposal>()
+                .GetQueryable(d => d.TenantId == TenantId
+                    && d.FiscalPeriodId.HasValue
+                    && periodIds.Contains(d.FiscalPeriodId.Value))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("asset disposals");
+
+            if (await _unitOfWork.Repository<AssetTransfer>()
+                .GetQueryable(t => t.TenantId == TenantId
+                    && t.FiscalPeriodId.HasValue
+                    && periodIds.Contains(t.FiscalPeriodId.Value))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("asset transfers");
+
+            if (await _unitOfWork.Repository<AssetValuation>()
+                .GetQueryable(v => v.TenantId == TenantId
+                    && v.FiscalPeriodId.HasValue
+                    && periodIds.Contains(v.FiscalPeriodId.Value))
+                .AnyAsync(cancellationToken))
+                dependencies.Add("asset valuations");
+
+            return dependencies;
         }
 
         public async Task<FiscalYearDto> UpdateFiscalYearAsync(Guid id, UpdateFiscalYearDto dto, CancellationToken cancellationToken = default)
@@ -264,6 +362,8 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             }
 
             var periods = await query
+                .Include(fp => fp.PeriodModuleLocks)
+                    .ThenInclude(moduleLock => moduleLock.ModuleDefinition)
                 .OrderBy(fp => fp.StartDate)
                 .ToListAsync(cancellationToken);
 
@@ -273,7 +373,10 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
         public async Task<FiscalPeriodDto?> GetFiscalPeriodByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
             var period = await _unitOfWork.Repository<FiscalPeriod>()
-                .FirstOrDefaultAsync(fp => fp.TenantId == TenantId && fp.Id == id);
+                .GetQueryable(fp => fp.TenantId == TenantId && fp.Id == id)
+                .Include(fp => fp.PeriodModuleLocks)
+                    .ThenInclude(moduleLock => moduleLock.ModuleDefinition)
+                .FirstOrDefaultAsync(cancellationToken);
 
             return period == null ? null : MapFiscalPeriodToDto(period);
         }
@@ -284,6 +387,8 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 .GetQueryable(fp => fp.TenantId == TenantId
                     && fp.StartDate <= transactionDate.Date
                     && fp.EndDate >= transactionDate.Date)
+                .Include(fp => fp.PeriodModuleLocks)
+                    .ThenInclude(moduleLock => moduleLock.ModuleDefinition)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return period == null ? null : MapFiscalPeriodToDto(period);
@@ -526,6 +631,9 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<FiscalPeriodDto> LockPeriodForModuleAsync(Guid periodId, string moduleCode, string reason, CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new InvalidOperationException("A reason is required to lock a module for an accounting period.");
+
             var period = await _unitOfWork.Repository<FiscalPeriod>()
                 .GetQueryable(fp => fp.TenantId == TenantId && fp.Id == periodId)
                 .Include(fp => fp.PeriodModuleLocks)
@@ -535,26 +643,35 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (period == null)
                 throw new ArgumentException($"Fiscal period with Id '{periodId}' not found.");
 
-            var module = await _unitOfWork.Repository<ModuleDefinition>()
-                .FirstOrDefaultAsync(m => m.ModuleCode == moduleCode);
-            
-            if (module == null)
-                throw new ArgumentException($"Module '{moduleCode}' not found.");
+            if (period.IsLocked)
+                throw new InvalidOperationException("The period is globally locked; every module is already locked.");
+
+            if (!period.IsOpen || period.IsClosed)
+                throw new InvalidOperationException("Module locks can only be changed while the accounting period is open.");
+
+            var module = await GetLockableModuleAsync(moduleCode, cancellationToken);
+            var normalizedReason = reason.Trim();
+            var now = DateTime.UtcNow;
+            var beforeValues = BuildModuleLockAuditSnapshot(
+                period.PeriodModuleLocks.FirstOrDefault(item => item.ModuleDefinitionId == module.Id));
 
             var existingLock = period.PeriodModuleLocks.FirstOrDefault(l => l.ModuleDefinitionId == module.Id);
-            
+
             if (existingLock != null)
             {
                 if (existingLock.IsLocked)
                     throw new InvalidOperationException($"Period is already locked for module {moduleCode}.");
-                
+
                 existingLock.IsLocked = true;
-                existingLock.LockedDate = DateTime.UtcNow;
+                existingLock.LockedDate = now;
                 existingLock.LockedByUserId = CurrentUserId;
-                existingLock.LockReason = reason;
-                existingLock.UnlockedDate = null;
-                existingLock.UnlockedByUserId = null;
-                
+                existingLock.LockReason = normalizedReason;
+                existingLock.ReopenExpiresAtUtc = null;
+                existingLock.ExpiryWarningSentAtUtc = null;
+                existingLock.AutoRelockedDate = null;
+                existingLock.UpdatedAt = now;
+                existingLock.UpdatedBy = UserName;
+
                 await _unitOfWork.Repository<PeriodModuleLock>().UpdateAsync(existingLock);
             }
             else
@@ -566,22 +683,54 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                     FiscalPeriodId = period.Id,
                     ModuleDefinitionId = module.Id,
                     IsLocked = true,
-                    LockedDate = DateTime.UtcNow,
+                    LockedDate = now,
                     LockedByUserId = CurrentUserId,
-                    LockReason = reason,
-                    CreatedAt = DateTime.UtcNow,
+                    LockReason = normalizedReason,
+                    CreatedAt = now,
                     CreatedBy = UserName
                 };
-                
+
                 await _unitOfWork.Repository<PeriodModuleLock>().AddAsync(newLock);
+                period.PeriodModuleLocks.Add(newLock);
+                existingLock = newLock;
             }
 
+            await RestoreGlobalLockIfNoModulesOpenAsync(period, cancellationToken);
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodModuleLocked,
+                period,
+                beforeValues,
+                BuildModuleLockAuditSnapshot(existingLock),
+                normalizedReason,
+                $"{module.ModuleName} locked for {period.PeriodName}.",
+                new { module.ModuleCode, module.ModuleName },
+                cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            _logger.LogWarning(
+                "Module {ModuleCode} locked for fiscal period {PeriodCode} by {User}. Reason: {Reason}",
+                module.ModuleCode, period.PeriodCode, UserName, normalizedReason);
             return MapFiscalPeriodToDto(period);
         }
 
-        public async Task<FiscalPeriodDto> UnlockPeriodForModuleAsync(Guid periodId, string moduleCode, string reason, CancellationToken cancellationToken = default)
+        public async Task<FiscalPeriodDto> UnlockPeriodForModuleAsync(
+            Guid periodId,
+            string moduleCode,
+            string reason,
+            DateTime reopenUntilUtc,
+            CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new InvalidOperationException("A reason is required to reopen a module for an accounting period.");
+
+            var now = DateTime.UtcNow;
+            var normalizedExpiry = reopenUntilUtc.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(reopenUntilUtc, DateTimeKind.Utc)
+                : reopenUntilUtc.ToUniversalTime();
+            if (normalizedExpiry <= now.AddMinutes(1))
+                throw new InvalidOperationException("The module reopening expiry must be at least one minute in the future.");
+            if (normalizedExpiry > now.AddHours(24))
+                throw new InvalidOperationException("A module can be reopened for no more than 24 hours.");
+
             var period = await _unitOfWork.Repository<FiscalPeriod>()
                 .GetQueryable(fp => fp.TenantId == TenantId && fp.Id == periodId)
                 .Include(fp => fp.PeriodModuleLocks)
@@ -591,79 +740,184 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (period == null)
                 throw new ArgumentException($"Fiscal period with Id '{periodId}' not found.");
 
-            var module = await _unitOfWork.Repository<ModuleDefinition>()
-                .FirstOrDefaultAsync(m => m.ModuleCode == moduleCode);
-            
-            if (module == null)
-                throw new ArgumentException($"Module '{moduleCode}' not found.");
+            if (!period.IsLocked && (!period.IsOpen || period.IsClosed))
+                throw new InvalidOperationException("A closed period must be reopened before an individual module can be reopened.");
+
+            var lockableModules = await GetLockableModulesAsync(cancellationToken);
+            var module = lockableModules.FirstOrDefault(item =>
+                item.ModuleCode.Equals(moduleCode?.Trim(), StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"Module '{moduleCode}' is not enabled and integrated with Finance for this tenant.");
+
+            var normalizedReason = reason.Trim();
+            var wasGloballyLocked = period.IsLocked;
+            var beforePeriod = BuildPeriodAuditSnapshot(period);
+
+            if (wasGloballyLocked)
+            {
+                // The old global state overrides every historical module row, including
+                // modules that have since been disabled for the tenant. This prevents a
+                // stale open row from keeping the suspended global lock alive forever.
+                foreach (var existingModuleLock in period.PeriodModuleLocks)
+                {
+                    existingModuleLock.IsLocked = true;
+                    existingModuleLock.LockedDate = period.LockedDate ?? now;
+                    existingModuleLock.LockedByUserId = period.LockedByUserId;
+                    existingModuleLock.LockReason = period.LockReason ?? "Global accounting period lock";
+                    existingModuleLock.ReopenExpiresAtUtc = null;
+                    existingModuleLock.ExpiryWarningSentAtUtc = null;
+                    existingModuleLock.AutoRelockedDate = null;
+                    existingModuleLock.UpdatedAt = now;
+                    existingModuleLock.UpdatedBy = UserName;
+                }
+
+                foreach (var lockableModule in lockableModules)
+                {
+                    var moduleLock = period.PeriodModuleLocks.FirstOrDefault(item =>
+                        item.ModuleDefinitionId == lockableModule.Id);
+                    if (moduleLock == null)
+                    {
+                        moduleLock = new PeriodModuleLock
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = TenantId,
+                            FiscalPeriodId = period.Id,
+                            ModuleDefinitionId = lockableModule.Id,
+                            CreatedAt = now,
+                            CreatedBy = UserName,
+                            ModuleDefinition = lockableModule
+                        };
+                        await _unitOfWork.Repository<PeriodModuleLock>().AddAsync(moduleLock);
+                        period.PeriodModuleLocks.Add(moduleLock);
+                    }
+
+                    moduleLock.IsLocked = lockableModule.Id != module.Id;
+                    moduleLock.LockedDate = moduleLock.IsLocked ? period.LockedDate ?? now : null;
+                    moduleLock.LockedByUserId = moduleLock.IsLocked ? period.LockedByUserId : null;
+                    moduleLock.LockReason = moduleLock.IsLocked
+                        ? period.LockReason ?? "Global accounting period lock"
+                        : moduleLock.LockReason;
+                    moduleLock.ReopenExpiresAtUtc = moduleLock.IsLocked ? null : normalizedExpiry;
+                    moduleLock.ExpiryWarningSentAtUtc = null;
+                    moduleLock.AutoRelockedDate = null;
+                    moduleLock.UnlockedDate = moduleLock.IsLocked ? moduleLock.UnlockedDate : now;
+                    moduleLock.UnlockedByUserId = moduleLock.IsLocked ? moduleLock.UnlockedByUserId : CurrentUserId;
+                    moduleLock.UnlockReason = moduleLock.IsLocked ? moduleLock.UnlockReason : normalizedReason;
+                    moduleLock.UpdatedAt = now;
+                    moduleLock.UpdatedBy = UserName;
+                }
+
+                // A global lock remains absolute. Reopening one module converts the period
+                // into an explicitly represented partial lock instead of overriding it.
+                period.IsLocked = false;
+                period.IsGlobalLockSuspended = true;
+                period.IsOpen = true;
+                period.IsClosed = false;
+                period.PeriodStatus = "Open";
+                period.UpdatedAt = now;
+                period.UpdatedBy = UserName;
+                period.LastModifiedById = CurrentUserId;
+            }
 
             var existingLock = period.PeriodModuleLocks.FirstOrDefault(l => l.ModuleDefinitionId == module.Id);
-            
-            if (existingLock == null)
+            if (existingLock == null && period.IsGlobalLockSuspended)
             {
-                 var newLock = new PeriodModuleLock
-                 {
+                existingLock = new PeriodModuleLock
+                {
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
                     FiscalPeriodId = period.Id,
                     ModuleDefinitionId = module.Id,
-                    IsLocked = false, 
-                    UnlockedDate = DateTime.UtcNow,
-                    UnlockedByUserId = CurrentUserId,
-                    UnlockReason = reason,
-                    CreatedAt = DateTime.UtcNow,
+                    ModuleDefinition = module,
+                    IsLocked = true,
+                    LockedDate = period.LockedDate ?? now,
+                    LockedByUserId = period.LockedByUserId,
+                    LockReason = period.LockReason ?? "Suspended global accounting period lock",
+                    CreatedAt = now,
                     CreatedBy = UserName
-                 };
-                 await _unitOfWork.Repository<PeriodModuleLock>().AddAsync(newLock);
-            }
-            else
-            {
-                existingLock.IsLocked = false;
-                existingLock.UnlockedDate = DateTime.UtcNow;
-                existingLock.UnlockedByUserId = CurrentUserId;
-                existingLock.UnlockReason = reason;
-                existingLock.LockedDate = null;
-                await _unitOfWork.Repository<PeriodModuleLock>().UpdateAsync(existingLock);
+                };
+                await _unitOfWork.Repository<PeriodModuleLock>().AddAsync(existingLock);
+                period.PeriodModuleLocks.Add(existingLock);
             }
 
+            if (existingLock == null)
+            {
+                throw new InvalidOperationException($"Period is not currently locked for module {module.ModuleName}.");
+            }
+
+            var reopeningHasExpired = !existingLock.IsLocked
+                && existingLock.ReopenExpiresAtUtc.HasValue
+                && existingLock.ReopenExpiresAtUtc <= now;
+            if (!wasGloballyLocked && !existingLock.IsLocked && !reopeningHasExpired)
+            {
+                if (existingLock.ReopenExpiresAtUtc.HasValue && existingLock.ReopenExpiresAtUtc > now)
+                    throw new InvalidOperationException($"Module {module.ModuleName} is already temporarily open.");
+
+                throw new InvalidOperationException($"Period is not currently locked for module {module.ModuleName}.");
+            }
+
+            var beforeLock = BuildModuleLockAuditSnapshot(existingLock);
+            existingLock.IsLocked = false;
+            existingLock.UnlockedDate = now;
+            existingLock.UnlockedByUserId = CurrentUserId;
+            existingLock.UnlockReason = normalizedReason;
+            existingLock.ReopenExpiresAtUtc = normalizedExpiry;
+            existingLock.ExpiryWarningSentAtUtc = null;
+            existingLock.AutoRelockedDate = null;
+            existingLock.UpdatedAt = now;
+            existingLock.UpdatedBy = UserName;
+
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodModuleReopened,
+                period,
+                beforeLock,
+                BuildModuleLockAuditSnapshot(existingLock),
+                normalizedReason,
+                $"{module.ModuleName} temporarily reopened for {period.PeriodName}.",
+                new
+                {
+                    module.ModuleCode,
+                    module.ModuleName,
+                    reopenUntilUtc = normalizedExpiry,
+                    convertedFromGlobalLock = wasGloballyLocked,
+                    beforePeriod,
+                    afterPeriod = BuildPeriodAuditSnapshot(period)
+                },
+                cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogWarning(
+                "Module {ModuleCode} reopened for fiscal period {PeriodCode} by {User} until {Expiry:o}. Reason: {Reason}",
+                module.ModuleCode, period.PeriodCode, UserName, normalizedExpiry, normalizedReason);
             return MapFiscalPeriodToDto(period);
         }
 
         public async Task<bool> IsPeriodLockedForModuleAsync(Guid periodId, string moduleCode, CancellationToken cancellationToken = default)
         {
+            var now = DateTime.UtcNow;
             var period = await _unitOfWork.Repository<FiscalPeriod>()
                 .GetQueryable(fp => fp.TenantId == TenantId && fp.Id == periodId)
                 .Include(fp => fp.PeriodModuleLocks)
                     .ThenInclude(pml => pml.ModuleDefinition)
                 .FirstOrDefaultAsync(cancellationToken);
-                
-            if (period == null) return true;
 
-            var moduleLock = period.PeriodModuleLocks.FirstOrDefault(ml => ml.ModuleDefinition.ModuleCode == moduleCode);
-            
-            if (period.IsLocked)
-            {
-                if (moduleLock != null && !moduleLock.IsLocked)
-                    return false;
-                
+            if (period == null || period.IsLocked || period.IsClosed || !period.IsOpen)
                 return true;
-            }
-            else
-            {
-                if (moduleLock != null && moduleLock.IsLocked)
-                    return true;
-                    
-                return false;
-            }
+
+            var moduleLock = period.PeriodModuleLocks.FirstOrDefault(moduleItem =>
+                moduleItem.TenantId == TenantId
+                && moduleItem.ModuleDefinition.TenantId == TenantId
+                && moduleItem.ModuleDefinition.ModuleCode == moduleCode);
+
+            if (moduleLock == null)
+                return period.IsGlobalLockSuspended;
+
+            return moduleLock.IsLocked
+                || (moduleLock.ReopenExpiresAtUtc.HasValue && moduleLock.ReopenExpiresAtUtc <= now);
         }
 
         public async Task<IReadOnlyList<ModuleDefinitionDto>> GetModuleDefinitionsAsync(CancellationToken cancellationToken = default)
         {
-            var modules = await _unitOfWork.Repository<ModuleDefinition>()
-                .GetQueryable(m => m.IsActive)
-                .OrderBy(m => m.SortOrder)
-                .ToListAsync(cancellationToken);
+            var modules = await GetLockableModulesAsync(cancellationToken);
 
             return modules.Select(m => new ModuleDefinitionDto
             {
@@ -674,6 +928,83 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 IsActive = m.IsActive,
                 SortOrder = m.SortOrder
             }).ToList();
+        }
+
+        private async Task<ModuleDefinition> GetLockableModuleAsync(
+            string moduleCode,
+            CancellationToken cancellationToken)
+        {
+            var modules = await GetLockableModulesAsync(cancellationToken);
+            return modules.FirstOrDefault(item =>
+                item.ModuleCode.Equals(moduleCode?.Trim(), StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"Module '{moduleCode}' is not enabled and integrated with Finance for this tenant.");
+        }
+
+        private async Task<List<ModuleDefinition>> GetLockableModulesAsync(CancellationToken cancellationToken)
+        {
+            var enabledTenantModules = (await _unitOfWork.Repository<TenantModule>()
+                    .GetQueryable(module => module.TenantId == TenantId && module.Status == ModuleStatus.Enabled)
+                    .Select(module => module.ModuleName)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var modules = await _unitOfWork.Repository<ModuleDefinition>()
+                .GetQueryable(module => module.TenantId == TenantId && module.IsActive)
+                .OrderBy(module => module.SortOrder)
+                .ToListAsync(cancellationToken);
+
+            return modules
+                .Where(module => FinanceModuleLockCatalog.IsEnabledForTenant(module.ModuleCode, enabledTenantModules))
+                .ToList();
+        }
+
+        private async Task RestoreGlobalLockIfNoModulesOpenAsync(
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            if (!period.IsGlobalLockSuspended)
+                return;
+
+            var now = DateTime.UtcNow;
+            var hasOpenModule = period.PeriodModuleLocks.Any(moduleLock =>
+                !moduleLock.IsLocked
+                && moduleLock.ReopenExpiresAtUtc.HasValue
+                && moduleLock.ReopenExpiresAtUtc > now);
+            if (hasOpenModule)
+                return;
+
+            period.IsGlobalLockSuspended = false;
+            period.IsLocked = true;
+            period.IsOpen = false;
+            period.IsClosed = true;
+            period.PeriodStatus = "Locked";
+            period.UpdatedAt = now;
+            period.UpdatedBy = UserName;
+            period.LastModifiedById = CurrentUserId;
+            await _unitOfWork.Repository<FiscalPeriod>().UpdateAsync(period);
+        }
+
+        private static object? BuildModuleLockAuditSnapshot(PeriodModuleLock? moduleLock)
+        {
+            if (moduleLock == null)
+                return null;
+
+            return new
+            {
+                moduleLock.Id,
+                moduleLock.TenantId,
+                moduleLock.FiscalPeriodId,
+                moduleLock.ModuleDefinitionId,
+                moduleLock.IsLocked,
+                moduleLock.LockedDate,
+                moduleLock.LockedByUserId,
+                moduleLock.LockReason,
+                moduleLock.UnlockedDate,
+                moduleLock.UnlockedByUserId,
+                moduleLock.UnlockReason,
+                moduleLock.ReopenExpiresAtUtc,
+                moduleLock.AutoRelockedDate
+            };
         }
 
         public async Task<PeriodCloseValidationDto> ValidatePeriodCloseAsync(Guid periodId, CancellationToken cancellationToken = default)
@@ -1145,6 +1476,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 period.IsOpen,
                 period.IsClosed,
                 period.IsLocked,
+                period.IsGlobalLockSuspended,
                 period.ClosedDate,
                 period.ClosedByUserId,
                 period.LockedDate,
@@ -1180,6 +1512,37 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         private FiscalPeriodDto MapFiscalPeriodToDto(FiscalPeriod period)
         {
+            var now = DateTime.UtcNow;
+            var moduleLocks = period.PeriodModuleLocks?
+                .Where(moduleLock => moduleLock.TenantId == period.TenantId)
+                .Select(moduleLock =>
+                {
+                    var reopeningExpired = !moduleLock.IsLocked
+                        && moduleLock.ReopenExpiresAtUtc.HasValue
+                        && moduleLock.ReopenExpiresAtUtc <= now;
+                    return new PeriodModuleLockDto
+                    {
+                        Id = moduleLock.Id,
+                        FiscalPeriodId = moduleLock.FiscalPeriodId,
+                        ModuleDefinitionId = moduleLock.ModuleDefinitionId,
+                        ModuleCode = moduleLock.ModuleDefinition?.ModuleCode ?? string.Empty,
+                        ModuleName = moduleLock.ModuleDefinition?.ModuleName ?? string.Empty,
+                        IsLocked = moduleLock.IsLocked || reopeningExpired,
+                        LockedDate = moduleLock.LockedDate,
+                        LockReason = reopeningExpired
+                            ? $"Temporary reopening expired at {moduleLock.ReopenExpiresAtUtc:u}."
+                            : moduleLock.LockReason,
+                        UnlockedDate = moduleLock.UnlockedDate,
+                        UnlockReason = moduleLock.UnlockReason,
+                        ReopenExpiresAtUtc = moduleLock.ReopenExpiresAtUtc,
+                        AutoRelockedDate = moduleLock.AutoRelockedDate,
+                        IsTemporaryReopening = !moduleLock.IsLocked
+                            && moduleLock.ReopenExpiresAtUtc.HasValue
+                            && moduleLock.ReopenExpiresAtUtc > now
+                    };
+                })
+                .ToList() ?? new List<PeriodModuleLockDto>();
+
             return new FiscalPeriodDto
             {
                 Id = period.Id,
@@ -1193,6 +1556,10 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 PeriodStatus = period.PeriodStatus,
                 IsOpen = period.IsOpen,
                 IsLocked = period.IsLocked,
+                IsGlobalLockSuspended = period.IsGlobalLockSuspended,
+                IsPartiallyLocked = period.IsOpen
+                    && !period.IsLocked
+                    && (period.IsGlobalLockSuspended || moduleLocks.Any(moduleLock => moduleLock.IsLocked)),
                 IsClosed = period.IsClosed,
                 IsCloseInitiated = period.IsCloseInitiated,
                 CloseInitiatedDate = period.CloseInitiatedDate,
@@ -1221,19 +1588,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 UpdatedAt = period.UpdatedAt,
                 CreatedBy = period.CreatedBy,
                 UpdatedBy = period.UpdatedBy,
-                ModuleLocks = period.PeriodModuleLocks?.Select(ml => new PeriodModuleLockDto
-                {
-                    Id = ml.Id,
-                    FiscalPeriodId = ml.FiscalPeriodId,
-                    ModuleDefinitionId = ml.ModuleDefinitionId,
-                    ModuleCode = ml.ModuleDefinition?.ModuleCode ?? string.Empty,
-                    ModuleName = ml.ModuleDefinition?.ModuleName ?? string.Empty,
-                    IsLocked = ml.IsLocked,
-                    LockedDate = ml.LockedDate,
-                    // LockedByUserName = ... resolve user
-                    LockReason = ml.LockReason,
-                    UnlockedDate = ml.UnlockedDate
-                }).ToList() ?? new List<PeriodModuleLockDto>()
+                ModuleLocks = moduleLocks
             };
         }
         private string GetPeriodName(PeriodType type, DateTime start, DateTime end, int number)

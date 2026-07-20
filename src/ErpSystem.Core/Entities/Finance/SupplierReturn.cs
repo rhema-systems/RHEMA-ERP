@@ -8,7 +8,9 @@ public enum SupplierReturnStatus
 {
     Draft = 1,
     Approved = 2,
-    Cancelled = 3
+    Cancelled = 3,
+    PendingApproval = 4,
+    Rejected = 5
 }
 
 public enum SupplierDebitNoteStatus

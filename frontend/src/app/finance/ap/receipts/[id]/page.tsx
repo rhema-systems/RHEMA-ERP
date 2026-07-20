@@ -12,6 +12,7 @@ import {
     Loader2,
     PackageCheck,
     Printer,
+    Send,
     ShoppingCart,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -36,7 +37,58 @@ function formatNumber(value: number) {
     return new Intl.NumberFormat('en-GH', { maximumFractionDigits: 2 }).format(value || 0);
 }
 
+function getReceiptWorkflowStatusName(receipt: FinancePurchaseOrderReceipt) {
+    if (receipt.statusName) return receipt.statusName;
+    if (typeof receipt.status === 'string') return receipt.status;
+
+    switch (receipt.status) {
+        case 1:
+            return 'Draft';
+        case 2:
+            return 'PendingApproval';
+        case 3:
+            return 'Approved';
+        case 4:
+            return 'Rejected';
+        case 5:
+            return 'Cancelled';
+        default:
+            return 'Draft';
+    }
+}
+
+function normalizeStatusLabel(value: string) {
+    return value.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
+function isApprovedReceipt(receipt: FinancePurchaseOrderReceipt) {
+    return getReceiptWorkflowStatusName(receipt).replace(/\s+/g, '').toLowerCase() === 'approved';
+}
+
 function getReceiptStatus(receipt: FinancePurchaseOrderReceipt) {
+    const workflowStatus = getReceiptWorkflowStatusName(receipt);
+    const workflowKey = workflowStatus.replace(/\s+/g, '').toLowerCase();
+
+    if (workflowKey === 'draft') {
+        return { label: 'Draft', className: 'bg-slate-600/10 text-slate-700 border-slate-200' };
+    }
+
+    if (workflowKey === 'pendingapproval') {
+        return { label: 'Pending Approval', className: 'bg-amber-600/15 text-amber-700 border-amber-200' };
+    }
+
+    if (workflowKey === 'rejected') {
+        return { label: 'Rejected', className: 'bg-red-600/15 text-red-700 border-red-200' };
+    }
+
+    if (workflowKey === 'cancelled') {
+        return { label: 'Cancelled', className: 'bg-zinc-600/15 text-zinc-700 border-zinc-200' };
+    }
+
+    if (workflowKey !== 'approved') {
+        return { label: normalizeStatusLabel(workflowStatus), className: 'bg-slate-600/10 text-slate-700 border-slate-200' };
+    }
+
     if (receipt.vendorInvoiceId) {
         return { label: 'Converted To Invoice', className: 'bg-blue-600/15 text-blue-700 border-blue-200' };
     }
@@ -52,7 +104,7 @@ function getReceiptStatus(receipt: FinancePurchaseOrderReceipt) {
         return { label: 'Partially Invoiced', className: 'bg-amber-600/15 text-amber-700 border-amber-200' };
     }
 
-    return { label: 'Open For Invoice', className: 'bg-slate-600/10 text-slate-700 border-slate-200' };
+    return { label: 'Approved For Invoice', className: 'bg-emerald-600/15 text-emerald-700 border-emerald-200' };
 }
 
 export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -63,6 +115,7 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
     const [purchaseOrder, setPurchaseOrder] = useState<FinancePurchaseOrder | null>(null);
     const [loading, setLoading] = useState(true);
     const [converting, setConverting] = useState(false);
+    const [submittingApproval, setSubmittingApproval] = useState(false);
 
     useEffect(() => {
         void loadReceipt();
@@ -88,6 +141,11 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
     };
 
     const handleConvertToInvoice = async () => {
+        if (!receipt || !isApprovedReceipt(receipt)) {
+            toast({ title: 'Approval required', description: 'Approve the GRV before converting it to a vendor invoice.', variant: 'destructive' });
+            return;
+        }
+
         setConverting(true);
         try {
             const draftInvoice = await financePurchaseOrderService.convertToVendorInvoice(id);
@@ -97,6 +155,19 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
             toast({ title: 'Error', description: error.message || 'Failed to convert to invoice', variant: 'destructive' });
         } finally {
             setConverting(false);
+        }
+    };
+
+    const handleSubmitForApproval = async () => {
+        setSubmittingApproval(true);
+        try {
+            const data = await financePurchaseOrderService.submitReceiptForApproval(id);
+            setReceipt(data);
+            toast({ title: 'Submitted', description: 'The GRV has been submitted for approval.' });
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message || 'Failed to submit GRV for approval', variant: 'destructive' });
+        } finally {
+            setSubmittingApproval(false);
         }
     };
 
@@ -124,7 +195,10 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
     }
 
     const status = getReceiptStatus(receipt);
+    const workflowStatusKey = getReceiptWorkflowStatusName(receipt).replace(/\s+/g, '').toLowerCase();
+    const canSubmitForApproval = workflowStatusKey === 'draft';
     const hasUninvoiced = receipt.items.some(item => (item.quantityReceived - (item.invoicedQuantity || 0)) > 0);
+    const canConvertToInvoice = isApprovedReceipt(receipt) && hasUninvoiced;
     const totalReceived = receipt.items.reduce((sum, item) => sum + item.quantityReceived, 0);
     const totalInvoiced = receipt.items.reduce((sum, item) => sum + (item.invoicedQuantity || 0), 0);
     const totalRemaining = receipt.items.reduce((sum, item) => sum + Math.max(0, item.quantityReceived - (item.invoicedQuantity || 0)), 0);
@@ -162,7 +236,13 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
                         <Printer className="mr-2 h-4 w-4" />
                         Print
                     </Button>
-                    {hasUninvoiced && (
+                    {canSubmitForApproval && (
+                        <Button onClick={handleSubmitForApproval} disabled={submittingApproval}>
+                            {submittingApproval ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                            Submit For Approval
+                        </Button>
+                    )}
+                    {canConvertToInvoice && (
                         <Button onClick={handleConvertToInvoice} disabled={converting}>
                             {converting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
                             Convert to Vendor Invoice

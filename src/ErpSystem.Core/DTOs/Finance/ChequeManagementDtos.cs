@@ -72,6 +72,7 @@ public class CreatePaymentMethodDto
     public string? Code { get; set; }
     public PaymentMethodType Type { get; set; }
     public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
     public bool RequiresBankAccount { get; set; } = true;
     public bool RequiresReference { get; set; }
     public Guid? DefaultGLAccountId { get; set; }

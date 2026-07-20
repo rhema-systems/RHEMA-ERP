@@ -16,6 +16,7 @@ import type {
     FinanceSettings,
     SegmentStructure,
     SegmentLookupValue,
+    ReportingSegmentOptionsResponse,
     AccountCurrencyLink,
     CreateAccountDto,
     UpdateAccountDto,
@@ -24,6 +25,7 @@ import type {
     CreateExchangeRateDto,
     CreateJournalEntryDto,
     CreateOpeningBalanceBatchDto,
+    UpdateOpeningBalanceBatchDto,
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
     AddCurrencyLinkDto,
@@ -46,7 +48,9 @@ import type {
     SubledgerAdjustmentJournal,
     SubledgerModule,
     TrialBalanceReportDto,
+    TrialBalanceRequestDto,
 } from '@/types/finance';
+import { appendFinanceSegmentFilters } from '@/lib/finance/report-segment-filters';
 import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
 import { apiService } from '@/services/api.service';
@@ -260,8 +264,8 @@ class FinanceDataService {
         return apiService.post(`/finance/periods/${periodId}/lock-module`, { moduleCode, reason });
     }
 
-    async unlockPeriodForModule(periodId: string, moduleCode: string, reason: string): Promise<void> {
-        return apiService.post(`/finance/periods/${periodId}/unlock-module`, { moduleCode, reason });
+    async unlockPeriodForModule(periodId: string, moduleCode: string, reason: string, reopenUntilUtc: string): Promise<void> {
+        return apiService.post(`/finance/periods/${periodId}/unlock-module`, { moduleCode, reason, reopenUntilUtc });
     }
 
     async reopenFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
@@ -392,8 +396,16 @@ class FinanceDataService {
         return apiService.post<OpeningBalanceBatch>('/finance/opening-balances', dto);
     }
 
+    async getOpeningBalanceBatches(): Promise<OpeningBalanceBatch[]> {
+        return apiService.get<OpeningBalanceBatch[]>('/finance/opening-balances');
+    }
+
     async getOpeningBalanceBatch(batchId: string): Promise<OpeningBalanceBatch> {
         return apiService.get<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}`);
+    }
+
+    async updateOpeningBalanceBatch(batchId: string, dto: UpdateOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
+        return apiService.put<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}`, dto);
     }
 
     async validateOpeningBalanceBatch(batchId: string): Promise<OpeningBalanceValidationResult> {
@@ -462,11 +474,12 @@ class FinanceDataService {
 
     // ===== FINANCIAL STATEMENTS =====
 
-    async getTrialBalance(params: { asAtDate: string; bookClassification?: string; includeZeroBalances?: boolean }): Promise<TrialBalanceReportDto> {
+    async getTrialBalance(params: TrialBalanceRequestDto): Promise<TrialBalanceReportDto> {
         const queryParams = new URLSearchParams();
         if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeZeroBalances !== undefined) queryParams.append('includeZeroBalances', String(params.includeZeroBalances));
+        appendFinanceSegmentFilters(queryParams, params.segmentFilters);
 
         return apiService.get<TrialBalanceReportDto>(`/finance/statements/trial-balance?${queryParams}`);
     }
@@ -491,6 +504,7 @@ class FinanceDataService {
         if (params.periodEnd) queryParams.append('periodEnd', params.periodEnd);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        appendFinanceSegmentFilters(queryParams, params.segmentFilters);
 
         return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
     }
@@ -500,6 +514,7 @@ class FinanceDataService {
         if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        appendFinanceSegmentFilters(queryParams, params.segmentFilters);
 
         return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
     }
@@ -534,6 +549,19 @@ class FinanceDataService {
 
     async getReportingDimensions(): Promise<SegmentStructure[]> {
         return apiService.get<SegmentStructure[]>('/finance/segments/reporting-dimensions');
+    }
+
+    async getReportingSegmentOptions(
+        segmentId: string,
+        search: string,
+        take = 50,
+        signal?: AbortSignal
+    ): Promise<ReportingSegmentOptionsResponse> {
+        const endpoint = `/finance/segments/${segmentId}/reporting-options`;
+        const query = { search, take };
+        return signal
+            ? apiService.getWithSignal<ReportingSegmentOptionsResponse>(endpoint, query, signal)
+            : apiService.get<ReportingSegmentOptionsResponse>(endpoint, query);
     }
 
     async getSegmentStructureById(id: string): Promise<SegmentStructure> {
@@ -585,7 +613,13 @@ class FinanceDataService {
     }
 
     async addAccountCurrencyLink(accountId: string, dto: AddCurrencyLinkDto): Promise<AccountCurrencyLink> {
-        return apiService.post<AccountCurrencyLink>(`/finance/accounts/${accountId}/currencies`, { ...dto, accountId });
+        const currencyCode = (dto.currencyCode || dto.linkedCurrencyCode || '').trim().toUpperCase();
+        return apiService.post<AccountCurrencyLink>(`/finance/accounts/${accountId}/currencies`, {
+            ...dto,
+            accountId,
+            currencyCode,
+            linkedCurrencyCode: currencyCode,
+        });
     }
 
     async removeAccountCurrencyLink(accountId: string, currencyCode: string): Promise<void> {

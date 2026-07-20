@@ -109,7 +109,11 @@ public static class FinanceAuditEvents
     public const string AccountingPeriodLockAttempted = "Finance.AccountingPeriod.LockAttempted";
     public const string AccountingPeriodLocked = "Finance.AccountingPeriod.Locked";
     public const string AccountingPeriodUnlocked = "Finance.AccountingPeriod.Unlocked";
+    public const string AccountingPeriodModuleLocked = "Finance.AccountingPeriod.ModuleLocked";
+    public const string AccountingPeriodModuleReopened = "Finance.AccountingPeriod.ModuleReopened";
+    public const string AccountingPeriodModuleAutoRelocked = "Finance.AccountingPeriod.ModuleAutoRelocked";
     public const string PostingBlockedPeriodClosedLocked = "Finance.PostingEvent.BlockedPeriodClosedLocked";
+    public const string PostingBlockedModuleLocked = "Finance.PostingEvent.BlockedModuleLocked";
 
     public const string ReportExported = "Finance.Report.Exported";
     public const string ReportPrinted = "Finance.Report.Printed";
@@ -254,6 +258,7 @@ public static class FinanceAuditEvents
     public const string SettlementRebuildFailed = "Finance.SubledgerSettlement.RebuildFailed";
 
     public const string OpeningBalanceBatchCreated = "Finance.Migration.OpeningBalanceBatchCreated";
+    public const string OpeningBalanceBatchUpdated = "Finance.Migration.OpeningBalanceBatchUpdated";
     public const string OpeningBalanceBatchValidated = "Finance.Migration.OpeningBalanceBatchValidated";
     public const string OpeningBalancePosted = "Finance.Migration.OpeningBalancePosted";
     public const string OpeningBalancePostingFailed = "Finance.Migration.OpeningBalancePostingFailed";

@@ -139,7 +139,12 @@ export default function VendorPaymentsPage() {
                                 ) : (
                                     paymentsData?.items.map((payment) => (
                                         <TableRow key={payment.id}>
-                                            <TableCell className="font-medium">{payment.paymentNumber}</TableCell>
+                                            <TableCell
+                                                className="font-medium text-blue-600 hover:underline cursor-pointer"
+                                                onClick={() => router.push(`/finance/ap/payments/${payment.id}`)}
+                                            >
+                                                {payment.paymentNumber}
+                                            </TableCell>
                                             <TableCell>{format(new Date(payment.paymentDate), 'MMM dd, yyyy')}</TableCell>
                                             <TableCell>{payment.supplierName}</TableCell>
                                             <TableCell>{payment.paymentMethod}</TableCell>

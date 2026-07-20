@@ -87,6 +87,9 @@ public class ReturnOrderService : IReturnOrderService
 
             if (deliveryNote.BusinessPartnerId != salesOrder.BusinessPartnerId)
                 throw new InvalidOperationException("Return order delivery note must belong to the source sales order business partner.");
+
+            if (deliveryNote.SalesOrderId != salesOrder.Id)
+                throw new InvalidOperationException("Return order delivery note must belong to the selected source sales order.");
         }
 
         var docNumber = await _documentNumberingService.GenerateAsync(
@@ -791,6 +794,7 @@ public class ReturnOrderService : IReturnOrderService
             var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
             {
                 SourceModule = "AR",
+                OriginModuleCode = "SALES",
                 SourceDocumentType = "SalesCreditNoteReversal",
                 SourceDocumentId = creditNote.Id,
                 SourceDocumentTenantId = creditNote.TenantId,
@@ -1124,6 +1128,7 @@ public class ReturnOrderService : IReturnOrderService
         return new FinancePostingRequestDto
         {
             SourceModule = "AR",
+            OriginModuleCode = "SALES",
             SourceDocumentType = "SalesCreditNote",
             SourceDocumentId = creditNote.Id,
             SourceDocumentTenantId = creditNote.TenantId,

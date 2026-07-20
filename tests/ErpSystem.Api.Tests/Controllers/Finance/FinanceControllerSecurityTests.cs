@@ -102,6 +102,26 @@ public sealed class FinanceControllerSecurityTests
         }
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-2")]
+    [Trait("Category", "FinanceSecurity")]
+    public void BudgetController_ShouldUseBudgetPermissionPoliciesWithoutLegacyFinanceRoleGate()
+    {
+        typeof(BudgetController)
+            .GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+            .Select(attribute => attribute.Policy)
+            .Should()
+            .NotContain("Finance", "budget access is governed by Finance.Budgeting.* permissions, not the legacy Finance role policy");
+
+        var method = typeof(BudgetController).GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(method => method.Name == nameof(BudgetController.GetScenariosForYear));
+
+        method.Should().NotBeNull();
+        GetMappedPolicies(typeof(BudgetController), method!)
+            .Should()
+            .Contain(FinancePermissions.ViewBudgets);
+    }
+
     [Theory]
     [InlineData(typeof(JournalEntryController), "CreateJournalEntry", FinancePermissions.CreateJournalEntries)]
     [InlineData(typeof(JournalEntryController), "RequestApproval", FinancePermissions.SubmitJournalEntries)]
@@ -123,6 +143,13 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(CashTransactionController), "Post", FinancePermissions.WorkflowPostAfterApproval)]
     [InlineData(typeof(FinanceApprovalsController), "Approve", FinancePermissions.WorkflowApprove)]
     [InlineData(typeof(FinanceApprovalsController), "Reject", FinancePermissions.WorkflowReject)]
+    [InlineData(typeof(OpeningBalancesController), "Create", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "List", FinancePermissions.ViewFinance)]
+    [InlineData(typeof(OpeningBalancesController), "Update", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "Validate", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "Submit", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "Submit", FinancePermissions.WorkflowSubmit)]
+    [InlineData(typeof(OpeningBalancesController), "Post", FinancePermissions.RunMigrationAdjustments)]
     [InlineData(typeof(RootFinanceController), "GetTrialBalance", FinancePermissions.RunFinanceReports)]
     [InlineData(typeof(FixedAssetsController), "ExportToExcel", FinancePermissions.ExportFinanceReports)]
     [InlineData(typeof(FinanceReportExportsController), "Export", FinancePermissions.ExportFinanceReports)]

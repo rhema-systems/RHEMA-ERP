@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,12 +20,13 @@ import type { BudgetScenario, BudgetReturn, CreateBudgetReturnDto } from '@/type
 import type { SegmentStructure, SegmentLookupValue } from '@/types/finance';
 
 interface PageProps {
-    params: {
+    params: Promise<{
         id: string;
-    };
+    }>;
 }
 
 export default function ScenarioDetailsPage({ params }: PageProps) {
+    const { id } = use(params);
     const { toast } = useToast();
     const router = useRouter();
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
@@ -38,7 +39,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const [segmentValues, setSegmentValues] = useState<SegmentLookupValue[]>([]);
     const [selectedSegmentId, setSelectedSegmentId] = useState<string>('');
     const [newReturnData, setNewReturnData] = useState<CreateBudgetReturnDto>({
-        budgetScenarioId: params.id,
+        budgetScenarioId: id,
         segmentValueId: '',
         notes: ''
     });
@@ -46,7 +47,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     useEffect(() => {
         loadData();
         loadSegments();
-    }, [params.id]);
+    }, [id]);
 
     useEffect(() => {
         if (selectedSegmentId) {
@@ -58,8 +59,8 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
         try {
             setIsLoading(true);
             const [scenarioData, returnsData] = await Promise.all([
-                budgetDataService.getScenarioById(params.id),
-                budgetDataService.getReturns(params.id)
+                budgetDataService.getScenarioById(id),
+                budgetDataService.getReturns(id)
             ]);
             setScenario(scenarioData);
             setReturns(returnsData);
@@ -112,7 +113,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
         try {
             await budgetDataService.createReturn({
                 ...newReturnData,
-                budgetScenarioId: params.id
+                budgetScenarioId: id
             });
             toast({
                 title: 'Success',
@@ -125,7 +126,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
             console.error('Failed to create return:', error);
             toast({
                 title: 'Error',
-                description: 'Failed to create budget return.',
+                description: error instanceof Error ? error.message : 'Failed to create budget return.',
                 variant: 'destructive',
             });
         }
@@ -134,7 +135,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const handleLockScenario = async () => {
         if (!confirm('Are you sure you want to lock this budget? This action cannot be easily undone.')) return;
         try {
-            await budgetDataService.lockScenario(params.id);
+            await budgetDataService.lockScenario(id);
             toast({ title: 'Success', description: 'Budget scenario locked.' });
             loadData();
         } catch (error) {

@@ -359,14 +359,14 @@ export default function DocumentNumberingPage() {
       </Card>
 
       <Dialog open={Boolean(editingSequence && formData)} onOpenChange={(open) => !open && closeEditDialog()}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="grid max-h-[90dvh] w-[calc(100vw-2rem)] max-w-3xl grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+          <DialogHeader className="border-b px-6 py-4 pr-12">
             <DialogTitle>Edit Document Sequence</DialogTitle>
             <DialogDescription>{editingSequence?.module} / {editingSequence?.documentType}</DialogDescription>
           </DialogHeader>
 
           {formData && (
-            <div className="grid gap-5 py-2">
+            <div className="grid min-h-0 gap-5 overflow-y-auto px-6 py-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="sequence-name">Name</Label>
@@ -448,7 +448,7 @@ export default function DocumentNumberingPage() {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="border-t bg-background px-6 py-4">
             <Button variant="outline" onClick={closeEditDialog} disabled={saving}>Cancel</Button>
             <Button onClick={saveSequence} disabled={saving}>
               <Save className="mr-2 h-4 w-4" />

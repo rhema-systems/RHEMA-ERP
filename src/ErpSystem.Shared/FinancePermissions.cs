@@ -27,6 +27,9 @@ public static class FinancePermissions
     public const string AdministerFinance = "Finance.Admin";
 
     public const string ManageChartOfAccounts = "Finance.ChartOfAccounts.Manage";
+    public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
+    public const string ConfigureTaxPolicy = "Finance.Policy.ConfigureTax";
+    public const string ConfigureFixedAssetCategoriesPolicy = "Finance.Policy.ConfigureFixedAssetCategories";
 
     public const string CreateJournalEntries = "Finance.JournalEntries.Create";
     public const string EditJournalEntries = "Finance.JournalEntries.Edit";
@@ -88,6 +91,7 @@ public static class FinancePermissions
 
     public const string RunMigrationDiagnostics = "Finance.Migration.Diagnostics.Run";
     public const string RunMigrationAdjustments = "Finance.Migration.Adjustments.Run";
+    public const string PrepareOpeningBalances = "Finance.Migration.OpeningBalances.Prepare";
 
     public const string ViewBudgets = "Finance.Budgeting.Read";
     public const string MaintainBudgets = "Finance.Budgeting.Write";
@@ -163,6 +167,7 @@ public static class FinancePermissions
 
         new(RunMigrationDiagnostics, "Run Finance Migration Diagnostics", "Run finance migration diagnostics and reconciliation checks.", CategoryMigration),
         new(RunMigrationAdjustments, "Run Finance Migration Adjustments", "Run approved finance migration adjustment actions.", CategoryMigration),
+        new(PrepareOpeningBalances, "Prepare Opening Balances", "Create, validate, and submit controlled opening-balance batches for approval.", CategoryMigration),
 
         new(ViewBudgets, "View Budgets", "View budget scenarios, returns, and worksheets.", CategoryBudgeting),
         new(MaintainBudgets, "Maintain Budgets", "Create budget scenarios, returns, and entries.", CategoryBudgeting),

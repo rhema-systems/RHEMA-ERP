@@ -4,37 +4,26 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { taxDataService } from '@/services/finance/tax-data.service';
-import { Tax, TaxCategory, TaxApplicability, TaxCalculationMethod, CreateTaxDto } from '@/types/tax';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import { Tax } from '@/types/tax';
+import type { Account } from '@/types/finance';
 import { Plus, Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import Link from 'next/link';
+import { TaxFormDialog } from '@/components/finance/tax/TaxFormDialog';
 
 export default function TaxesPage() {
     const [taxes, setTaxes] = useState<Tax[]>([]);
+    const [accounts, setAccounts] = useState<Account[]>([]);
     const [loading, setLoading] = useState(true);
+    const [accountsLoading, setAccountsLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingTax, setEditingTax] = useState<Tax | null>(null);
-    const [formData, setFormData] = useState<CreateTaxDto>({
-        code: '',
-        name: '',
-        rate: 0,
-        calculationMethod: TaxCalculationMethod.Simple,
-        category: TaxCategory.Standard,
-        applicability: TaxApplicability.Both,
-        isInputTaxDeductible: false,
-        isActive: true,
-        thresholdAmount: null,
-    });
     const { toast } = useToast();
 
     useEffect(() => {
         loadTaxes();
+        loadAccounts();
     }, []);
 
     const loadTaxes = async () => {
@@ -53,62 +42,26 @@ export default function TaxesPage() {
         }
     };
 
-    const handleOpenDialog = (tax?: Tax) => {
-        if (tax) {
-            setEditingTax(tax);
-            setFormData({
-                code: tax.code,
-                name: tax.name,
-                rate: tax.rate,
-                calculationMethod: tax.calculationMethod,
-                category: tax.category,
-                applicability: tax.applicability,
-                isInputTaxDeductible: tax.isInputTaxDeductible,
-                isActive: tax.isActive,
-                thresholdAmount: tax.thresholdAmount,
-            });
-        } else {
-            setEditingTax(null);
-            setFormData({
-                code: '',
-                name: '',
-                rate: 0,
-                calculationMethod: TaxCalculationMethod.Simple,
-                category: TaxCategory.Standard,
-                applicability: TaxApplicability.Both,
-                isInputTaxDeductible: false,
-                isActive: true,
-                thresholdAmount: null,
-            });
-        }
-        setDialogOpen(true);
-    };
-
-    const handleSave = async () => {
+    const loadAccounts = async () => {
         try {
-            if (editingTax) {
-                await taxDataService.updateTax(editingTax.id, formData);
-                toast({
-                    title: 'Success',
-                    description: 'Tax updated successfully',
-                });
-            } else {
-                await taxDataService.createTax(formData);
-                toast({
-                    title: 'Success',
-                    description: 'Tax created successfully',
-                });
-            }
-            setDialogOpen(false);
-            loadTaxes();
+            setAccountsLoading(true);
+            const data = await financeDataService.getAccounts({ status: 'Active', pageSize: 1000 });
+            setAccounts(data);
         } catch (error) {
-            console.error('Failed to save tax:', error);
+            console.error('Failed to load accounts:', error);
             toast({
                 title: 'Error',
-                description: 'Failed to save tax',
+                description: 'Failed to load GL accounts',
                 variant: 'destructive',
             });
+        } finally {
+            setAccountsLoading(false);
         }
+    };
+
+    const handleOpenDialog = (tax?: Tax) => {
+        setEditingTax(tax ?? null);
+        setDialogOpen(true);
     };
 
     const handleDelete = async (id: string) => {
@@ -224,124 +177,20 @@ export default function TaxesPage() {
                 </CardContent>
             </Card>
 
-            {/* Add/Edit Dialog */}
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                        <DialogTitle>{editingTax ? 'Edit Tax' : 'Add Tax'}</DialogTitle>
-                        <DialogDescription>
-                            {editingTax ? 'Update the tax details' : 'Create a new tax'}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <Label htmlFor="code">Tax Code *</Label>
-                                <Input
-                                    id="code"
-                                    value={formData.code}
-                                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                                    placeholder="VAT, NHIL, etc."
-                                    className="mt-1"
-                                />
-                            </div>
-                            <div>
-                                <Label htmlFor="name">Tax Name *</Label>
-                                <Input
-                                    id="name"
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    placeholder="Value Added Tax"
-                                    className="mt-1"
-                                />
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <Label htmlFor="rate">Tax Rate (%) *</Label>
-                                <Input
-                                    id="rate"
-                                    type="number"
-                                    step="0.01"
-                                    value={formData.rate}
-                                    onChange={(e) => setFormData({ ...formData, rate: parseFloat(e.target.value) })}
-                                    className="mt-1"
-                                />
-                            </div>
-                            <div>
-                                <Label htmlFor="threshold">Threshold Check (Optional)</Label>
-                                <Input
-                                    id="threshold"
-                                    type="number"
-                                    value={formData.thresholdAmount || ''}
-                                    onChange={(e) => setFormData({ ...formData, thresholdAmount: e.target.value ? parseFloat(e.target.value) : null })}
-                                    placeholder="Min amount to apply"
-                                    className="mt-1"
-                                />
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <Label htmlFor="category">Category *</Label>
-                                <Select
-                                    value={formData.category}
-                                    onValueChange={(value: any) => setFormData({ ...formData, category: value })}
-                                >
-                                    <SelectTrigger className="mt-1">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Standard">Standard</SelectItem>
-                                        <SelectItem value="Withholding">Withholding</SelectItem>
-                                        <SelectItem value="Levy">Levy</SelectItem>
-                                        <SelectItem value="Excise">Excise</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div>
-                                <Label htmlFor="applicability">Applicability *</Label>
-                                <Select
-                                    value={formData.applicability}
-                                    onValueChange={(value: any) => setFormData({ ...formData, applicability: value })}
-                                >
-                                    <SelectTrigger className="mt-1">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Sales">Sales Only</SelectItem>
-                                        <SelectItem value="Purchases">Purchases Only</SelectItem>
-                                        <SelectItem value="Both">Both</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                            <Switch
-                                id="isDeductible"
-                                checked={formData.isInputTaxDeductible}
-                                onCheckedChange={(checked) => setFormData({ ...formData, isInputTaxDeductible: checked })}
-                            />
-                            <Label htmlFor="isDeductible">Is Input Tax Deductible? (Recoverable)</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                            <Switch
-                                id="isActive"
-                                checked={formData.isActive}
-                                onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
-                            />
-                            <Label htmlFor="isActive">Active</Label>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleSave}>
-                            {editingTax ? 'Update' : 'Create'}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <TaxFormDialog
+                open={dialogOpen}
+                tax={editingTax}
+                accounts={accounts}
+                accountsLoading={accountsLoading}
+                onOpenChange={setDialogOpen}
+                onSaved={() => {
+                    toast({
+                        title: 'Success',
+                        description: editingTax ? 'Tax updated successfully' : 'Tax created successfully',
+                    });
+                    loadTaxes();
+                }}
+            />
         </div>
     );
 }

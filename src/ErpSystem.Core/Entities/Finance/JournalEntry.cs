@@ -67,6 +67,13 @@ public class JournalEntry : BusinessEntity
     public string? SourceModule { get; set; }
 
     /// <summary>
+    /// Top-level application module that originated the posting. This remains stable
+    /// even when the journal is processed by a Finance subledger such as AP or AR.
+    /// </summary>
+    [MaxLength(10)]
+    public string? OriginModuleCode { get; set; }
+
+    /// <summary>
     /// Source document ID from originating module.
     /// Enables drill-down from GL to source transaction.
     /// </summary>
@@ -274,6 +281,11 @@ public class JournalEntry : BusinessEntity
     /// Links to the master recurring entry definition.
     /// </summary>
     public Guid? RecurringTemplateId { get; set; }
+
+    [ForeignKey(nameof(RecurringTemplateId))]
+    public virtual RecurringJournalTemplate? RecurringTemplate { get; set; }
+
+    public virtual RecurringJournalOccurrence? RecurringOccurrence { get; set; }
 
     /// <summary>
     /// Recurrence frequency: "Monthly", "Quarterly", "Annually"

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -120,6 +121,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         await ApplyAccountBalanceMovementsAsync(
             tenantId,
             journalEntry.Transactions,
+            cancellationToken);
+
+        await ApplyAccountCurrencyLinkMovementsAsync(
+            tenantId,
+            journalEntry.Transactions,
+            now,
+            postedByUserId,
             cancellationToken);
 
         _context.FinancePostingEvents.Add(postingEvent);
@@ -263,6 +271,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         journalEntry.Description = validation.Description;
         journalEntry.ReferenceNumber = validation.SourceDocumentReference;
         journalEntry.SourceModule = validation.SourceModule;
+        journalEntry.OriginModuleCode = validation.OriginModuleCode;
         journalEntry.SourceDocumentId = validation.SourceDocumentId;
         journalEntry.SourceDocumentType = validation.SourceDocumentType;
         journalEntry.TotalDebitAmount = validation.TotalDebitAmount;
@@ -327,6 +336,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             Description = validation.Description,
             ReferenceNumber = validation.SourceDocumentReference,
             SourceModule = validation.SourceModule,
+            OriginModuleCode = validation.OriginModuleCode,
             SourceDocumentId = validation.SourceDocumentId,
             SourceDocumentType = validation.SourceDocumentType,
             TotalDebitAmount = validation.TotalDebitAmount,
@@ -455,7 +465,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             throw new InvalidOperationException("Reversal line count does not match the original journal entry.");
         }
 
-        original.PostingStatus = "Reversed";
+        // A reversal is a new posted accounting event; it does not make the original
+        // journal unposted. Keep both entries reportable and use the linkage flags to
+        // prevent duplicate reversals and explain the correction trail.
         original.IsReversed = true;
         original.ReversalDate = validation.PostingDate;
         original.ReversalJournalEntryId = reversal.Id;
@@ -473,7 +485,6 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             originalLine.ReversalTransactionId = reversalLine.Id;
             originalLine.ReversalType = validation.ReversalType;
             originalLine.ReversalReason = validation.ReversalReason;
-            originalLine.PostingStatus = "Reversed";
             originalLine.UpdatedAt = now;
 
             reversalLine.OriginalTransactionId = originalLine.Id;
@@ -492,6 +503,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             SourceModule = validation.SourceModule,
+            OriginModuleCode = validation.OriginModuleCode,
             SourceDocumentType = validation.SourceDocumentType,
             SourceDocumentId = validation.SourceDocumentId,
             PostingAction = validation.PostingAction,
@@ -654,7 +666,138 @@ WHERE [Id] = {delta.AccountId}
         return -transaction.CreditAmount;
     }
 
+    private static decimal GetTransactionCurrencyBalanceDelta(AccountType accountType, AccountTransaction transaction)
+    {
+        var debitAmount = transaction.TransactionDebitAmount
+            ?? (transaction.DebitAmount > 0m ? transaction.DebitAmount : 0m);
+        var creditAmount = transaction.TransactionCreditAmount
+            ?? (transaction.CreditAmount > 0m ? transaction.CreditAmount : 0m);
+
+        if (debitAmount > 0m)
+        {
+            if (accountType == AccountType.Asset || accountType == AccountType.Expense)
+            {
+                return debitAmount;
+            }
+
+            return -debitAmount;
+        }
+
+        if (accountType == AccountType.Liability || accountType == AccountType.Equity || accountType == AccountType.Revenue)
+        {
+            return creditAmount;
+        }
+
+        return -creditAmount;
+    }
+
     private sealed record AccountBalanceDelta(Guid AccountId, decimal Amount);
+
+    private async Task ApplyAccountCurrencyLinkMovementsAsync(
+        Guid tenantId,
+        IEnumerable<AccountTransaction> transactions,
+        DateTime now,
+        Guid? postedByUserId,
+        CancellationToken cancellationToken)
+    {
+        var transactionList = transactions
+            .Where(t => !t.IsDeleted && !string.IsNullOrWhiteSpace(t.TransactionCurrency))
+            .OrderBy(t => t.TransactionDate)
+            .ThenBy(t => t.LineNumber)
+            .ToList();
+
+        if (transactionList.Count == 0)
+        {
+            return;
+        }
+
+        var accountIds = transactionList
+            .Select(t => t.AccountId)
+            .Distinct()
+            .ToList();
+
+        var accounts = await _context.Accounts
+            .Where(a => a.TenantId == tenantId && accountIds.Contains(a.Id) && !a.IsDeleted)
+            .Select(a => new { a.Id, a.AccountType })
+            .ToDictionaryAsync(a => a.Id, a => a.AccountType, cancellationToken);
+
+        if (accounts.Count == 0)
+        {
+            return;
+        }
+
+        var links = await _context.AccountCurrencyLinks
+            .Where(l => l.TenantId == tenantId
+                && accountIds.Contains(l.AccountId)
+                && l.IsActive
+                && !l.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        if (links.Count == 0)
+        {
+            return;
+        }
+
+        var linksByAccountCurrency = links
+            .GroupBy(l => new
+            {
+                l.AccountId,
+                CurrencyCode = NormalizeCurrency(l.LinkedCurrencyCode, "Linked currency")
+            })
+            .ToDictionary(
+                g => (g.Key.AccountId, g.Key.CurrencyCode),
+                g => g.OrderByDescending(l => l.EffectiveDate).First());
+
+        foreach (var group in transactionList.GroupBy(t => new
+        {
+            t.AccountId,
+            CurrencyCode = NormalizeCurrency(t.TransactionCurrency, "Transaction currency")
+        }))
+        {
+            if (!accounts.TryGetValue(group.Key.AccountId, out var accountType)
+                || !linksByAccountCurrency.TryGetValue((group.Key.AccountId, group.Key.CurrencyCode), out var link))
+            {
+                continue;
+            }
+
+            var foreignDelta = group.Sum(t => GetTransactionCurrencyBalanceDelta(accountType, t));
+            var functionalDelta = group.Sum(t => GetAccountBalanceDelta(accountType, t));
+            var groupLines = group.ToList();
+            var firstDate = groupLines.Min(t => t.TransactionDate.Date);
+            var lastLine = groupLines
+                .OrderByDescending(t => t.TransactionDate)
+                .ThenByDescending(t => t.LineNumber)
+                .First();
+
+            link.ForeignCurrencyBalance = RoundMoney(link.ForeignCurrencyBalance + foreignDelta);
+            link.BaseCurrencyEquivalent = RoundMoney(link.BaseCurrencyEquivalent + functionalDelta);
+            link.HasTransactionHistory = true;
+            link.TransactionCount += groupLines.Count;
+            link.FirstTransactionDate = link.FirstTransactionDate.HasValue
+                ? (link.FirstTransactionDate.Value.Date <= firstDate ? link.FirstTransactionDate.Value.Date : firstDate)
+                : firstDate;
+            link.LastTransactionDate = link.LastTransactionDate.HasValue
+                ? (link.LastTransactionDate.Value.Date >= lastLine.TransactionDate.Date ? link.LastTransactionDate.Value.Date : lastLine.TransactionDate.Date)
+                : lastLine.TransactionDate.Date;
+
+            if (lastLine.ExchangeRate is > 0m)
+            {
+                link.CurrentExchangeRate = RoundRate(lastLine.ExchangeRate.Value);
+                link.RateEffectiveDate = lastLine.ExchangeRateDate?.Date ?? lastLine.TransactionDate.Date;
+            }
+            else if (string.Equals(group.Key.CurrencyCode, lastLine.FunctionalCurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                link.CurrentExchangeRate = 1m;
+                link.RateEffectiveDate = lastLine.TransactionDate.Date;
+            }
+
+            link.UpdatedAt = now;
+            link.UpdatedBy = _currentUserService.UserName;
+            link.LastModifiedById = postedByUserId;
+            link.ModifiedByUserId = postedByUserId;
+            link.ModifiedDate = now;
+        }
+    }
 
     private async Task<ValidatedPosting> ValidatePostingRequestAsync(
         Guid tenantId,
@@ -672,6 +815,9 @@ WHERE [Id] = {delta.AccountId}
         }
 
         var sourceModule = NormalizeRequired(request.SourceModule, "Source module", 50);
+        var originModuleCode = FinanceModuleLockCatalog.ResolveOriginModuleCode(
+            sourceModule,
+            request.OriginModuleCode);
         var sourceDocumentType = NormalizeRequired(request.SourceDocumentType, "Source document type", 100);
         var postingAction = NormalizeRequired(request.PostingAction, "Posting action", 50);
         var description = NormalizeRequired(request.Description, "Posting description", 500);
@@ -731,23 +877,24 @@ WHERE [Id] = {delta.AccountId}
 
         var postingDate = request.PostingDate.Date;
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, postingDate, request.FiscalPeriodId, cancellationToken);
-        if (!fiscalPeriod.IsOpen || fiscalPeriod.IsClosed || fiscalPeriod.IsLocked)
-        {
-            // Year-end closing entries are the one legitimate post into a closed (not locked)
-            // period: the close itself requires every period closed first. The exception is
-            // limited to the GL year-end source types so it cannot become a general bypass.
-            var isYearEndClosePosting = request.AllowPostingToClosedPeriod
-                && !fiscalPeriod.IsLocked
-                && string.Equals(request.SourceModule, "GL", StringComparison.OrdinalIgnoreCase)
-                && (string.Equals(request.SourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(request.SourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));
+        var isYearEndClosePosting = request.AllowPostingToClosedPeriod
+            && string.Equals(sourceModule, "GL", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));
 
-            if (!isYearEndClosePosting)
-            {
-                await RecordPostingBlockedByPeriodAuditAsync(tenantId, request, fiscalPeriod, postingDate, cancellationToken);
-                throw new InvalidOperationException("Posting period is not open.");
-            }
+        if ((!fiscalPeriod.IsOpen || fiscalPeriod.IsClosed || fiscalPeriod.IsLocked) && !isYearEndClosePosting)
+        {
+            await RecordPostingBlockedByPeriodAuditAsync(tenantId, request, fiscalPeriod, postingDate, cancellationToken);
+            throw new InvalidOperationException("Posting period is not open.");
         }
+
+        if (!isYearEndClosePosting)
+            await EnsureOriginModuleCanPostAsync(
+                tenantId,
+                fiscalPeriod,
+                originModuleCode,
+                request,
+                cancellationToken);
 
         if (postingDate < fiscalPeriod.StartDate.Date || postingDate > fiscalPeriod.EndDate.Date)
         {
@@ -906,6 +1053,19 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException($"Cannot post to inactive GL account(s): {string.Join(", ", inactiveAccounts)}.");
         }
 
+        var multiCurrencyAccountIds = accounts.Values
+            .Where(a => a.IsMultiCurrency)
+            .Select(a => a.Id)
+            .ToList();
+        var currencyLinks = multiCurrencyAccountIds.Count == 0
+            ? new List<AccountCurrencyLink>()
+            : await _context.AccountCurrencyLinks
+                .AsNoTracking()
+                .Where(l => l.TenantId == tenantId
+                    && multiCurrencyAccountIds.Contains(l.AccountId)
+                    && !l.IsDeleted)
+                .ToListAsync(cancellationToken);
+
         foreach (var line in normalizedLines)
         {
             var account = accounts[line.AccountId];
@@ -915,6 +1075,20 @@ WHERE [Id] = {delta.AccountId}
             {
                 throw new InvalidOperationException(
                     $"Account '{account.AccountNumber}' only accepts {accountCurrency} transactions and cannot be posted in {line.TransactionCurrency}.");
+            }
+
+            if (account.IsMultiCurrency
+                && !string.Equals(accountCurrency, line.TransactionCurrency, StringComparison.OrdinalIgnoreCase)
+                && !currencyLinks.Any(link =>
+                    link.AccountId == account.Id
+                    && string.Equals(
+                        NormalizeCurrency(link.LinkedCurrencyCode, "Linked currency", functionalCurrency),
+                        line.TransactionCurrency,
+                        StringComparison.OrdinalIgnoreCase)
+                    && IsCurrencyLinkEffectiveForPosting(link, postingDate)))
+            {
+                throw new InvalidOperationException(
+                    $"Account '{account.AccountNumber}' does not have an active {line.TransactionCurrency} currency link for {postingDate:yyyy-MM-dd}. Add or reactivate the currency link before posting.");
             }
         }
 
@@ -927,6 +1101,7 @@ WHERE [Id] = {delta.AccountId}
 
         return new ValidatedPosting(
             sourceModule,
+            originModuleCode,
             sourceDocumentType,
             request.SourceDocumentId,
             postingAction,
@@ -979,6 +1154,82 @@ WHERE [Id] = {delta.AccountId}
                 cancellationToken);
 
         return period ?? throw new InvalidOperationException("No fiscal period covers the posting date for this tenant.");
+    }
+
+    private async Task EnsureOriginModuleCanPostAsync(
+        Guid tenantId,
+        FiscalPeriod fiscalPeriod,
+        string originModuleCode,
+        FinancePostingRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var module = await _context.ModuleDefinitions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId
+                && item.IsActive
+                && item.ModuleCode == originModuleCode
+                && !item.IsDeleted,
+                cancellationToken);
+
+        // Existing tenants may briefly have no reconciled module definitions during
+        // deployment. A normal open period remains compatible, while a partial lock
+        // fails closed so an unknown/missing module cannot evade the global lock.
+        if (module == null)
+        {
+            if (!fiscalPeriod.IsGlobalLockSuspended)
+                return;
+
+            await RecordPostingBlockedByModuleAuditAsync(
+                tenantId,
+                request,
+                fiscalPeriod,
+                originModuleCode,
+                "The module is not registered in this period's partial-lock state.",
+                null,
+                cancellationToken);
+            throw new InvalidOperationException(
+                $"Posting blocked: {originModuleCode} is locked for {fiscalPeriod.PeriodName}. " +
+                "You may continue editing this transaction, but it cannot be posted until a Finance administrator reopens the module.");
+        }
+
+        var moduleLock = await _context.PeriodModuleLocks
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId
+                && item.FiscalPeriodId == fiscalPeriod.Id
+                && item.ModuleDefinitionId == module.Id
+                && !item.IsDeleted,
+                cancellationToken);
+        var now = DateTime.UtcNow;
+        var reopeningExpired = moduleLock != null
+            && !moduleLock.IsLocked
+            && moduleLock.ReopenExpiresAtUtc.HasValue
+            && moduleLock.ReopenExpiresAtUtc <= now;
+        var isLocked = fiscalPeriod.IsGlobalLockSuspended
+            ? moduleLock == null || moduleLock.IsLocked || reopeningExpired
+            : moduleLock != null && (moduleLock.IsLocked || reopeningExpired);
+
+        if (!isLocked)
+            return;
+
+        var reason = reopeningExpired
+            ? $"Temporary reopening expired at {moduleLock!.ReopenExpiresAtUtc:u}."
+            : moduleLock?.LockReason ?? fiscalPeriod.LockReason ?? "Accounting period module lock";
+        await RecordPostingBlockedByModuleAuditAsync(
+            tenantId,
+            request,
+            fiscalPeriod,
+            originModuleCode,
+            reason,
+            moduleLock,
+            cancellationToken);
+
+        throw new InvalidOperationException(
+            $"Posting blocked: {module.ModuleName} is locked for {fiscalPeriod.PeriodName} " +
+            $"({fiscalPeriod.StartDate:MMM d, yyyy} - {fiscalPeriod.EndDate:MMM d, yyyy}). " +
+            "You may continue editing this transaction, but it cannot be posted until a Finance administrator reopens the module. " +
+            $"Reason: {reason}");
     }
 
     private async Task<FunctionalCurrencyConfig> ResolveTenantFunctionalCurrencyAsync(
@@ -1187,6 +1438,8 @@ WHERE [Id] = {delta.AccountId}
             FunctionalCurrencyCode = postingEvent.FunctionalCurrencyCode,
             PostingDate = postingEvent.PostingDate,
             SourceModule = postingEvent.SourceModule,
+            OriginModuleCode = postingEvent.OriginModuleCode
+                ?? FinanceModuleLockCatalog.ResolveOriginModuleCode(postingEvent.SourceModule),
             SourceDocumentType = postingEvent.SourceDocumentType,
             SourceDocumentId = postingEvent.SourceDocumentId,
             PostingAction = postingEvent.PostingAction
@@ -1320,6 +1573,51 @@ WHERE [Id] = {delta.AccountId}
                 fiscalPeriod.IsLocked
             },
             Comment = "Posting blocked because the accounting period is closed, locked, or not open.",
+            Resource = "Finance.FiscalPeriod",
+            ResourceId = fiscalPeriod.Id.ToString()
+        }, cancellationToken);
+    }
+
+    private async Task RecordPostingBlockedByModuleAuditAsync(
+        Guid tenantId,
+        FinancePostingRequestDto request,
+        FiscalPeriod fiscalPeriod,
+        string originModuleCode,
+        string reason,
+        PeriodModuleLock? moduleLock,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null)
+            return;
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.PostingBlockedModuleLocked,
+            TenantId = tenantId,
+            SourceModule = request.SourceModule,
+            SourceDocumentType = request.SourceDocumentType,
+            SourceDocumentId = request.SourceDocumentId == Guid.Empty ? null : request.SourceDocumentId,
+            Reason = reason,
+            AfterValues = new
+            {
+                request.SourceModule,
+                OriginModuleCode = originModuleCode,
+                request.SourceDocumentType,
+                request.SourceDocumentId,
+                request.PostingAction,
+                request.SourceDocumentReference,
+                request.PostingDate,
+                FiscalPeriodId = fiscalPeriod.Id,
+                fiscalPeriod.PeriodCode,
+                fiscalPeriod.PeriodName,
+                fiscalPeriod.IsGlobalLockSuspended,
+                ModuleLockId = moduleLock?.Id,
+                ModuleLockIsLocked = moduleLock?.IsLocked,
+                ModuleLockReason = moduleLock?.LockReason,
+                ModuleUnlockReason = moduleLock?.UnlockReason,
+                ModuleReopenExpiresAtUtc = moduleLock?.ReopenExpiresAtUtc
+            },
+            Comment = "Posting blocked by a fiscal-period module lock.",
             Resource = "Finance.FiscalPeriod",
             ResourceId = fiscalPeriod.Id.ToString()
         }, cancellationToken);
@@ -1504,8 +1802,17 @@ WHERE [Id] = {delta.AccountId}
         return normalized;
     }
 
+    private static bool IsCurrencyLinkEffectiveForPosting(AccountCurrencyLink link, DateTime postingDate)
+    {
+        var postingDay = postingDate.Date;
+        return link.IsActive
+            && link.EffectiveDate.Date <= postingDay
+            && (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value.Date >= postingDay);
+    }
+
     private sealed record ValidatedPosting(
         string SourceModule,
+        string OriginModuleCode,
         string SourceDocumentType,
         Guid SourceDocumentId,
         string PostingAction,

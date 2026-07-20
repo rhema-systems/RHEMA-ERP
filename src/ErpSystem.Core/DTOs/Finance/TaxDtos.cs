@@ -66,6 +66,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? ThresholdAmount { get; set; }
         public Guid? TaxPayableAccountId { get; set; }
         public Guid? TaxReceivableAccountId { get; set; }
+        public bool ClearTaxPayableAccount { get; set; }
+        public bool ClearTaxReceivableAccount { get; set; }
     }
 
     #endregion

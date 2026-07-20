@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AP;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -652,7 +653,13 @@ public class FinancePurchaseOrderController : ControllerBase
     {
         if (!paymentTermId.HasValue || paymentTermId.Value == Guid.Empty)
         {
-            return null;
+            return await _dbContext.PaymentTerms
+                .Where(t =>
+                    t.TenantId == tenantId && !t.IsDeleted && t.IsActive && t.IsDefault &&
+                    (t.ApplicableTo == "All" || t.ApplicableTo == applicableTo || t.ApplicableTo == "Vendor"))
+                .OrderBy(t => t.ApplicableTo == applicableTo ? 0 : 1)
+                .ThenBy(t => t.DisplayOrder)
+                .FirstOrDefaultAsync(cancellationToken);
         }
 
         var paymentTerm = await _dbContext.PaymentTerms
@@ -789,20 +796,23 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
     private readonly ApplicationDbContext _dbContext;
     private readonly ICurrentUserService _currentUserService;
     private readonly IDocumentNumberingService _documentNumberingService;
-    private readonly IFinancePostingEngine _financePostingEngine;
+    private readonly IWorkflowService _workflowService;
+    private readonly FinancePurchaseOrderReceiptPostingService _receiptPostingService;
     private readonly ILogger<FinancePurchaseOrderReceiptController> _logger;
 
     public FinancePurchaseOrderReceiptController(
         ApplicationDbContext dbContext,
         ICurrentUserService currentUserService,
         IDocumentNumberingService documentNumberingService,
-        IFinancePostingEngine financePostingEngine,
+        IWorkflowService workflowService,
+        FinancePurchaseOrderReceiptPostingService receiptPostingService,
         ILogger<FinancePurchaseOrderReceiptController> logger)
     {
         _dbContext = dbContext;
         _currentUserService = currentUserService;
         _documentNumberingService = documentNumberingService;
-        _financePostingEngine = financePostingEngine;
+        _workflowService = workflowService;
+        _receiptPostingService = receiptPostingService;
         _logger = logger;
     }
 
@@ -894,6 +904,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             FinancePurchaseOrderId = purchaseOrder.Id,
             ReceiptNumber = receiptNumber,
             ReceiptDate = receiptDate,
+            Status = FinancePurchaseOrderReceiptStatus.Draft,
             Remarks = dto.Remarks
         };
 
@@ -942,8 +953,6 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         _dbContext.FinancePurchaseOrderReceipts.Add(receipt);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        await PostReceiptThroughFinancePostingEngineAsync(receipt.Id, cancellationToken);
-
         await transaction.CommitAsync(cancellationToken);
 
         var saved = await BaseReceiptQuery(tenantId)
@@ -951,6 +960,77 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             .FirstAsync(r => r.Id == receipt.Id, cancellationToken);
 
         return CreatedAtAction(nameof(GetById), new { id = receipt.Id }, MapReceipt(saved));
+    }
+
+    [HttpPost("{id:guid}/submit-for-approval")]
+    public async Task<ActionResult<FinancePurchaseOrderReceiptDto>> SubmitForApproval(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var receipt = await _dbContext.FinancePurchaseOrderReceipts
+            .Include(r => r.Items.Where(i => !i.IsDeleted))
+            .FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId && !r.IsDeleted, cancellationToken);
+
+        if (receipt == null)
+        {
+            return NotFound();
+        }
+
+        if (receipt.Status != FinancePurchaseOrderReceiptStatus.Draft)
+        {
+            return BadRequest("Only draft finance GRVs can be submitted for approval.");
+        }
+
+        if (!receipt.Items.Any())
+        {
+            return BadRequest("At least one receipt line is required before submitting for approval.");
+        }
+
+        var userId = TryGetCurrentUserId();
+        var now = DateTime.UtcNow;
+        receipt.Status = FinancePurchaseOrderReceiptStatus.PendingApproval;
+        receipt.SubmittedAt = now;
+        receipt.SubmittedById = userId;
+        receipt.UpdatedAt = now;
+        receipt.UpdatedBy = _currentUserService.UserName;
+        receipt.RejectedAt = null;
+        receipt.RejectedById = null;
+        receipt.RejectionReason = null;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var workflowResult = await _workflowService.StartApprovalWorkflowAsync("FinancePurchaseOrderReceipt", id);
+        if (!workflowResult.Success)
+        {
+            receipt.Status = FinancePurchaseOrderReceiptStatus.Draft;
+            receipt.SubmittedAt = null;
+            receipt.SubmittedById = null;
+            receipt.UpdatedAt = DateTime.UtcNow;
+            receipt.UpdatedBy = _currentUserService.UserName;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return BadRequest(workflowResult.Message ?? "Unable to start finance GRV approval workflow.");
+        }
+
+        receipt.WorkflowInstanceId = workflowResult.WorkflowInstanceId ?? receipt.WorkflowInstanceId;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (workflowResult.Status == WorkflowInstanceStatus.Completed && userId.HasValue)
+        {
+            await _receiptPostingService.ApproveAndPostAsync(
+                tenantId,
+                receipt.Id,
+                userId.Value,
+                _currentUserService.UserName,
+                null,
+                cancellationToken);
+        }
+
+        var saved = await BaseReceiptQuery(tenantId)
+            .AsSplitQuery()
+            .FirstAsync(r => r.Id == receipt.Id, cancellationToken);
+
+        return Ok(MapReceipt(saved));
     }
 
     [HttpPost("{id:guid}/convert-to-vendor-invoice")]
@@ -995,6 +1075,11 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             return existingInvoice == null
                 ? BadRequest("This receipt is linked to a vendor invoice that no longer exists.")
                 : Ok(MapVendorInvoice(existingInvoice));
+        }
+
+        if (receipt.Status != FinancePurchaseOrderReceiptStatus.Approved)
+        {
+            return BadRequest("Only approved finance GRVs can be converted to vendor invoices.");
         }
 
         var billableLines = receipt.Items
@@ -1161,107 +1246,6 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             .Where(r => r.TenantId == tenantId && !r.IsDeleted);
     }
 
-    private async Task PostReceiptThroughFinancePostingEngineAsync(Guid receiptId, CancellationToken cancellationToken)
-    {
-        var tenantId = TenantId;
-        var receipt = await _dbContext.FinancePurchaseOrderReceipts
-            .Include(r => r.FinancePurchaseOrder)
-                .ThenInclude(po => po.Vendor)
-            .Include(r => r.Items.Where(i => !i.IsDeleted))
-                .ThenInclude(i => i.FinancePurchaseOrderItem)
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == receiptId && !r.IsDeleted, cancellationToken)
-            ?? throw new InvalidOperationException("Finance purchase receipt was not found for this tenant.");
-
-        var settings = await _dbContext.FinanceSettings
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
-            ?? throw new InvalidOperationException("Finance settings not configured for this tenant.");
-
-        var grvAccrualAccountId = settings.ControlAccountGRVAccrualId
-            ?? throw new InvalidOperationException("GRV Accrual Control Account is not configured in Finance Settings.");
-
-        var purchaseOrder = receipt.FinancePurchaseOrder;
-        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
-        var headerCurrencyCode = NormalizeCurrency(purchaseOrder.CurrencyCode, functionalCurrency);
-        var headerExchangeRate = NormalizeExchangeRate(purchaseOrder.ExchangeRate);
-        var lines = new List<FinancePostingLineDto>();
-        var lineNumber = 1;
-
-        foreach (var receiptItem in receipt.Items.Where(i => !i.IsDeleted).OrderBy(i => i.CreatedAt).ThenBy(i => i.Id))
-        {
-            var poItem = receiptItem.FinancePurchaseOrderItem
-                ?? throw new InvalidOperationException($"Finance GRV line {receiptItem.Id} is missing its purchase order line.");
-
-            var grossAmount = RoundMoney(receiptItem.QuantityReceived * poItem.UnitPrice);
-            var percentageDiscount = RoundMoney(grossAmount * receiptItem.DiscountPercentage / 100m);
-            var lineSourceAmount = RoundMoney(grossAmount - receiptItem.DiscountAmount - percentageDiscount);
-            if (lineSourceAmount <= 0m)
-            {
-                continue;
-            }
-
-            var debitAccountId = poItem.LineType == 1
-                ? settings.ControlAccountInventoryId
-                    ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.")
-                : poItem.GlAccountId
-                    ?? throw new InvalidOperationException($"No GL account specified for finance GRV line '{poItem.Description}'.");
-
-            var lineCurrencyCode = NormalizeCurrency(poItem.CurrencyCode, headerCurrencyCode);
-            var lineExchangeRate = NormalizeExchangeRate(poItem.ExchangeRate > 0m ? poItem.ExchangeRate : headerExchangeRate);
-            var lineFunctionalAmount = ToFunctionalAmount(lineSourceAmount, lineCurrencyCode, functionalCurrency, lineExchangeRate);
-
-            lines.Add(BuildPostingLine(
-                debitAccountId,
-                $"GRV {receipt.ReceiptNumber} - {poItem.Description}",
-                lineFunctionalAmount,
-                0m,
-                lineSourceAmount,
-                lineCurrencyCode,
-                functionalCurrency,
-                lineExchangeRate,
-                receipt.ReceiptDate,
-                receipt.ReceiptNumber,
-                lineNumber++,
-                "AP-GRV-Receipt"));
-
-            lines.Add(BuildPostingLine(
-                grvAccrualAccountId,
-                $"GRV accrual - {receipt.ReceiptNumber} - {poItem.Description}",
-                0m,
-                lineFunctionalAmount,
-                lineSourceAmount,
-                lineCurrencyCode,
-                functionalCurrency,
-                lineExchangeRate,
-                receipt.ReceiptDate,
-                receipt.ReceiptNumber,
-                lineNumber++,
-                "AP-GRV-Accrual"));
-        }
-
-        if (lines.Count == 0)
-        {
-            throw new InvalidOperationException($"Finance GRV {receipt.ReceiptNumber} has no positive-value lines to post.");
-        }
-
-        await _financePostingEngine.PostAsync(new FinancePostingRequestDto
-        {
-            SourceModule = "AP",
-            SourceDocumentType = "FinancePurchaseOrderReceipt",
-            SourceDocumentId = receipt.Id,
-            SourceDocumentTenantId = tenantId,
-            PostingAction = "PostFinancePurchaseOrderReceipt",
-            SourceDocumentReference = receipt.ReceiptNumber,
-            Description = $"Finance GRV {receipt.ReceiptNumber} - {purchaseOrder.Vendor?.PartnerName ?? purchaseOrder.OrderNumber}",
-            PostingDate = receipt.ReceiptDate,
-            JournalType = "System Generated",
-            BookClassification = "IFRS",
-            FunctionalCurrencyCode = functionalCurrency,
-            IdempotencyKey = $"FinancePurchaseOrderReceipt:{tenantId:N}:{receipt.Id:N}:Post",
-            Lines = lines
-        }, cancellationToken);
-    }
-
     private static FinancePurchaseOrderReceiptDto MapReceipt(FinancePurchaseOrderReceipt receipt)
     {
         return new FinancePurchaseOrderReceiptDto
@@ -1271,7 +1255,14 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             ReceiptNumber = receipt.ReceiptNumber,
             ReceiptDate = receipt.ReceiptDate,
             Remarks = receipt.Remarks,
+            Status = (int)receipt.Status,
+            StatusName = receipt.Status.ToString(),
+            WorkflowInstanceId = receipt.WorkflowInstanceId,
             VendorInvoiceId = receipt.VendorInvoiceId,
+            SubmittedAt = receipt.SubmittedAt,
+            ApprovedAt = receipt.ApprovedAt,
+            RejectedAt = receipt.RejectedAt,
+            RejectionReason = receipt.RejectionReason,
             OrderNumber = receipt.FinancePurchaseOrder?.OrderNumber,
             VendorName = receipt.FinancePurchaseOrder?.Vendor?.PartnerName,
             Items = receipt.Items
@@ -1298,6 +1289,9 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
                 .ToList()
         };
     }
+
+    private Guid? TryGetCurrentUserId()
+        => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;
 
     private async Task<string> GenerateReceiptNumberAsync(Guid tenantId, DateTime receiptDate, CancellationToken cancellationToken)
     {
@@ -1347,55 +1341,6 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         // numbers unless the tenant sequence explicitly allows manual entry.
         return await GenerateReceiptNumberAsync(tenantId, receiptDate, cancellationToken);
     }
-
-    private static FinancePostingLineDto BuildPostingLine(
-        Guid accountId,
-        string description,
-        decimal debitAmount,
-        decimal creditAmount,
-        decimal sourceAmount,
-        string transactionCurrency,
-        string functionalCurrency,
-        decimal exchangeRate,
-        DateTime rateDate,
-        string reference,
-        int lineNumber,
-        string tag)
-    {
-        var sameCurrency = string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
-        return new FinancePostingLineDto
-        {
-            AccountId = accountId,
-            Description = description,
-            DebitAmount = RoundMoney(debitAmount),
-            CreditAmount = RoundMoney(creditAmount),
-            TransactionCurrency = transactionCurrency,
-            TransactionDebitAmount = debitAmount > 0m ? RoundMoney(sourceAmount) : 0m,
-            TransactionCreditAmount = creditAmount > 0m ? RoundMoney(sourceAmount) : 0m,
-            ForeignCurrencyAmount = sameCurrency ? null : RoundMoney(sourceAmount),
-            ExchangeRate = sameCurrency ? null : exchangeRate,
-            ExchangeRateDate = sameCurrency ? null : rateDate.Date,
-            SourceReferenceNumber = reference,
-            LineNumber = lineNumber,
-            TransactionTag = tag
-        };
-    }
-
-    private static decimal ToFunctionalAmount(decimal sourceAmount, string transactionCurrency, string functionalCurrency, decimal exchangeRate)
-        => string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
-            ? RoundMoney(sourceAmount)
-            : RoundMoney(sourceAmount * exchangeRate);
-
-    private static decimal NormalizeExchangeRate(decimal exchangeRate)
-        => exchangeRate <= 0m ? 1m : exchangeRate;
-
-    private static string NormalizeCurrency(string? currencyCode, string fallback)
-        => string.IsNullOrWhiteSpace(currencyCode)
-            ? fallback.Trim().ToUpperInvariant()
-            : currencyCode.Trim().ToUpperInvariant();
-
-    private static decimal RoundMoney(decimal amount)
-        => Math.Round(amount, 2, MidpointRounding.AwayFromZero);
 
     private async Task<Supplier> EnsureSupplierForVendorAsync(
         BusinessPartner vendor,

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -105,7 +106,7 @@ public class PaymentTermsController : ControllerBase
     /// Create a new payment term
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<PaymentTermDto>> Create([FromBody] CreatePaymentTermDto dto)
     {
         if (!ModelState.IsValid)
@@ -128,7 +129,7 @@ public class PaymentTermsController : ControllerBase
     /// Update a payment term
     /// </summary>
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<PaymentTermDto>> Update(Guid id, [FromBody] UpdatePaymentTermDto dto)
     {
         if (!ModelState.IsValid)
@@ -151,30 +152,59 @@ public class PaymentTermsController : ControllerBase
     /// Delete a payment term
     /// </summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult> Delete(Guid id)
     {
-        var result = await _paymentTermService.DeleteAsync(id);
-        if (!result)
+        try
         {
-            return NotFound($"Payment term with ID {id} not found.");
+            var result = await _paymentTermService.DeleteAsync(id);
+            if (!result)
+            {
+                return NotFound($"Payment term with ID {id} not found.");
+            }
+            return NoContent();
         }
-        return NoContent();
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>
     /// Set a payment term as default
     /// </summary>
     [HttpPost("{id:guid}/set-default")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult> SetDefault(Guid id)
     {
-        var result = await _paymentTermService.SetDefaultAsync(id);
-        if (!result)
+        try
         {
-            return NotFound($"Payment term with ID {id} not found.");
+            var result = await _paymentTermService.SetDefaultAsync(id);
+            if (!result)
+            {
+                return NotFound($"Payment term with ID {id} not found.");
+            }
+            return Ok(new { message = "Payment term set as default successfully." });
         }
-        return Ok(new { message = "Payment term set as default successfully." });
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("{id:guid}/toggle-active")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
+    public async Task<ActionResult> ToggleActive(Guid id)
+    {
+        try
+        {
+            var result = await _paymentTermService.ToggleActiveAsync(id);
+            return result ? NoContent() : NotFound($"Payment term with ID {id} not found.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>

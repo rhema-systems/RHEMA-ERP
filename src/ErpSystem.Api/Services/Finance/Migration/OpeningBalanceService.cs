@@ -144,6 +144,172 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     public async Task<OpeningBalanceBatchDto?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
         => await MapBatchAsync(batchId, cancellationToken);
 
+    public async Task<IReadOnlyList<OpeningBalanceBatchDto>> GetBatchesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        return await _db.OpeningBalanceBatches
+            .AsNoTracking()
+            .Where(batch => batch.TenantId == tenantId && !batch.IsDeleted)
+            .OrderByDescending(batch => batch.UpdatedAt ?? batch.CreatedAt)
+            .ThenByDescending(batch => batch.CreatedAt)
+            .Select(batch => new OpeningBalanceBatchDto
+            {
+                Id = batch.Id,
+                TenantId = batch.TenantId,
+                BatchNumber = batch.BatchNumber,
+                SourceReference = batch.SourceReference,
+                Description = batch.Description,
+                OpeningDate = batch.OpeningDate,
+                FiscalPeriodId = batch.FiscalPeriodId,
+                FiscalPeriodCode = batch.FiscalPeriod.PeriodCode,
+                BookClassification = batch.BookClassification,
+                Status = batch.Status,
+                IdempotencyKey = batch.IdempotencyKey,
+                TotalDebit = batch.TotalDebit,
+                TotalCredit = batch.TotalCredit,
+                Difference = batch.Difference,
+                JournalEntryId = batch.JournalEntryId,
+                PostingEventId = batch.PostingEventId,
+                WorkflowInstanceId = batch.WorkflowInstanceId,
+                ValidatedAt = batch.ValidatedAt,
+                SubmittedAt = batch.SubmittedAt,
+                ApprovedAt = batch.ApprovedAt,
+                PostedAt = batch.PostedAt,
+                FailureReason = batch.FailureReason,
+                CreatedAt = batch.CreatedAt,
+                UpdatedAt = batch.UpdatedAt
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<OpeningBalanceBatchDto> UpdateBatchAsync(
+        Guid batchId,
+        UpdateOpeningBalanceBatchDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var batch = await LoadBatchAsync(tenantId, batchId, cancellationToken);
+        if (!IsEditableStatus(batch.Status))
+        {
+            throw new InvalidOperationException($"Opening balance batch '{batch.BatchNumber}' cannot be edited while it is {batch.Status}.");
+        }
+
+        if (dto.Lines == null || dto.Lines.Count == 0)
+        {
+            throw new InvalidOperationException("Opening balance batch requires at least one line.");
+        }
+
+        var book = NormalizeBook(dto.BookClassification);
+        if (IsAllActiveBooks(book))
+        {
+            throw new InvalidOperationException("ALL_ACTIVE_BOOKS opening-balance posting remains disabled. Select one explicit book classification.");
+        }
+
+        var period = await _db.FiscalPeriods
+            .FirstOrDefaultAsync(candidate => candidate.TenantId == tenantId && candidate.Id == dto.FiscalPeriodId && !candidate.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Opening balance fiscal period was not found for the current tenant.");
+
+        var beforeValues = new
+        {
+            batch.SourceReference,
+            batch.Description,
+            batch.OpeningDate,
+            batch.FiscalPeriodId,
+            batch.BookClassification,
+            batch.TotalDebit,
+            batch.TotalCredit,
+            lineCount = batch.Lines.Count
+        };
+
+        batch.SourceReference = string.IsNullOrWhiteSpace(dto.SourceReference) ? null : dto.SourceReference.Trim();
+        batch.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
+        batch.OpeningDate = dto.OpeningDate.Date;
+        batch.FiscalPeriodId = period.Id;
+        batch.BookClassification = book;
+
+        var now = DateTime.UtcNow;
+        var userName = _currentUser.UserName ?? "system";
+        var userId = CurrentUserId();
+        var functionalCurrency = await GetFunctionalCurrencyAsync(tenantId, cancellationToken);
+        var existingLines = batch.Lines.OrderBy(line => line.LineNumber).ToList();
+        for (var index = 0; index < dto.Lines.Count; index++)
+        {
+            var lineDto = dto.Lines[index];
+            var line = index < existingLines.Count
+                ? existingLines[index]
+                : new OpeningBalanceLine
+                {
+                    TenantId = tenantId,
+                    OpeningBalanceBatchId = batch.Id,
+                    CreatedAt = now,
+                    CreatedBy = userName,
+                    CreatedById = userId
+                };
+
+            line.LineNumber = index + 1;
+            line.AccountId = lineDto.AccountId;
+            line.DebitAmount = RoundMoney(lineDto.DebitAmount);
+            line.CreditAmount = RoundMoney(lineDto.CreditAmount);
+            line.TransactionCurrencyCode = NormalizeCurrency(lineDto.TransactionCurrencyCode, functionalCurrency);
+            line.FunctionalCurrencyCode = NormalizeCurrency(lineDto.FunctionalCurrencyCode, functionalCurrency);
+            line.ExchangeRateId = lineDto.ExchangeRateId;
+            line.ExchangeRateDate = lineDto.ExchangeRateDate;
+            line.SegmentString = lineDto.SegmentString;
+            line.BankAccountId = lineDto.BankAccountId;
+            line.CounterpartyType = lineDto.CounterpartyType;
+            line.CounterpartyId = lineDto.CounterpartyId;
+            line.SourceReference = lineDto.SourceReference;
+            line.Notes = lineDto.Notes;
+            line.UpdatedAt = now;
+            line.UpdatedBy = userName;
+            line.LastModifiedById = userId;
+
+            if (index >= existingLines.Count)
+            {
+                batch.Lines.Add(line);
+            }
+        }
+
+        if (existingLines.Count > dto.Lines.Count)
+        {
+            _db.OpeningBalanceLines.RemoveRange(existingLines.Skip(dto.Lines.Count));
+        }
+
+        RecalculateTotals(batch);
+        batch.Status = StatusDraft;
+        batch.ValidatedAt = null;
+        batch.SubmittedAt = null;
+        batch.ApprovedAt = null;
+        batch.WorkflowInstanceId = null;
+        batch.FailureReason = null;
+        batch.FailedAt = null;
+        batch.UpdatedAt = now;
+        batch.UpdatedBy = userName;
+        batch.LastModifiedById = userId;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        await RecordAuditAsync(
+            FinanceAuditEvents.OpeningBalanceBatchUpdated,
+            batch,
+            beforeValues: beforeValues,
+            afterValues: new
+            {
+                batch.SourceReference,
+                batch.Description,
+                batch.OpeningDate,
+                batch.FiscalPeriodId,
+                batch.BookClassification,
+                batch.TotalDebit,
+                batch.TotalCredit,
+                lineCount = batch.Lines.Count
+            },
+            cancellationToken: cancellationToken);
+
+        return await MapBatchAsync(batch.Id, cancellationToken)
+            ?? throw new InvalidOperationException("Opening balance batch was updated but could not be reloaded.");
+    }
+
     public async Task<OpeningBalanceValidationResultDto> ValidateBatchAsync(
         Guid batchId,
         CancellationToken cancellationToken = default)
@@ -610,6 +776,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             ApprovedAt = batch.ApprovedAt,
             PostedAt = batch.PostedAt,
             FailureReason = batch.FailureReason,
+            CreatedAt = batch.CreatedAt,
+            UpdatedAt = batch.UpdatedAt,
             Lines = batch.Lines
                 .OrderBy(l => l.LineNumber)
                 .Select(l => new OpeningBalanceLineDto
@@ -689,6 +857,11 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
 
     private static bool IsAllActiveBooks(string? value)
         => string.Equals(NormalizeBook(value), "ALL_ACTIVE_BOOKS", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEditableStatus(string? status)
+        => string.Equals(status, StatusDraft, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, StatusValidated, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, StatusFailed, StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeCurrency(string? value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback.ToUpperInvariant() : value.Trim().ToUpperInvariant();

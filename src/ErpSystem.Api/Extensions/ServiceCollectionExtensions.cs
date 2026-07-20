@@ -635,6 +635,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookService, ErpSystem.Api.Services.Finance.Settings.AccountingBookService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IGeneralLedgerService, ErpSystem.Api.Services.Finance.GL.GeneralLedgerService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
+            services.AddScoped<ErpSystem.Core.Finance.IBusinessCalendarProvider, ErpSystem.Data.Services.PayrollBusinessCalendarProvider>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAuditService, ErpSystem.Api.Services.Finance.FinanceAuditService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancePostingEngine, ErpSystem.Api.Services.Finance.GL.FinancePostingEngine>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISubledgerSettlementReadModelService, ErpSystem.Api.Services.Finance.SubledgerSettlementReadModelService>();
@@ -655,6 +656,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 sp.GetRequiredService<ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyRevaluationService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService, ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.AP.FinancePurchaseOrderReceiptPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetCategoryService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetCategoryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetDepreciationService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetDepreciationService>();
@@ -913,6 +915,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Exception log maintenance (retention purge)
             services.AddHostedService<ErpSystem.Api.Services.ExceptionLogMaintenanceBackgroundService>();
 
+            // Reconciles temporary fiscal-period module reopenings and sends expiry notices.
+            services.AddHostedService<ErpSystem.Api.Services.Finance.Fiscal.ModuleLockExpiryBackgroundService>();
+
             // Tenant data retention (audit/security logs, notifications, EHC audit events)
             services.AddHostedService<ErpSystem.Api.Services.DataRetentionBackgroundService>();
 
@@ -942,6 +947,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
         public static IServiceCollection AddErpSystemAuthorization(this IServiceCollection services)
         {
+            services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler,
+                StructuredAuthorizationMiddlewareResultHandler>();
+
             var authorizationBuilder = services.AddAuthorizationBuilder()
                 .AddPolicy("SuperAdmin", policy =>
                     policy.RequireRole("SuperAdmin"))
@@ -993,6 +1001,20 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // without granting broader MaintenanceWrite permissions.
                 .AddPolicy("FleetInspectionWrite", policy =>
                     policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"));
+
+            authorizationBuilder
+                .AddPolicy(FinancePermissions.ConfigureChartOfAccountsPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.AdministerFinance,
+                        FinancePermissions.ManageChartOfAccounts)))
+                .AddPolicy(FinancePermissions.ConfigureTaxPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.AdministerFinance,
+                        FinancePermissions.ManageTaxConfiguration)))
+                .AddPolicy(FinancePermissions.ConfigureFixedAssetCategoriesPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.AdministerFinance,
+                        FinancePermissions.ManageFixedAssets)));
 
             foreach (var permission in FinancePermissions.All)
             {

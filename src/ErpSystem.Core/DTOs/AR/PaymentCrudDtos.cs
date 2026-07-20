@@ -12,6 +12,7 @@ public class PaymentCreateDto
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
     public string PaymentMethod { get; set; } = "Cash";
+    public Guid? PaymentMethodId { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? BankAccountId { get; set; }
@@ -36,6 +37,7 @@ public class PaymentUpdateDto
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
     public string PaymentMethod { get; set; } = string.Empty;
+    public Guid? PaymentMethodId { get; set; }
     public Guid? BankAccountId { get; set; }
     public string? CheckNumber { get; set; }
     public string? TransactionReference { get; set; }
@@ -55,6 +57,7 @@ public class PaymentQueryDto
     public string? SearchTerm { get; set; }
     public Guid? CustomerId { get; set; }
     public string? PaymentMethod { get; set; }
+    public Guid? PaymentMethodId { get; set; }
     public string? Status { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }

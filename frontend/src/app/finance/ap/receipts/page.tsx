@@ -23,7 +23,54 @@ function formatNumber(value: number) {
     return new Intl.NumberFormat('en-GH', { maximumFractionDigits: 2 }).format(value || 0);
 }
 
+function getReceiptWorkflowStatusName(receipt: FinancePurchaseOrderReceipt) {
+    if (receipt.statusName) return receipt.statusName;
+    if (typeof receipt.status === 'string') return receipt.status;
+
+    switch (receipt.status) {
+        case 1:
+            return 'Draft';
+        case 2:
+            return 'PendingApproval';
+        case 3:
+            return 'Approved';
+        case 4:
+            return 'Rejected';
+        case 5:
+            return 'Cancelled';
+        default:
+            return 'Draft';
+    }
+}
+
+function normalizeStatusLabel(value: string) {
+    return value.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
 function getReceiptStatus(receipt: FinancePurchaseOrderReceipt) {
+    const workflowStatus = getReceiptWorkflowStatusName(receipt);
+    const workflowKey = workflowStatus.replace(/\s+/g, '').toLowerCase();
+
+    if (workflowKey === 'draft') {
+        return { label: 'Draft', className: 'bg-slate-600/10 text-slate-700 border-slate-200' };
+    }
+
+    if (workflowKey === 'pendingapproval') {
+        return { label: 'Pending Approval', className: 'bg-amber-600/15 text-amber-700 border-amber-200' };
+    }
+
+    if (workflowKey === 'rejected') {
+        return { label: 'Rejected', className: 'bg-red-600/15 text-red-700 border-red-200' };
+    }
+
+    if (workflowKey === 'cancelled') {
+        return { label: 'Cancelled', className: 'bg-zinc-600/15 text-zinc-700 border-zinc-200' };
+    }
+
+    if (workflowKey !== 'approved') {
+        return { label: normalizeStatusLabel(workflowStatus), className: 'bg-slate-600/10 text-slate-700 border-slate-200' };
+    }
+
     if (receipt.vendorInvoiceId) {
         return { label: 'Invoiced', className: 'bg-blue-600/15 text-blue-700 border-blue-200' };
     }
@@ -39,7 +86,7 @@ function getReceiptStatus(receipt: FinancePurchaseOrderReceipt) {
         return { label: 'Partially Invoiced', className: 'bg-amber-600/15 text-amber-700 border-amber-200' };
     }
 
-    return { label: 'Open', className: 'bg-slate-600/10 text-slate-700 border-slate-200' };
+    return { label: 'Approved', className: 'bg-emerald-600/15 text-emerald-700 border-emerald-200' };
 }
 
 export default function ReceiptsPage() {

@@ -40,7 +40,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 
-export default function PaymentsPage() {
+export default function ReceiptsPage() {
     const router = useRouter();
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
@@ -49,7 +49,7 @@ export default function PaymentsPage() {
     const [statusFilter, setStatusFilter] = useState<string>('');
 
     const { data: paymentsData, isLoading } = useQuery({
-        queryKey: ['payments', page, pageSize, debouncedSearchTerm, statusFilter],
+        queryKey: ['customer-receipts', page, pageSize, debouncedSearchTerm, statusFilter],
         queryFn: () => arService.getPayments({
             page,
             pageSize,
@@ -80,20 +80,20 @@ export default function PaymentsPage() {
         <div className="space-y-8 p-8 max-w-[1600px] mx-auto">
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Payments</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">Customer Receipts</h1>
                     <p className="text-muted-foreground mt-2">
-                        Track and manage customer payments and allocations.
+                        Track and manage receipts from customers and their invoice allocations.
                     </p>
                 </div>
-                <Button onClick={() => router.push('/finance/ar/payments/new')}>
-                    <Plus className="mr-2 h-4 w-4" /> Record Payment
+                <Button onClick={() => router.push('/finance/ar/receipts/new')}>
+                    <Plus className="mr-2 h-4 w-4" /> Record Receipt
                 </Button>
             </div>
 
             <Card>
                 <CardHeader>
                     <div className="flex items-center justify-between">
-                        <CardTitle>Payment History</CardTitle>
+                        <CardTitle>Receipt History</CardTitle>
                         <div className="flex items-center space-x-2">
                             {/* 
               <div className="relative w-64">
@@ -129,7 +129,7 @@ export default function PaymentsPage() {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Payment #</TableHead>
+                                    <TableHead>Receipt #</TableHead>
                                     <TableHead>Date</TableHead>
                                     <TableHead>Customer</TableHead>
                                     <TableHead>Method</TableHead>
@@ -156,7 +156,7 @@ export default function PaymentsPage() {
                                 ) : paymentsData?.items?.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={8} className="h-24 text-center">
-                                            No payments found.
+                                            No customer receipts found.
                                         </TableCell>
                                     </TableRow>
                                 ) : (
@@ -185,12 +185,12 @@ export default function PaymentsPage() {
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
                                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                                        {/* <DropdownMenuItem onClick={() => router.push(`/finance/ar/payments/${payment.id}`)}>
+                                                        {/* <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/${payment.id}`)}>
                               View Details
                             </DropdownMenuItem> */}
                                                         {payment.unallocatedAmount > 0 && payment.status === 'Posted' && (
-                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/payments/new?customerId=${payment.customerId}&paymentId=${payment.id}`)}>
-                                                                <FileText className="mr-2 h-4 w-4" /> Allocate Payment
+                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?customerId=${payment.customerId}&paymentId=${payment.id}`)}>
+                                                                <FileText className="mr-2 h-4 w-4" /> Allocate Receipt
                                                             </DropdownMenuItem>
                                                         )}
                                                     </DropdownMenuContent>

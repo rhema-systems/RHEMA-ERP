@@ -524,6 +524,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<CurrencyLinkDto> AddCurrencyLinkAsync(AddCurrencyLinkDto dto)
         {
+            var currencyCode = ResolveCurrencyCode(dto);
             var account = await _unitOfWork.Accounts
                 .GetQueryable(a => a.TenantId == TenantId && a.Id == dto.AccountId)
                 .Include(a => a.CurrencyLinks)
@@ -532,12 +533,26 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (account == null)
                 throw new ArgumentException($"Account {dto.AccountId} not found");
 
-            var existingLink = account.CurrencyLinks.FirstOrDefault(c => c.LinkedCurrencyCode == dto.CurrencyCode);
+            if (!account.IsMultiCurrency)
+                throw new InvalidOperationException("Currency links can only be added to accounts with multi-currency enabled.");
+
+            if (string.Equals(NormalizeCurrencyCode(account.CurrencyCode), currencyCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Currency {currencyCode} is the account primary currency and is linked implicitly.");
+
+            var now = DateTime.UtcNow;
+            var currentUserId = TryGetCurrentUserId();
+            var existingLink = account.CurrencyLinks.FirstOrDefault(c =>
+                string.Equals(NormalizeCurrencyCode(c.LinkedCurrencyCode), currencyCode, StringComparison.OrdinalIgnoreCase));
             if (existingLink != null)
             {
                 if (existingLink.IsActive)
-                    throw new InvalidOperationException($"Currency {dto.CurrencyCode} is already linked");
+                    throw new InvalidOperationException($"Currency {currencyCode} is already linked");
+
+                existingLink.LinkedCurrencyCode = currencyCode;
                 existingLink.IsActive = true;
+                existingLink.EffectiveEndDate = null;
+                existingLink.InactivationReason = null;
+                ApplyCurrencyLinkSettings(existingLink, dto, now, currentUserId);
                 await _unitOfWork.SaveChangesAsync();
                 return MapCurrencyLinkToDto(existingLink, account);
             }
@@ -547,9 +562,23 @@ namespace ErpSystem.Api.Services.Finance.GL
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 AccountId = dto.AccountId,
-                LinkedCurrencyCode = dto.CurrencyCode,
-                ForeignCurrencyBalance = dto.OpeningBalance ?? 0,
-                IsActive = dto.IsActive
+                LinkedCurrencyCode = currencyCode,
+                ForeignCurrencyBalance = RoundMoney(dto.OpeningBalance ?? 0m),
+                BaseCurrencyEquivalent = RoundMoney(dto.OpeningBalanceBaseCurrency ?? 0m),
+                CurrentExchangeRate = CalculateOpeningRate(dto.OpeningBalance, dto.OpeningBalanceBaseCurrency),
+                RateEffectiveDate = dto.OpeningBalanceDate?.Date,
+                RevaluationRequired = dto.RevaluationRequired,
+                RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency),
+                TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily"),
+                RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End"),
+                Notes = dto.Notes,
+                IsActive = dto.IsActive,
+                EffectiveDate = dto.OpeningBalanceDate?.Date ?? now,
+                CreatedAt = now,
+                CreatedBy = UserName,
+                CreatedById = currentUserId,
+                CreatedByUserId = currentUserId ?? Guid.Empty,
+                CreatedDate = now
             };
 
             account.CurrencyLinks.Add(currencyLink);
@@ -560,6 +589,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         public async Task<CurrencyLinkRemovalResultDto> RemoveCurrencyLinkAsync(RemoveCurrencyLinkDto dto)
         {
             var result = new CurrencyLinkRemovalResultDto();
+            var currencyCode = NormalizeCurrencyCode(dto.CurrencyCode);
             var account = await _unitOfWork.Accounts
                 .GetQueryable(a => a.TenantId == TenantId && a.Id == dto.AccountId)
                 .Include(a => a.CurrencyLinks)
@@ -568,17 +598,23 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (account == null)
                 throw new ArgumentException($"Account {dto.AccountId} not found");
 
-            var currencyLink = account.CurrencyLinks.FirstOrDefault(c => c.LinkedCurrencyCode == dto.CurrencyCode);
+            if (string.Equals(NormalizeCurrencyCode(account.CurrencyCode), currencyCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The account primary currency is linked implicitly and cannot be removed.");
+
+            var currencyLink = account.CurrencyLinks.FirstOrDefault(c =>
+                string.Equals(NormalizeCurrencyCode(c.LinkedCurrencyCode), currencyCode, StringComparison.OrdinalIgnoreCase));
             if (currencyLink == null)
             {
                 result.Success = false;
-                result.Message = $"Currency {dto.CurrencyCode} not linked";
+                result.Message = $"Currency {currencyCode} not linked";
                 return result;
             }
 
-            // Check if account has any transactions
+            // Check transaction history only for this account-currency pair.
             var transactionCount = await _unitOfWork.Repository<AccountTransaction>()
-                .GetQueryable(t => t.AccountId == dto.AccountId && !t.IsDeleted)
+                .GetQueryable(t => t.AccountId == dto.AccountId
+                    && t.TransactionCurrency == currencyCode
+                    && !t.IsDeleted)
                 .CountAsync();
 
             result.TransactionCount = transactionCount;
@@ -586,6 +622,13 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (transactionCount > 0 && !dto.ForceRemove)
             {
                 currencyLink.IsActive = false;
+                currencyLink.EffectiveEndDate = DateTime.UtcNow;
+                currencyLink.InactivationReason = dto.Reason;
+                currencyLink.UpdatedAt = DateTime.UtcNow;
+                currencyLink.UpdatedBy = UserName;
+                currencyLink.LastModifiedById = TryGetCurrentUserId();
+                currencyLink.ModifiedByUserId = currencyLink.LastModifiedById;
+                currencyLink.ModifiedDate = DateTime.UtcNow;
                 await _unitOfWork.SaveChangesAsync();
                 result.Success = true;
                 result.WasInactivated = true;
@@ -603,6 +646,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<CurrencyLinkDto> InactivateCurrencyLinkAsync(Guid accountId, string currencyCode)
         {
+            var normalizedCurrencyCode = NormalizeCurrencyCode(currencyCode);
             var account = await _unitOfWork.Accounts
                 .GetQueryable(a => a.TenantId == TenantId && a.Id == accountId)
                 .Include(a => a.CurrencyLinks)
@@ -611,11 +655,21 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (account == null)
                 throw new ArgumentException($"Account {accountId} not found");
 
-            var currencyLink = account.CurrencyLinks.FirstOrDefault(c => c.LinkedCurrencyCode == currencyCode);
+            if (string.Equals(NormalizeCurrencyCode(account.CurrencyCode), normalizedCurrencyCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The account primary currency is linked implicitly and cannot be inactivated.");
+
+            var currencyLink = account.CurrencyLinks.FirstOrDefault(c =>
+                string.Equals(NormalizeCurrencyCode(c.LinkedCurrencyCode), normalizedCurrencyCode, StringComparison.OrdinalIgnoreCase));
             if (currencyLink == null)
-                throw new ArgumentException($"Currency {currencyCode} not linked");
+                throw new ArgumentException($"Currency {normalizedCurrencyCode} not linked");
 
             currencyLink.IsActive = false;
+            currencyLink.EffectiveEndDate = DateTime.UtcNow;
+            currencyLink.UpdatedAt = DateTime.UtcNow;
+            currencyLink.UpdatedBy = UserName;
+            currencyLink.LastModifiedById = TryGetCurrentUserId();
+            currencyLink.ModifiedByUserId = currencyLink.LastModifiedById;
+            currencyLink.ModifiedDate = DateTime.UtcNow;
             await _unitOfWork.SaveChangesAsync();
             return MapCurrencyLinkToDto(currencyLink, account);
         }
@@ -636,10 +690,13 @@ namespace ErpSystem.Api.Services.Finance.GL
             foreach (var link in links)
             {
                 var dto = MapCurrencyLinkToDto(link, account);
-                // Get transaction count for account
-                dto.TransactionCount = await _unitOfWork.Repository<AccountTransaction>()
-                    .GetQueryable(t => t.AccountId == accountId && !t.IsDeleted)
+                var currencyCode = NormalizeCurrencyCode(link.LinkedCurrencyCode);
+                var transactionCount = await _unitOfWork.Repository<AccountTransaction>()
+                    .GetQueryable(t => t.AccountId == accountId
+                        && t.TransactionCurrency == currencyCode
+                        && !t.IsDeleted)
                     .CountAsync();
+                dto.TransactionCount = Math.Max(link.TransactionCount, transactionCount);
                 dto.HasTransactions = dto.TransactionCount > 0;
                 result.Add(dto);
             }
@@ -649,20 +706,106 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private CurrencyLinkDto MapCurrencyLinkToDto(AccountCurrencyLink link, Account account)
         {
+            var currencyCode = NormalizeCurrencyCode(link.LinkedCurrencyCode);
+            var currentExchangeRate = link.CurrentExchangeRate > 0m ? link.CurrentExchangeRate : (decimal?)null;
             return new CurrencyLinkDto
             {
                 Id = link.Id,
                 AccountId = link.AccountId,
                 AccountNumber = account.AccountNumber,
                 AccountName = account.AccountName,
-                CurrencyCode = link.LinkedCurrencyCode,
-                CurrencyName = link.LinkedCurrencyCode, // Use code as name for now
+                CurrencyCode = currencyCode,
+                LinkedCurrencyCode = currencyCode,
+                CurrencyName = currencyCode, // Use code as name for now
                 CurrentBalance = link.ForeignCurrencyBalance,
-                CurrentBalanceBaseCurrency = 0, // TODO: Calculate from exchange rate
+                CurrentBalanceBaseCurrency = link.BaseCurrencyEquivalent,
+                ForeignCurrencyBalance = link.ForeignCurrencyBalance,
+                BaseCurrencyBalance = link.BaseCurrencyEquivalent,
+                CurrentExchangeRate = currentExchangeRate,
+                RevaluationRequired = link.RevaluationRequired,
+                RevaluationFrequency = link.RevaluationFrequency.ToString(),
+                TransactionRateType = link.TransactionRateType,
+                RevaluationRateType = link.RevaluationRateType,
+                LastRevaluationDate = link.LastRevaluationDate,
+                LastRevaluationRate = currentExchangeRate,
+                LastRevaluationAdjustment = link.LastRevaluationAdjustment,
+                CumulativeRevaluationAdjustment = link.CumulativeRevaluationAdjustment,
+                UnrealizedGainLoss = link.LastRevaluationAdjustment,
                 IsActive = link.IsActive,
-                CreatedDate = link.CreatedAt
+                HasTransactions = link.HasTransactionHistory,
+                TransactionCount = link.TransactionCount,
+                Notes = link.Notes,
+                CreatedDate = link.CreatedAt,
+                CreatedAt = link.CreatedAt,
+                UpdatedAt = link.UpdatedAt
             };
         }
+
+        private static string ResolveCurrencyCode(AddCurrencyLinkDto dto)
+            => NormalizeCurrencyCode(!string.IsNullOrWhiteSpace(dto.CurrencyCode)
+                ? dto.CurrencyCode
+                : dto.LinkedCurrencyCode);
+
+        private static string NormalizeCurrencyCode(string? currencyCode)
+        {
+            var normalized = currencyCode?.Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(normalized) || normalized.Length != 3)
+                throw new InvalidOperationException("Currency code must be a valid 3-character ISO code.");
+
+            return normalized;
+        }
+
+        private static string NormalizeRateType(string? value, string fallback)
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+            if (normalized.Length > 20)
+                throw new InvalidOperationException("Rate type cannot exceed 20 characters.");
+
+            return normalized;
+        }
+
+        private static RevaluationFrequency ParseRevaluationFrequency(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return RevaluationFrequency.Monthly;
+
+            var normalized = value.Trim().Replace("-", string.Empty).Replace(" ", string.Empty);
+            return Enum.TryParse<RevaluationFrequency>(normalized, ignoreCase: true, out var frequency)
+                ? frequency
+                : RevaluationFrequency.Monthly;
+        }
+
+        private static decimal RoundMoney(decimal amount)
+            => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+        private static decimal CalculateOpeningRate(decimal? foreignBalance, decimal? baseBalance)
+        {
+            if (!foreignBalance.HasValue || foreignBalance.Value == 0m || !baseBalance.HasValue)
+                return 0m;
+
+            return decimal.Round(baseBalance.Value / foreignBalance.Value, 6, MidpointRounding.AwayFromZero);
+        }
+
+        private void ApplyCurrencyLinkSettings(
+            AccountCurrencyLink link,
+            AddCurrencyLinkDto dto,
+            DateTime now,
+            Guid? currentUserId)
+        {
+            link.RevaluationRequired = dto.RevaluationRequired;
+            link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
+            link.TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily");
+            link.RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End");
+            link.Notes = dto.Notes;
+            link.UpdatedAt = now;
+            link.UpdatedBy = UserName;
+            link.LastModifiedById = currentUserId;
+            link.ModifiedByUserId = currentUserId;
+            link.ModifiedDate = now;
+        }
+
+        private Guid? TryGetCurrentUserId()
+            => Guid.TryParse(_currentUser.UserId, out var userId) ? userId : null;
 
         #endregion
     }

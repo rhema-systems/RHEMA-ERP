@@ -164,7 +164,16 @@ namespace ErpSystem.Core.Enums
         Completed = 3,
 
         [Display(Name = "Cancelled")]
-        Cancelled = 4
+        Cancelled = 4,
+
+        [Display(Name = "Pending Approval")]
+        PendingApproval = 5,
+
+        [Display(Name = "Approved")]
+        Approved = 6,
+
+        [Display(Name = "Rejected")]
+        Rejected = 7
     }
 
     public enum AssetCondition
@@ -218,7 +227,13 @@ namespace ErpSystem.Core.Enums
         Terminated = 3,
 
         [Display(Name = "Completed")]
-        Completed = 4
+        Completed = 4,
+
+        [Display(Name = "Pending Approval")]
+        PendingApproval = 5,
+
+        [Display(Name = "Rejected")]
+        Rejected = 6
     }
 
     /// <summary>

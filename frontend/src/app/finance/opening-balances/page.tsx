@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
     AlertCircle,
     ArrowRight,
@@ -46,7 +47,7 @@ type OpeningLine = {
     notes: string;
 };
 
-type BusyAction = 'create' | 'validate' | 'submit' | 'post' | 'load' | null;
+type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | null;
 
 const BASE_CURRENCY = 'GHS';
 
@@ -125,9 +126,15 @@ function statusVariant(status?: string): 'default' | 'secondary' | 'destructive'
 
 export default function OpeningBalancesPage() {
     const { toast } = useToast();
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const requestedBatchId = searchParams.get('batchId');
+    const suppressRequestedLoadRef = useRef(false);
     const [busyAction, setBusyAction] = useState<BusyAction>(null);
+    const [activeTab, setActiveTab] = useState('gl');
     const [openAccountLineId, setOpenAccountLineId] = useState<string | null>(null);
     const [currentBatch, setCurrentBatch] = useState<OpeningBalanceBatch | null>(null);
+    const [isDirty, setIsDirty] = useState(false);
     const [validation, setValidation] = useState<OpeningBalanceValidationResult | null>(null);
     const [comment, setComment] = useState('');
     const [header, setHeader] = useState({
@@ -165,6 +172,11 @@ export default function OpeningBalancesPage() {
         queryFn: () => financeDataService.getOpeningBalanceDiagnostics(),
     });
 
+    const batchesQuery = useQuery({
+        queryKey: ['opening-balance-batches'],
+        queryFn: () => financeDataService.getOpeningBalanceBatches(),
+    });
+
     const accountingBooks = useMemo<AccountingBook[]>(() => {
         const books = (booksQuery.data && booksQuery.data.length > 0 ? booksQuery.data : DEFAULT_ACCOUNTING_BOOKS)
             .filter(book => book.isActive !== false && book.allowsPosting !== false);
@@ -177,6 +189,15 @@ export default function OpeningBalancesPage() {
         return open.length > 0 ? open : fiscalPeriods;
     }, [fiscalPeriods]);
 
+    const periodOptions = useMemo(() => {
+        if (!currentBatch || openPeriods.some(period => period.id === currentBatch.fiscalPeriodId)) {
+            return openPeriods;
+        }
+
+        const savedPeriod = fiscalPeriods.find(period => period.id === currentBatch.fiscalPeriodId);
+        return savedPeriod ? [savedPeriod, ...openPeriods] : openPeriods;
+    }, [currentBatch, fiscalPeriods, openPeriods]);
+
     const accounts = useMemo(() => {
         return (accountsQuery.data ?? [])
             .filter(isPostingAccount)
@@ -185,7 +206,7 @@ export default function OpeningBalancesPage() {
     }, [accountsQuery.data, header.bookClassification]);
 
     useEffect(() => {
-        if (openPeriods.length === 0) {
+        if (currentBatch || openPeriods.length === 0) {
             return;
         }
 
@@ -206,7 +227,7 @@ export default function OpeningBalancesPage() {
                 openingDate,
             };
         });
-    }, [openPeriods]);
+    }, [currentBatch, openPeriods]);
 
     useEffect(() => {
         if (!accountingBooks.some(book => book.code === header.bookClassification)) {
@@ -250,6 +271,7 @@ export default function OpeningBalancesPage() {
 
     const updateLine = (id: string, patch: Partial<OpeningLine>) => {
         setValidation(null);
+        setIsDirty(true);
         setLines(current => current.map(line => {
             if (line.id !== id) return line;
             const updated = { ...line, ...patch };
@@ -264,10 +286,12 @@ export default function OpeningBalancesPage() {
     };
 
     const addLine = () => {
+        setIsDirty(true);
         setLines(current => [...current, newLine()]);
     };
 
     const removeLine = (id: string) => {
+        setIsDirty(true);
         setLines(current => current.length > 1 ? current.filter(line => line.id !== id) : current);
         setValidation(null);
     };
@@ -292,6 +316,28 @@ export default function OpeningBalancesPage() {
             })),
     });
 
+    const applyBatchToForm = useCallback((batch: OpeningBalanceBatch) => {
+        setCurrentBatch(batch);
+        setValidation(null);
+        setIsDirty(false);
+        setHeader({
+            batchNumber: batch.batchNumber,
+            sourceReference: batch.sourceReference || '',
+            description: batch.description || '',
+            openingDate: normalizeDate(batch.openingDate),
+            fiscalPeriodId: batch.fiscalPeriodId,
+            bookClassification: batch.bookClassification,
+        });
+        setLines(batch.lines.map(line => ({
+            id: line.id,
+            accountId: line.accountId,
+            debitAmount: line.debitAmount || '',
+            creditAmount: line.creditAmount || '',
+            sourceReference: line.sourceReference || '',
+            notes: line.notes || '',
+        })));
+    }, []);
+
     const handleCreateBatch = async () => {
         if (clientErrors.length > 0) {
             toast({ title: 'Validation', description: clientErrors[0], variant: 'destructive' });
@@ -301,12 +347,33 @@ export default function OpeningBalancesPage() {
         try {
             setBusyAction('create');
             const created = await financeDataService.createOpeningBalanceBatch(buildPayload());
-            setCurrentBatch(created);
-            setValidation(null);
-            await diagnosticsQuery.refetch();
+            applyBatchToForm(created);
+            router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
+            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
             toast({ title: 'Opening batch created', description: created.batchNumber });
         } catch (error: any) {
             toast({ title: 'Create failed', description: error?.message || 'Unable to create opening balance batch.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleUpdateBatch = async () => {
+        if (!currentBatch || clientErrors.length > 0) {
+            if (clientErrors.length > 0) {
+                toast({ title: 'Validation', description: clientErrors[0], variant: 'destructive' });
+            }
+            return;
+        }
+
+        try {
+            setBusyAction('update');
+            const updated = await financeDataService.updateOpeningBalanceBatch(currentBatch.id, buildPayload());
+            applyBatchToForm(updated);
+            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
+            toast({ title: 'Opening batch saved', description: updated.batchNumber });
+        } catch (error: any) {
+            toast({ title: 'Save failed', description: error?.message || 'Unable to update opening balance batch.', variant: 'destructive' });
         } finally {
             setBusyAction(null);
         }
@@ -320,7 +387,8 @@ export default function OpeningBalancesPage() {
             const refreshed = await financeDataService.getOpeningBalanceBatch(currentBatch.id);
             setValidation(result);
             setCurrentBatch(refreshed);
-            await diagnosticsQuery.refetch();
+            setIsDirty(false);
+            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
             toast({
                 title: result.isValid ? 'Validation passed' : 'Validation failed',
                 description: result.isValid ? currentBatch.batchNumber : result.errors[0],
@@ -338,8 +406,8 @@ export default function OpeningBalancesPage() {
         try {
             setBusyAction('submit');
             const submitted = await financeDataService.submitOpeningBalanceBatch(currentBatch.id, comment || undefined);
-            setCurrentBatch(submitted);
-            await diagnosticsQuery.refetch();
+            applyBatchToForm(submitted);
+            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
             toast({ title: 'Opening batch submitted', description: submitted.status });
         } catch (error: any) {
             toast({ title: 'Submit failed', description: error?.message || 'Unable to submit opening balance batch.', variant: 'destructive' });
@@ -353,8 +421,8 @@ export default function OpeningBalancesPage() {
         try {
             setBusyAction('post');
             const posted = await financeDataService.postOpeningBalanceBatch(currentBatch.id, comment || undefined);
-            setCurrentBatch(posted);
-            await diagnosticsQuery.refetch();
+            applyBatchToForm(posted);
+            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
             toast({ title: 'Opening batch posted', description: posted.batchNumber });
         } catch (error: any) {
             toast({ title: 'Post failed', description: error?.message || 'Unable to post opening balance batch.', variant: 'destructive' });
@@ -363,37 +431,70 @@ export default function OpeningBalancesPage() {
         }
     };
 
-    const loadBatch = async (batchId: string) => {
+    const loadBatch = useCallback(async (batchId: string, updateUrl = true) => {
         try {
             setBusyAction('load');
             const batch = await financeDataService.getOpeningBalanceBatch(batchId);
-            setCurrentBatch(batch);
-            setValidation(null);
-            setHeader({
-                batchNumber: batch.batchNumber,
-                sourceReference: batch.sourceReference || '',
-                description: batch.description || '',
-                openingDate: normalizeDate(batch.openingDate),
-                fiscalPeriodId: batch.fiscalPeriodId,
-                bookClassification: batch.bookClassification,
-            });
-            setLines(batch.lines.map(line => ({
-                id: line.id,
-                accountId: line.accountId,
-                debitAmount: line.debitAmount || '',
-                creditAmount: line.creditAmount || '',
-                sourceReference: line.sourceReference || '',
-                notes: line.notes || '',
-            })));
+            applyBatchToForm(batch);
+            setActiveTab('gl');
+            if (updateUrl) {
+                router.replace(`/finance/opening-balances?batchId=${batch.id}`, { scroll: false });
+            }
         } catch (error: any) {
             toast({ title: 'Load failed', description: error?.message || 'Unable to load opening balance batch.', variant: 'destructive' });
         } finally {
             setBusyAction(null);
         }
+    }, [applyBatchToForm, router, toast]);
+
+    useEffect(() => {
+        if (!requestedBatchId) {
+            suppressRequestedLoadRef.current = false;
+            return;
+        }
+
+        if (suppressRequestedLoadRef.current) {
+            return;
+        }
+
+        if (requestedBatchId && currentBatch?.id !== requestedBatchId) {
+            void loadBatch(requestedBatchId, false);
+        }
+    }, [currentBatch?.id, loadBatch, requestedBatchId]);
+
+    const handleNewBatch = () => {
+        const today = todayInputValue();
+        const period = openPeriods.find(item => isDateInPeriod(today, item)) ?? openPeriods[0];
+        suppressRequestedLoadRef.current = true;
+        setCurrentBatch(null);
+        setValidation(null);
+        setComment('');
+        setIsDirty(false);
+        setHeader({
+            batchNumber: '',
+            sourceReference: '',
+            description: '',
+            openingDate: period ? openingDateForPeriod(period, today) : today,
+            fiscalPeriodId: period?.id || '',
+            bookClassification: accountingBooks[0]?.code ?? 'IFRS',
+        });
+        setLines([newLine(), newLine()]);
+        setActiveTab('gl');
+        router.replace('/finance/opening-balances', { scroll: false });
+    };
+
+    const handleRefresh = async () => {
+        const refreshes: Promise<unknown>[] = [batchesQuery.refetch(), diagnosticsQuery.refetch()];
+        if (currentBatch) {
+            refreshes.push(loadBatch(currentBatch.id, false));
+        }
+        await Promise.all(refreshes);
     };
 
     const canSubmit = Boolean(currentBatch) && ['Draft', 'Validated', 'Failed'].includes(currentBatch?.status || '');
     const canPost = Boolean(currentBatch) && ['Approved', 'Failed'].includes(currentBatch?.status || '');
+    const canEditCurrent = Boolean(currentBatch) && ['Draft', 'Validated', 'Failed'].includes(currentBatch?.status || '');
+    const formReadOnly = Boolean(currentBatch) && !canEditCurrent;
     const selectedBookName = getAccountingBookName(accountingBooks, header.bookClassification);
 
     return (
@@ -404,9 +505,13 @@ export default function OpeningBalancesPage() {
                     <p className="text-muted-foreground mt-2">Controlled GL opening batches and subledger opening documents.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={() => diagnosticsQuery.refetch()} disabled={diagnosticsQuery.isFetching}>
-                        {diagnosticsQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    <Button variant="outline" onClick={handleRefresh} disabled={batchesQuery.isFetching || diagnosticsQuery.isFetching || busyAction !== null}>
+                        {(batchesQuery.isFetching || diagnosticsQuery.isFetching) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                         Refresh
+                    </Button>
+                    <Button variant="outline" onClick={handleNewBatch} disabled={busyAction !== null}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        New Batch
                     </Button>
                     <Button variant="outline" asChild>
                         <Link href="/finance/approvals">
@@ -437,7 +542,7 @@ export default function OpeningBalancesPage() {
                 </Alert>
             )}
 
-            <Tabs defaultValue="gl" className="space-y-6">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
                 <TabsList>
                     <TabsTrigger value="gl">GL Batch</TabsTrigger>
                     <TabsTrigger value="subledger">Subledger</TabsTrigger>
@@ -445,6 +550,59 @@ export default function OpeningBalancesPage() {
                 </TabsList>
 
                 <TabsContent value="gl" className="space-y-6">
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                            <CardTitle>Saved GL Batches</CardTitle>
+                            <Badge variant="outline">{batchesQuery.data?.length ?? 0}</Badge>
+                        </CardHeader>
+                        <CardContent>
+                            {batchesQuery.isLoading ? (
+                                <div className="space-y-3">
+                                    <Skeleton className="h-12 w-full" />
+                                    <Skeleton className="h-12 w-full" />
+                                </div>
+                            ) : (batchesQuery.data ?? []).length === 0 ? (
+                                <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                                    No saved GL opening-balance batches yet.
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto rounded-md border">
+                                    <table className="w-full min-w-[760px]">
+                                        <thead>
+                                            <tr className="border-b bg-muted/50">
+                                                <th className="p-3 text-left font-medium">Batch</th>
+                                                <th className="p-3 text-left font-medium">Opening Date</th>
+                                                <th className="p-3 text-left font-medium">Period / Book</th>
+                                                <th className="p-3 text-right font-medium">Debit</th>
+                                                <th className="p-3 text-left font-medium">Status</th>
+                                                <th className="p-3 w-[96px]"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(batchesQuery.data ?? []).map(batch => (
+                                                <tr key={batch.id} className={cn('border-b last:border-0', currentBatch?.id === batch.id && 'bg-primary/5')}>
+                                                    <td className="p-3">
+                                                        <div className="font-medium">{batch.batchNumber}</div>
+                                                        <div className="max-w-[280px] truncate text-xs text-muted-foreground">{batch.description || batch.sourceReference || 'No description'}</div>
+                                                    </td>
+                                                    <td className="p-3">{normalizeDate(batch.openingDate)}</td>
+                                                    <td className="p-3">{batch.fiscalPeriodCode} / {batch.bookClassification}</td>
+                                                    <td className="p-3 text-right font-medium">{formatAmount(batch.totalDebit)}</td>
+                                                    <td className="p-3"><Badge variant={statusVariant(batch.status)}>{batch.status}</Badge></td>
+                                                    <td className="p-3 text-right">
+                                                        <Button size="sm" variant={currentBatch?.id === batch.id ? 'secondary' : 'outline'} onClick={() => loadBatch(batch.id)} disabled={busyAction !== null}>
+                                                            {currentBatch?.id === batch.id ? 'Loaded' : 'Open'}
+                                                        </Button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+
                     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                         <div className="space-y-6">
                             <Card>
@@ -459,10 +617,11 @@ export default function OpeningBalancesPage() {
                                                 id="batchNumber"
                                                 value={header.batchNumber}
                                                 onChange={(event) => {
-                                                    setCurrentBatch(null);
+                                                    setIsDirty(true);
                                                     setHeader(current => ({ ...current, batchNumber: event.target.value }));
                                                 }}
                                                 placeholder="Auto-generated"
+                                                disabled={Boolean(currentBatch) || formReadOnly}
                                             />
                                         </div>
                                         <div className="space-y-2">
@@ -474,9 +633,10 @@ export default function OpeningBalancesPage() {
                                                 min={selectedPeriodStart || undefined}
                                                 max={selectedPeriodEnd || undefined}
                                                 onChange={(event) => {
-                                                    setCurrentBatch(null);
+                                                    setIsDirty(true);
                                                     setHeader(current => ({ ...current, openingDate: event.target.value }));
                                                 }}
+                                                disabled={formReadOnly}
                                             />
                                             {selectedPeriodStart && selectedPeriodEnd && (
                                                 <p className="text-xs text-muted-foreground">
@@ -489,20 +649,21 @@ export default function OpeningBalancesPage() {
                                             <Select
                                                 value={header.fiscalPeriodId}
                                                 onValueChange={(value) => {
-                                                    const period = openPeriods.find(item => item.id === value);
-                                                    setCurrentBatch(null);
+                                                    const period = periodOptions.find(item => item.id === value);
+                                                    setIsDirty(true);
                                                     setHeader(current => ({
                                                         ...current,
                                                         fiscalPeriodId: value,
                                                         openingDate: period ? openingDateForPeriod(period, current.openingDate) : current.openingDate,
                                                     }));
                                                 }}
+                                                disabled={formReadOnly}
                                             >
                                                 <SelectTrigger>
                                                     <SelectValue placeholder={periodsQuery.isLoading ? 'Loading periods...' : 'Select period'} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {openPeriods.map(period => (
+                                                    {periodOptions.map(period => (
                                                         <SelectItem key={period.id} value={period.id}>
                                                             {period.periodCode} - {period.periodName}
                                                         </SelectItem>
@@ -515,13 +676,14 @@ export default function OpeningBalancesPage() {
                                             <Select
                                                 value={header.bookClassification}
                                                 onValueChange={(value) => {
-                                                    setCurrentBatch(null);
+                                                    setIsDirty(true);
                                                     setHeader(current => ({ ...current, bookClassification: value }));
                                                     setLines(current => current.map(line => {
                                                         const account = accountsQuery.data?.find(item => item.id === line.accountId);
                                                         return account && !isAccountEligibleForBook(account, value) ? { ...line, accountId: '' } : line;
                                                     }));
                                                 }}
+                                                disabled={formReadOnly}
                                             >
                                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                                 <SelectContent>
@@ -537,10 +699,11 @@ export default function OpeningBalancesPage() {
                                                 id="sourceReference"
                                                 value={header.sourceReference}
                                                 onChange={(event) => {
-                                                    setCurrentBatch(null);
+                                                    setIsDirty(true);
                                                     setHeader(current => ({ ...current, sourceReference: event.target.value }));
                                                 }}
                                                 placeholder="Migration file or working paper"
+                                                disabled={formReadOnly}
                                             />
                                         </div>
                                         <div className="space-y-2">
@@ -557,11 +720,12 @@ export default function OpeningBalancesPage() {
                                                 id="description"
                                                 value={header.description}
                                                 onChange={(event) => {
-                                                    setCurrentBatch(null);
+                                                    setIsDirty(true);
                                                     setHeader(current => ({ ...current, description: event.target.value }));
                                                 }}
                                                 rows={2}
                                                 placeholder="Opening trial balance at migration cutover"
+                                                disabled={formReadOnly}
                                             />
                                         </div>
                                     </div>
@@ -571,7 +735,7 @@ export default function OpeningBalancesPage() {
                             <Card>
                                 <CardHeader className="flex flex-row items-center justify-between">
                                     <CardTitle>GL Opening Lines</CardTitle>
-                                    <Button variant="outline" size="sm" onClick={addLine}>
+                                    <Button variant="outline" size="sm" onClick={addLine} disabled={formReadOnly}>
                                         <Plus className="mr-2 h-4 w-4" />
                                         Add Line
                                     </Button>
@@ -611,6 +775,7 @@ export default function OpeningBalancesPage() {
                                                                                 variant="outline"
                                                                                 role="combobox"
                                                                                 className="w-full justify-between font-normal"
+                                                                                disabled={formReadOnly}
                                                                             >
                                                                                 <span className="truncate">
                                                                                     {selectedAccount
@@ -657,6 +822,7 @@ export default function OpeningBalancesPage() {
                                                                         onChange={(event) => updateLine(line.id, { debitAmount: event.target.value === '' ? '' : Number(event.target.value) })}
                                                                         className="text-right"
                                                                         aria-label={`Line ${index + 1} debit`}
+                                                                        disabled={formReadOnly}
                                                                     />
                                                                 </td>
                                                                 <td className="p-3">
@@ -668,6 +834,7 @@ export default function OpeningBalancesPage() {
                                                                         onChange={(event) => updateLine(line.id, { creditAmount: event.target.value === '' ? '' : Number(event.target.value) })}
                                                                         className="text-right"
                                                                         aria-label={`Line ${index + 1} credit`}
+                                                                        disabled={formReadOnly}
                                                                     />
                                                                 </td>
                                                                 <td className="p-3">
@@ -675,6 +842,7 @@ export default function OpeningBalancesPage() {
                                                                         value={line.sourceReference}
                                                                         onChange={(event) => updateLine(line.id, { sourceReference: event.target.value })}
                                                                         placeholder="Optional"
+                                                                        disabled={formReadOnly}
                                                                     />
                                                                 </td>
                                                                 <td className="p-3">
@@ -682,10 +850,11 @@ export default function OpeningBalancesPage() {
                                                                         value={line.notes}
                                                                         onChange={(event) => updateLine(line.id, { notes: event.target.value })}
                                                                         placeholder="Optional"
+                                                                        disabled={formReadOnly}
                                                                     />
                                                                 </td>
                                                                 <td className="p-3 text-center">
-                                                                    <Button variant="ghost" size="icon" onClick={() => removeLine(line.id)} disabled={lines.length === 1}>
+                                                                    <Button variant="ghost" size="icon" onClick={() => removeLine(line.id)} disabled={formReadOnly || lines.length === 1}>
                                                                         <Trash2 className="h-4 w-4" />
                                                                     </Button>
                                                                 </td>
@@ -765,6 +934,14 @@ export default function OpeningBalancesPage() {
                                         </Alert>
                                     )}
 
+                                    {currentBatch && isDirty && (
+                                        <Alert>
+                                            <AlertCircle className="h-4 w-4" />
+                                            <AlertTitle>Unsaved changes</AlertTitle>
+                                            <AlertDescription>Save this batch before validating or submitting it.</AlertDescription>
+                                        </Alert>
+                                    )}
+
                                     <div className="space-y-2">
                                         <Label htmlFor="comment">Approval / Posting Comment</Label>
                                         <Textarea
@@ -777,15 +954,20 @@ export default function OpeningBalancesPage() {
                                     </div>
 
                                     <div className="grid grid-cols-1 gap-2">
-                                        <Button onClick={handleCreateBatch} disabled={busyAction !== null || clientErrors.length > 0}>
-                                            {busyAction === 'create' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
-                                            Create Batch
+                                        <Button
+                                            onClick={currentBatch ? handleUpdateBatch : handleCreateBatch}
+                                            disabled={busyAction !== null || clientErrors.length > 0 || (Boolean(currentBatch) && (!canEditCurrent || !isDirty))}
+                                        >
+                                            {busyAction === 'create' || busyAction === 'update'
+                                                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                : <Database className="mr-2 h-4 w-4" />}
+                                            {currentBatch ? (isDirty ? 'Save Changes' : 'Saved') : 'Create Batch'}
                                         </Button>
-                                        <Button variant="outline" onClick={handleValidateBatch} disabled={!currentBatch || busyAction !== null}>
+                                        <Button variant="outline" onClick={handleValidateBatch} disabled={!currentBatch || isDirty || busyAction !== null || !canEditCurrent}>
                                             {busyAction === 'validate' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
                                             Validate
                                         </Button>
-                                        <Button variant="outline" onClick={handleSubmitBatch} disabled={!canSubmit || busyAction !== null}>
+                                        <Button variant="outline" onClick={handleSubmitBatch} disabled={!canSubmit || isDirty || busyAction !== null}>
                                             {busyAction === 'submit' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                             Submit
                                         </Button>

@@ -413,6 +413,8 @@ public class VendorPayment : TenantEntity
     // ── Payment Method ──────────────────────────────────────────────────
 
     public VendorPaymentMethod PaymentMethod { get; set; } = VendorPaymentMethod.BankTransfer;
+    public Guid? PaymentMethodId { get; set; }
+    public virtual PaymentMethod? ConfiguredPaymentMethod { get; set; }
 
     // ── Currency ────────────────────────────────────────────────────────
 
@@ -571,6 +573,8 @@ public class PaymentBatch : TenantEntity
     // ── Payment Method ──────────────────────────────────────────────────
 
     public VendorPaymentMethod PaymentMethod { get; set; } = VendorPaymentMethod.BankTransfer;
+    public Guid? PaymentMethodId { get; set; }
+    public virtual PaymentMethod? ConfiguredPaymentMethod { get; set; }
 
     public Guid? BankAccountId { get; set; }
     public virtual BankAccount? BankAccount { get; set; }

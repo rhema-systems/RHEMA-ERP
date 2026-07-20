@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,19 +18,22 @@ public class TenantController : ControllerBase
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILdapAuthenticationService _ldapAuthenticationService;
+    private readonly PaymentTermBaselineSeeder _paymentTermBaselineSeeder;
 
     public TenantController(
         ITenantService tenantService,
         ILogger<TenantController> logger,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
-        ILdapAuthenticationService ldapAuthenticationService)
+        ILdapAuthenticationService ldapAuthenticationService,
+        PaymentTermBaselineSeeder paymentTermBaselineSeeder)
     {
         _tenantService = tenantService;
         _logger = logger;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
         _ldapAuthenticationService = ldapAuthenticationService;
+        _paymentTermBaselineSeeder = paymentTermBaselineSeeder;
     }
 
     /// <summary>
@@ -183,6 +187,9 @@ public class TenantController : ControllerBase
             };
 
             var createdTenant = await _tenantService.CreateTenantAsync(tenant);
+
+            // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.
+            await _paymentTermBaselineSeeder.SeedTenantAsync(createdTenant.Id);
 
             // Log audit trail for tenant creation
             try

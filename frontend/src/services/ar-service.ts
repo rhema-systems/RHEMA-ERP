@@ -52,6 +52,8 @@ export interface PaymentQuery {
     startDate?: string;
     endDate?: string;
     status?: string;
+    paymentMethod?: string;
+    paymentMethodId?: string;
 }
 
 class ArService {
@@ -128,6 +130,8 @@ class ArService {
         if (query.startDate) params.append('StartDate', query.startDate);
         if (query.endDate) params.append('EndDate', query.endDate);
         if (query.status) params.append('Status', query.status);
+        if (query.paymentMethod) params.append('PaymentMethod', query.paymentMethod);
+        if (query.paymentMethodId) params.append('PaymentMethodId', query.paymentMethodId);
 
         return apiService.get<PagedResult<CustomerPayment>>(`${this.baseUrl}/payments?${params.toString()}`);
     }

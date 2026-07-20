@@ -43,6 +43,8 @@ public class CustomerPayment : BusinessEntity
     [Required]
     [MaxLength(50)]
     public string PaymentMethod { get; set; } = "Cash"; // Cash, Check, BankTransfer, CreditCard, DebitCard, MobileMoney, Online
+    public Guid? PaymentMethodId { get; set; }
+    public virtual PaymentMethod? ConfiguredPaymentMethod { get; set; }
 
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = "USD";

@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +15,7 @@ public class BusinessPartnerService : IBusinessPartnerService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly IPaymentTermRepository _paymentTermRepository;
     private readonly ILogger<BusinessPartnerService> _logger;
 
     public BusinessPartnerService(
@@ -22,6 +24,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        IPaymentTermRepository paymentTermRepository,
         ILogger<BusinessPartnerService> logger)
     {
         _partnerRepository = partnerRepository;
@@ -29,6 +32,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _paymentTermRepository = paymentTermRepository;
         _logger = logger;
     }
 
@@ -68,6 +72,7 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<BusinessPartnerDetailDto> CreateAsync(CreateBusinessPartnerDto dto)
     {
         var partnerCode = await _partnerRepository.GeneratePartnerCodeAsync(dto.PartnerType);
+        var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId, dto.PartnerType, useDefaultWhenMissing: true);
 
         var partner = new BusinessPartner
         {
@@ -99,12 +104,17 @@ public class BusinessPartnerService : IBusinessPartnerService
             Currency = dto.Currency
         };
 
+        // PROCUREMENT OWNERSHIP NOTE: Finance uses PaymentTermId as the authoritative value.
+        // PaymentTerms is intentionally dual-written for older procurement screens/reports; do not
+        // parse or bulk-backfill historical free text without agreement from the procurement owner.
+        partner.PaymentTermId = paymentTerm?.Id;
+        partner.PaymentTerms = paymentTerm?.Name;
+
         // Set customer-specific fields if partner type is Customer
         if (dto.PartnerType == "Customer")
         {
             partner.CustomerType = dto.CustomerType;
             partner.CreditLimit = dto.CreditLimit;
-            partner.PaymentTerms = dto.PaymentTerms;
             partner.DefaultDiscount = dto.DefaultDiscount;
             partner.PriceList = dto.PriceList;
             partner.SalesRepresentativeId = dto.SalesRepresentativeId;
@@ -140,6 +150,16 @@ public class BusinessPartnerService : IBusinessPartnerService
         partner.UpdatedAt = DateTime.UtcNow;
         partner.ParentId = dto.ParentId;
         partner.Currency = dto.Currency;
+
+        if (dto.PaymentTermId.HasValue)
+        {
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId, partner.PartnerType, useDefaultWhenMissing: false);
+
+            // PROCUREMENT OWNERSHIP NOTE: keep the legacy descriptor synchronized only for
+            // forward edits made through the structured selector. Existing legacy-only rows stay untouched.
+            partner.PaymentTermId = paymentTerm!.Id;
+            partner.PaymentTerms = paymentTerm.Name;
+        }
         
         if (!string.IsNullOrEmpty(dto.Status)) 
         {
@@ -151,7 +171,6 @@ public class BusinessPartnerService : IBusinessPartnerService
         {
             partner.CustomerType = dto.CustomerType;
             partner.CreditLimit = dto.CreditLimit;
-            partner.PaymentTerms = dto.PaymentTerms;
             partner.DefaultDiscount = dto.DefaultDiscount;
             partner.PriceList = dto.PriceList;
             partner.SalesRepresentativeId = dto.SalesRepresentativeId;
@@ -680,6 +699,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             CreditLimit = partner.CreditLimit,
             OutstandingBalance = partner.OutstandingBalance,
             IsOnCreditHold = partner.IsOnCreditHold,
+            PaymentTermId = partner.PaymentTermId,
             // Parent Business Partner
             ParentId = partner.ParentId,
             ParentName = partner.Parent?.PartnerName
@@ -750,6 +770,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             CreditLimit = partner.CreditLimit,
             OutstandingBalance = partner.OutstandingBalance,
             PaymentTerms = partner.PaymentTerms,
+            PaymentTermId = partner.PaymentTermId,
             Currency = partner.Currency,
             DefaultDiscount = partner.DefaultDiscount,
             PriceList = partner.PriceList,
@@ -852,6 +873,42 @@ public class BusinessPartnerService : IBusinessPartnerService
         }
 
         return dto;
+    }
+
+    private async Task<ErpSystem.Core.Entities.Finance.PaymentTerm?> ResolvePaymentTermAsync(
+        Guid? paymentTermId,
+        string partnerType,
+        bool useDefaultWhenMissing)
+    {
+        var applicableTo = partnerType.Equals("Customer", StringComparison.OrdinalIgnoreCase)
+            ? "Customer"
+            : partnerType.Equals("Contractor", StringComparison.OrdinalIgnoreCase)
+                ? "Contractor"
+                : partnerType.Equals("Both", StringComparison.OrdinalIgnoreCase)
+                    ? "All"
+                    : "Supplier";
+
+        var term = paymentTermId.HasValue
+            ? await _paymentTermRepository.GetByIdAsync(paymentTermId.Value)
+            : useDefaultWhenMissing
+                ? await _paymentTermRepository.GetDefaultAsync(applicableTo)
+                : null;
+
+        if (paymentTermId.HasValue && term == null)
+        {
+            throw new InvalidOperationException("The selected payment term was not found for this tenant.");
+        }
+
+        if (term != null && (!term.IsActive ||
+            !(term.ApplicableTo.Equals("All", StringComparison.OrdinalIgnoreCase) ||
+              term.ApplicableTo.Equals(applicableTo, StringComparison.OrdinalIgnoreCase) ||
+              (applicableTo == "Supplier" && term.ApplicableTo.Equals("Vendor", StringComparison.OrdinalIgnoreCase)) ||
+              (applicableTo == "Customer" && term.ApplicableTo.Equals("Client", StringComparison.OrdinalIgnoreCase)))))
+        {
+            throw new InvalidOperationException($"Payment term '{term.Code}' is not active and applicable to {applicableTo.ToLowerInvariant()} partners.");
+        }
+
+        return term;
     }
 
     private async Task<BusinessPartner> GetPartnerEntityAsync(Guid partnerId)

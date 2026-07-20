@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -104,6 +105,7 @@ public class PaymentMethodController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<PaymentMethodDto>> Create([FromBody] CreatePaymentMethodDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
@@ -126,7 +128,7 @@ public class PaymentMethodController : ControllerBase
             Code = code,
             Type = dto.Type,
             Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim(),
-            IsActive = true,
+            IsActive = dto.IsActive,
             RequiresBankAccount = dto.RequiresBankAccount,
             RequiresReference = dto.RequiresReference,
             DefaultGLAccountId = dto.DefaultGLAccountId,
@@ -141,6 +143,7 @@ public class PaymentMethodController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<PaymentMethodDto>> Update(Guid id, [FromBody] CreatePaymentMethodDto dto)
     {
         var tenantId = TenantId;
@@ -166,6 +169,7 @@ public class PaymentMethodController : ControllerBase
         method.Code = code;
         method.Type = dto.Type;
         method.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
+        method.IsActive = dto.IsActive;
         method.RequiresBankAccount = dto.RequiresBankAccount;
         method.RequiresReference = dto.RequiresReference;
         method.DefaultGLAccountId = dto.DefaultGLAccountId;

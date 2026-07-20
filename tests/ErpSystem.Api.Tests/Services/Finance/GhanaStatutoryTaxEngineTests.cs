@@ -326,6 +326,17 @@ public sealed class GhanaStatutoryTaxEngineTests
         {
             TaxReceivableAccountId = replacementReceivable.Id
         });
+
+        await service.UpdateTaxAsync(created.Id, new UpdateTaxDto
+        {
+            ClearTaxReceivableAccount = true
+        });
+
+        var cleared = await db.Set<Tax>()
+            .AsNoTracking()
+            .FirstAsync(t => t.Id == created.Id);
+        cleared.TaxReceivableAccountId.Should().BeNull();
+
         await service.DeleteTaxAsync(created.Id);
 
         var actions = await db.AuditLogs

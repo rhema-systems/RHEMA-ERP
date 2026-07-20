@@ -5,6 +5,15 @@ using ErpSystem.Core.Entities.Procurement;
 
 namespace ErpSystem.Core.Entities.Finance;
 
+public enum FinancePurchaseOrderReceiptStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Rejected = 4,
+    Cancelled = 5
+}
+
 /// <summary>
 /// Finance/AP purchase order used for payable commitment and matching flows.
 /// Supports both inventory-backed and GL-account-backed lines.
@@ -127,6 +136,25 @@ public class FinancePurchaseOrderReceipt : TenantEntity
     public string ReceiptNumber { get; set; } = string.Empty;
 
     public DateTime ReceiptDate { get; set; } = DateTime.UtcNow;
+
+    public FinancePurchaseOrderReceiptStatus Status { get; set; } = FinancePurchaseOrderReceiptStatus.Draft;
+
+    public Guid? WorkflowInstanceId { get; set; }
+
+    public DateTime? SubmittedAt { get; set; }
+
+    public Guid? SubmittedById { get; set; }
+
+    public DateTime? ApprovedAt { get; set; }
+
+    public Guid? ApprovedById { get; set; }
+
+    public DateTime? RejectedAt { get; set; }
+
+    public Guid? RejectedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
 
     [MaxLength(500)]
     public string? Remarks { get; set; }

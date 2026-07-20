@@ -105,8 +105,8 @@ export default function InvoiceDetailsPage() {
                     </Button>
                     )}
                     {(invoice.status === 'Sent' || invoice.status === 'Posted') && invoice.balanceAmount > 0 && (
-                        <Button size="sm" onClick={() => router.push(`/finance/ar/payments/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
-                            <CreditCard className="mr-2 h-4 w-4" /> Record Payment
+                        <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
+                            <CreditCard className="mr-2 h-4 w-4" /> Record Receipt
                         </Button>
                     )}
                 </div>

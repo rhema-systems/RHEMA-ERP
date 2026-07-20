@@ -37,6 +37,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { arService } from '@/services/ar-service';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeService } from '@/services/finance.service';
+import { PaymentMethodType } from '@/types/cash-management';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
@@ -49,6 +50,7 @@ const paymentSchema = z.object({
     paymentDate: z.date(),
     totalAmount: z.coerce.number().min(0.01, 'Amount must be positive'),
     paymentMethod: z.string().min(1, 'Payment method is required'),
+    paymentMethodId: z.string().optional(),
     referenceNumber: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
@@ -57,12 +59,36 @@ const paymentSchema = z.object({
 
 type PaymentFormValues = z.infer<typeof paymentSchema>;
 
-export default function NewPaymentPage() {
+const toCustomerPaymentMethod = (type?: PaymentMethodType): string => {
+    switch (type) {
+        case PaymentMethodType.Cash:
+            return 'Cash';
+        case PaymentMethodType.Cheque:
+            return 'Cheque';
+        case PaymentMethodType.EFT:
+            return 'EFT';
+        case PaymentMethodType.Card:
+            return 'Card';
+        case PaymentMethodType.MobileMoney:
+            return 'Mobile Money';
+        case PaymentMethodType.DirectDebit:
+            return 'Direct Debit';
+        case PaymentMethodType.StandingOrder:
+            return 'Standing Order';
+        case PaymentMethodType.BankTransfer:
+            return 'Bank Transfer';
+        default:
+            return 'Other';
+    }
+};
+
+export default function NewReceiptPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const preselectedCustomerId = searchParams.get('customerId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
+    const preselectedPaymentMethodId = searchParams.get('paymentMethodId') || '';
     const preselectedAmountParam = searchParams.get('amount');
     const preselectedAmount = preselectedAmountParam && Number.isFinite(Number(preselectedAmountParam))
         ? Number(preselectedAmountParam)
@@ -89,6 +115,11 @@ export default function NewPaymentPage() {
         queryFn: () => cashManagementDataService.getActiveBankAccounts(),
     });
 
+    const { data: paymentMethods } = useQuery({
+        queryKey: ['payment-methods', 'active'],
+        queryFn: () => cashManagementDataService.getActivePaymentMethods(),
+    });
+
     const form = useForm<PaymentFormValues>({
         resolver: zodResolver(paymentSchema) as any,
         defaultValues: {
@@ -97,6 +128,7 @@ export default function NewPaymentPage() {
             paymentDate: preselectedPaymentDate,
             totalAmount: preselectedAmount,
             paymentMethod: 'Bank Transfer',
+            paymentMethodId: preselectedPaymentMethodId || undefined,
             referenceNumber: preselectedReferenceNumber,
             currencyCode: 'GHS',
             exchangeRate: 1,
@@ -106,6 +138,27 @@ export default function NewPaymentPage() {
 
     const selectedCustomerId = form.watch('customerId');
     const selectedBankAccountId = form.watch('bankAccountId');
+    const selectedPaymentMethodId = form.watch('paymentMethodId');
+
+    useEffect(() => {
+        if (!paymentMethods?.length) return;
+
+        if (selectedPaymentMethodId) {
+            const selectedMethod = paymentMethods.find((method) => method.id === selectedPaymentMethodId);
+            if (selectedMethod) {
+                form.setValue('paymentMethod', toCustomerPaymentMethod(selectedMethod.type));
+            }
+            return;
+        }
+
+        const preferredMethod =
+            paymentMethods.find((method) => method.type === PaymentMethodType.BankTransfer) ||
+            paymentMethods.find((method) => method.type === PaymentMethodType.EFT) ||
+            paymentMethods[0];
+
+        form.setValue('paymentMethodId', preferredMethod.id);
+        form.setValue('paymentMethod', toCustomerPaymentMethod(preferredMethod.type));
+    }, [paymentMethods, selectedPaymentMethodId, form]);
 
     useEffect(() => {
         if (!selectedBankAccountId || !bankAccounts) return;
@@ -148,6 +201,22 @@ export default function NewPaymentPage() {
     const onSubmit = async (data: PaymentFormValues) => {
         setIsSubmitting(true);
         try {
+            const selectedPaymentMethod = paymentMethods?.find((method) => method.id === data.paymentMethodId);
+            if (data.paymentMethodId && !selectedPaymentMethod) {
+                form.setError('paymentMethodId', { type: 'manual', message: 'Selected payment method is not available' });
+                return;
+            }
+
+            if (selectedPaymentMethod?.requiresBankAccount && !data.bankAccountId) {
+                form.setError('bankAccountId', { type: 'manual', message: `${selectedPaymentMethod.name} requires a bank account` });
+                return;
+            }
+
+            if (selectedPaymentMethod?.requiresReference && !data.referenceNumber?.trim()) {
+                form.setError('referenceNumber', { type: 'manual', message: `${selectedPaymentMethod.name} requires a reference number` });
+                return;
+            }
+
             const invoiceIds = new Set([
                 ...Object.keys(allocations),
                 ...Object.keys(discountAllocations),
@@ -164,8 +233,8 @@ export default function NewPaymentPage() {
             const totalAllocated = allocationRows.reduce((sum, row) => sum + row.allocatedAmount, 0);
             if (totalAllocated > data.totalAmount) {
                 toast({
-                    title: 'Allocation exceeds payment',
-                    description: 'Allocated invoice amounts cannot exceed the payment amount.',
+                    title: 'Allocation exceeds receipt',
+                    description: 'Allocated invoice amounts cannot exceed the receipt amount.',
                     variant: 'destructive',
                 });
                 return;
@@ -178,8 +247,8 @@ export default function NewPaymentPage() {
                 allocations: allocationRows.length > 0 ? allocationRows : undefined,
             });
 
-            toast({ title: 'Success', description: 'Payment recorded successfully' });
-            router.push('/finance/ar/payments');
+            toast({ title: 'Success', description: 'Customer receipt recorded successfully' });
+            router.push('/finance/ar/receipts');
         } catch (error: any) {
             toast({
                 title: 'Error',
@@ -228,18 +297,18 @@ export default function NewPaymentPage() {
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Record Payment</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">Record Customer Receipt</h1>
                     <p className="text-muted-foreground">
-                        Receive payment from customer and allocate to invoices.
+                        Record a receipt from a customer and allocate it to outstanding invoices.
                     </p>
                 </div>
             </div>
 
             <div className="grid gap-8 md:grid-cols-3">
-                {/* Payment Details Form */}
+                {/* Customer receipt details; the API persists receipts as AR payments. */}
                 <Card className="md:col-span-1 h-fit">
                     <CardHeader>
-                        <CardTitle>Payment Details</CardTitle>
+                        <CardTitle>Receipt Details</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <form id="payment-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -360,25 +429,36 @@ export default function NewPaymentPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="paymentMethod">Payment Method</Label>
                                 <Select
-                                    onValueChange={(val) => form.setValue('paymentMethod', val)}
-                                    defaultValue="Bank Transfer"
+                                    onValueChange={(val) => {
+                                        const method = paymentMethods?.find((item) => item.id === val);
+                                        form.setValue('paymentMethodId', val);
+                                        form.setValue('paymentMethod', toCustomerPaymentMethod(method?.type));
+                                    }}
+                                    value={form.watch('paymentMethodId') || undefined}
                                     disabled={isSubmitting}
                                 >
                                     <SelectTrigger>
-                                        <SelectValue />
+                                        <SelectValue placeholder="Select payment method..." />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                                        <SelectItem value="Cash">Cash</SelectItem>
-                                        <SelectItem value="Cheque">Cheque</SelectItem>
-                                        <SelectItem value="Credit Card">Credit Card</SelectItem>
+                                        {paymentMethods?.map((method) => (
+                                            <SelectItem key={method.id} value={method.id}>
+                                                {method.name}
+                                            </SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
+                                {form.formState.errors.paymentMethodId && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.paymentMethodId.message}</p>
+                                )}
                             </div>
 
                             <div className="space-y-2">
                                 <Label htmlFor="reference">Reference #</Label>
                                 <Input id="reference" {...form.register('referenceNumber')} disabled={isSubmitting} />
+                                {form.formState.errors.referenceNumber && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.referenceNumber.message}</p>
+                                )}
                             </div>
 
                             <div className="space-y-2">
@@ -390,7 +470,7 @@ export default function NewPaymentPage() {
                     <CardFooter>
                         <Button type="submit" form="payment-form" className="w-full" disabled={isSubmitting}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Process Payment
+                            Record Receipt
                         </Button>
                     </CardFooter>
                 </Card>

@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -248,54 +249,7 @@ public class FinanceDataSeeder
 
     private async Task SeedPaymentTermsAsync(Guid tenantId, DateTime baseDate)
     {
-        var terms = new[]
-        {
-            new { Id = Guid.Parse("00000001-0030-0000-0000-000000000001"), Code = "NET30", Name = "Net 30 Days", Description = "Payment due 30 days from invoice date.", DueDays = 30, DiscountPercent = 0m, DiscountDays = 0, IsDefault = true, DisplayOrder = 10, ApplicableTo = "All" },
-            new { Id = Guid.Parse("00000001-0000-0000-0000-000000000001"), Code = "COD", Name = "Cash on Delivery", Description = "Payment due immediately on delivery.", DueDays = 0, DiscountPercent = 0m, DiscountDays = 0, IsDefault = false, DisplayOrder = 20, ApplicableTo = "All" },
-            new { Id = Guid.Parse("00000001-0007-0000-0000-000000000001"), Code = "NET7", Name = "Net 7 Days", Description = "Payment due 7 days from invoice date.", DueDays = 7, DiscountPercent = 0m, DiscountDays = 0, IsDefault = false, DisplayOrder = 30, ApplicableTo = "All" },
-            new { Id = Guid.Parse("00000001-0015-0000-0000-000000000001"), Code = "NET15", Name = "Net 15 Days", Description = "Payment due 15 days from invoice date.", DueDays = 15, DiscountPercent = 0m, DiscountDays = 0, IsDefault = false, DisplayOrder = 40, ApplicableTo = "All" },
-            new { Id = Guid.Parse("00000001-0045-0000-0000-000000000001"), Code = "NET45", Name = "Net 45 Days", Description = "Payment due 45 days from invoice date.", DueDays = 45, DiscountPercent = 0m, DiscountDays = 0, IsDefault = false, DisplayOrder = 50, ApplicableTo = "All" },
-            new { Id = Guid.Parse("00000001-0060-0000-0000-000000000001"), Code = "NET60", Name = "Net 60 Days", Description = "Payment due 60 days from invoice date.", DueDays = 60, DiscountPercent = 0m, DiscountDays = 0, IsDefault = false, DisplayOrder = 60, ApplicableTo = "All" },
-            new { Id = Guid.Parse("00000001-0210-0030-0000-000000000001"), Code = "2_10_NET30", Name = "2/10 Net 30", Description = "2% discount if paid within 10 days; otherwise due in 30 days.", DueDays = 30, DiscountPercent = 2m, DiscountDays = 10, IsDefault = false, DisplayOrder = 70, ApplicableTo = "All" }
-        };
-
-        foreach (var term in terms)
-        {
-            var existing = await _context.PaymentTerms
-                .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Code == term.Code);
-
-            if (existing == null)
-            {
-                await _context.PaymentTerms.AddAsync(new PaymentTerm
-                {
-                    Id = term.Id,
-                    TenantId = tenantId,
-                    Code = term.Code,
-                    Name = term.Name,
-                    Description = term.Description,
-                    DueDays = term.DueDays,
-                    DiscountPercent = term.DiscountPercent,
-                    DiscountDays = term.DiscountDays,
-                    IsActive = true,
-                    IsDefault = term.IsDefault,
-                    DisplayOrder = term.DisplayOrder,
-                    ApplicableTo = term.ApplicableTo,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                });
-                continue;
-            }
-
-            existing.Name = term.Name;
-            existing.Description = term.Description;
-            existing.DueDays = term.DueDays;
-            existing.DiscountPercent = term.DiscountPercent;
-            existing.DiscountDays = term.DiscountDays;
-            existing.IsActive = true;
-            existing.IsDefault = term.IsDefault;
-            existing.DisplayOrder = term.DisplayOrder;
-            existing.ApplicableTo = term.ApplicableTo;
-        }
+        await PaymentTermBaselineSeeder.SeedTenantBaselineAsync(_context, tenantId);
 
         _logger.LogInformation("Payment terms seeded");
     }
@@ -1388,6 +1342,31 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-2110-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "2110",
+                AccountNumber = "2110",
+                AccountName = "GRV Accrual Control",
+                AccountType = AccountType.Liability,
+                AccountCategory = "Current Liabilities",
+                AccountSubCategory = "Goods Received Not Invoiced",
+                Description = "Dedicated control account credited when goods are received before supplier invoicing, then cleared when the AP invoice is posted.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-2200-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "2200",
@@ -2120,7 +2099,7 @@ public class FinanceDataSeeder
             ControlAccountInventoryId = Guid.Parse("00000005-1200-0000-0000-000000000001"),
             ControlAccountPayrollId = Guid.Parse("00000005-2120-0000-0000-000000000001"),
             ControlAccountTaxId = Guid.Parse("00000005-2200-0000-0000-000000000001"),
-            ControlAccountGRVAccrualId = Guid.Parse("00000005-2100-0000-0000-000000000001"),
+            ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001"),
             DiscountAllowedAccountId = Guid.Parse("00000005-4210-0000-0000-000000000001"),
             DiscountReceivedAccountId = Guid.Parse("00000005-4910-0000-0000-000000000001"),
             MigrationClearingAccountId = Guid.Parse("00000005-1990-0000-0000-000000000001"),
@@ -2169,7 +2148,14 @@ public class FinanceDataSeeder
 
             if (!settings.ControlAccountGRVAccrualId.HasValue)
             {
-                settings.ControlAccountGRVAccrualId = Guid.Parse("00000005-2100-0000-0000-000000000001");
+                settings.ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001");
+                updated = true;
+            }
+
+            // Move tenants that still have the old generic default to the dedicated GRV control account.
+            if (settings.ControlAccountGRVAccrualId == Guid.Parse("00000005-2100-0000-0000-000000000001"))
+            {
+                settings.ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001");
                 updated = true;
             }
 
@@ -2398,108 +2384,83 @@ public class FinanceDataSeeder
 
     private async Task SeedModuleDefinitionsAsync(Guid tenantId, DateTime baseDate)
     {
-        var modules = new[]
-        {
-            new { Code = "FIN", Name = "Finance", Desc = "General Ledger, Accounts Payable, Accounts Receivable, Cash Management", Icon = "fa-calculator", Sort = 1 },
-            new { Code = "INV", Name = "Inventory", Desc = "Inventory Management, Stock Control, Warehousing", Icon = "fa-boxes", Sort = 2 },
-            new { Code = "PROC", Name = "Procurement", Desc = "Purchase Orders, Requisitions, Supplier Management", Icon = "fa-shopping-cart", Sort = 3 },
-            new { Code = "SALES", Name = "Sales", Desc = "Sales Orders, Invoicing, Customer Management", Icon = "fa-chart-line", Sort = 4 },
-            new { Code = "FA", Name = "Fixed Assets", Desc = "Asset Registry, Depreciation, Asset Lifecycle", Icon = "fa-building", Sort = 5 },
-            new { Code = "MNT", Name = "Maintenance", Desc = "Work Orders, Preventive Maintenance, Equipment Management", Icon = "fa-wrench", Sort = 6 },
-            new { Code = "HR", Name = "Human Resources", Desc = "Employee Management, Payroll, Leave Management", Icon = "fa-users", Sort = 7 },
-            new { Code = "PROJ", Name = "Projects", Desc = "Project Management, Costing, Billing", Icon = "fa-project-diagram", Sort = 8 },
-            new { Code = "MFG", Name = "Manufacturing", Desc = "Production Planning, BOM, Manufacturing Execution", Icon = "fa-industry", Sort = 9 }
-        };
+        var now = DateTime.UtcNow;
+        var existing = await _context.ModuleDefinitions
+            .IgnoreQueryFilters()
+            .Where(module => module.TenantId == tenantId)
+            .ToListAsync();
+        var currentCodes = FinanceModuleLockCatalog.Definitions
+            .Select(module => module.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var mod in modules)
+        foreach (var definition in FinanceModuleLockCatalog.Definitions)
         {
-            if (!await _context.ModuleDefinitions.AnyAsync(m => m.ModuleCode == mod.Code && m.TenantId == tenantId))
+            var module = existing.FirstOrDefault(item =>
+                item.ModuleCode.Equals(definition.Code, StringComparison.OrdinalIgnoreCase));
+
+            if (module == null)
             {
                 await _context.ModuleDefinitions.AddAsync(new ModuleDefinition
                 {
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
-                    ModuleCode = mod.Code,
-                    ModuleName = mod.Name,
-                    Description = mod.Desc,
-                    IconClass = mod.Icon,
-                    SortOrder = mod.Sort,
+                    ModuleCode = definition.Code,
+                    ModuleName = definition.Name,
+                    Description = definition.Description,
+                    IconClass = definition.IconClass,
+                    SortOrder = definition.SortOrder,
                     IsActive = true,
                     IsSystem = true,
                     CreatedAt = baseDate,
                     CreatedBy = "System"
                 });
+                continue;
             }
+
+            module.ModuleCode = definition.Code;
+            module.ModuleName = definition.Name;
+            module.Description = definition.Description;
+            module.IconClass = definition.IconClass;
+            module.SortOrder = definition.SortOrder;
+            module.IsActive = true;
+            module.IsSystem = true;
+            module.IsDeleted = false;
+            module.DeletedAt = null;
+            module.DeletedBy = null;
+            module.UpdatedAt = now;
+            module.UpdatedBy = "System";
         }
-        
-        _logger.LogInformation("Module definitions seeded");
+
+        foreach (var stale in existing.Where(module => !currentCodes.Contains(module.ModuleCode) && module.IsActive))
+        {
+            stale.IsActive = false;
+            stale.UpdatedAt = now;
+            stale.UpdatedBy = "System";
+        }
+
+        _logger.LogInformation("Finance-integrated top-level module definitions reconciled");
     }
 
     private async Task SeedTransactionDocumentMappingsAsync(Guid tenantId, DateTime baseDate)
     {
-        // Get Modules
-        var finMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "FIN" && m.TenantId == tenantId);
-        var invMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "INV" && m.TenantId == tenantId);
-        var procMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "PROC" && m.TenantId == tenantId);
-        var salesMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "SALES" && m.TenantId == tenantId);
-        var faMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "FA" && m.TenantId == tenantId);
+        // Document type alone cannot determine the originating top-level module. For
+        // example, an AR invoice may be entered in Finance or generated by Sales.
+        // OriginModuleCode on the posting request is now authoritative, so retire the
+        // early-stage mappings without deleting historical configuration rows.
+        var staleMappings = await _context.TransactionDocumentModuleMappings
+            .Where(mapping => mapping.TenantId == tenantId && mapping.IsActive)
+            .ToListAsync();
 
-        if (finMod == null) return; // Should not happen if previous method ran
-
-        var mappings = new List<(string DocType, Guid ModId)>
+        foreach (var mapping in staleMappings)
         {
-            // Finance
-            ("JournalEntry", finMod.Id),
-            ("Payment", finMod.Id),
-            ("Receipt", finMod.Id),
-            ("BankTransfer", finMod.Id),
-            ("BankReconciliation", finMod.Id),
-            ("TaxAdjustment", finMod.Id),
-            ("BudgetEntry", finMod.Id),
-
-            // Inventory
-            ("InventoryAdjustment", invMod?.Id ?? finMod.Id),
-            ("StockTransfer", invMod?.Id ?? finMod.Id),
-            ("StockCount", invMod?.Id ?? finMod.Id),
-            ("GoodsReceipt", invMod?.Id ?? finMod.Id),
-            ("GoodsIssue", invMod?.Id ?? finMod.Id),
-
-            // Procurement
-            ("PurchaseOrder", procMod?.Id ?? finMod.Id),
-            ("PurchaseRequisition", procMod?.Id ?? finMod.Id),
-            ("VendorInvoice", procMod?.Id ?? finMod.Id), // AP Invoice usually mapped to Procurement or Finance
-
-            // Sales
-            ("SalesOrder", salesMod?.Id ?? finMod.Id),
-            ("SalesInvoice", salesMod?.Id ?? finMod.Id), // AR Invoice
-            ("DeliveryNote", salesMod?.Id ?? finMod.Id),
-            ("Quotation", salesMod?.Id ?? finMod.Id),
-
-            // Fixed Assets
-            ("AssetAcquisition", faMod?.Id ?? finMod.Id),
-            ("AssetDepreciation", faMod?.Id ?? finMod.Id),
-            ("AssetDisposal", faMod?.Id ?? finMod.Id),
-            ("AssetTransfer", faMod?.Id ?? finMod.Id)
-        };
-
-        foreach (var mapping in mappings)
-        {
-            if (!await _context.TransactionDocumentModuleMappings.AnyAsync(m => m.DocumentType == mapping.DocType && m.TenantId == tenantId))
-            {
-                await _context.TransactionDocumentModuleMappings.AddAsync(new TransactionDocumentModuleMapping
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    DocumentType = mapping.DocType,
-                    ModuleDefinitionId = mapping.ModId,
-                    IsActive = true,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                });
-            }
+            mapping.IsActive = false;
+            mapping.UpdatedAt = DateTime.UtcNow;
+            mapping.UpdatedBy = "System";
         }
 
-        _logger.LogInformation("Transaction document mappings seeded");
+        _logger.LogInformation(
+            "Retired {Count} legacy document-type module mappings; posting origin is now explicit",
+            staleMappings.Count);
     }
 
     #endregion

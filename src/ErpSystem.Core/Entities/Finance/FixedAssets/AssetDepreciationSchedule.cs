@@ -67,6 +67,24 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         // --- Status ---
 
+        [MaxLength(30)]
+        public string ApprovalStatus { get; set; } = "Draft";
+
+        public DateTime? SubmittedAt { get; set; }
+
+        public Guid? SubmittedById { get; set; }
+
+        public DateTime? ApprovedAt { get; set; }
+
+        public Guid? ApprovedById { get; set; }
+
+        public DateTime? RejectedAt { get; set; }
+
+        public Guid? RejectedById { get; set; }
+
+        [MaxLength(1000)]
+        public string? RejectionReason { get; set; }
+
         public bool IsPosted { get; set; } = false;
         public DateTime? PostedDate { get; set; }
         public DateTime? PostingDate { get; set; }

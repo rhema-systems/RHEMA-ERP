@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using ErpSystem.Data;
 using ErpSystem.Api.Services.Finance;
 using Microsoft.AspNetCore.Authorization;
@@ -170,6 +171,7 @@ public class FixedAssetCategoriesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = FinancePermissions.ConfigureFixedAssetCategoriesPolicy)]
     public async Task<ActionResult<FixedAssetCategoryDto>> Create(CreateFixedAssetCategoryDto dto)
     {
         var result = await _categoryService.CreateAsync(dto);
@@ -177,6 +179,7 @@ public class FixedAssetCategoriesController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Policy = FinancePermissions.ConfigureFixedAssetCategoriesPolicy)]
     public async Task<ActionResult<FixedAssetCategoryDto>> Update(Guid id, UpdateFixedAssetCategoryDto dto)
     {
         try
@@ -191,6 +194,7 @@ public class FixedAssetCategoriesController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Policy = FinancePermissions.ConfigureFixedAssetCategoriesPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         try

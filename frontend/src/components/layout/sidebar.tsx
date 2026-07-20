@@ -63,6 +63,7 @@ import {
   Phone,
   Swords,
   BookTemplate,
+  Repeat2,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -76,7 +77,10 @@ interface NavItem {
   children?: NavItem[];
   roles?: string[];
   permissions?: string[];
+  accessMode?: 'all' | 'any';
 }
+
+const ADMINISTRATION_ROLES = ['admin', 'SuperAdmin', 'TenantAdmin'];
 
 const navigationItems: NavItem[] = [
   {
@@ -103,6 +107,7 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
           { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
+          { title: 'Recurring Journals', href: '/finance/recurring-journals', icon: Repeat2 },
           { title: 'Opening Balances', href: '/finance/opening-balances', icon: Database },
           {
             title: 'Journal Approval Queue',
@@ -110,16 +115,6 @@ const navigationItems: NavItem[] = [
             icon: ShieldCheck,
             roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'],
           },
-        ],
-      },
-      {
-        title: 'Segmented Accounts',
-        href: '/finance/segmented-accounts',
-        icon: FolderTree,
-        children: [
-          { title: 'Segment Structure', href: '/finance/settings/segments', icon: FolderTree },
-          { title: 'Segment Values', href: '/finance/settings/segments?tab=values', icon: Database },
-          { title: 'Account Generator', href: '/finance/accounts/generate', icon: FileText },
         ],
       },
       {
@@ -138,7 +133,6 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Dashboard', href: '/finance/fixed-assets/dashboard', icon: LayoutDashboard },
           { title: 'Asset Register', href: '/finance/fixed-assets/register', icon: FileText },
-          { title: 'Categories', href: '/finance/fixed-assets/categories', icon: FolderTree },
           { title: 'Depreciation', href: '/finance/fixed-assets/depreciation', icon: TrendingUp },
           { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: BarChart3 },
           { title: 'Transfers', href: '/finance/fixed-assets/transfers', icon: Activity },
@@ -204,7 +198,7 @@ const navigationItems: NavItem[] = [
           { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
           { title: 'Customer Returns', href: '/sales/return-orders', icon: RotateCcw },
           { title: 'Credit Notes', href: '/sales/credit-notes', icon: CreditCard },
-          { title: 'Payments', href: '/finance/ar/payments', icon: CreditCard },
+          { title: 'Receipts', href: '/finance/ar/receipts', icon: CreditCard },
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
           { title: 'Adjustment Journal', href: '/finance/subledger-adjustments/new?module=AR', icon: FileText },
           { title: 'Journals', href: '/finance/journal-entries?sourceModule=AR', icon: FileText },
@@ -256,10 +250,8 @@ const navigationItems: NavItem[] = [
         href: '/finance/unit-accounting',
         icon: BarChart3,
         children: [
-          { title: 'Unit Types', href: '/finance/unit-types', icon: FileText },
           { title: 'Unit Accounts', href: '/finance/unit-accounts', icon: BarChart3 },
           { title: 'Unit Journal Entries', href: '/finance/unit-journal-entries', icon: FileText },
-          { title: 'Ratio Definitions', href: '/finance/ratio-definitions', icon: BarChart3 },
           { title: 'Unit Budgets', href: '/finance/unit-budgets', icon: BarChart3 },
           { title: 'Allocations', href: '/finance/allocations', icon: BarChart3 },
         ],
@@ -269,7 +261,6 @@ const navigationItems: NavItem[] = [
         href: '/finance/multi-currency',
         icon: CreditCard,
         children: [
-          { title: 'Currencies', href: '/finance/currencies', icon: CreditCard },
           { title: 'Exchange Rates', href: '/finance/exchange-rates', icon: BarChart3 },
           { title: 'Rate Trends', href: '/finance/exchange-rates/trends', icon: TrendingUp },
           { title: 'Revaluation', href: '/finance/revaluation', icon: BarChart3 },
@@ -280,9 +271,6 @@ const navigationItems: NavItem[] = [
         href: '/finance/tax',
         icon: BarChart3,
         children: [
-          { title: 'Tax Configuration', href: '/finance/tax/configuration', icon: Settings },
-          { title: 'Taxes', href: '/finance/tax/configuration/taxes', icon: FileText },
-          { title: 'Tax Groups', href: '/finance/tax/configuration/groups', icon: FileText },
           { title: 'Tax Calculator', href: '/finance/tax/calculator', icon: BarChart3 },
           {
             title: 'Tax Reports',
@@ -312,7 +300,6 @@ const navigationItems: NavItem[] = [
           { title: 'Detailed Ledger', href: '/finance/reports/detailed-ledger', icon: ListTree },
         ],
       },
-      { title: 'Settings', href: '/finance/settings', icon: Settings },
     ],
   },
   {
@@ -685,29 +672,66 @@ const navigationItems: NavItem[] = [
     title: 'Administration',
     href: '/administration',
     icon: Settings,
-    roles: ['admin', 'SuperAdmin', 'TenantAdmin'],
+    roles: ADMINISTRATION_ROLES,
+    permissions: ['Finance.Admin'],
+    accessMode: 'any',
     children: [
-      { title: 'Message Queue', href: '/administration/notifications', icon: Bell },
-      { title: 'System Logs', href: '/administration/system-exception-logs', icon: AlertTriangle },
+      { title: 'Message Queue', href: '/administration/notifications', icon: Bell, roles: ADMINISTRATION_ROLES },
+      { title: 'System Logs', href: '/administration/system-exception-logs', icon: AlertTriangle, roles: ADMINISTRATION_ROLES },
       {
         title: 'Finance',
         href: '/administration/finance',
         icon: CreditCard,
+        permissions: ['Finance.Admin'],
         children: [
-          { title: 'Chart of Accounts', href: '/administration/finance/accounts', icon: CreditCard },
-          { title: 'Tax Configuration', href: '/administration/finance/tax', icon: CreditCard },
-          { title: 'Payment Terms', href: '/administration/finance/payment-terms', icon: CreditCard },
-          { title: 'Currencies', href: '/administration/finance/currencies', icon: DollarSign },
-          { title: 'Currency Settings', href: '/administration/finance/currency', icon: CreditCard },
-          { title: 'Payment Methods', href: '/administration/finance/payment-methods', icon: CreditCard },
-          { title: 'Financial Periods', href: '/administration/finance/periods', icon: CreditCard },
-          { title: 'Document Numbering', href: '/administration/finance/document-numbering', icon: FileText },
+          {
+            title: 'Core Accounting',
+            href: '/administration/finance/settings',
+            icon: Settings,
+            children: [
+              { title: 'Finance Settings', href: '/administration/finance/settings', icon: Settings },
+              { title: 'Chart of Accounts Setup', href: '/administration/finance/accounts', icon: CreditCard },
+              { title: 'Account Segments', href: '/administration/finance/account-segments', icon: FolderTree },
+              { title: 'Account Generator', href: '/administration/finance/account-generator', icon: FileText },
+              { title: 'Fiscal Calendar Setup', href: '/administration/finance/fiscal-calendar', icon: Calendar },
+            ],
+          },
+          {
+            title: 'Tax & Currency',
+            href: '/administration/finance/tax',
+            icon: Globe,
+            children: [
+              { title: 'Tax Configuration', href: '/administration/finance/tax', icon: Settings },
+              { title: 'Currencies', href: '/administration/finance/currencies', icon: DollarSign },
+            ],
+          },
+          {
+            title: 'Payments & Documents',
+            href: '/administration/finance/payment-terms',
+            icon: FileText,
+            children: [
+              { title: 'Payment Terms', href: '/administration/finance/payment-terms', icon: CreditCard },
+              { title: 'Payment Methods', href: '/administration/finance/payment-methods', icon: CreditCard },
+              { title: 'Document Numbering', href: '/administration/finance/document-numbering', icon: FileText },
+            ],
+          },
+          {
+            title: 'Asset & Unit Accounting',
+            href: '/administration/finance/fixed-asset-categories',
+            icon: FolderTree,
+            children: [
+              { title: 'Fixed Asset Categories', href: '/administration/finance/fixed-asset-categories', icon: FolderTree },
+              { title: 'Unit Types', href: '/administration/finance/unit-types', icon: FileText },
+              { title: 'Ratio Definitions', href: '/administration/finance/ratio-definitions', icon: BarChart3 },
+            ],
+          },
         ],
       },
       {
         title: 'HR',
         href: '/administration/hr',
         icon: UserCheck,
+        roles: ADMINISTRATION_ROLES,
         children: [
           { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
@@ -724,6 +748,7 @@ const navigationItems: NavItem[] = [
         title: 'Procurement',
         href: '/administration/procurement',
         icon: Briefcase,
+        roles: ADMINISTRATION_ROLES,
         children: [
           { title: 'Pending Partners', href: '/administration/procurement/business-partners/pending', icon: Users },
           { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
@@ -746,6 +771,7 @@ const navigationItems: NavItem[] = [
         title: 'Inventory',
         href: '/administration/inventory',
         icon: Package,
+        roles: ADMINISTRATION_ROLES,
         children: [
           { title: 'Units of Measure', href: '/administration/inventory/units-of-measure', icon: Package },
           { title: 'UoM Schedules', href: '/administration/inventory/uom-schedules', icon: Package },
@@ -756,6 +782,7 @@ const navigationItems: NavItem[] = [
         title: 'Sales',
         href: '/administration/sales',
         icon: ShoppingCart,
+        roles: ADMINISTRATION_ROLES,
         children: [
           { title: 'Sales Setup', href: '/administration/sales', icon: Settings },
           { title: 'Customer Categories', href: '/administration/sales/customer-categories', icon: Users },
@@ -769,6 +796,7 @@ const navigationItems: NavItem[] = [
         title: 'Marketing',
         href: '/administration/marketing',
         icon: Megaphone,
+        roles: ADMINISTRATION_ROLES,
         children: [
           { title: 'Campaign Templates', href: '/administration/marketing/templates', icon: Megaphone },
           { title: 'Lead Sources', href: '/administration/marketing/lead-sources', icon: Users },
@@ -780,6 +808,7 @@ const navigationItems: NavItem[] = [
         title: 'Estate',
         href: '/administration/estate',
         icon: Home,
+        roles: ADMINISTRATION_ROLES,
         children: [
           { title: 'Property Types', href: '/administration/estate/property-types', icon: Home },
           { title: 'Lease Templates', href: '/administration/estate/lease-templates', icon: FileText },
@@ -838,6 +867,7 @@ const navigationItems: NavItem[] = [
             title: 'Helpdesk',
             href: '/administration/helpdesk',
             icon: HelpCircle,
+            roles: ADMINISTRATION_ROLES,
             children: [
               { title: 'Ticket Categories', href: '/administration/helpdesk/categories', icon: FileText },
               { title: 'Root Causes', href: '/administration/helpdesk/root-causes', icon: Target },
@@ -857,11 +887,13 @@ const navigationItems: NavItem[] = [
         title: 'Workflow',
         href: '/administration/workflow',
         icon: Workflow,
+        roles: ADMINISTRATION_ROLES,
       },
       {
         title: 'System',
         href: '/administration/system',
         icon: Settings,
+        roles: ADMINISTRATION_ROLES,
         children: [
           {
             title: 'Security',
@@ -1178,11 +1210,13 @@ export function Sidebar({ className }: SidebarProps) {
     }
 
     return items.reduce<NavItem[]>((acc, item) => {
-      if (item.roles && !hasAnyRole(item.roles)) {
-        return acc;
-      }
+      const hasRoleAccess = !item.roles || hasAnyRole(item.roles);
+      const hasPermissionAccess = !item.permissions || hasAnyPermission(item.permissions);
+      const hasAccess = item.accessMode === 'any'
+        ? hasRoleAccess || hasPermissionAccess
+        : hasRoleAccess && hasPermissionAccess;
 
-      if (item.permissions && !hasAnyPermission(item.permissions)) {
+      if (!hasAccess) {
         return acc;
       }
 

@@ -18,6 +18,7 @@ import { salesOrderService, type CreateSalesOrderDto, type CreateSalesOrderLineD
 import { salesAllocationService } from '@/services/salesAllocationService';
 import { projectService } from '@/services/projectService';
 import { apiService } from '@/services/api.service';
+import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import {
   parseSaleableSourceContextFromParams,
   saleableItemToContext,
@@ -74,7 +75,8 @@ export default function CreateSalesOrderPage() {
   const [orderType, setOrderType] = useState('Standard');
   const [priority, setPriority] = useState('Normal');
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState('');
+  const [paymentTermId, setPaymentTermId] = useState('');
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
   const [customerPoNumber, setCustomerPoNumber] = useState('');
   const [propertyReference, setPropertyReference] = useState('');
   const [propertyType, setPropertyType] = useState('');
@@ -182,6 +184,16 @@ export default function CreateSalesOrderPage() {
     }
   }, []);
 
+  useEffect(() => {
+    paymentTermService.getByApplicableTo('Customer')
+      .then((terms) => {
+        setPaymentTerms(terms || []);
+        const defaultTerm = (terms || []).find((term) => term.isDefault);
+        if (defaultTerm) setPaymentTermId((current) => current || defaultTerm.id);
+      })
+      .catch(() => setPaymentTerms([]));
+  }, []);
+
   const applySaleableItem = (item: SalesSaleableItemDto, source: SalesSaleableSourceDto) => {
     const context = saleableItemToContext(item, source);
     setLinkedSourceContext(context);
@@ -243,7 +255,7 @@ export default function CreateSalesOrderPage() {
     setCustomerResults([]);
     if (customer.billingAddress) setBillingAddress(customer.billingAddress);
     if (customer.shippingAddress) setShippingAddress(customer.shippingAddress);
-    if (customer.paymentTerms) setPaymentTerms(customer.paymentTerms);
+    if (customer.paymentTermId) setPaymentTermId(customer.paymentTermId);
   };
 
   const addLine = () => {
@@ -363,7 +375,7 @@ export default function CreateSalesOrderPage() {
       orderType,
       priority,
       expectedDeliveryDate: expectedDeliveryDate || undefined,
-      paymentTerms: paymentTerms || undefined,
+      paymentTermId: paymentTermId || undefined,
       // Preserve currency in the Sales payload so downstream Finance posting can use the correct document currency.
       currency,
       customerPoNumber: customerPoNumber || undefined,
@@ -571,7 +583,18 @@ export default function CreateSalesOrderPage() {
             </div>
             <div>
               <Label>Payment Terms</Label>
-              <Input placeholder="e.g., Net 30" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} />
+              <Select value={paymentTermId} onValueChange={setPaymentTermId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment terms" />
+                </SelectTrigger>
+                <SelectContent>
+                  {paymentTerms.map((term) => (
+                    <SelectItem key={term.id} value={term.id}>
+                      {term.code} - {term.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label>Customer PO #</Label>

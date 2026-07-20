@@ -100,6 +100,7 @@ public partial class UseBusinessPartnersForSalesReturnAccounting : Migration
             DECLARE @table sysname;
             DECLARE @fromIndex sysname;
             DECLARE @toIndex sysname;
+            DECLARE @indexQualifiedName nvarchar(776);
 
             DECLARE index_cursor CURSOR LOCAL FAST_FORWARD FOR
             SELECT v.TableName, N'IX_' + v.TableName + N'_{fromColumnName}', N'IX_' + v.TableName + N'_{toColumnName}'
@@ -110,7 +111,10 @@ public partial class UseBusinessPartnersForSalesReturnAccounting : Migration
             WHILE @@FETCH_STATUS = 0
             BEGIN
                 IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'[dbo].[' + @table + N']') AND name = @fromIndex)
-                    EXEC sp_rename N'[dbo].[' + @table + N'].[' + @fromIndex + N']', @toIndex, N'INDEX';
+                BEGIN
+                    SET @indexQualifiedName = N'[dbo].[' + @table + N'].[' + @fromIndex + N']';
+                    EXEC sp_rename @indexQualifiedName, @toIndex, N'INDEX';
+                END;
 
                 FETCH NEXT FROM index_cursor INTO @table, @fromIndex, @toIndex;
             END;

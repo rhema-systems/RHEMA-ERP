@@ -286,12 +286,12 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
-            if (key == Normalize("PurchaseReturn"))
+            if (key == Normalize("SupplierReturn"))
             {
-                var purchaseReturn = await _unitOfWork.Repository<PurchaseReturn>().FirstOrDefaultAsync(x => x.Id == entityId);
-                info.EntityType = "PurchaseReturn";
-                info.EntityNumber = purchaseReturn?.ReturnNumber;
-                info.EntityName = purchaseReturn?.SupplierName;
+                var supplierReturn = await _unitOfWork.Repository<SupplierReturn>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Vendor);
+                info.EntityType = "SupplierReturn";
+                info.EntityNumber = supplierReturn?.ReturnNumber;
+                info.EntityName = supplierReturn?.VendorName ?? supplierReturn?.Vendor?.PartnerName;
                 info.ActionUrl = $"/finance/ap/returns/{entityId}";
                 return info;
             }

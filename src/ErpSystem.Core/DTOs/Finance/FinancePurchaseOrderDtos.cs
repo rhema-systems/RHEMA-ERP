@@ -113,7 +113,14 @@ public class FinancePurchaseOrderReceiptDto
     public string ReceiptNumber { get; set; } = string.Empty;
     public DateTime ReceiptDate { get; set; }
     public string? Remarks { get; set; }
+    public int Status { get; set; }
+    public string StatusName { get; set; } = string.Empty;
+    public Guid? WorkflowInstanceId { get; set; }
     public Guid? VendorInvoiceId { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public DateTime? RejectedAt { get; set; }
+    public string? RejectionReason { get; set; }
     public string? OrderNumber { get; set; }
     public string? VendorName { get; set; }
     public List<FinancePurchaseOrderReceiptItemDto> Items { get; set; } = new();

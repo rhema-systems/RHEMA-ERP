@@ -75,6 +75,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal AllocatedAmount { get; set; }
         public decimal UnallocatedAmount { get; set; }
         public string PaymentMethod { get; set; } = string.Empty;
+        public Guid? PaymentMethodId { get; set; }
+        public string? PaymentMethodName { get; set; }
         public string CurrencyCode { get; set; } = string.Empty;
         public decimal ExchangeRate { get; set; }
         public Guid? BankAccountId { get; set; }

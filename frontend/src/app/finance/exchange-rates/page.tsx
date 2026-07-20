@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { TrendingUp, Plus, Edit, Upload, Filter, LineChart } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
+import { TrendingUp, Plus, Edit, Upload, Filter, LineChart, Download, AlertCircle, FileText, Loader2 } from 'lucide-react';
+import { financeService } from '@/services/finance.service';
+import { buildExchangeRateTemplateCsv, formatImportFileSize, parseExchangeRateImportFile } from '@/lib/finance/exchange-rate-import';
 import type { ExchangeRate, ExchangeRateType } from '@/types/finance';
 import Link from 'next/link';
 
@@ -70,9 +73,15 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
 const MOCK_CURRENCIES = ['GHS', 'USD', 'EUR', 'GBP'];
 
 export default function ExchangeRatesPage() {
+    const { toast } = useToast();
+    const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
     const [rates, setRates] = useState<ExchangeRate[]>(MOCK_EXCHANGE_RATES);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+    const [bulkUploadFile, setBulkUploadFile] = useState<File | null>(null);
+    const [bulkUploadErrors, setBulkUploadErrors] = useState<string[]>([]);
+    const [isBulkUploading, setIsBulkUploading] = useState(false);
+    const [isBulkFileDragOver, setIsBulkFileDragOver] = useState(false);
     const [editingRate, setEditingRate] = useState<ExchangeRate | null>(null);
     const [filters, setFilters] = useState({
         fromCurrency: 'all',
@@ -87,6 +96,25 @@ export default function ExchangeRatesPage() {
         effectiveDate: new Date().toISOString().split('T')[0],
         rateSource: '',
     });
+
+    useEffect(() => {
+        let isMounted = true;
+
+        financeService.getExchangeRates()
+            .then((apiRates) => {
+                if (isMounted) {
+                    setRates(apiRates);
+                }
+            })
+            .catch((error) => {
+                // Keep the seeded rows visible in local/demo mode when the API is not reachable.
+                console.error('Failed to load exchange rates', error);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const filteredRates = rates.filter((rate) => {
         if (filters.fromCurrency !== 'all' && rate.baseCurrencyCode !== filters.fromCurrency) return false;
@@ -156,6 +184,112 @@ export default function ExchangeRatesPage() {
         });
     };
 
+    const resetBulkUploadState = () => {
+        setBulkUploadFile(null);
+        setBulkUploadErrors([]);
+        setIsBulkFileDragOver(false);
+        if (bulkFileInputRef.current) {
+            bulkFileInputRef.current.value = '';
+        }
+    };
+
+    const handleBulkDialogOpenChange = (open: boolean) => {
+        setIsBulkUploadOpen(open);
+        if (!open) {
+            resetBulkUploadState();
+        }
+    };
+
+    const handleBulkFileSelected = (file?: File) => {
+        if (!file) {
+            return;
+        }
+
+        setBulkUploadFile(file);
+        setBulkUploadErrors([]);
+    };
+
+    const handleBulkUpload = async () => {
+        if (!bulkUploadFile) {
+            toast({
+                title: 'Select a file',
+                description: 'Choose a CSV or XLSX exchange-rate file before uploading.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        try {
+            setIsBulkUploading(true);
+            setBulkUploadErrors([]);
+
+            const parsedImport = await parseExchangeRateImportFile(bulkUploadFile);
+            if (parsedImport.errors.length > 0) {
+                setBulkUploadErrors(parsedImport.errors);
+                toast({
+                    title: 'Upload validation failed',
+                    description: `${parsedImport.errors.length} issue(s) need correction before import.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            const uploadedRates = await financeService.bulkUploadExchangeRates(parsedImport.rows);
+            setRates((currentRates) => {
+                const uploadedIds = new Set(uploadedRates.map((rate) => rate.id));
+                return [
+                    ...uploadedRates,
+                    ...currentRates.filter((rate) => !uploadedIds.has(rate.id)),
+                ];
+            });
+
+            const skippedCount = parsedImport.rows.length - uploadedRates.length;
+            if (skippedCount > 0) {
+                setBulkUploadErrors([
+                    `${uploadedRates.length} of ${parsedImport.rows.length} row(s) were imported. ${skippedCount} row(s) were rejected by server-side finance validation, usually because a matching rate already exists or overlaps an existing rate window.`,
+                ]);
+                toast({
+                    title: 'Import partially completed',
+                    description: `${uploadedRates.length} of ${parsedImport.rows.length} exchange-rate row(s) were imported.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            toast({
+                title: 'Exchange rates imported',
+                description: `${uploadedRates.length} exchange-rate row(s) uploaded successfully.`,
+            });
+            setIsBulkUploadOpen(false);
+            resetBulkUploadState();
+        } catch (error: any) {
+            const message = error?.message || 'Unable to upload exchange rates.';
+            setBulkUploadErrors([message]);
+            toast({
+                title: 'Upload failed',
+                description: message,
+                variant: 'destructive',
+            });
+        } finally {
+            setIsBulkUploading(false);
+        }
+    };
+
+    const handleDownloadTemplate = () => {
+        const templateDate = new Date().toISOString().split('T')[0];
+        const csv = buildExchangeRateTemplateCsv(templateDate);
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `exchange-rate-upload-template-${templateDate}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    };
+
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleDateString('en-US', {
             year: 'numeric',
@@ -184,7 +318,7 @@ export default function ExchangeRatesPage() {
                             Trend Analysis
                         </Link>
                     </Button>
-                    <Dialog open={isBulkUploadOpen} onOpenChange={setIsBulkUploadOpen}>
+                    <Dialog open={isBulkUploadOpen} onOpenChange={handleBulkDialogOpenChange}>
                         <DialogTrigger asChild>
                             <Button variant="outline">
                                 <Upload className="mr-2 h-4 w-4" />
@@ -199,34 +333,117 @@ export default function ExchangeRatesPage() {
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4 py-4">
-                                <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                                    <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
-                                    <p className="mt-2 text-sm text-muted-foreground">
-                                        Drag and drop your file here, or click to browse
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Supported formats: CSV, XLSX
-                                    </p>
-                                    <Button variant="outline" className="mt-4">
+                                <input
+                                    ref={bulkFileInputRef}
+                                    type="file"
+                                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    className="hidden"
+                                    onChange={(event) => handleBulkFileSelected(event.target.files?.[0])}
+                                />
+                                <div
+                                    role="button"
+                                    tabIndex={0}
+                                    className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${isBulkFileDragOver ? 'border-primary bg-primary/5' : ''}`}
+                                    onClick={() => bulkFileInputRef.current?.click()}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            bulkFileInputRef.current?.click();
+                                        }
+                                    }}
+                                    onDragOver={(event) => {
+                                        event.preventDefault();
+                                        setIsBulkFileDragOver(true);
+                                    }}
+                                    onDragLeave={() => setIsBulkFileDragOver(false)}
+                                    onDrop={(event) => {
+                                        event.preventDefault();
+                                        setIsBulkFileDragOver(false);
+                                        handleBulkFileSelected(event.dataTransfer.files?.[0]);
+                                    }}
+                                >
+                                    {bulkUploadFile ? (
+                                        <div className="space-y-2">
+                                            <FileText className="mx-auto h-12 w-12 text-primary" />
+                                            <p className="text-sm font-medium">{bulkUploadFile.name}</p>
+                                            <p className="text-xs text-muted-foreground">{formatImportFileSize(bulkUploadFile)}</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
+                                            <p className="mt-2 text-sm text-muted-foreground">
+                                                Drag and drop your file here, or click to browse
+                                            </p>
+                                            <p className="text-xs text-muted-foreground mt-1">
+                                                Supported formats: CSV, XLSX
+                                            </p>
+                                        </>
+                                    )}
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="mt-4"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            bulkFileInputRef.current?.click();
+                                        }}
+                                        disabled={isBulkUploading}
+                                    >
                                         Select File
+                                    </Button>
+                                </div>
+                                <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="text-sm font-medium">Need the correct format?</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Start from the CSV template with required and optional fields.
+                                        </p>
+                                    </div>
+                                    <Button type="button" variant="outline" onClick={handleDownloadTemplate}>
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Download Template
                                     </Button>
                                 </div>
                                 <div className="text-sm text-muted-foreground">
                                     <p className="font-semibold mb-2">Required columns:</p>
                                     <ul className="list-disc list-inside space-y-1">
-                                        <li>From Currency (e.g., USD)</li>
-                                        <li>To Currency (e.g., GHS)</li>
-                                        <li>Rate (e.g., 12.50)</li>
-                                        <li>Effective Date (YYYY-MM-DD)</li>
-                                        <li>Rate Type (Official/Market/Custom)</li>
+                                        <li>baseCurrencyCode (e.g., USD)</li>
+                                        <li>targetCurrencyCode (e.g., GHS)</li>
+                                        <li>rate (e.g., 12.5000)</li>
+                                        <li>effectiveDate (YYYY-MM-DD)</li>
+                                        <li>rateType (Daily/Spot/Official/Market/Custom)</li>
+                                        <li>rateSource (e.g., Manual, BankFeed, Bank of Ghana)</li>
                                     </ul>
                                 </div>
+                                {bulkUploadErrors.length > 0 && (
+                                    <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                                        <div className="flex items-start gap-2 font-medium">
+                                            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                            <span>Upload checks found issues</span>
+                                        </div>
+                                        <ul className="mt-2 list-disc space-y-1 pl-5">
+                                            {bulkUploadErrors.slice(0, 8).map((error, index) => (
+                                                <li key={`${error}-${index}`}>{error}</li>
+                                            ))}
+                                        </ul>
+                                        {bulkUploadErrors.length > 8 && (
+                                            <p className="mt-2">Showing first 8 of {bulkUploadErrors.length} issue(s).</p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setIsBulkUploadOpen(false)}>
+                                <Button variant="outline" onClick={() => handleBulkDialogOpenChange(false)} disabled={isBulkUploading}>
                                     Cancel
                                 </Button>
-                                <Button disabled>Upload Rates</Button>
+                                <Button onClick={handleBulkUpload} disabled={!bulkUploadFile || isBulkUploading}>
+                                    {isBulkUploading ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Upload className="mr-2 h-4 w-4" />
+                                    )}
+                                    Upload Rates
+                                </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>

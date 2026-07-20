@@ -394,7 +394,10 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> OpeningBalancePolicy(string action)
         => action switch
         {
-            "Get" or "Diagnostics" or "Validate" => One(FinancePermissions.RunMigrationDiagnostics),
+            "Get" or "List" => One(FinancePermissions.ViewFinance),
+            "Diagnostics" => One(FinancePermissions.RunMigrationDiagnostics),
+            "Create" or "Update" or "Validate" => One(FinancePermissions.PrepareOpeningBalances),
+            "Submit" => new[] { FinancePermissions.PrepareOpeningBalances, FinancePermissions.WorkflowSubmit },
             _ => One(FinancePermissions.RunMigrationAdjustments)
         };
 

@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
     ArrowLeft,
     Printer,
     FileText,
+    Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,16 +22,38 @@ import { accountsPayableService } from '@/services/accountsPayableService';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function VendorPaymentDetailsPage() {
     const router = useRouter();
     const params = useParams();
     const id = params.id as string;
+    const { toast } = useToast();
+    const [isPosting, setIsPosting] = useState(false);
 
-    const { data: payment, isLoading } = useQuery({
+    const { data: payment, isLoading, refetch } = useQuery({
         queryKey: ['vendor-payment', id],
         queryFn: () => accountsPayableService.getPayment(id),
     });
+
+    const handlePost = async () => {
+        if (!payment) return;
+
+        setIsPosting(true);
+        try {
+            await accountsPayableService.postPayment(payment.id);
+            toast({ title: 'Success', description: 'Vendor payment posted successfully.' });
+            await refetch();
+        } catch (error: any) {
+            toast({
+                title: 'Posting failed',
+                description: error.message || 'Unable to post vendor payment.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsPosting(false);
+        }
+    };
 
     if (isLoading) {
         return <PaymentDetailsSkeleton />;
@@ -71,6 +95,12 @@ export default function VendorPaymentDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-2">
+                    {!payment.journalEntryId && ['Authorized', 'Processed'].includes(payment.status) && (
+                        <Button size="sm" onClick={handlePost} disabled={isPosting}>
+                            {isPosting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Post Payment
+                        </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => window.print()}>
                         <Printer className="mr-2 h-4 w-4" /> Print Receipt
                     </Button>
@@ -123,6 +153,12 @@ export default function VendorPaymentDetailsPage() {
                             <p className="font-semibold text-green-600">{formatCurrency(payment.allocatedAmount)}</p>
                         </div>
                         <div>
+                            <p className="text-xs text-muted-foreground uppercase font-bold mb-2">WHT Withheld</p>
+                            <p className={payment.withholdingTaxAmount > 0 ? 'font-semibold text-orange-600' : 'font-semibold text-muted-foreground'}>
+                                {payment.withholdingTaxAmount > 0 ? formatCurrency(payment.withholdingTaxAmount) : '-'}
+                            </p>
+                        </div>
+                        <div>
                             <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Unallocated</p>
                             <p className={`font-semibold ${payment.unallocatedAmount > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
                                 {formatCurrency(payment.unallocatedAmount)}
@@ -135,21 +171,25 @@ export default function VendorPaymentDetailsPage() {
                         <h3 className="text-lg font-semibold mb-4">Invoices Paid</h3>
                         <div className="rounded-md border">
                             <div className="grid grid-cols-12 gap-4 p-4 bg-muted/50 text-xs font-bold uppercase text-muted-foreground border-b">
-                                <div className="col-span-4">Invoice #</div>
+                                <div className="col-span-3">Invoice #</div>
                                 <div className="col-span-3">Allocation Date</div>
-                                <div className="col-span-3 text-right">Discount Taken</div>
+                                <div className="col-span-2 text-right">Discount Taken</div>
+                                <div className="col-span-2 text-right">WHT Withheld</div>
                                 <div className="col-span-2 text-right">Amount Applied</div>
                             </div>
                             {payment.allocations?.map((alloc, index) => (
                                 <div key={alloc.id || index} className="grid grid-cols-12 gap-4 p-4 border-b last:border-0 text-sm items-center">
-                                    <div className="col-span-4 font-medium text-blue-600 hover:underline cursor-pointer" onClick={() => router.push(`/finance/ap/invoices/${alloc.vendorInvoiceId}`)}>
+                                    <div className="col-span-3 font-medium text-blue-600 hover:underline cursor-pointer" onClick={() => router.push(`/finance/ap/invoices/${alloc.vendorInvoiceId}`)}>
                                         {alloc.invoiceNumber}
                                     </div>
                                     <div className="col-span-3 text-muted-foreground">
                                         {format(new Date(alloc.allocationDate), 'MMM dd, yyyy')}
                                     </div>
-                                    <div className="col-span-3 text-right text-muted-foreground">
+                                    <div className="col-span-2 text-right text-muted-foreground">
                                         {alloc.discountAmount > 0 ? formatCurrency(alloc.discountAmount) : '-'}
+                                    </div>
+                                    <div className="col-span-2 text-right text-orange-600">
+                                        {alloc.withholdingTaxAmount > 0 ? formatCurrency(alloc.withholdingTaxAmount) : '-'}
                                     </div>
                                     <div className="col-span-2 text-right font-medium">
                                         {formatCurrency(alloc.allocatedAmount)}
