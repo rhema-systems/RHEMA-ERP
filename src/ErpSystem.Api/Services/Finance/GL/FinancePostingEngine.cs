@@ -877,7 +877,10 @@ WHERE [Id] = {delta.AccountId}
 
         var postingDate = request.PostingDate.Date;
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, postingDate, request.FiscalPeriodId, cancellationToken);
+        // Year-end closing may target the closed final period, but an explicit period lock is
+        // still authoritative and must be lifted through the controlled reopen process first.
         var isYearEndClosePosting = request.AllowPostingToClosedPeriod
+            && !fiscalPeriod.IsLocked
             && string.Equals(sourceModule, "GL", StringComparison.OrdinalIgnoreCase)
             && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));

@@ -226,7 +226,7 @@ public sealed class FinanceConcurrencyHardeningTests
         var numberingService = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Services", "DocumentNumberingService.cs"));
 
         var createMethod = ExtractMember(controllerSource, "public async Task<ActionResult<FinancePurchaseOrderReceiptDto>> Create", "[HttpPost(\"{id:guid}/convert-to-vendor-invoice\")]");
-        var generator = ExtractMember(controllerSource, "private async Task<string> GenerateReceiptNumberAsync", "private static FinancePostingLineDto BuildPostingLine");
+        var generator = ExtractMember(controllerSource, "private async Task<string> GenerateReceiptNumberAsync", "private async Task<string> ResolveReceiptNumberAsync");
 
         var transactionIndex = createMethod.IndexOf("BeginTransactionAsync(IsolationLevel.Serializable", StringComparison.Ordinal);
         var numberingIndex = createMethod.IndexOf("ResolveReceiptNumberAsync(tenantId, receiptDate, dto.ReceiptNumber, cancellationToken)", StringComparison.Ordinal);
@@ -419,6 +419,86 @@ public sealed class FinanceConcurrencyHardeningTests
 
         var registrations = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Extensions", "ServiceCollectionExtensions.cs"));
         registrations.Should().Contain("ICustomerService, ErpSystem.Api.Services.Finance.AR.CustomerService", "customer account endpoints must resolve their Finance AR service at runtime");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void CustomerPaymentMigration_ShouldReplaceLegacyCustomerFkWithBusinessPartnerFk()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Data",
+            "Migrations",
+            "20260720110000_AlignCustomerPaymentsToBusinessPartners.cs"));
+
+        source.Should().Contain("[Migration(\"20260720110000_AlignCustomerPaymentsToBusinessPartners\")]",
+            "EF Core must discover the hand-written AR receipt alignment migration");
+        source.Should().Contain("INNER JOIN [dbo].[Customers] c",
+            "receipt-only legacy customers must be preserved as canonical BusinessPartners before the FK changes");
+        source.Should().Contain("c.[TenantId] = cp.[TenantId]",
+            "legacy receipt migration must never map a counterparty across tenants");
+        source.Should().Contain("FK_CustomerPayment_BusinessPartners_CustomerId",
+            "the physical database constraint must match the current EF relationship");
+        source.Should().Contain("DROP CONSTRAINT",
+            "the obsolete Customers FK must be removed before current BusinessPartner IDs can be saved");
+        source.Should().Contain("WITH CHECK",
+            "the replacement FK must validate migrated rows rather than trusting unverified legacy data");
+        source.Should().Contain("THROW 51000",
+            "unmapped or cross-tenant receipt identities must stop the migration instead of becoming corrupt AR evidence");
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=MigrationDiscovery;Trusted_Connection=True")
+            .Options;
+        using var context = new ApplicationDbContext(options);
+        context.GetService<IMigrationsAssembly>().Migrations.Should()
+            .ContainKey("20260720110000_AlignCustomerPaymentsToBusinessPartners");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinanceApprovalCompletion_ShouldCommitWorkflowAndBusinessOutcomeAtomically()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Finance",
+            "FinanceApprovalsController.cs"));
+        var processMethod = ExtractMember(
+            source,
+            "private async Task<ActionResult<WorkflowExecutionResult>> ProcessApprovalAsync",
+            "private async Task<WorkflowExecutionResult> ProcessWorkflowAndOutcomeAtomicallyAsync");
+        var atomicMethod = ExtractMember(
+            source,
+            "private async Task<WorkflowExecutionResult> ProcessWorkflowAndOutcomeAtomicallyAsync",
+            "private IQueryable<WorkflowApproval> QueryPendingApprovals");
+
+        processMethod.Should().Contain("ProcessWorkflowAndOutcomeAtomicallyAsync",
+            "controller actions must not finalize workflow state separately from the Finance outcome");
+        processMethod.Should().NotContain("_workflowService.ProcessApprovalStepAsync",
+            "workflow persistence must occur inside the shared atomic helper");
+        atomicMethod.Should().Contain("CreateExecutionStrategy()",
+            "the explicit transaction must run through the configured relational retry strategy");
+        atomicMethod.Should().Contain("BeginTransactionAsync(cancellationToken)",
+            "workflow completion and outcome application need one database transaction");
+        atomicMethod.Should().Contain("_workflowService.ProcessApprovalStepAsync",
+            "workflow state changes must occur inside the transaction");
+        atomicMethod.Should().Contain("ApplyApprovedOutcomeAsync",
+            "the approved Finance action must occur in the same transaction");
+        atomicMethod.Should().Contain("ApplyRejectedOutcomeAsync",
+            "rejected Finance state changes must occur in the same transaction");
+        atomicMethod.Should().Contain("CommitAsync(cancellationToken)",
+            "the transaction may commit only after the outcome succeeds");
+        atomicMethod.Should().Contain("RollbackAsync(cancellationToken)",
+            "a failed outcome must leave the workflow action retryable");
+        atomicMethod.Should().Contain("_db.ChangeTracker.Clear()",
+            "rolled-back workflow and outcome state must not remain tracked for a later save");
     }
 
     [Fact]

@@ -239,28 +239,90 @@ public class FinanceApprovalsController : ControllerBase
                 detail: "The submitter cannot approve or reject this high-risk finance workflow item.");
         }
 
-        var workflowResult = await _workflowService.ProcessApprovalStepAsync(
+        var workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
+            tenantId,
             entityType,
             instance.EntityId,
             currentUserId.Value,
             action,
-            comments);
+            comments,
+            cancellationToken);
 
         if (!workflowResult.Success)
         {
             return BadRequest(workflowResult);
         }
 
-        if (workflowResult.Status == WorkflowInstanceStatus.Completed)
+        return Ok(workflowResult);
+    }
+
+    private async Task<WorkflowExecutionResult> ProcessWorkflowAndOutcomeAtomicallyAsync(
+        Guid tenantId,
+        string entityType,
+        Guid entityId,
+        Guid currentUserId,
+        string action,
+        string? comments,
+        CancellationToken cancellationToken)
+    {
+        async Task<WorkflowExecutionResult> ProcessAndApplyAsync()
         {
-            await ApplyApprovedOutcomeAsync(tenantId, entityType, instance.EntityId, currentUserId.Value, comments, cancellationToken);
-        }
-        else if (workflowResult.Status is WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
-        {
-            await ApplyRejectedOutcomeAsync(tenantId, entityType, instance.EntityId, currentUserId.Value, comments, cancellationToken);
+            var result = await _workflowService.ProcessApprovalStepAsync(
+                entityType,
+                entityId,
+                currentUserId,
+                action,
+                comments);
+
+            if (!result.Success)
+            {
+                return result;
+            }
+
+            if (result.Status == WorkflowInstanceStatus.Completed)
+            {
+                await ApplyApprovedOutcomeAsync(tenantId, entityType, entityId, currentUserId, comments, cancellationToken);
+            }
+            else if (result.Status is WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
+            {
+                await ApplyRejectedOutcomeAsync(tenantId, entityType, entityId, currentUserId, comments, cancellationToken);
+            }
+
+            return result;
         }
 
-        return Ok(workflowResult);
+        // Workflow repositories, Finance outcome services, and the posting engine share this scoped
+        // DbContext. Keep the final workflow state and its business/GL outcome in one transaction so
+        // a failed outcome leaves the approval pending and retryable instead of consuming it.
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction != null)
+        {
+            return await ProcessAndApplyAsync();
+        }
+
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var result = await ProcessAndApplyAsync();
+                if (!result.Success)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _db.ChangeTracker.Clear();
+                    return result;
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     private IQueryable<WorkflowApproval> QueryPendingApprovals(Guid tenantId)
