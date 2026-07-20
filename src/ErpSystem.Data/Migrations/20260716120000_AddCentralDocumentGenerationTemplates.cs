@@ -1,4 +1,6 @@
 using System;
+using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,6 +8,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(ApplicationDbContext))]
+    [Migration("20260716120000_AddCentralDocumentGenerationTemplates")]
     public partial class AddCentralDocumentGenerationTemplates : Migration
     {
         /// <inheritdoc />
