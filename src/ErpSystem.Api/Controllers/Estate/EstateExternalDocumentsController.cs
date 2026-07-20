@@ -157,7 +157,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && !item.IsDeleted
                 && item.OpenedById == userId.Value
                 && (item.SourceDepartment == "External Portal"
-                    || item.SourceDepartment == "External Portal - Estate Services"))
+                    || item.SourceDepartment == "External Portal - Estate Services"
+                    || item.SourceDepartment == "External Portal - Estate Listings"))
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .Take(100)
             .Select(item => new

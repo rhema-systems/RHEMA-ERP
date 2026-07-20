@@ -809,6 +809,7 @@ public sealed class DocumentManagementController : ControllerBase
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .Take(200)
             .ToListAsync(cancellationToken);
+        records = await FilterViewableRecordsAsync(tenantId, records, cancellationToken);
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValuesByRecord = await GetMetadataValuesByRecordAsync(tenantId, records.Select(item => item.Id), cancellationToken);
 
@@ -846,6 +847,7 @@ public sealed class DocumentManagementController : ControllerBase
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .Take(take)
             .ToListAsync(cancellationToken);
+        records = await FilterViewableRecordsAsync(tenantId, records, cancellationToken);
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValuesByRecord = await GetMetadataValuesByRecordAsync(tenantId, records.Select(item => item.Id), cancellationToken);
 
@@ -945,6 +947,12 @@ public sealed class DocumentManagementController : ControllerBase
         {
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
+
+        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+        {
+            return Forbid();
+        }
+
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValues = await GetMetadataValuesAsync(tenantId, record.Id, cancellationToken);
         var accessRules = await GetActiveAccessRulesAsync(tenantId, cancellationToken);
@@ -1024,6 +1032,19 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
 
+        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var requestedAccessProfile = request.AccessProfile?.Trim();
+        if (!string.IsNullOrWhiteSpace(requestedAccessProfile)
+            && !string.Equals(requestedAccessProfile, record.AccessProfile, StringComparison.OrdinalIgnoreCase)
+            && !await CanAssignAccessProfileAsync(tenantId, requestedAccessProfile, cancellationToken))
+        {
+            return Forbid();
+        }
+
         record.Title = request.Title?.Trim() ?? record.Title;
         record.SourceModule = request.SourceModule?.Trim() ?? record.SourceModule;
         record.SourceLabel = request.SourceLabel?.Trim() ?? record.SourceLabel;
@@ -1038,7 +1059,7 @@ public sealed class DocumentManagementController : ControllerBase
         record.VersionStatus = request.VersionStatus ?? record.VersionStatus;
         record.AnnotationStatus = request.AnnotationStatus ?? record.AnnotationStatus;
         record.CommentStatus = request.CommentStatus ?? record.CommentStatus;
-        record.AccessProfile = request.AccessProfile ?? record.AccessProfile;
+        record.AccessProfile = requestedAccessProfile ?? record.AccessProfile;
         record.RetentionStatus = request.RetentionStatus ?? record.RetentionStatus;
         record.LifecycleStatus = request.LifecycleStatus ?? record.LifecycleStatus;
         record.EffectiveDate = request.EffectiveDate ?? record.EffectiveDate;
@@ -2505,9 +2526,8 @@ public sealed class DocumentManagementController : ControllerBase
 
     private async Task<string> NextDocumentReferenceAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var count = await _db.CentralDocumentRecords
-            .CountAsync(item => item.TenantId == tenantId, cancellationToken);
-        return $"DMS-{DateTime.UtcNow:yyyy}-{count + 1:000000}";
+        await Task.CompletedTask;
+        return $"DMS-{DateTime.UtcNow:yyyy}-{Guid.NewGuid():N}"[..21].ToUpperInvariant();
     }
 
     private async Task<IReadOnlyDictionary<string, CentralDocumentMetadataTemplateEntity>> GetTemplatesByCodeAsync(
@@ -2581,6 +2601,23 @@ public sealed class DocumentManagementController : ControllerBase
         return values
             .GroupBy(item => item.DocumentRecordId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<CentralDocumentMetadataValue>)group.ToList());
+    }
+
+    private async Task<List<CentralDocumentRecord>> FilterViewableRecordsAsync(
+        Guid tenantId,
+        IEnumerable<CentralDocumentRecord> records,
+        CancellationToken cancellationToken)
+    {
+        var viewableRecords = new List<CentralDocumentRecord>();
+        foreach (var record in records)
+        {
+            if (await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+            {
+                viewableRecords.Add(record);
+            }
+        }
+
+        return viewableRecords;
     }
 
     private static IReadOnlyList<CentralDocumentMetadataValue> MetadataValuesFor(
@@ -3133,6 +3170,11 @@ public sealed class DocumentManagementController : ControllerBase
         Func<CentralDocumentAccessRule, bool> actionPredicate,
         CancellationToken cancellationToken)
     {
+        if (IsDmsAccessAdministrator())
+        {
+            return true;
+        }
+
         var rules = await _db.CentralDocumentAccessRules
             .AsNoTracking()
             .Where(rule => rule.TenantId == tenantId
@@ -3151,6 +3193,37 @@ public sealed class DocumentManagementController : ControllerBase
             && (string.IsNullOrWhiteSpace(rule.RoleName)
                 || _currentUserService.IsInRole(rule.RoleName)));
     }
+
+    private async Task<bool> CanAssignAccessProfileAsync(
+        Guid tenantId,
+        string accessProfile,
+        CancellationToken cancellationToken)
+    {
+        if (IsDmsAccessAdministrator())
+        {
+            return true;
+        }
+
+        var rules = await _db.CentralDocumentAccessRules
+            .AsNoTracking()
+            .Where(rule => rule.TenantId == tenantId
+                && rule.IsActive
+                && !rule.IsDeleted
+                && rule.AccessProfile == accessProfile)
+            .ToListAsync(cancellationToken);
+
+        // Only users with upload rights may move a record into a protected profile.
+        return rules.Count > 0
+            && rules.Any(rule => rule.CanUpload
+                && (string.IsNullOrWhiteSpace(rule.RoleName)
+                    || _currentUserService.IsInRole(rule.RoleName)));
+    }
+
+    private bool IsDmsAccessAdministrator()
+        => _currentUserService.IsInRole("SuperAdmin")
+            || _currentUserService.IsInRole("TenantAdmin")
+            || _currentUserService.IsInRole("Document Control Officer")
+            || _currentUserService.IsInRole("Records Officer");
 
     private sealed record VersionDownloadFile(
         bool Success,

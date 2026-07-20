@@ -125,6 +125,15 @@ public sealed class EstateManagedAssetsController : ControllerBase
             return BadRequest(new { success = false, message = "Listing images must be image files." });
         }
 
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var assetExists = tenantId != Guid.Empty
+            && await _db.EstateManagedAssets.AnyAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted);
+        if (!assetExists)
+        {
+            return NotFound(new { success = false, message = "Estate asset was not found." });
+        }
+
         var folder = $"estate/managed-assets/{id:N}";
         await using var stream = file.OpenReadStream();
         var filePath = await _fileStorageService.UploadFileAsync(stream, file.FileName, folder);
