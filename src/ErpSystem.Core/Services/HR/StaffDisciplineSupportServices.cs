@@ -1,0 +1,800 @@
+using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.Extensions.Logging;
+
+namespace ErpSystem.Core.Services.HR;
+
+// ============================================================================
+// STAFF DISCIPLINE ACTION STEP SERVICE
+// ============================================================================
+
+#region Staff Discipline Action Step Service
+
+public class StaffDisciplineActionStepService : IStaffDisciplineActionStepService
+{
+    private readonly IStaffDisciplineActionStepRepository _actionStepRepository;
+    private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    private readonly IStaffOffenseProcedureRepository _procedureRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<StaffDisciplineActionStepService> _logger;
+
+    public StaffDisciplineActionStepService(
+        IStaffDisciplineActionStepRepository actionStepRepository,
+        IStaffDisciplinaryActionRepository caseRepository,
+        IStaffOffenseProcedureRepository procedureRepository,
+        IUnitOfWork unitOfWork,
+        ILogger<StaffDisciplineActionStepService> logger)
+    {
+        _actionStepRepository = actionStepRepository;
+        _caseRepository = caseRepository;
+        _procedureRepository = procedureRepository;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<StaffDisciplineActionStepDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _actionStepRepository.GetWithDocumentsAsync(id);
+        return entity?.ToDto();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _actionStepRepository.GetByCaseIdAsync(caseId);
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetPendingStepsAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _actionStepRepository.GetPendingStepsAsync(caseId);
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetOverdueStepsAsync(CancellationToken cancellationToken = default)
+    {
+        var entities = await _actionStepRepository.GetOverdueStepsAsync();
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetByActionedByAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _actionStepRepository.GetByActionedByAsync(employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineActionStepDto>> InitialiseFromOffenseProceduresAsync(Guid caseId, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var disciplinaryCase = await _caseRepository.GetByIdAsync(caseId);
+
+        if (disciplinaryCase == null)
+            throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
+
+        var existingSteps = await _actionStepRepository.GetByCaseIdAsync(caseId);
+        if (existingSteps.Any())
+            throw new InvalidOperationException("Action steps have already been initialised for this case.");
+
+        var procedures = await _procedureRepository.GetByOffenseIdAsync(disciplinaryCase.StaffOffenseId);
+
+        if (!procedures.Any())
+            throw new InvalidOperationException("No procedure steps are defined for the offense associated with this case.");
+
+        var today = DateTime.UtcNow.Date;
+        var steps = procedures.Select(p => new StaffDisciplineActionStep
+        {
+            TenantId             = disciplinaryCase.TenantId,
+            DisciplinaryActionId = caseId,
+            OffenseProcedureId   = p.Id,
+            DueDate              = p.ExpectedCompletionDays.HasValue
+                                     ? today.AddDays(p.ExpectedCompletionDays.Value)
+                                     : (DateTime?)null,
+            Status               = DisciplinaryActionStepStatus.Pending,
+            CreatedBy            = userId.ToString(),
+        }).ToList();
+
+        foreach (var step in steps)
+            await _actionStepRepository.AddAsync(step);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("{Count} action steps initialised for case {CaseId}", steps.Count, caseId);
+
+        return steps.Select(s => s.ToDto()).ToList();
+    }
+
+    public async Task<StaffDisciplineActionStepDto> UpdateAsync(UpdateActionStepDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _actionStepRepository.GetByIdAsync(dto.StepId);
+
+        if (entity == null)
+            throw new ArgumentException($"Action step with ID '{dto.StepId}' not found.");
+
+        entity.DueDate       = dto.DueDate       ?? entity.DueDate;
+        entity.StartedDate   = dto.StartedDate   ?? entity.StartedDate;
+        entity.CompletedDate = dto.CompletedDate  ?? entity.CompletedDate;
+        entity.Status        = dto.Status;
+        entity.ActionedById  = dto.ActionedById  ?? entity.ActionedById;
+        entity.Notes         = dto.Notes         ?? entity.Notes;
+        entity.UpdatedAt     = DateTime.UtcNow;
+        entity.UpdatedBy     = userId.ToString();
+
+        await _actionStepRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> CompleteStepAsync(Guid stepId, string notes, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _actionStepRepository.GetByIdAsync(stepId);
+
+        if (entity == null)
+            throw new ArgumentException($"Action step with ID '{stepId}' not found.");
+
+        if (entity.Status == DisciplinaryActionStepStatus.Completed)
+            throw new InvalidOperationException("The action step is already completed.");
+
+        entity.Status        = DisciplinaryActionStepStatus.Completed;
+        entity.CompletedDate = DateTime.UtcNow;
+        entity.Notes         = notes;
+        entity.UpdatedAt     = DateTime.UtcNow;
+        entity.UpdatedBy     = userId.ToString();
+
+        await _actionStepRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    public async Task<bool> SkipStepAsync(Guid stepId, string reason, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _actionStepRepository.GetByIdAsync(stepId);
+
+        if (entity == null)
+            throw new ArgumentException($"Action step with ID '{stepId}' not found.");
+
+        if (entity.Status == DisciplinaryActionStepStatus.Completed)
+            throw new InvalidOperationException("A completed action step cannot be skipped.");
+
+        entity.Status    = DisciplinaryActionStepStatus.Skipped;
+        entity.Notes     = reason;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+
+        await _actionStepRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+}
+
+#endregion
+
+// ============================================================================
+// STAFF DISCIPLINE WITNESS SERVICE
+// ============================================================================
+
+#region Staff Discipline Witness Service
+
+public class StaffDisciplineWitnessService : IStaffDisciplineWitnessService
+{
+    private readonly IStaffDisciplineWitnessRepository _witnessRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<StaffDisciplineWitnessService> _logger;
+
+    public StaffDisciplineWitnessService(
+        IStaffDisciplineWitnessRepository witnessRepository,
+        IUnitOfWork unitOfWork,
+        ILogger<StaffDisciplineWitnessService> logger)
+    {
+        _witnessRepository = witnessRepository;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<StaffDisciplineWitnessDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _witnessRepository.GetByIdAsync(id);
+        return entity?.ToDto();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _witnessRepository.GetByCaseIdAsync(caseId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetByEmployeeWitnessAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _witnessRepository.GetByEmployeeWitnessAsync(employeeId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetWithoutStatementAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _witnessRepository.GetWithoutStatementAsync(caseId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<StaffDisciplineWitnessDto> AddAsync(CreateStaffDisciplineWitnessDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = dto.ToEntity(tenantId, userId);
+
+        await _witnessRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<StaffDisciplineWitnessDto> UpdateAsync(UpdateStaffDisciplineWitnessDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _witnessRepository.GetByIdAsync(dto.Id);
+
+        if (entity == null)
+            throw new ArgumentException($"Witness with ID '{dto.Id}' not found.");
+
+        entity.UpdateEntity(dto, userId);
+
+        await _witnessRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _witnessRepository.GetByIdAsync(id);
+
+        if (entity == null)
+            throw new ArgumentException($"Witness with ID '{id}' not found.");
+
+        await _witnessRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+}
+
+#endregion
+
+// ============================================================================
+// STAFF DISCIPLINE DOCUMENT SERVICE
+// ============================================================================
+
+#region Staff Discipline Document Service
+
+public class StaffDisciplineDocumentService : IStaffDisciplineDocumentService
+{
+    private static readonly string[] AllowedExtensions =
+        [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".txt"];
+
+    private readonly IStaffDisciplineDocumentRepository _documentRepository;
+    private readonly IStaffDisciplineActionStepRepository _actionStepRepository;
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
+    private readonly IFileStorageService _fileStorage;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<StaffDisciplineDocumentService> _logger;
+
+    public StaffDisciplineDocumentService(
+        IStaffDisciplineDocumentRepository documentRepository,
+        IStaffDisciplineActionStepRepository actionStepRepository,
+        IStaffDisciplineAppealRepository appealRepository,
+        IFileStorageService fileStorage,
+        IUnitOfWork unitOfWork,
+        ILogger<StaffDisciplineDocumentService> logger)
+    {
+        _documentRepository = documentRepository;
+        _actionStepRepository = actionStepRepository;
+        _appealRepository = appealRepository;
+        _fileStorage = fileStorage;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<StaffDisciplineDocumentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _documentRepository.GetByIdAsync(id);
+        return entity?.ToDto();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _documentRepository.GetByCaseIdAsync(caseId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByScopeAsync(Guid caseId, DisciplinaryDocumentScope scope, CancellationToken cancellationToken = default)
+    {
+        var entities = await _documentRepository.GetByScopeAsync(caseId, scope);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByActionStepIdAsync(Guid actionStepId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _documentRepository.GetByActionStepIdAsync(actionStepId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByAppealIdAsync(Guid appealId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _documentRepository.GetByAppealIdAsync(appealId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByCategoryAsync(Guid caseId, DisciplinaryDocumentCategory category, CancellationToken cancellationToken = default)
+    {
+        var entities = await _documentRepository.GetByCategoryAsync(caseId, category);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<StaffDisciplineDocumentDto> AddAsync(CreateStaffDisciplineDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        await ValidateScopeAsync(
+            dto.DisciplinaryActionId,
+            dto.Scope,
+            dto.ActionStepId,
+            dto.AppealId,
+            cancellationToken);
+
+        var entity = dto.ToEntity(tenantId, userId);
+
+        await _documentRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<StaffDisciplineDocumentDto> UploadAsync(
+        Guid caseId,
+        Stream fileStream,
+        string fileName,
+        string contentType,
+        DisciplinaryDocumentScope scope,
+        DisciplinaryDocumentCategory category,
+        Guid? actionStepId,
+        Guid? appealId,
+        string? description,
+        Guid tenantId,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (fileStream is null || !fileStream.CanRead)
+            throw new ArgumentException("A readable file stream is required.");
+
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (string.IsNullOrEmpty(ext) || !AllowedExtensions.Contains(ext))
+            throw new ArgumentException($"File type '{ext}' is not permitted.");
+
+        await ValidateScopeAsync(caseId, scope, actionStepId, appealId, cancellationToken);
+
+        var folderPath = $"staff-discipline/{caseId:N}";
+        var storedPath = await _fileStorage.UploadFileAsync(fileStream, fileName, folderPath);
+
+        var dto = new CreateStaffDisciplineDocumentDto
+        {
+            DisciplinaryActionId = caseId,
+            Scope = scope,
+            ActionStepId = scope == DisciplinaryDocumentScope.ActionStep ? actionStepId : null,
+            AppealId = scope == DisciplinaryDocumentScope.Appeal ? appealId : null,
+            FileName = fileName,
+            FilePath = storedPath,
+            Category = category,
+            Description = description,
+            UploadedById = userId,
+            UploadDate = DateTime.UtcNow
+        };
+
+        return await AddAsync(dto, tenantId, userId, cancellationToken);
+    }
+
+    public async Task<(Stream Stream, string FileName, string ContentType)?> OpenFileAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _documentRepository.GetByIdAsync(id);
+        if (entity is null)
+            return null;
+
+        if (!await _fileStorage.FileExistsAsync(entity.FilePath))
+            throw new FileNotFoundException($"Stored file not found for document '{id}'.");
+
+        var stream = await _fileStorage.DownloadFileAsync(entity.FilePath, entity.Id);
+        return (stream, entity.FileName, GetContentType(entity.FileName));
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _documentRepository.GetByIdAsync(id);
+
+        if (entity == null)
+            throw new ArgumentException($"Document with ID '{id}' not found.");
+
+        var filePath = entity.FilePath;
+
+        await _documentRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(filePath))
+                await _fileStorage.DeleteFileAsync(filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not delete stored file for document {DocumentId}", id);
+        }
+
+        return true;
+    }
+
+    private async Task ValidateScopeAsync(
+        Guid caseId,
+        DisciplinaryDocumentScope scope,
+        Guid? actionStepId,
+        Guid? appealId,
+        CancellationToken cancellationToken)
+    {
+        switch (scope)
+        {
+            case DisciplinaryDocumentScope.Case:
+                if (actionStepId.HasValue || appealId.HasValue)
+                    throw new ArgumentException("Case-scoped documents cannot be linked to a step or appeal.");
+                break;
+
+            case DisciplinaryDocumentScope.ActionStep:
+                if (!actionStepId.HasValue)
+                    throw new ArgumentException("Action step is required for step-scoped documents.");
+                if (appealId.HasValue)
+                    throw new ArgumentException("Appeal cannot be set for step-scoped documents.");
+
+                var step = await _actionStepRepository.GetByIdAsync(actionStepId.Value);
+                if (step is null || step.DisciplinaryActionId != caseId)
+                    throw new ArgumentException("The action step does not belong to this case.");
+                break;
+
+            case DisciplinaryDocumentScope.Appeal:
+                if (!appealId.HasValue)
+                    throw new ArgumentException("Appeal is required for appeal-scoped documents.");
+                if (actionStepId.HasValue)
+                    throw new ArgumentException("Action step cannot be set for appeal-scoped documents.");
+
+                var appeal = await _appealRepository.GetByIdAsync(appealId.Value);
+                if (appeal is null || appeal.DisciplinaryActionId != caseId)
+                    throw new ArgumentException("The appeal does not belong to this case.");
+                break;
+
+            default:
+                throw new ArgumentException($"Unsupported document scope '{scope}'.");
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private static string GetContentType(string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "application/pdf",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".txt" => "text/plain",
+            _ => "application/octet-stream"
+        };
+    }
+}
+
+#endregion
+
+// ============================================================================
+// STAFF DISCIPLINE NOTE SERVICE
+// ============================================================================
+
+#region Staff Discipline Note Service
+
+public class StaffDisciplineNoteService : IStaffDisciplineNoteService
+{
+    private readonly IStaffDisciplineNoteRepository _noteRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<StaffDisciplineNoteService> _logger;
+
+    public StaffDisciplineNoteService(
+        IStaffDisciplineNoteRepository noteRepository,
+        IUnitOfWork unitOfWork,
+        ILogger<StaffDisciplineNoteService> logger)
+    {
+        _noteRepository = noteRepository;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<StaffDisciplineNoteDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _noteRepository.GetByIdAsync(id);
+        return entity?.ToDto();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineNoteSummaryDto>> GetByCaseIdAsync(Guid caseId, bool includeConfidential = true, CancellationToken cancellationToken = default)
+    {
+        var entities = await _noteRepository.GetByCaseIdAsync(caseId, includeConfidential);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineNoteSummaryDto>> GetByAuthorAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _noteRepository.GetByAuthorAsync(employeeId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<StaffDisciplineNoteDto> AddAsync(CreateStaffDisciplineNoteDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = dto.ToEntity(tenantId, userId);
+
+        await _noteRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<StaffDisciplineNoteDto> UpdateAsync(UpdateStaffDisciplineNoteDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _noteRepository.GetByIdAsync(dto.Id);
+
+        if (entity == null)
+            throw new ArgumentException($"Note with ID '{dto.Id}' not found.");
+
+        entity.UpdateEntity(dto, userId);
+
+        await _noteRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _noteRepository.GetByIdAsync(id);
+
+        if (entity == null)
+            throw new ArgumentException($"Note with ID '{id}' not found.");
+
+        await _noteRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+}
+
+#endregion
+
+// ============================================================================
+// STAFF DISCIPLINE NOTIFICATION SERVICE
+// ============================================================================
+
+#region Staff Discipline Notification Service
+
+public class StaffDisciplineNotificationService : IStaffDisciplineNotificationService
+{
+    private readonly IStaffDisciplineNotificationRepository _notificationRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<StaffDisciplineNotificationService> _logger;
+
+    public StaffDisciplineNotificationService(
+        IStaffDisciplineNotificationRepository notificationRepository,
+        IUnitOfWork unitOfWork,
+        ILogger<StaffDisciplineNotificationService> logger)
+    {
+        _notificationRepository = notificationRepository;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<StaffDisciplineNotificationDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _notificationRepository.GetByIdAsync(id);
+        return entity?.ToDto();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _notificationRepository.GetByCaseIdAsync(caseId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetUnacknowledgedAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _notificationRepository.GetUnacknowledgedAsync(caseId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetPendingFollowupAsync(int daysOld = 3, CancellationToken cancellationToken = default)
+    {
+        var entities = await _notificationRepository.GetPendingFollowupAsync(daysOld);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<StaffDisciplineNotificationDto> SendAsync(CreateStaffDisciplineNotificationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = dto.ToEntity(tenantId, userId);
+
+        await _notificationRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Notification sent for case {CaseId}, Type: {Type}", dto.DisciplinaryActionId, dto.NotificationType);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> AcknowledgeAsync(AcknowledgeNotificationDto dto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _notificationRepository.GetByIdAsync(dto.NotificationId);
+
+        if (entity == null)
+            throw new ArgumentException($"Notification with ID '{dto.NotificationId}' not found.");
+
+        if (entity.AcknowledgedDate.HasValue)
+            throw new InvalidOperationException("This notification has already been acknowledged.");
+
+        entity.AcknowledgedDate = dto.AcknowledgedDate;
+        entity.UpdatedAt        = DateTime.UtcNow;
+
+        await _notificationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    public async Task<bool> SendFollowupAsync(SendFollowupNotificationDto dto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _notificationRepository.GetByIdAsync(dto.NotificationId);
+
+        if (entity == null)
+            throw new ArgumentException($"Notification with ID '{dto.NotificationId}' not found.");
+
+        if (entity.IsFollowupSent)
+            throw new InvalidOperationException("A follow-up has already been sent for this notification.");
+
+        entity.IsFollowupSent = true;
+        entity.FollowupDate   = dto.FollowupDate;
+        entity.UpdatedAt      = DateTime.UtcNow;
+
+        await _notificationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Follow-up notification recorded for notification {NotificationId}", dto.NotificationId);
+
+        return true;
+    }
+}
+
+#endregion
+
+// ============================================================================
+// STAFF DISCIPLINE LEGAL REVIEW SERVICE
+// ============================================================================
+
+#region Staff Discipline Legal Review Service
+
+public class StaffDisciplineLegalReviewService : IStaffDisciplineLegalReviewService
+{
+    private readonly IStaffDisciplineLegalReviewRepository _legalReviewRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<StaffDisciplineLegalReviewService> _logger;
+
+    public StaffDisciplineLegalReviewService(
+        IStaffDisciplineLegalReviewRepository legalReviewRepository,
+        IUnitOfWork unitOfWork,
+        ILogger<StaffDisciplineLegalReviewService> logger)
+    {
+        _legalReviewRepository = legalReviewRepository;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<StaffDisciplineLegalReviewDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _legalReviewRepository.GetByIdAsync(id);
+        return entity?.ToDto();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entities = await _legalReviewRepository.GetByCaseIdAsync(caseId);
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetOpenReviewsAsync(CancellationToken cancellationToken = default)
+    {
+        var entities = await _legalReviewRepository.GetOpenReviewsAsync();
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetByRiskLevelAsync(DisciplineLegalRiskLevel minimumRisk, CancellationToken cancellationToken = default)
+    {
+        var entities = await _legalReviewRepository.GetByRiskLevelAsync(minimumRisk);
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetRequiringExternalCounselAsync(CancellationToken cancellationToken = default)
+    {
+        var entities = await _legalReviewRepository.GetRequiringExternalCounselAsync();
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public async Task<decimal> GetTotalLegalCostsForCaseAsync(Guid caseId, CancellationToken cancellationToken = default)
+        => await _legalReviewRepository.GetTotalLegalCostsForCaseAsync(caseId);
+
+    public async Task<StaffDisciplineLegalReviewDto> ReferAsync(CreateStaffDisciplineLegalReviewDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = dto.ToEntity(tenantId, userId);
+
+        if (entity.ReferredToLegalDate == default)
+            entity.ReferredToLegalDate = DateTime.UtcNow;
+
+        await _legalReviewRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Case {CaseId} referred to legal review, Risk: {Risk}", dto.DisciplinaryActionId, dto.LegalRiskLevel);
+
+        return entity.ToDto();
+    }
+
+    public async Task<StaffDisciplineLegalReviewDto> UpdateAsync(UpdateStaffDisciplineLegalReviewDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _legalReviewRepository.GetByIdAsync(dto.Id);
+
+        if (entity == null)
+            throw new ArgumentException($"Legal review with ID '{dto.Id}' not found.");
+
+        entity.UpdateEntity(dto, userId);
+
+        await _legalReviewRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> CompleteAsync(Guid reviewId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _legalReviewRepository.GetByIdAsync(reviewId);
+
+        if (entity == null)
+            throw new ArgumentException($"Legal review with ID '{reviewId}' not found.");
+
+        if (entity.LegalReviewCompleteDate.HasValue)
+            throw new InvalidOperationException("This legal review has already been marked as complete.");
+
+        entity.LegalReviewCompleteDate = DateTime.UtcNow;
+        entity.UpdatedAt               = DateTime.UtcNow;
+        entity.UpdatedBy               = userId.ToString();
+
+        await _legalReviewRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Legal review {ReviewId} marked complete", reviewId);
+
+        return true;
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _legalReviewRepository.GetByIdAsync(id);
+
+        if (entity == null)
+            throw new ArgumentException($"Legal review with ID '{id}' not found.");
+
+        await _legalReviewRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+}
+
+#endregion

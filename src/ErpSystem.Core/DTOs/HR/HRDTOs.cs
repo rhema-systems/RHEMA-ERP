@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
-using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.DTOs.Maintenance;
 
 namespace ErpSystem.Core.DTOs.HR;
 
@@ -13,7 +13,6 @@ public class EmployeeDto
 {
     public Guid Id { get; set; }
     public string EmployeeNumber { get; set; } = string.Empty;
-    public string? CorporateEmployeeID { get; set; }
     public string FirstName { get; set; } = string.Empty;
     public string? MiddleName { get; set; }
     public string LastName { get; set; } = string.Empty;
@@ -23,16 +22,17 @@ public class EmployeeDto
     public Gender? Gender { get; set; }
     public string EmailAddress { get; set; } = string.Empty;
     public string? MobileNumber { get; set; }
-    public string? DivisionName { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
     public string? SectionName { get; set; }
-    public string? UnitName { get; set; }
     public string PositionTitle { get; set; } = string.Empty;
     public string? StaffLevelName { get; set; }
+
+    // Preferred org assignment display (replaces Department/Section over time)
     public string? OrganizationLevelName { get; set; }
     public string? OrganizationUnitName { get; set; }
     public string? LocationLevelName { get; set; }
     public string? LocationName { get; set; }
+
     public StaffStatus StaffStatus { get; set; }
     public EmploymentType EmploymentType { get; set; }
     public bool IsActive { get; set; }
@@ -49,14 +49,18 @@ public class EmployeeDto
 /// </summary>
 public class EmployeeDetailDto : EmployeeDto
 {
+    // Foreign keys / IDs (useful for edit forms)
+    public Guid? DepartmentId { get; set; }
+    public Guid? SectionId { get; set; }
     public Guid? OrganizationLevelId { get; set; }
     public Guid? OrganizationUnitId { get; set; }
-    public Guid? LocationLevelId { get; set; }
-    public Guid? LocationId { get; set; }
     public Guid PositionId { get; set; }
     public Guid? ManagerId { get; set; }
+    public Guid? LocationLevelId { get; set; }
+    public Guid? LocationId { get; set; }
     public Guid? CountryId { get; set; }
     public Guid? ShiftId { get; set; }
+
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
@@ -78,6 +82,7 @@ public class EmployeeDetailDto : EmployeeDto
     public BloodType? BloodType { get; set; }
     public string? ShiftName { get; set; }
     public decimal? Salary { get; set; }
+    // Payroll/tax switches (additive)
     public bool PayTax { get; set; }
     public bool SSFund { get; set; }
     public bool GrossUp { get; set; }
@@ -92,6 +97,8 @@ public class EmployeeDetailDto : EmployeeDto
     public DateTime? TerminationDate { get; set; }
     public string? TerminationReason { get; set; }
     public string? TerminationNotes { get; set; }
+
+    // Convenience UI flag (computed in domain; projected here)
     public bool IsOnProbation { get; set; }
 
     // Related collections
@@ -126,8 +133,6 @@ public class CreateEmployeeDto
 {
     [Required]
     public string EmployeeNumber { get; set; } = string.Empty;
-
-    public string? CorporateEmployeeID { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -173,30 +178,29 @@ public class CreateEmployeeDto
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
 
-    public Guid? DivisionId { get; set; }
-
     [Required]
     public Guid DepartmentId { get; set; }
 
     public Guid? SectionId { get; set; }
-    public Guid? UnitId { get; set; }
-    public Guid OrganizationLevelId { get; set; }
-    public Guid OrganizationUnitId { get; set; }
-    public Guid LocationLevelId { get; set; }
-    public Guid LocationId { get; set; }
-    public Guid? ManagerId { get; set; }
 
     [Required]
     public Guid PositionId { get; set; }
 
+    [Required]
+    public Guid OrganizationUnitId { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    public Guid? ManagerId { get; set; }
+
     public StaffStatus StaffStatus { get; set; } = StaffStatus.Active;
-    public Guid? StationId { get; set; }
     public string? TaxNumber { get; set; }
     public string? SocialSecurityNumber { get; set; }
     public string? TINNumber { get; set; }
     public BloodType? BloodType { get; set; }
     public Guid? ShiftId { get; set; }
     public decimal? Salary { get; set; }
+    // Payroll/tax switches
     public bool PayTax { get; set; }
     public bool SSFund { get; set; }
     public bool GrossUp { get; set; }
@@ -205,6 +209,7 @@ public class CreateEmployeeDto
     public string? BadgeNumber { get; set; }
     public string? PicturePath { get; set; }
     public string? Notes { get; set; }
+
     public bool IsExpatriate { get; set; }
 }
 
@@ -214,7 +219,6 @@ public class CreateEmployeeDto
 public class UpdateEmployeeDto
 {
     public string? EmployeeNumber { get; set; }
-    public string? CorporateEmployeeID { get; set; }
     public string? FirstName { get; set; }
     public string? MiddleName { get; set; }
     public string? LastName { get; set; }
@@ -243,18 +247,13 @@ public class UpdateEmployeeDto
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
-    public Guid? OrganizationLevelId { get; set; }
-    public Guid? OrganizationUnitId { get; set; }
-    public Guid? LocationLevelId { get; set; }
-    public Guid? LocationId { get; set; }
-    public Guid? ManagerId { get; set; }
-    public Guid? DivisionId { get; set; }
     public Guid? DepartmentId { get; set; }
     public Guid? SectionId { get; set; }
     public Guid? PositionId { get; set; }
     public StaffStatus? StaffStatus { get; set; }
-    public Guid? StationId { get; set; }
-    public Guid? UnitId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public Guid? LocationId { get; set; }
+    public Guid? ManagerId { get; set; }
     public bool? IsExpatriate { get; set; }
     public string? TaxNumber { get; set; }
     public string? SocialSecurityNumber { get; set; }
@@ -262,6 +261,7 @@ public class UpdateEmployeeDto
     public BloodType? BloodType { get; set; }
     public Guid? ShiftId { get; set; }
     public decimal? Salary { get; set; }
+    // Payroll/tax switches
     public bool? PayTax { get; set; }
     public bool? SSFund { get; set; }
     public bool? GrossUp { get; set; }
@@ -285,11 +285,9 @@ public class UpdateEmployeeDto
 public class EmployeeSearchDto
 {
     public string? SearchTerm { get; set; }
-    public Guid? DivisionId { get; set; }
     public Guid? DepartmentId { get; set; }
     public Guid? SectionId { get; set; }
     public Guid? PositionId { get; set; }
-    public Guid? UnitId { get; set; }
     public StaffStatus? StaffStatus { get; set; }
     public EmploymentType? EmploymentType { get; set; }
     public bool? IsActive { get; set; }
@@ -426,7 +424,7 @@ public class CreateEmployeeEmergencyContactDto
 
     public string? MiddleName { get; set; }
 
-    public string? LastName { get; set; }
+    public string LastName { get; set; } = string.Empty;
 
     [Required]
     public string Relationship { get; set; } = string.Empty;
@@ -447,6 +445,9 @@ public class CreateEmployeeEmergencyContactDto
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// DTO for updating emergency contacts (additive; does not replace existing DTOs).
+/// </summary>
 public class UpdateEmployeeEmergencyContactDto
 {
     [Required]
@@ -477,12 +478,11 @@ public class EmployeeDependentDto
     public Guid EmployeeId { get; set; }
     public string FirstName { get; set; } = string.Empty;
     public string? MiddleName { get; set; }
-    public string? LastName { get; set; }
+    public string LastName { get; set; } = string.Empty;
     public string Relationship { get; set; } = string.Empty;
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
     public string? Occupation { get; set; }
-    public bool IsStudentDependent { get; set; }
     public bool IsEligibleForBenefits { get; set; }
     public int? Age { get; set; }
     public bool IsDeceased { get; set; }
@@ -662,7 +662,7 @@ public class CreateEmployeeDependentDto
 
     public string? MiddleName { get; set; }
 
-    public string? LastName { get; set; }
+    public string LastName { get; set; } = string.Empty;
 
     [Required]
     public string Relationship { get; set; } = string.Empty;
@@ -722,9 +722,6 @@ public class CreateEmployeeQualificationDto
     public string? CustomQualificationName { get; set; }
 
     [Required]
-    public string QualificationName { get; set; } = string.Empty;
-
-    [Required]
     public string Institution { get; set; } = string.Empty;
 
     public string? FieldOfStudy { get; set; }
@@ -732,7 +729,6 @@ public class CreateEmployeeQualificationDto
     public DateOnly? CompletionDate { get; set; }
     public string? Grade { get; set; }
     public Guid? CountryId { get; set; }
-    public string? CountryName { get; set; }
     public string? Description { get; set; }
     public string? Notes { get; set; }
 }
@@ -780,6 +776,25 @@ public class EmployeeSkillDto
 }
 
 /// <summary>
+/// DTO for updating employee skills.
+/// </summary>
+public class UpdateEmployeeSkillDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    public SkillLevel? SkillLevel { get; set; }
+    public DateOnly? AcquiredDate { get; set; }
+    public bool? IsCertified { get; set; }
+    public DateOnly? CertificationDate { get; set; }
+    public DateOnly? CertificationExpiryDate { get; set; }
+    public string? CertificationNumber { get; set; }
+    public string? CertifyingBody { get; set; }
+    public string? Notes { get; set; }
+    public bool? IsVerified { get; set; }
+}
+
+/// <summary>
 /// DTO for creating employee skills
 /// </summary>
 public class CreateEmployeeSkillDto
@@ -800,25 +815,6 @@ public class CreateEmployeeSkillDto
 }
 
 /// <summary>
-/// DTO for updating employee skills.
-/// </summary>
-public class UpdateEmployeeSkillDto
-{
-    [Required]
-    public Guid Id { get; set; }
-
-    public SkillLevel? SkillLevel { get; set; }
-    public DateOnly? AcquiredDate { get; set; }
-    public bool? IsCertified { get; set; }
-    public DateOnly? CertificationDate { get; set; }
-    public DateOnly? CertificationExpiryDate { get; set; }
-    public string? CertificationNumber { get; set; }
-    public string? CertifyingBody { get; set; }
-    public string? Notes { get; set; }
-    public bool? IsVerified { get; set; }
-}
-
-/// <summary>
 /// Employee contract detail information
 /// </summary>
 public class EmployeeContractDetailDto
@@ -832,6 +828,7 @@ public class EmployeeContractDetailDto
     public decimal Salary { get; set; }
     public string PayFrequency { get; set; } = string.Empty;
     public PayFrequency? PayFrequencyType { get; set; }
+
     public TaxTreatmentType? TaxTreatmentType { get; set; }
 
     [Range(typeof(decimal), "0", "100")]
@@ -839,6 +836,7 @@ public class EmployeeContractDetailDto
 
     public bool? IsPensionApplicable { get; set; }
     public bool? IsTaxExempt { get; set; }
+
     public ContractStatus? ContractStatus { get; set; }
     public int WorkingHoursPerWeek { get; set; }
     public int VacationDaysPerYear { get; set; }
@@ -933,6 +931,10 @@ public class UpdateEmployeeContractDetailDto
     public DateOnly? TerminationDate { get; set; }
     public string? TerminationReason { get; set; }
 }
+
+#endregion
+
+#region Employee Extended (Subresources)
 
 /// <summary>
 /// Identification type lookup for selectors.
@@ -1263,7 +1265,7 @@ public class EmployeePositionHistoryListDto
 
 public class EmployeePositionHistoryDetailDto : EmployeePositionHistoryListDto
 {
-    public Guid LocationLevelId { get; set; }
+    public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid OrganizationLevelId { get; set; }
     public Guid? OrganizationUnitId { get; set; }
@@ -1275,8 +1277,7 @@ public class CreateEmployeePositionHistoryDto
     [Required]
     public Guid EmployeeId { get; set; }
 
-    [Required]
-    public Guid LocationLevelId { get; set; }
+    public Guid? LocationLevelId { get; set; }
 
     public Guid? LocationId { get; set; }
 
@@ -1617,7 +1618,7 @@ public class UpdateEmployeeGuarantorDto
 
 // ─── Bank + Branch Reference DTOs ────────────────────────────────────────────
 
-public class EmployeeBankDto
+public class BankDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1629,7 +1630,7 @@ public class EmployeeBankDto
     public int BranchCount { get; set; }
 }
 
-public class CreateEmployeeBankDto
+public class CreateBankDto
 {
     [Required]
     [MaxLength(200)]
@@ -1647,7 +1648,7 @@ public class CreateEmployeeBankDto
     public bool IsActive { get; set; } = true;
 }
 
-public class UpdateEmployeeBankDto
+public class UpdateBankDto
 {
     [Required]
     public Guid Id { get; set; }
@@ -1666,7 +1667,7 @@ public class UpdateEmployeeBankDto
     public bool? IsActive { get; set; }
 }
 
-public class EmployeeBankBranchDto
+public class BankBranchDto
 {
     public Guid Id { get; set; }
     public Guid BankId { get; set; }
@@ -1683,7 +1684,7 @@ public class EmployeeBankBranchDto
     public bool IsActive { get; set; }
 }
 
-public class CreateEmployeeBankBranchDto
+public class CreateBankBranchDto
 {
     [Required]
     public Guid BankId { get; set; }
@@ -1713,7 +1714,7 @@ public class CreateEmployeeBankBranchDto
     public bool IsActive { get; set; } = true;
 }
 
-public class UpdateEmployeeBankBranchDto
+public class UpdateBankBranchDto
 {
     [Required]
     public Guid Id { get; set; }
@@ -1921,32 +1922,43 @@ public class CreateSectionDto
 public class EmployeePositionDto
 {
     public Guid Id { get; set; }
+
     public string Title { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public Guid? OrganizationLevelId { get; set; }
-    public string? OrganizationLevelName { get; set; }
-    public Guid? OrganizationUnitId { get; set; }
-    public string? OrganizationUnitName { get; set; }
-    public Guid DepartmentId { get; set; }
-    public string DepartmentName { get; set; } = string.Empty;
+
+    public Guid OrganizationLevelId { get; set; }
+    public string OrganizationLevelName { get; set; } = string.Empty;
+
+    public Guid OrganizationUnitId { get; set; }
+    public string OrganizationUnitName { get; set; } = string.Empty;
+
     public Guid? StaffLevelId { get; set; }
     public string? StaffLevelName { get; set; }
+
     public Guid? ReportsToPositionId { get; set; }
     public string? ReportsToPositionTitle { get; set; }
+
     public int Level { get; set; }
     public int? MinimumExperienceYears { get; set; }
     public int? MinimumAge { get; set; }
     public int? MaximumAge { get; set; }
+
     public int ExpectedHeadcount { get; set; }
+
     public Guid? SalaryGradeId { get; set; }
     public string? SalaryGradeName { get; set; }
+
     public WorkMode WorkMode { get; set; }
+    public int? ProbationPeriodMonths { get; set; }
+    public int? NoticePeriodMonths { get; set; }
+
     public bool RequiresCertification { get; set; }
     public bool RequiresGuarantor { get; set; }
     public bool RequiresLicense { get; set; }
+
     public bool IsActive { get; set; }
-    public string? Requirements { get; set; }
+
     public int EmployeeCount { get; set; }
     public List<PositionSkillRequirementDto> SkillRequirements { get; set; } = new();
     public List<EmployeePositionBenefitDto> PositionBenefits { get; set; } = new();
@@ -1958,13 +1970,14 @@ public class EmployeePositionDto
 public class CreateEmployeePositionDto : IValidatableObject
 {
     [Required]
+    [MaxLength(100)]
     public string Title { get; set; } = string.Empty;
 
+    [MaxLength(20)]
     public string Code { get; set; } = string.Empty;
-    public string? Description { get; set; }
 
-    [Required]
-    public Guid DepartmentId { get; set; }
+    [MaxLength(1000)]
+    public string? Description { get; set; }
 
     [Required]
     public Guid OrganizationLevelId { get; set; }
@@ -1974,7 +1987,7 @@ public class CreateEmployeePositionDto : IValidatableObject
 
     public Guid? StaffLevelId { get; set; }
     public Guid? ReportsToPositionId { get; set; }
-    
+
     [Range(1, int.MaxValue)]
     public int Level { get; set; } = 1;
 
@@ -1993,10 +2006,10 @@ public class CreateEmployeePositionDto : IValidatableObject
     public Guid? SalaryGradeId { get; set; }
 
     public WorkMode WorkMode { get; set; } = WorkMode.OnSite;
-    
-    public decimal? MinSalary { get; set; }
-    public decimal? MaxSalary { get; set; }
-    public bool RequiresCertification { get; set; }
+    public int? ProbationPeriodMonths { get; set; }
+    public int? NoticePeriodMonths { get; set; }
+
+    public bool RequiresCertification { get; set; } = false;
     public bool RequiresGuarantor { get; set; } = false;
     public bool RequiresLicense { get; set; } = false;
 
@@ -2056,6 +2069,8 @@ public class UpdateEmployeePositionDto : IValidatableObject
     public Guid? SalaryGradeId { get; set; }
 
     public WorkMode WorkMode { get; set; } = WorkMode.OnSite;
+    public int? ProbationPeriodMonths { get; set; }
+    public int? NoticePeriodMonths { get; set; }
     public bool RequiresCertification { get; set; } = false;
     public bool RequiresGuarantor { get; set; } = false;
     public bool RequiresLicense { get; set; } = false;
@@ -2134,10 +2149,8 @@ public class SkillDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? Category { get; set; }
-    public bool IsActive { get; set; }
     public bool RequiresCertification { get; set; }
-    public int EmployeeCount { get; set; }
-    public int PositionRequirementCount { get; set; }
+    public bool IsActive { get; set; }
 }
 
 /// <summary>
@@ -2165,7 +2178,6 @@ public class CreateSkillDto
 
     [MaxLength(100)]
     public string? Category { get; set; }
-    
     public bool RequiresCertification { get; set; }
 
     public bool IsActive { get; set; } = true;
@@ -2177,10 +2189,8 @@ public class CreateSkillDto
 public class PositionSkillRequirementDto
 {
     public Guid Id { get; set; }
-    public Guid PositionId { get; set; }
     public Guid SkillId { get; set; }
     public string SkillName { get; set; } = string.Empty;
-    public string? SkillCategory { get; set; }
     public SkillLevel RequiredLevel { get; set; }
     public bool IsRequired { get; set; }
     public int Priority { get; set; }
@@ -2192,14 +2202,49 @@ public class PositionSkillRequirementDto
 public class CreatePositionSkillRequirementDto
 {
     [Required]
-    public Guid PositionId { get; set; }
-
-    [Required]
     public Guid SkillId { get; set; }
 
     public SkillLevel RequiredLevel { get; set; } = SkillLevel.Beginner;
     public bool IsRequired { get; set; } = true;
+
+    [Range(1, int.MaxValue)]
     public int Priority { get; set; } = 1;
+}
+
+#endregion
+
+#region Qualification Catalogue DTOs
+
+public class QualificationCatalogueDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? ShortCode { get; set; }
+    public string? Description { get; set; }
+    public QualificationType Type { get; set; }
+    public string? IssuingAuthority { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class CreateQualificationCatalogueDto
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? ShortCode { get; set; }
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    [Required]
+    public QualificationType Type { get; set; }
+
+    [MaxLength(200)]
+    public string? IssuingAuthority { get; set; }
+
+    public bool IsActive { get; set; } = true;
 }
 
 #endregion

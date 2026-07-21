@@ -87,7 +87,9 @@ public static class SimpleMaintenanceSeeder
             TenantId = tenantId,
             Title = "Maintenance Technician",
             Code = "TECH",
-            DepartmentId = maintenanceDept.Id,
+            // [HR-MODULE-PORT] EmployeePosition no longer has DepartmentId; positions now anchor to
+            // the org structure via the REQUIRED OrganizationUnitId + OrganizationLevelId.
+            // ACTION NEEDED: seed an OrganizationUnit/Level and reference it here.
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
@@ -104,7 +106,9 @@ public static class SimpleMaintenanceSeeder
             FirstName = "John",
             LastName = "Smith",
             EmailAddress = "john.smith@rhema.com",
-            DepartmentId = maintenanceDept.Id,
+            // [HR-MODULE-PORT] EmployeePosition no longer has DepartmentId; positions now anchor to
+            // the org structure via the REQUIRED OrganizationUnitId + OrganizationLevelId.
+            // ACTION NEEDED: seed an OrganizationUnit/Level and reference it here.
             PositionId = techPosition.Id,
             StaffStatus = StaffStatus.Active,
             IsActive = true,
@@ -120,7 +124,9 @@ public static class SimpleMaintenanceSeeder
             FirstName = "Emily",
             LastName = "Davis",
             EmailAddress = "emily.davis@rhema.com",
-            DepartmentId = maintenanceDept.Id,
+            // [HR-MODULE-PORT] EmployeePosition no longer has DepartmentId; positions now anchor to
+            // the org structure via the REQUIRED OrganizationUnitId + OrganizationLevelId.
+            // ACTION NEEDED: seed an OrganizationUnit/Level and reference it here.
             PositionId = techPosition.Id,
             StaffStatus = StaffStatus.Active,
             IsActive = true,

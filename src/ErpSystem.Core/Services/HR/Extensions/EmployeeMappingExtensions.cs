@@ -88,6 +88,8 @@ public static class EmployeeMappingExtensions
             PicturePath = e.PicturePath,
 
             // IDs for edit forms
+            DepartmentId = e.DepartmentId,
+            SectionId = e.SectionId,
             OrganizationLevelId = e.OrganizationLevelId,
             OrganizationUnitId = e.OrganizationUnitId,
             PositionId = e.PositionId,
@@ -95,8 +97,6 @@ public static class EmployeeMappingExtensions
             LocationLevelId = e.LocationLevelId,
             LocationId = e.LocationId,
             CountryId = e.CountryId,
-            ShiftId = e.ShiftId,
-
             // Detail fields
             DateOfBirth = e.DateOfBirth,
             MaritalStatus = e.MaritalStatus,
@@ -117,7 +117,7 @@ public static class EmployeeMappingExtensions
             SocialSecurityNumber = e.SocialSecurityNumber,
             TINNumber = e.TINNumber,
             BloodType = e.BloodType,
-            ShiftName = e.Shift?.Name,
+            ShiftName = null, // Shift assignment now managed via ShiftAssignment entity
             Salary = e.Salary,
             PayTax = e.PayTax,
             SSFund = e.SSFund,
@@ -131,7 +131,7 @@ public static class EmployeeMappingExtensions
             NextReviewDate = e.NextReviewDate,
             StationName = e.Location?.Name,
             TerminationDate = e.TerminationDate,
-            TerminationReason = e.TerminationReason,
+            TerminationReason = e.TerminationReason?.ToString(),
             TerminationNotes = e.TerminationNotes,
             IsOnProbation = e.IsOnProbation,
 
@@ -197,6 +197,9 @@ public static class EmployeeMappingExtensions
         to.CanBeAssignedToMaintenance = from.CanBeAssignedToMaintenance;
         to.PicturePath = from.PicturePath;
 
+        // Detail fields
+        to.DepartmentId = from.DepartmentId;
+        to.SectionId = from.SectionId;
         to.OrganizationLevelId = from.OrganizationLevelId;
         to.OrganizationUnitId = from.OrganizationUnitId;
         to.PositionId = from.PositionId;
@@ -281,6 +284,9 @@ public static class EmployeeMappingExtensions
             ConfirmationDate = dto.ConfirmationDate,
             RetirementDate = dto.RetirementDate,
 
+            // Deprecated fields - convert Guid.Empty to null for backward compatibility
+            DepartmentId = dto.DepartmentId == Guid.Empty ? null : dto.DepartmentId,
+            SectionId = dto.SectionId == Guid.Empty ? null : dto.SectionId,
             OrganizationLevelId = organizationLevelId,
             OrganizationUnitId = dto.OrganizationUnitId,
             PositionId = dto.PositionId,
@@ -293,7 +299,6 @@ public static class EmployeeMappingExtensions
             SocialSecurityNumber = dto.SocialSecurityNumber,
             TINNumber = dto.TINNumber,
             BloodType = dto.BloodType,
-            ShiftId = dto.ShiftId,
             Salary = dto.Salary,
             PayTax = dto.PayTax,
             SSFund = dto.SSFund,
@@ -347,8 +352,7 @@ public static class EmployeeMappingExtensions
         if (dto.ConfirmationDate.HasValue) e.ConfirmationDate = dto.ConfirmationDate;
         if (dto.RetirementDate.HasValue) e.RetirementDate = dto.RetirementDate;
         if (dto.DepartmentId.HasValue) e.DepartmentId = dto.DepartmentId.Value;
-        if (dto.SectionId.HasValue) e.SectionId = dto.SectionId.Value;
-
+        if (dto.SectionId.HasValue) e.SectionId = dto.SectionId;
         if (dto.PositionId.HasValue) e.PositionId = dto.PositionId.Value;
 
         if (organizationLevelId.HasValue) e.OrganizationLevelId = organizationLevelId.Value;
@@ -357,14 +361,13 @@ public static class EmployeeMappingExtensions
         if (dto.StaffStatus.HasValue) e.StaffStatus = dto.StaffStatus.Value;
 
         if (locationLevelId.HasValue) e.LocationLevelId = locationLevelId.Value;
-        if (dto.LocationId.HasValue) e.LocationId = dto.LocationId.Value;
+        if (dto.LocationId.HasValue) e.LocationId = dto.LocationId;
         if (dto.ManagerId.HasValue) e.ManagerId = dto.ManagerId;
 
         if (dto.TaxNumber != null) e.TaxNumber = dto.TaxNumber;
         if (dto.SocialSecurityNumber != null) e.SocialSecurityNumber = dto.SocialSecurityNumber;
         if (dto.TINNumber != null) e.TINNumber = dto.TINNumber;
         if (dto.BloodType.HasValue) e.BloodType = dto.BloodType;
-        if (dto.ShiftId.HasValue) e.ShiftId = dto.ShiftId;
         if (dto.Salary.HasValue) e.Salary = dto.Salary;
 
         if (dto.PayTax.HasValue) e.PayTax = dto.PayTax.Value;
@@ -382,7 +385,7 @@ public static class EmployeeMappingExtensions
         if (dto.NextReviewDate.HasValue) e.NextReviewDate = dto.NextReviewDate;
 
         if (dto.TerminationDate.HasValue) e.TerminationDate = dto.TerminationDate;
-        if (dto.TerminationReason != null) e.TerminationReason = dto.TerminationReason;
+        if (dto.TerminationReason != null) e.TerminationReason = Enum.TryParse<TerminationReason>(dto.TerminationReason, out var tr) ? tr : null;
         if (dto.TerminationNotes != null) e.TerminationNotes = dto.TerminationNotes;
 
         if (dto.IsExpatriate.HasValue) e.IsExpatriate = dto.IsExpatriate.Value;
@@ -1266,7 +1269,7 @@ public static class EmployeeMappingExtensions
 
     #endregion
 
-    #region Bank Reference Entities
+    #region EmployeeBank Reference Entities
 
     public static EmployeeBankDto ToDto(this EmployeeBank b, int branchCount = 0) => new()
     {
@@ -1342,7 +1345,7 @@ public static class EmployeeMappingExtensions
 
     #endregion
 
-    #region Bank Details
+    #region EmployeeBank Details
 
     public static EmployeeBankDetailDto ToDto(this EmployeeBankDetail e) => new()
     {

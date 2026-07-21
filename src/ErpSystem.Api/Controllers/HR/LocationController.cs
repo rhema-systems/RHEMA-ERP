@@ -17,7 +17,9 @@ public class LocationController : ControllerBase
     private readonly ILocationService _locationService;
     private readonly ILogger<LocationController> _logger;
 
-    public LocationController(ILocationService locationService, ILogger<LocationController> logger)
+    public LocationController(
+        ILocationService locationService,
+        ILogger<LocationController> logger)
     {
         _locationService = locationService;
         _logger = logger;

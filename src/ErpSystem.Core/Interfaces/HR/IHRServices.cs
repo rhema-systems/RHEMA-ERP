@@ -1,7 +1,8 @@
-using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
-using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.StaffAttendance;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -10,49 +11,7 @@ namespace ErpSystem.Core.Interfaces.HR;
 /// </summary>
 public interface IEmployeeService
 {
-    // Employee CRUD operations
-    Task<EmployeeDto?> GetByIdAsync(Guid id);
-    Task<EmployeeDetailDto?> GetDetailsByIdAsync(Guid id);
-    Task<EmployeeDto?> GetByEmployeeNumberAsync(string employeeNumber);
-    Task<IEnumerable<EmployeeDto>> GetAllAsync();
-    Task<IEnumerable<EmployeeDto>> GetActiveEmployeesAsync();
-    Task<IEnumerable<EmployeeDto>> SearchEmployeesAsync(EmployeeSearchDto searchCriteria);
-    Task<EmployeeDto> CreateEmployeeAsync(CreateEmployeeDto createDto);
-    Task<EmployeeDto> UpdateEmployeeAsync(Guid id, UpdateEmployeeDto updateDto);
-    Task<bool> DeleteEmployeeAsync(Guid id);
-    Task<bool> DeactivateEmployeeAsync(Guid id);
-    Task<bool> ActivateEmployeeAsync(Guid id);
-    Task<bool> TerminateEmployeeAsync(Guid id, TerminateEmployeeDto dto);
-
-    // Employee filtering and grouping
-    Task<IEnumerable<EmployeeDto>> GetByStationAsync(Guid stationId);
-    Task<IEnumerable<EmployeeDto>> GetByDivisionAsync(Guid divisionId);
-    Task<IEnumerable<EmployeeDto>> GetByDepartmentAsync(Guid departmentId);
-    Task<IEnumerable<EmployeeDto>> GetBySectionAsync(Guid sectionId);
-    Task<IEnumerable<EmployeeDto>> GetByUnitAsync(Guid unitId);
-    Task<IEnumerable<EmployeeDto>> GetByPositionAsync(Guid positionId);
-    Task<IEnumerable<EmployeeDto>> GetByStatusAsync(StaffStatus status);
-    Task<IEnumerable<EmployeeDto>> GetByEmploymentTypeAsync(EmploymentType employmentType);
-
-    // Maintenance integration
-    Task<IEnumerable<MaintenanceTechnicianDto>> GetMaintenanceTechniciansAsync();
-    Task<IEnumerable<MaintenanceTechnicianDto>> GetAvailableTechniciansAsync();
-    Task<MaintenanceTechnicianDto?> GetTechnicianByIdAsync(Guid employeeId);
-    Task<TechnicianAvailabilityDto?> GetTechnicianAvailabilityAsync(Guid employeeId);
-    Task<IEnumerable<MaintenanceTechnicianDto>> GetTechniciansWithSkillAsync(Guid skillId, SkillLevel? minLevel = null);
-
-    // Employee validation
-    Task<bool> EmployeeNumberExistsAsync(string employeeNumber);
-    Task<bool> EmailExistsAsync(string email);
-    Task<string> GenerateEmployeeNumberAsync();
-
-    // Employee statistics
-    Task<int> GetTotalEmployeeCountAsync();
-    Task<int> GetActiveEmployeeCountAsync();
-    Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync();
-    Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync();
-
-        #region 1) Core Employee Lifecycle (writes - transactional)
+    #region 1) Core Employee Lifecycle (writes - transactional)
 
     Task<EmployeeDetailDto> CreateEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeDetailDto> UpdateEmployeeAsync(Guid employeeId, UpdateEmployeeDto dto, CancellationToken cancellationToken = default);
@@ -100,7 +59,6 @@ public interface IEmployeeService
     Task<EmployeeEmergencyContactDto> SetPrimaryEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
     Task<EmployeeEmergencyContactDto> ActivateEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
     Task<EmployeeEmergencyContactDto> DeactivateEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
-    Task<EmployeeEmergencyContactDto?> GetEmergencyContactByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Address contacts
     Task<IEnumerable<EmployeeContactDto>> GetContactsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -108,14 +66,12 @@ public interface IEmployeeService
     Task<EmployeeContactDto> UpdateContactAsync(UpdateEmployeeContactDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveContactAsync(Guid contactId, CancellationToken cancellationToken = default);
     Task<EmployeeContactDto> SetPrimaryContactAsync(Guid contactId, CancellationToken cancellationToken = default);
-    Task<EmployeeContactDto?> GetContactByIdAsync(Guid contactId, CancellationToken cancellationToken = default);
 
     // Dependents
     Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeDependentReadDto> AddDependentAsync(EmployeeDependentCreateDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeDependentReadDto> UpdateDependentAsync(EmployeeDependentUpdateDto dto, CancellationToken cancellationToken = default);
-    Task<bool> RemoveDependentAsync(Guid dependentId, CancellationToken cancellationToken = default);
-    Task<EmployeeDependentReadDto?> GetDependentAsync(Guid dependentId, CancellationToken cancellationToken = default);
+    Task<bool> RemoveDependentAsync(Guid employeeId, Guid dependentId, CancellationToken cancellationToken = default);
 
     // Dependent benefits
     Task<IEnumerable<EmployeeDependentBenefitDto>> GetDependentBenefitsAsync(Guid employeeDependentId, CancellationToken cancellationToken = default);
@@ -124,7 +80,6 @@ public interface IEmployeeService
     Task<bool> RemoveDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
     Task<EmployeeDependentBenefitDto> ActivateDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
     Task<EmployeeDependentBenefitDto> DeactivateDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
-    Task<EmployeeDependentBenefitDto?> GetDependentBenefitByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Qualifications
     Task<IEnumerable<EmployeeQualificationDto>> GetQualificationsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -133,7 +88,6 @@ public interface IEmployeeService
     Task<bool> RemoveQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
     Task<EmployeeQualificationDto> VerifyQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
     Task<EmployeeQualificationDto> UnverifyQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
-    Task<EmployeeQualificationDto?> GetQualificationByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Skills & certifications
     Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -142,7 +96,6 @@ public interface IEmployeeService
     Task<bool> RemoveSkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> VerifySkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> UnverifySkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
-    Task<EmployeeSkillDto?> GetSkillByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Identification cards
     Task<IEnumerable<EmployeeIdentificationCardListDto>> GetIdentificationCardsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -169,7 +122,6 @@ public interface IEmployeeService
     Task<EmployeeContractDetailDto> ActivateContractAsync(Guid contractId, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> DeactivateContractAsync(Guid contractId, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> TerminateContractAsync(Guid contractId, DateOnly terminationDate, string reason, CancellationToken cancellationToken = default);
-    Task<EmployeeContractDetailDto?> GetContractByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Expatriate assignments
     Task<IEnumerable<ExpatriateAssignmentListDto>> GetExpatriateAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -260,6 +212,40 @@ public interface IEmployeeService
     Task<bool> CanTerminateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
 
     #endregion
+
+    #region Legacy / Backward compatibility (keep controllers compiling)
+
+    Task<EmployeeDto?> GetByIdAsync(Guid id);
+    Task<EmployeeDetailDto?> GetDetailsByIdAsync(Guid id);
+    Task<EmployeeDto?> GetByEmployeeNumberAsync(string employeeNumber);
+    Task<IEnumerable<EmployeeDto>> GetAllAsync();
+    Task<IEnumerable<EmployeeDto>> GetActiveEmployeesAsync();
+    Task<IEnumerable<EmployeeDto>> SearchEmployeesAsync(EmployeeSearchDto searchCriteria);
+    Task<EmployeeDto> CreateEmployeeAsync(CreateEmployeeDto createDto);
+    Task<EmployeeDto> UpdateEmployeeAsync(Guid id, UpdateEmployeeDto updateDto);
+    Task<bool> DeleteEmployeeAsync(Guid id);
+    Task<bool> DeactivateEmployeeAsync(Guid id);
+    Task<bool> ActivateEmployeeAsync(Guid id);
+    Task<bool> TerminateEmployeeAsync(Guid id, TerminateEmployeeDto dto);
+    Task<IEnumerable<EmployeeDto>> GetByDepartmentAsync(Guid departmentId);
+    Task<IEnumerable<EmployeeDto>> GetBySectionAsync(Guid sectionId);
+    Task<IEnumerable<EmployeeDto>> GetByPositionAsync(Guid positionId);
+    Task<IEnumerable<EmployeeDto>> GetByStatusAsync(StaffStatus status);
+    Task<IEnumerable<EmployeeDto>> GetByEmploymentTypeAsync(EmploymentType employmentType);
+    Task<IEnumerable<MaintenanceTechnicianDto>> GetMaintenanceTechniciansAsync();
+    Task<IEnumerable<MaintenanceTechnicianDto>> GetAvailableTechniciansAsync();
+    Task<MaintenanceTechnicianDto?> GetTechnicianByIdAsync(Guid employeeId);
+    Task<TechnicianAvailabilityDto?> GetTechnicianAvailabilityAsync(Guid employeeId);
+    Task<IEnumerable<MaintenanceTechnicianDto>> GetTechniciansWithSkillAsync(Guid skillId, SkillLevel? minLevel = null);
+    Task<bool> EmployeeNumberExistsAsync(string employeeNumber);
+    Task<bool> EmailExistsAsync(string email);
+    Task<string> GenerateEmployeeNumberAsync();
+    Task<int> GetTotalEmployeeCountAsync();
+    Task<int> GetActiveEmployeeCountAsync();
+    Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync();
+    Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync();
+
+    #endregion
 }
 
 /// <summary>
@@ -327,6 +313,23 @@ public interface ISkillService
     Task<bool> DeleteSkillAsync(Guid id);
     Task<bool> NameExistsAsync(string name);
     Task<IEnumerable<string>> GetSkillCategoriesAsync();
+}
+
+/// <summary>
+/// Service interface for the qualification catalogue (master reference data).
+/// Mirrors ISkillService in structure.
+/// </summary>
+public interface IQualificationCatalogueService
+{
+    Task<QualificationCatalogueDto?> GetByIdAsync(Guid id);
+    Task<IEnumerable<QualificationCatalogueDto>> GetAllAsync();
+    Task<IEnumerable<QualificationCatalogueDto>> GetActiveAsync();
+    Task<IEnumerable<QualificationCatalogueDto>> GetByTypeAsync(QualificationType type);
+    Task<QualificationCatalogueDto?> GetByNameAsync(string name);
+    Task<QualificationCatalogueDto> CreateAsync(CreateQualificationCatalogueDto dto);
+    Task<QualificationCatalogueDto> UpdateAsync(Guid id, CreateQualificationCatalogueDto dto);
+    Task<bool> DeleteAsync(Guid id);
+    Task<bool> NameExistsAsync(string name);
 }
 
 /// <summary>
@@ -448,14 +451,14 @@ public interface ICountryService
 /// </summary>
 public interface IAttendanceService
 {
-    Task<IEnumerable<AttendanceRecord>> GetByEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<AttendanceRecord>> GetByDateRangeAsync(Guid employeeId, DateOnly startDate, DateOnly endDate);
-    Task<AttendanceRecord?> GetByEmployeeAndDateAsync(Guid employeeId, DateOnly date);
-    Task<IEnumerable<AttendanceRecord>> GetByDateAsync(DateOnly date);
-    Task<AttendanceRecord> RecordCheckInAsync(Guid employeeId, TimeOnly checkInTime, DateOnly? date = null);
-    Task<AttendanceRecord> RecordCheckOutAsync(Guid employeeId, TimeOnly checkOutTime, DateOnly? date = null);
-    Task<IEnumerable<AttendanceRecord>> GetAbsentEmployeesAsync(DateOnly date);
-    Task<IEnumerable<AttendanceRecord>> GetLateEmployeesAsync(DateOnly date);
+    Task<IEnumerable<StaffAttendanceRecord>> GetByEmployeeAsync(Guid employeeId);
+    Task<IEnumerable<StaffAttendanceRecord>> GetByDateRangeAsync(Guid employeeId, DateOnly startDate, DateOnly endDate);
+    Task<StaffAttendanceRecord?> GetByEmployeeAndDateAsync(Guid employeeId, DateOnly date);
+    Task<IEnumerable<StaffAttendanceRecord>> GetByDateAsync(DateOnly date);
+    Task<StaffAttendanceRecord> RecordCheckInAsync(Guid employeeId, TimeOnly checkInTime, DateOnly? date = null);
+    Task<StaffAttendanceRecord> RecordCheckOutAsync(Guid employeeId, TimeOnly checkOutTime, DateOnly? date = null);
+    Task<IEnumerable<StaffAttendanceRecord>> GetAbsentEmployeesAsync(DateOnly date);
+    Task<IEnumerable<StaffAttendanceRecord>> GetLateEmployeesAsync(DateOnly date);
     Task<Dictionary<string, object>> GetAttendanceSummaryAsync(Guid employeeId, DateOnly startDate, DateOnly endDate);
 }
 
@@ -468,20 +471,20 @@ public interface IHRReportingService
     Task<Dictionary<string, object>> GetEmployeeStatisticsAsync();
     Task<Dictionary<string, object>> GetDepartmentStatisticsAsync();
     Task<Dictionary<string, object>> GetSkillStatisticsAsync();
-
+    
     // Turnover and retention
     Task<Dictionary<string, object>> GetTurnoverAnalysisAsync(int months = 12);
     Task<IEnumerable<EmployeeDto>> GetNewHiresAsync(DateOnly fromDate, DateOnly? toDate = null);
     Task<IEnumerable<EmployeeDto>> GetTerminatedEmployeesAsync(DateOnly fromDate, DateOnly? toDate = null);
-
+    
     // Certification and compliance
     Task<IEnumerable<EmployeeSkillDto>> GetExpiringCertificationsAsync(int withinDays = 30);
     Task<IEnumerable<EmployeeDto>> GetEmployeesWithoutRequiredSkillsAsync(Guid positionId);
-
+    
     // Contract management
     Task<IEnumerable<EmployeeContractDetailDto>> GetExpiringContractsAsync(int withinDays = 60);
     Task<IEnumerable<EmployeeDto>> GetProbationaryEmployeesAsync();
-
+    
     // Organizational analysis
     Task<Dictionary<string, object>> GetOrganizationalChartDataAsync();
     Task<Dictionary<string, object>> GetHeadcountByDepartmentAsync();

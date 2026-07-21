@@ -1,0 +1,437 @@
+using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ErpSystem.Api.Controllers.HR;
+
+[ApiController]
+[Route("api/job-candidates")]
+[Authorize]
+public class JobCandidateController : ControllerBase
+{
+    private readonly IJobCandidateService _service;
+    private readonly ICurrentUserService _currentUser;
+
+    public JobCandidateController(IJobCandidateService service, ICurrentUserService currentUser)
+    {
+        _service = service;
+        _currentUser = currentUser;
+    }
+
+    // =========================================================================
+    // QUERIES
+    // =========================================================================
+
+    [HttpGet]
+    public async Task<ActionResult<PagedResult<JobCandidateSummaryDto>>> GetPaged(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20)
+        => Ok(await _service.GetPagedAsync(pageNumber, pageSize));
+
+    [HttpGet("all")]
+    public async Task<ActionResult<IEnumerable<JobCandidateSummaryDto>>> GetAll()
+        => Ok(await _service.GetAllAsync());
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<JobCandidateDto>> GetById(Guid id)
+        => Ok(await _service.GetByIdAsync(id));
+
+    [HttpGet("number/{candidateNumber}")]
+    public async Task<ActionResult<JobCandidateDto?>> GetByCandidateNumber(string candidateNumber)
+        => Ok(await _service.GetByCandidateNumberAsync(candidateNumber));
+
+    [HttpGet("{id:guid}/details")]
+    public async Task<ActionResult<JobCandidateDetailDto>> GetWithDetails(Guid id)
+        => Ok(await _service.GetWithFullDetailsAsync(id));
+
+    [HttpGet("talent-pool")]
+    public async Task<ActionResult<IEnumerable<JobCandidateSummaryDto>>> GetTalentPool()
+        => Ok(await _service.GetTalentPoolAsync());
+
+    [HttpGet("vacancy/{vacancyId:guid}")]
+    public async Task<ActionResult<IEnumerable<JobCandidateSummaryDto>>> GetByVacancy(Guid vacancyId)
+        => Ok(await _service.GetByVacancyIdAsync(vacancyId));
+
+    [HttpGet("email/{email}")]
+    public async Task<ActionResult<JobCandidateDto?>> GetByEmail(string email)
+        => Ok(await _service.GetByEmailAsync(email));
+
+    // =========================================================================
+    // CRUD
+    // =========================================================================
+
+    [HttpPost]
+    public async Task<ActionResult<JobCandidateDto>> Create([FromBody] CreateJobCandidateDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        var created = await _service.CreateAsync(dto, tenantId.Value, employeeId.Value);
+        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<JobCandidateDto>> Update(Guid id, [FromBody] UpdateJobCandidateDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        await _service.DeleteAsync(id);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // TALENT POOL
+    // =========================================================================
+
+    [HttpPost("{id:guid}/add-to-talent-pool")]
+    public async Task<IActionResult> AddToTalentPool(Guid id)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _service.AddToTalentPoolAsync(id, employeeId.Value);
+        return Ok(new { message = "Candidate added to talent pool." });
+    }
+
+    [HttpPost("{id:guid}/remove-from-talent-pool")]
+    public async Task<IActionResult> RemoveFromTalentPool(Guid id)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _service.RemoveFromTalentPoolAsync(id, employeeId.Value);
+        return Ok(new { message = "Candidate removed from talent pool." });
+    }
+
+    // =========================================================================
+    // QUALIFICATIONS
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/qualifications")]
+    public async Task<ActionResult<IEnumerable<JobCandidateQualificationDto>>> GetQualifications(Guid candidateId)
+        => Ok(await _service.GetQualificationsAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/qualifications")]
+    public async Task<ActionResult<JobCandidateQualificationDto>> AddQualification(
+        Guid candidateId, [FromBody] CreateJobCandidateQualificationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddQualificationAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/qualifications/{qualificationId:guid}")]
+    public async Task<ActionResult<JobCandidateQualificationDto>> UpdateQualification(
+        Guid candidateId, Guid qualificationId, [FromBody] UpdateJobCandidateQualificationDto dto)
+    {
+        if (qualificationId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateQualificationAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("qualifications/{qualificationId:guid}")]
+    public async Task<IActionResult> DeleteQualification(Guid qualificationId)
+    {
+        await _service.DeleteQualificationAsync(qualificationId);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // WORK HISTORY
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/work-history")]
+    public async Task<ActionResult<IEnumerable<JobCandidateWorkHistoryDto>>> GetWorkHistory(Guid candidateId)
+        => Ok(await _service.GetWorkHistoriesAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/work-history")]
+    public async Task<ActionResult<JobCandidateWorkHistoryDto>> AddWorkHistory(
+        Guid candidateId, [FromBody] CreateJobCandidateWorkHistoryDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddWorkHistoryAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/work-history/{workHistoryId:guid}")]
+    public async Task<ActionResult<JobCandidateWorkHistoryDto>> UpdateWorkHistory(
+        Guid candidateId, Guid workHistoryId, [FromBody] UpdateJobCandidateWorkHistoryDto dto)
+    {
+        if (workHistoryId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateWorkHistoryAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("work-history/{workHistoryId:guid}")]
+    public async Task<IActionResult> DeleteWorkHistory(Guid workHistoryId)
+    {
+        await _service.DeleteWorkHistoryAsync(workHistoryId);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // REFEREES
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/referees")]
+    public async Task<ActionResult<IEnumerable<JobCandidateRefereeDto>>> GetReferees(Guid candidateId)
+        => Ok(await _service.GetRefereesAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/referees")]
+    public async Task<ActionResult<JobCandidateRefereeDto>> AddReferee(
+        Guid candidateId, [FromBody] CreateJobCandidateRefereeDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddRefereeAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/referees/{refereeId:guid}")]
+    public async Task<ActionResult<JobCandidateRefereeDto>> UpdateReferee(
+        Guid candidateId, Guid refereeId, [FromBody] UpdateJobCandidateRefereeDto dto)
+    {
+        if (refereeId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateRefereeAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("referees/{refereeId:guid}")]
+    public async Task<IActionResult> DeleteReferee(Guid refereeId)
+    {
+        await _service.DeleteRefereeAsync(refereeId);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // SKILLS
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/skills")]
+    public async Task<ActionResult<IEnumerable<JobCandidateSkillDto>>> GetSkills(Guid candidateId)
+        => Ok(await _service.GetSkillsAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/skills")]
+    public async Task<ActionResult<JobCandidateSkillDto>> AddSkill(
+        Guid candidateId, [FromBody] CreateJobCandidateSkillDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddSkillAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/skills/{skillId:guid}")]
+    public async Task<ActionResult<JobCandidateSkillDto>> UpdateSkill(
+        Guid candidateId, Guid skillId, [FromBody] UpdateJobCandidateSkillDto dto)
+    {
+        if (skillId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateSkillAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("skills/{skillId:guid}")]
+    public async Task<IActionResult> DeleteSkill(Guid skillId)
+    {
+        await _service.DeleteSkillAsync(skillId);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // INTERESTS
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/interests")]
+    public async Task<ActionResult<IEnumerable<JobCandidateInterestDto>>> GetInterests(Guid candidateId)
+        => Ok(await _service.GetInterestsAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/interests")]
+    public async Task<ActionResult<JobCandidateInterestDto>> AddInterest(
+        Guid candidateId, [FromBody] CreateJobCandidateInterestDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddInterestAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/interests/{interestId:guid}")]
+    public async Task<ActionResult<JobCandidateInterestDto>> UpdateInterest(
+        Guid candidateId, Guid interestId, [FromBody] UpdateJobCandidateInterestDto dto)
+    {
+        if (interestId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateInterestAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("interests/{interestId:guid}")]
+    public async Task<IActionResult> DeleteInterest(Guid interestId)
+    {
+        await _service.DeleteInterestAsync(interestId);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // DOCUMENTS
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/documents")]
+    public async Task<ActionResult<IEnumerable<JobCandidateDocumentDto>>> GetDocuments(Guid candidateId)
+        => Ok(await _service.GetDocumentsAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/documents")]
+    public async Task<ActionResult<JobCandidateDocumentDto>> AddDocument(
+        Guid candidateId, [FromBody] CreateJobCandidateDocumentDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddDocumentAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpDelete("documents/{documentId:guid}")]
+    public async Task<IActionResult> DeleteDocument(Guid documentId)
+    {
+        await _service.DeleteDocumentAsync(documentId);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // NOTES
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/notes")]
+    public async Task<ActionResult<IEnumerable<JobCandidateNoteDto>>> GetNotes(
+        Guid candidateId, [FromQuery] bool includePrivate = false)
+        => Ok(await _service.GetNotesAsync(candidateId, includePrivate));
+
+    [HttpPost("{candidateId:guid}/notes")]
+    public async Task<ActionResult<JobCandidateNoteDto>> AddNote(
+        Guid candidateId, [FromBody] CreateJobCandidateNoteDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddNoteAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/notes/{noteId:guid}")]
+    public async Task<ActionResult<JobCandidateNoteDto>> UpdateNote(
+        Guid candidateId, Guid noteId, [FromBody] UpdateJobCandidateNoteDto dto)
+    {
+        if (noteId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateNoteAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("notes/{noteId:guid}")]
+    public async Task<IActionResult> DeleteNote(Guid noteId)
+    {
+        await _service.DeleteNoteAsync(noteId);
+        return NoContent();
+    }
+}

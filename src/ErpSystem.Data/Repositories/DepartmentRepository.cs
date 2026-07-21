@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Enums;
-using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Data.Repositories
 {
@@ -19,7 +19,8 @@ namespace ErpSystem.Data.Repositories
         {
             return await _dbSet
                 .Include(d => d.DepartmentHead)
-                .Include(d => d.ParentDepartment)
+                .Include(d => d.Division)
+                .Include(d => d.Sections)
                 .FirstOrDefaultAsync(d => d.Code == code && !d.IsDeleted);
         }
 
@@ -27,20 +28,17 @@ namespace ErpSystem.Data.Repositories
 
         public async Task<IEnumerable<Department>> GetSubDepartmentsAsync(Guid parentDepartmentId)
         {
-            return await _dbSet
-                .Include(d => d.DepartmentHead)
-                .Include(d => d.Sections)
-                .Where(d => d.ParentDepartmentId == parentDepartmentId && !d.IsDeleted)
-                .OrderBy(d => d.Name)
-                .ToListAsync();
+            // Department no longer has a parent/child hierarchy in the current model.
+            return await Task.FromResult(Enumerable.Empty<Department>());
         }
 
         public async Task<IEnumerable<Department>> GetRootDepartmentsAsync()
         {
             return await _dbSet
                 .Include(d => d.DepartmentHead)
-                .Include(d => d.SubDepartments)
-                .Where(d => d.ParentDepartmentId == null && !d.IsDeleted)
+                .Include(d => d.Division)
+                .Include(d => d.Sections)
+                .Where(d => !d.IsDeleted)
                 .OrderBy(d => d.Name)
                 .ToListAsync();
         }
@@ -49,7 +47,8 @@ namespace ErpSystem.Data.Repositories
         {
             return await _dbSet
                 .Include(d => d.DepartmentHead)
-                .Include(d => d.ParentDepartment)
+                .Include(d => d.Division)
+                .Include(d => d.Sections)
                 .Where(d => d.IsActive && !d.IsDeleted)
                 .OrderBy(d => d.Name)
                 .ToListAsync();
@@ -59,7 +58,7 @@ namespace ErpSystem.Data.Repositories
         {
             return await _dbSet
                 .Include(d => d.DepartmentHead)
-                .Include(d => d.ParentDepartment)
+                .Include(d => d.Division)
                 .Include(d => d.Employees)
                     .ThenInclude(e => e.Position)
                 .Include(d => d.Sections)
@@ -74,18 +73,59 @@ namespace ErpSystem.Data.Repositories
 
         public async Task<Department?> GetByTypeAsync(DepartmentType departmentType)
         {
+            var code = departmentType switch
+            {
+                DepartmentType.Operations => "OPS",
+                DepartmentType.Administration => "ADMIN",
+                DepartmentType.HumanResources => "HR",
+                DepartmentType.Finance => "FIN",
+                DepartmentType.IT => "IT",
+                DepartmentType.Maintenance => "MAINT",
+                DepartmentType.Safety => "SAFE",
+                DepartmentType.QualityAssurance => "QA",
+                DepartmentType.RnD => "RND",
+                DepartmentType.Marketing => "MKTG",
+                DepartmentType.Sales => "SALES",
+                _ => null
+            };
+
+            if (string.IsNullOrWhiteSpace(code))
+                return null;
+
             return await _dbSet
                 .Include(d => d.DepartmentHead)
-                .Include(d => d.ParentDepartment)
-                .FirstOrDefaultAsync(d => d.DepartmentType == departmentType && !d.IsDeleted);
+                .Include(d => d.Division)
+                .FirstOrDefaultAsync(d => d.Code == code && !d.IsDeleted);
         }
 
         public async Task<IEnumerable<Department>> GetByTypeAsync(IEnumerable<DepartmentType> departmentTypes)
         {
+            var codes = departmentTypes
+                .Select(t => t switch
+                {
+                    DepartmentType.Operations => "OPS",
+                    DepartmentType.Administration => "ADMIN",
+                    DepartmentType.HumanResources => "HR",
+                    DepartmentType.Finance => "FIN",
+                    DepartmentType.IT => "IT",
+                    DepartmentType.Maintenance => "MAINT",
+                    DepartmentType.Safety => "SAFE",
+                    DepartmentType.QualityAssurance => "QA",
+                    DepartmentType.RnD => "RND",
+                    DepartmentType.Marketing => "MKTG",
+                    DepartmentType.Sales => "SALES",
+                    _ => null
+                })
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .ToList();
+
+            if (codes.Count == 0)
+                return Enumerable.Empty<Department>();
+
             return await _dbSet
                 .Include(d => d.DepartmentHead)
-                .Include(d => d.ParentDepartment)
-                .Where(d => departmentTypes.Contains(d.DepartmentType) && !d.IsDeleted)
+                .Include(d => d.Division)
+                .Where(d => codes.Contains(d.Code) && !d.IsDeleted)
                 .OrderBy(d => d.Name)
                 .ToListAsync();
         }
@@ -97,18 +137,7 @@ namespace ErpSystem.Data.Repositories
                 .AnyAsync(e => e.DepartmentId == departmentId && !e.IsDeleted);
 
             if (hasEmployees)
-            {
                 return false;
-            }
-
-            // Check if department has sub-departments
-            var hasSubDepartments = await _dbSet
-                .AnyAsync(d => d.ParentDepartmentId == departmentId && !d.IsDeleted);
-
-            if (hasSubDepartments)
-            {
-                return false;
-            }
 
             // Check if department has sections
             var hasSections = await _context.Set<Section>()

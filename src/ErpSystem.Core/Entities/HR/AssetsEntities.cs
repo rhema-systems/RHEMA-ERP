@@ -26,7 +26,7 @@ public class AssetType : TenantEntity
 /// </summary>
 public class AssetTypeAttribute : TenantEntity
 {
-    public int AssetTypeId { get; set; }
+    public Guid AssetTypeId { get; set; }
 
     [Required]
     [MaxLength(70)]
@@ -75,9 +75,6 @@ public class CompanyAsset : TenantEntity
     [MaxLength(70)]
     public string? SerialNumber { get; set; }
 
-    [MaxLength(30)]
-    public string? Imei { get; set; } // For phones
-
     // Purchase Information
     public DateOnly? PurchaseDate { get; set; }
 
@@ -99,13 +96,6 @@ public class CompanyAsset : TenantEntity
     [MaxLength(100)]
     public string? WarrantyProvider { get; set; }
 
-    // Depreciation
-    public int? DepreciationPeriodMonths { get; set; }
-
-    public decimal? CurrentValue { get; set; }
-
-    public decimal? SalvageValue { get; set; }
-
     // Physical Details
     [MaxLength(30)]
     public string? Color { get; set; }
@@ -117,15 +107,18 @@ public class CompanyAsset : TenantEntity
     public string? Specifications { get; set; }
 
     // Status
-    public AssetStatus Status { get; set; }
+    public CompanyAssetStatus Status { get; set; } = CompanyAssetStatus.Available;
 
-    public HRAssetCondition Condition { get; set; }
+    public HRAssetCondition Condition { get; set; } = HRAssetCondition.Good;
 
     // Location
-    public Guid? StationId { get; set; }
+    public Guid? LocationId { get; set; }
 
     [MaxLength(500)]
     public string? LocationDetails { get; set; }
+
+    // Organization Unit
+    public Guid? UnitId { get; set; }
 
     // Assignment
     public bool IsAssignable { get; set; }
@@ -162,8 +155,11 @@ public class CompanyAsset : TenantEntity
     [ForeignKey(nameof(AssetTypeId))]
     public virtual AssetType AssetType { get; set; } = null!;
 
-    [ForeignKey(nameof(StationId))]
-    public virtual WorkStation? Station { get; set; }
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    [ForeignKey(nameof(UnitId))]
+    public virtual OrganizationUnit? Unit { get; set; }
 
     [ForeignKey(nameof(CurrentAssignedToId))]
     public virtual Employee? CurrentAssignedTo { get; set; }
@@ -173,6 +169,8 @@ public class CompanyAsset : TenantEntity
     public virtual ICollection<AssetMaintenance> MaintenanceRecords { get; set; } = new List<AssetMaintenance>();
 
     public virtual ICollection<AssetAttributeValue> AssetAttributeValues { get; set; } = new List<AssetAttributeValue>();
+
+    public virtual ICollection<AssetImage> Images { get; set; } = new List<AssetImage>();
 
     public virtual ICollection<AssetAttachment> Attachments { get; set; } = new List<AssetAttachment>();
 }
@@ -186,11 +184,28 @@ public class AssetAttributeValue : TenantEntity
     [MaxLength(700)]
     public string Value { get; set; } = string.Empty;
 
-    [ForeignKey("AssetId")]
+    [ForeignKey(nameof(AssetId))]
     public virtual CompanyAsset Asset { get; set; } = null!;
 
-    [ForeignKey("AssetTypeAttributeId")]
-    public virtual AssetTypeAttribute AttributeDefinition { get; set; } = null!;
+    [ForeignKey(nameof(AssetTypeAttributeId))]
+    public virtual AssetTypeAttribute AssetTypeAttribute { get; set; } = null!;
+}
+
+/// <summary>
+/// Asset images for visual identification and documentation
+/// </summary>
+public class AssetImage : TenantEntity
+{
+    public Guid AssetId { get; set; }
+    
+    public string FilePath { get; set; } = string.Empty;
+    
+    public string FileName { get; set; } = string.Empty;
+    
+    public DateTime UploadDate { get; set; }
+
+    [ForeignKey(nameof(AssetId))]
+    public virtual CompanyAsset Asset { get; set; } = null!;
 }
 
 /// <summary>
@@ -440,12 +455,16 @@ public class AssetTransfer : TenantEntity
     // From
     public Guid? FromEmployeeId { get; set; }
     
-    public Guid? FromStationId { get; set; }
+    public Guid? FromLocationId { get; set; }
+    
+    public Guid? FromUnitId { get; set; }
 
     // To
     public Guid? ToEmployeeId { get; set; }
     
-    public Guid? ToStationId { get; set; }
+    public Guid? ToLocationId { get; set; }
+    
+    public Guid? ToUnitId { get; set; }
 
     [MaxLength(1000)]
     public string? TransferReason { get; set; }
@@ -469,14 +488,20 @@ public class AssetTransfer : TenantEntity
     [ForeignKey(nameof(FromEmployeeId))]
     public virtual Employee? FromEmployee { get; set; }
 
-    [ForeignKey(nameof(FromStationId))]
-    public virtual WorkStation? FromStation { get; set; }
+    [ForeignKey(nameof(FromLocationId))]
+    public virtual Location? FromLocation { get; set; }
+    
+    [ForeignKey(nameof(FromUnitId))]
+    public virtual OrganizationUnit? FromUnit { get; set; }
 
     [ForeignKey(nameof(ToEmployeeId))]
     public virtual Employee? ToEmployee { get; set; }
 
-    [ForeignKey(nameof(ToStationId))]
-    public virtual WorkStation? ToStation { get; set; }
+    [ForeignKey(nameof(ToLocationId))]
+    public virtual Location? ToLocation { get; set; }
+    
+    [ForeignKey(nameof(ToUnitId))]
+    public virtual OrganizationUnit? ToUnit { get; set; }
 
     [ForeignKey(nameof(InitiatedById))]
     public virtual Employee InitiatedBy { get; set; } = null!;

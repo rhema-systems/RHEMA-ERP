@@ -1,0 +1,139 @@
+using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
+
+namespace ErpSystem.Core.Interfaces.HR;
+
+#region Job Description Service
+
+public interface IJobDescriptionService
+{
+    Task<JobDescriptionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<JobDescriptionDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobDescriptionDto>> GetAllAsync(CancellationToken cancellationToken = default);
+    Task<PagedResult<JobDescriptionDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobDescriptionSummaryDto>> GetByPositionIdAsync(Guid positionId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobDescriptionSummaryDto>> GetByStatusAsync(JobDescriptionStatus status, CancellationToken cancellationToken = default);
+    Task<JobDescriptionDto?> GetCurrentVersionForPositionAsync(Guid positionId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobDescriptionSummaryDto>> GetDueForReviewAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
+    Task<JobAnalyticsDto> GetAnalyticsAsync(CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobDescriptionSummaryDto>> GetVersionHistoryAsync(Guid positionId, CancellationToken cancellationToken = default);
+    Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default);
+    Task<JobDescriptionDto> UpdateAsync(UpdateJobDescriptionDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> SubmitForReviewAsync(SubmitJobDescriptionForReviewDto submitDto, CancellationToken cancellationToken = default);
+    Task<bool> ReviewAsync(ReviewJobDescriptionDto reviewDto, Guid reviewedById, CancellationToken cancellationToken = default);
+    Task<bool> ApproveAsync(ApproveJobDescriptionDto approveDto, Guid approvedById, CancellationToken cancellationToken = default);
+    Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default);
+    /// <summary>Deep-copies a job description (and all its child sections) into a new Draft.</summary>
+    Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default);
+    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Responsibility operations
+    Task<JobResponsibilityDto> AddResponsibilityAsync(CreateJobResponsibilityDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobResponsibilityDto>> GetResponsibilitiesAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobResponsibilityDto> UpdateResponsibilityAsync(UpdateJobResponsibilityDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteResponsibilityAsync(Guid responsibilityId, CancellationToken cancellationToken = default);
+
+    // Qualification operations
+    Task<JobQualificationDto> AddQualificationAsync(CreateJobQualificationDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobQualificationDto>> GetQualificationsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobQualificationDto> UpdateQualificationAsync(UpdateJobQualificationDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
+
+    // Competency operations
+    Task<JobCompetencyDto> AddCompetencyAsync(CreateJobCompetencyDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobCompetencyDto>> GetCompetenciesAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobCompetencyDto> UpdateCompetencyAsync(UpdateJobCompetencyDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteCompetencyAsync(Guid competencyId, CancellationToken cancellationToken = default);
+
+    // Physical Demand operations
+    Task<JobPhysicalDemandDto> AddPhysicalDemandAsync(CreateJobPhysicalDemandDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobPhysicalDemandDto>> GetPhysicalDemandsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobPhysicalDemandDto> UpdatePhysicalDemandAsync(UpdateJobPhysicalDemandDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeletePhysicalDemandAsync(Guid demandId, CancellationToken cancellationToken = default);
+
+    // Working Condition operations
+    Task<JobWorkingConditionDto> AddWorkingConditionAsync(CreateJobWorkingConditionDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobWorkingConditionDto>> GetWorkingConditionsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobWorkingConditionDto> UpdateWorkingConditionAsync(UpdateJobWorkingConditionDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteWorkingConditionAsync(Guid conditionId, CancellationToken cancellationToken = default);
+
+    // Equipment Tool operations
+    Task<JobEquipmentToolDto> AddEquipmentToolAsync(CreateJobEquipmentToolDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobEquipmentToolDto>> GetEquipmentToolsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobEquipmentToolDto> UpdateEquipmentToolAsync(UpdateJobEquipmentToolDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteEquipmentToolAsync(Guid toolId, CancellationToken cancellationToken = default);
+
+    // Reporting Relationship operations
+    Task<JobReportingRelationshipDto> AddReportingRelationshipAsync(CreateJobReportingRelationshipDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobReportingRelationshipDto>> GetReportingRelationshipsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobReportingRelationshipDto> UpdateReportingRelationshipAsync(UpdateJobReportingRelationshipDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteReportingRelationshipAsync(Guid relationshipId, CancellationToken cancellationToken = default);
+
+    // Duty Item operations
+    Task<JobDutyItemDto> AddDutyItemAsync(CreateJobDutyItemDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobDutyItemDto>> GetDutyItemsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobDutyItemDto> UpdateDutyItemAsync(UpdateJobDutyItemDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteDutyItemAsync(Guid dutyItemId, CancellationToken cancellationToken = default);
+
+    // PPE Requirement operations
+    Task<JobPpeRequirementDto> AddPpeRequirementAsync(CreateJobPpeRequirementDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobPpeRequirementDto>> GetPpeRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobPpeRequirementDto> UpdatePpeRequirementAsync(UpdateJobPpeRequirementDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeletePpeRequirementAsync(Guid ppeRequirementId, CancellationToken cancellationToken = default);
+
+    // Equipment Training operations
+    Task<JobEquipmentTrainingDto> AddEquipmentTrainingAsync(CreateJobEquipmentTrainingDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobEquipmentTrainingDto>> GetEquipmentTrainingsAsync(Guid jobEquipmentToolId, CancellationToken cancellationToken = default);
+    Task<JobEquipmentTrainingDto> UpdateEquipmentTrainingAsync(UpdateJobEquipmentTrainingDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteEquipmentTrainingAsync(Guid equipmentTrainingId, CancellationToken cancellationToken = default);
+
+    // Medical Requirement operations
+    Task<JobMedicalRequirementDto> AddMedicalRequirementAsync(CreateJobMedicalRequirementDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobMedicalRequirementDto>> GetMedicalRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+    Task<JobMedicalRequirementDto> UpdateMedicalRequirementAsync(UpdateJobMedicalRequirementDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteMedicalRequirementAsync(Guid medicalRequirementId, CancellationToken cancellationToken = default);
+
+    // Job Evaluation / Valuation
+    /// <summary>Computes the valuation summary and persists the estimated range + suggested grade.</summary>
+    Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+
+    // Responsibility KPI operations
+    Task<JobResponsibilityKpiDto> AddResponsibilityKpiAsync(CreateJobResponsibilityKpiDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobResponsibilityKpiDto>> GetResponsibilityKpisAsync(Guid responsibilityId, CancellationToken cancellationToken = default);
+    Task<JobResponsibilityKpiDto> UpdateResponsibilityKpiAsync(UpdateJobResponsibilityKpiDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteResponsibilityKpiAsync(Guid kpiId, CancellationToken cancellationToken = default);
+}
+
+#endregion Job Description Service
+
+#region Manpower Budget Service
+
+public interface IManpowerBudgetService
+{
+    Task<ManpowerBudgetDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ManpowerBudgetDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetDto>> GetAllAsync(CancellationToken cancellationToken = default);
+    Task<PagedResult<ManpowerBudgetDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByFiscalYearAsync(int fiscalYear, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByOrganizationUnitIdAsync(Guid organizationUnitId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByOrganizationLevelIdAsync(Guid organizationLevelId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByStatusAsync(ManpowerBudgetStatus status, CancellationToken cancellationToken = default);
+    Task<ManpowerBudgetDto?> GetCurrentBudgetForOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetSummaryDto>> GetPendingApprovalsAsync(CancellationToken cancellationToken = default);
+    Task<ManpowerBudgetDto> CreateAsync(CreateManpowerBudgetDto createDto, CancellationToken cancellationToken = default);
+    Task<ManpowerBudgetDto> UpdateAsync(UpdateManpowerBudgetDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> SubmitForApprovalAsync(Guid budgetId, CancellationToken cancellationToken = default);
+    Task<bool> ApproveAsync(ApproveManpowerBudgetDto approveDto, Guid approvedById, CancellationToken cancellationToken = default);
+    Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default);
+    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Budget Line operations
+    Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetLineDto>> GetBudgetLinesAsync(Guid budgetId, CancellationToken cancellationToken = default);
+    Task<ManpowerBudgetLineDto> UpdateBudgetLineAsync(UpdateManpowerBudgetLineDto updateDto, CancellationToken cancellationToken = default);
+    Task<bool> DeleteBudgetLineAsync(Guid lineId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ManpowerBudgetLineDto>> GetCriticalPositionsAsync(Guid budgetId, CancellationToken cancellationToken = default);
+}
+
+#endregion Manpower Budget Service

@@ -1,0 +1,898 @@
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Benefits;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace ErpSystem.Core.Services.HR;
+
+/// <summary>
+/// Employee benefit enrollment service. Owns the in-force enrollment ledger, the reconcile-from-
+/// position-entitlements operation, and the Benefit→Payroll bridge. Valuation is delegated to
+/// <see cref="GhanaBikValuator"/>; basic pay / cash emoluments come from <see cref="IEmolumentService"/>.
+/// </summary>
+public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentService
+{
+    private readonly IGenericRepository<EmployeeBenefitEnrollment> _enrollmentRepository;
+    private readonly IBenefitPolicyRepository _benefitPolicyRepository;
+    private readonly IGenericRepository<EmployeePositionBenefit> _positionBenefitRepository;
+    private readonly IGenericRepository<BenefitGradeValue> _gradeValueRepository;
+    private readonly IGenericRepository<EmployeeDependentBenefit> _dependentBenefitRepository;
+    private readonly IGenericRepository<BenefitBeneficiary> _beneficiaryRepository;
+    private readonly IGenericRepository<BenefitUtilization> _utilizationRepository;
+    private readonly IGenericRepository<Employee> _employeeRepository;
+    private readonly IEmolumentService _emolumentService;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<EmployeeBenefitEnrollmentService> _logger;
+
+    public EmployeeBenefitEnrollmentService(
+        IGenericRepository<EmployeeBenefitEnrollment> enrollmentRepository,
+        IBenefitPolicyRepository benefitPolicyRepository,
+        IGenericRepository<EmployeePositionBenefit> positionBenefitRepository,
+        IGenericRepository<BenefitGradeValue> gradeValueRepository,
+        IGenericRepository<EmployeeDependentBenefit> dependentBenefitRepository,
+        IGenericRepository<BenefitBeneficiary> beneficiaryRepository,
+        IGenericRepository<BenefitUtilization> utilizationRepository,
+        IGenericRepository<Employee> employeeRepository,
+        IEmolumentService emolumentService,
+        IUnitOfWork unitOfWork,
+        ILogger<EmployeeBenefitEnrollmentService> logger)
+    {
+        _enrollmentRepository = enrollmentRepository ?? throw new ArgumentNullException(nameof(enrollmentRepository));
+        _benefitPolicyRepository = benefitPolicyRepository ?? throw new ArgumentNullException(nameof(benefitPolicyRepository));
+        _positionBenefitRepository = positionBenefitRepository ?? throw new ArgumentNullException(nameof(positionBenefitRepository));
+        _gradeValueRepository = gradeValueRepository ?? throw new ArgumentNullException(nameof(gradeValueRepository));
+        _dependentBenefitRepository = dependentBenefitRepository ?? throw new ArgumentNullException(nameof(dependentBenefitRepository));
+        _beneficiaryRepository = beneficiaryRepository ?? throw new ArgumentNullException(nameof(beneficiaryRepository));
+        _utilizationRepository = utilizationRepository ?? throw new ArgumentNullException(nameof(utilizationRepository));
+        _employeeRepository = employeeRepository ?? throw new ArgumentNullException(nameof(employeeRepository));
+        _emolumentService = emolumentService ?? throw new ArgumentNullException(nameof(emolumentService));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeBenefitEnrollmentDto?> GetByIdAsync(Guid id)
+    {
+        var entity = await QueryWithGraph()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == id);
+
+        if (entity is null)
+        {
+            return null;
+        }
+
+        var dto = entity.ToDto();
+        var balance = await ComputeBalanceReadOnlyAsync(entity);
+        dto.CoverageLimit = balance.Limit;
+        dto.UtilizedAmount = balance.Used;
+        dto.RemainingAmount = balance.Remaining;
+        dto.CurrentPeriodStart = balance.Start;
+        dto.CurrentPeriodEnd = balance.End;
+        return dto;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EmployeeBenefitEnrollmentListDto>> GetByEmployeeAsync(Guid employeeId)
+    {
+        var rows = await _enrollmentRepository
+            .GetQueryable(e => e.EmployeeId == employeeId)
+            .AsNoTracking()
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Employee).ThenInclude(emp => emp.Position)
+            .Include(e => e.Utilizations)
+            .OrderByDescending(e => e.EffectiveFrom)
+            .ToListAsync();
+
+        var list = new List<EmployeeBenefitEnrollmentListDto>(rows.Count);
+        foreach (var row in rows)
+        {
+            var dto = ToListDto(row);
+            var balance = await ComputeBalanceReadOnlyAsync(row);
+            dto.CoverageLimit = balance.Limit;
+            dto.UtilizedAmount = balance.Used;
+            dto.RemainingAmount = balance.Remaining;
+            dto.CurrentPeriodStart = balance.Start;
+            dto.CurrentPeriodEnd = balance.End;
+            list.Add(dto);
+        }
+
+        return list;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EmployeeBenefitEnrollmentListDto>> GetByPolicyAsync(Guid benefitPolicyId)
+    {
+        var rows = await _enrollmentRepository
+            .GetQueryable(e => e.BenefitPolicyId == benefitPolicyId)
+            .AsNoTracking()
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Employee)
+            .OrderByDescending(e => e.EffectiveFrom)
+            .ToListAsync();
+
+        return rows.Select(ToListDto).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeBenefitEnrollmentDto> CreateAsync(CreateEmployeeBenefitEnrollmentDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var policy = await _benefitPolicyRepository
+            .GetQueryable(p => p.Id == dto.BenefitPolicyId)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Benefit policy '{dto.BenefitPolicyId}' not found.");
+
+        var employee = await _employeeRepository
+            .GetQueryable(e => e.Id == dto.EmployeeId)
+            .Include(e => e.Position)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Employee '{dto.EmployeeId}' not found.");
+
+        await EnsureEligibleAsync(policy, employee);
+
+        var asOf = DateOnly.FromDateTime(dto.EffectiveFrom);
+        var valuation = await ResolveValuationAsync(policy, employee, asOf, dto.AssessedValueOverride);
+        var (employerContribution, employeeContribution) = await ResolveContributionsAsync(policy, employee, asOf, valuation.AssessedValue);
+
+        var entity = new EmployeeBenefitEnrollment
+        {
+            EmployeeId = dto.EmployeeId,
+            BenefitPolicyId = dto.BenefitPolicyId,
+            EnrollmentDate = DateTime.UtcNow,
+            EffectiveFrom = dto.EffectiveFrom,
+            EffectiveTo = dto.EffectiveTo,
+            CurrentPeriodStart = dto.EffectiveFrom,
+            Status = EmployeeBenefitEnrollmentStatus.Draft,
+            Source = BenefitEnrollmentSource.Manual,
+            AssessedValue = valuation.AssessedValue,
+            TaxableValue = valuation.TaxableValue,
+            EmployerContribution = employerContribution,
+            EmployeeContribution = employeeContribution,
+            Currency = policy.Currency,
+            IsValueOverridden = dto.AssessedValueOverride.HasValue,
+            Notes = dto.Notes,
+            TenantId = policy.TenantId
+        };
+
+        await _enrollmentRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        await AddDependentsAsync(entity, policy, dto.Dependents);
+        AddBeneficiaries(entity, dto.Beneficiaries);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Created benefit enrollment {EnrollmentId} for employee {EmployeeId}.", entity.Id, entity.EmployeeId);
+
+        return (await GetByIdAsync(entity.Id))!;
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeBenefitEnrollmentDto> UpdateAsync(Guid id, UpdateEmployeeBenefitEnrollmentDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var entity = await _enrollmentRepository
+            .GetQueryable(e => e.Id == id)
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Employee).ThenInclude(e => e.Position)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Enrollment '{id}' not found.");
+
+        entity.EffectiveFrom = dto.EffectiveFrom;
+        entity.EffectiveTo = dto.EffectiveTo;
+        entity.Notes = dto.Notes;
+
+        var asOf = DateOnly.FromDateTime(dto.EffectiveFrom);
+
+        if (dto.AssessedValueOverride.HasValue)
+        {
+            // Explicit override: keep the supplied value and recompute only the taxable portion.
+            entity.AssessedValue = dto.AssessedValueOverride.Value;
+            entity.TaxableValue = ResolveTaxableForOverride(entity.BenefitPolicy, dto.AssessedValueOverride.Value);
+            entity.IsValueOverridden = true;
+        }
+        else if (!entity.IsValueOverridden)
+        {
+            var valuation = await ResolveValuationAsync(entity.BenefitPolicy, entity.Employee, asOf, null);
+            entity.AssessedValue = valuation.AssessedValue;
+            entity.TaxableValue = valuation.TaxableValue;
+            var (employer, employeeContribution) = await ResolveContributionsAsync(entity.BenefitPolicy, entity.Employee, asOf, valuation.AssessedValue);
+            entity.EmployerContribution = employer;
+            entity.EmployeeContribution = employeeContribution;
+        }
+
+        await _enrollmentRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        return (await GetByIdAsync(entity.Id))!;
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeBenefitEnrollmentDto> ChangeStatusAsync(Guid id, EnrollmentStatusChangeDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var entity = await _enrollmentRepository
+            .GetQueryable(e => e.Id == id)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Enrollment '{id}' not found.");
+
+        entity.Status = dto.Status;
+
+        if (dto.Status == EmployeeBenefitEnrollmentStatus.Active && entity.ApprovedDate is null)
+        {
+            entity.ApprovedDate = DateTime.UtcNow;
+        }
+
+        if (dto.Status is EmployeeBenefitEnrollmentStatus.Terminated or EmployeeBenefitEnrollmentStatus.Rejected)
+        {
+            entity.TerminationReason = dto.Reason;
+        }
+
+        await _enrollmentRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        return (await GetByIdAsync(entity.Id))!;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ReconcilePositionEnrollmentsAsync(Guid employeeId)
+    {
+        var employee = await _employeeRepository
+            .GetQueryable(e => e.Id == employeeId)
+            .Include(e => e.Position)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Employee '{employeeId}' not found.");
+
+        var positionBenefits = await _positionBenefitRepository
+            .GetQueryable(pb => pb.PositionId == employee.PositionId)
+            .Include(pb => pb.BenefitPolicy)
+            .ToListAsync();
+
+        var existing = await _enrollmentRepository
+            .GetQueryable(e => e.EmployeeId == employeeId)
+            .ToListAsync();
+
+        var created = 0;
+
+        foreach (var positionBenefit in positionBenefits)
+        {
+            var policy = positionBenefit.BenefitPolicy;
+            if (policy is null || !policy.IsActive)
+            {
+                continue;
+            }
+
+            if (!IsEligible(policy, employee))
+            {
+                continue;
+            }
+
+            var match = existing.FirstOrDefault(e => e.BenefitPolicyId == policy.Id);
+
+            // Leave manual, overridden or opted-out (suspended/terminated) enrollments alone.
+            if (match is not null)
+            {
+                if (match.Source != BenefitEnrollmentSource.Position || match.IsValueOverridden
+                    || match.Status is EmployeeBenefitEnrollmentStatus.Suspended or EmployeeBenefitEnrollmentStatus.Terminated)
+                {
+                    continue;
+                }
+
+                var asOfRefresh = DateOnly.FromDateTime(DateTime.UtcNow);
+                var refreshed = await ResolveValuationAsync(policy, employee, asOfRefresh, positionBenefit.PositionAmount);
+                match.AssessedValue = refreshed.AssessedValue;
+                match.TaxableValue = refreshed.TaxableValue;
+                var (emp, empl) = await ResolveContributionsAsync(policy, employee, asOfRefresh, refreshed.AssessedValue);
+                match.EmployerContribution = emp;
+                match.EmployeeContribution = empl;
+                await _enrollmentRepository.UpdateAsync(match);
+                continue;
+            }
+
+            var asOf = DateOnly.FromDateTime(DateTime.UtcNow);
+            var valuation = await ResolveValuationAsync(policy, employee, asOf, positionBenefit.PositionAmount);
+            var (employer, employeeContribution) = await ResolveContributionsAsync(policy, employee, asOf, valuation.AssessedValue);
+
+            var enrollment = new EmployeeBenefitEnrollment
+            {
+                EmployeeId = employeeId,
+                BenefitPolicyId = policy.Id,
+                EnrollmentDate = DateTime.UtcNow,
+                EffectiveFrom = DateTime.UtcNow,
+                CurrentPeriodStart = DateTime.UtcNow,
+                Status = policy.IsMandatory ? EmployeeBenefitEnrollmentStatus.Active : EmployeeBenefitEnrollmentStatus.PendingApproval,
+                Source = policy.IsMandatory ? BenefitEnrollmentSource.Mandatory : BenefitEnrollmentSource.Position,
+                SourcePositionBenefitId = positionBenefit.Id,
+                AssessedValue = valuation.AssessedValue,
+                TaxableValue = valuation.TaxableValue,
+                EmployerContribution = employer,
+                EmployeeContribution = employeeContribution,
+                Currency = policy.Currency,
+                TenantId = policy.TenantId
+            };
+
+            await _enrollmentRepository.AddAsync(enrollment);
+            created++;
+        }
+
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Reconciled position benefits for employee {EmployeeId}: {Created} new enrollment(s).", employeeId, created);
+
+        return created;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EmployeeBenefitPayrollLineDto>> GetEmployeeBenefitPayrollLinesAsync(Guid employeeId, DateTime asOf)
+    {
+        var enrollments = await _enrollmentRepository
+            .GetQueryable(e => e.EmployeeId == employeeId
+                && e.Status == EmployeeBenefitEnrollmentStatus.Active
+                && e.EffectiveFrom <= asOf
+                && (e.EffectiveTo == null || e.EffectiveTo >= asOf))
+            .AsNoTracking()
+            .Include(e => e.BenefitPolicy).ThenInclude(p => p.PayComponent)
+            .ToListAsync();
+
+        return enrollments.Select(e =>
+        {
+            var policy = e.BenefitPolicy;
+            return new EmployeeBenefitPayrollLineDto
+            {
+                EnrollmentId = e.Id,
+                EmployeeId = e.EmployeeId,
+                BenefitPolicyId = e.BenefitPolicyId,
+                BenefitName = policy?.PolicyName ?? string.Empty,
+                PayComponentCode = policy?.PayComponent?.Code,
+                DeliveryType = policy?.DeliveryType ?? BenefitDeliveryType.Cash,
+                GrossValue = e.AssessedValue,
+                TaxableValue = e.TaxableValue,
+                EmployerContribution = e.EmployerContribution,
+                EmployeeContribution = e.EmployeeContribution,
+                IsPensionable = policy?.IsPensionable ?? false,
+                AffectsGrossPay = policy?.AffectsGrossPay ?? true,
+                AffectsNetPay = policy?.AffectsNetPay ?? true,
+                Frequency = policy?.Frequency ?? PayFrequency.Monthly,
+                Currency = e.Currency,
+                EffectiveFrom = e.EffectiveFrom,
+                EffectiveTo = e.EffectiveTo
+            };
+        }).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<BenefitUtilizationDto>> GetUtilizationsAsync(Guid enrollmentId)
+    {
+        var rows = await _utilizationRepository
+            .GetQueryable(u => u.EnrollmentId == enrollmentId)
+            .AsNoTracking()
+            .Include(u => u.EmployeeDependent)
+            .OrderByDescending(u => u.ClaimDate)
+            .ThenByDescending(u => u.CreatedAt)
+            .ToListAsync();
+
+        return rows.Select(ToUtilizationDto).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<EnrollmentBalanceDto> GetBalanceAsync(Guid enrollmentId)
+    {
+        var enrollment = await _enrollmentRepository
+            .GetQueryable(e => e.Id == enrollmentId)
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Employee).ThenInclude(emp => emp.Position)
+            .Include(e => e.Dependents)
+            .Include(e => e.Utilizations)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Enrollment '{enrollmentId}' not found.");
+
+        var (limit, used, remaining, start, end) = await ApplyPeriodAndRecomputeAsync(enrollment, persist: true);
+        await _unitOfWork.SaveChangesAsync();
+
+        return new EnrollmentBalanceDto
+        {
+            EnrollmentId = enrollment.Id,
+            CoverageLimit = limit,
+            UtilizedAmount = used,
+            RemainingAmount = remaining,
+            LimitPeriod = enrollment.BenefitPolicy?.LimitPeriod ?? BenefitLimitPeriod.Annual,
+            PeriodStart = start,
+            PeriodEnd = end,
+            Currency = enrollment.Currency
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<BenefitUtilizationDto> RecordUtilizationAsync(CreateBenefitUtilizationDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var enrollment = await _enrollmentRepository
+            .GetQueryable(e => e.Id == dto.EnrollmentId)
+            .Include(e => e.Dependents)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Enrollment '{dto.EnrollmentId}' not found.");
+
+        if (enrollment.Status != EmployeeBenefitEnrollmentStatus.Active)
+        {
+            throw new InvalidOperationException("Claims can only be recorded against an active enrollment.");
+        }
+
+        if (dto.EmployeeDependentId.HasValue
+            && enrollment.Dependents.All(d => d.EmployeeDependentId != dto.EmployeeDependentId.Value))
+        {
+            throw new ArgumentException("The selected dependent is not covered under this enrollment.");
+        }
+
+        var entity = new BenefitUtilization
+        {
+            EnrollmentId = enrollment.Id,
+            EmployeeDependentId = dto.EmployeeDependentId,
+            ClaimDate = dto.ClaimDate,
+            Amount = Math.Round(dto.Amount, 2, MidpointRounding.AwayFromZero),
+            Type = dto.Type,
+            Status = BenefitClaimStatus.Pending,
+            Description = dto.Description,
+            ReferenceNumber = dto.ReferenceNumber,
+            TenantId = enrollment.TenantId
+        };
+
+        await _utilizationRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        return ToUtilizationDto(entity);
+    }
+
+    /// <inheritdoc />
+    public async Task<BenefitUtilizationDto> ChangeClaimStatusAsync(Guid claimId, ClaimStatusChangeDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var claim = await _utilizationRepository
+            .GetQueryable(u => u.Id == claimId)
+            .Include(u => u.EmployeeDependent)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Claim '{claimId}' not found.");
+
+        var enrollment = await _enrollmentRepository
+            .GetQueryable(e => e.Id == claim.EnrollmentId)
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Employee).ThenInclude(emp => emp.Position)
+            .Include(e => e.Dependents)
+            .Include(e => e.Utilizations)
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Enrollment '{claim.EnrollmentId}' not found.");
+
+        // Apply the transition on the tracked claim instance from the enrollment graph.
+        var tracked = enrollment.Utilizations.First(u => u.Id == claim.Id);
+        tracked.Status = dto.Status;
+
+        if (dto.Status is BenefitClaimStatus.Approved or BenefitClaimStatus.Paid)
+        {
+            tracked.ApprovedDate ??= DateTime.UtcNow;
+
+            // Block if approving/paying this claim would push the period total past the coverage limit.
+            var (limit, used, _, _, _) = await ApplyPeriodAndRecomputeAsync(enrollment, persist: false);
+            if (used > limit)
+            {
+                throw new InvalidOperationException(
+                    $"Claim exceeds the remaining benefit balance (limit {limit:N2}, would be used {used:N2}).");
+            }
+        }
+        else if (dto.Status is BenefitClaimStatus.Rejected or BenefitClaimStatus.Cancelled)
+        {
+            tracked.RejectionReason = dto.Reason;
+        }
+
+        // Refresh denormalized caches to reflect the new claim state, then persist.
+        await ApplyPeriodAndRecomputeAsync(enrollment, persist: true);
+        await _unitOfWork.SaveChangesAsync();
+
+        return ToUtilizationDto(tracked);
+    }
+
+    // ─────────────────────────── helpers ───────────────────────────
+
+    private IQueryable<EmployeeBenefitEnrollment> QueryWithGraph()
+        => _enrollmentRepository.GetQueryable()
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Employee).ThenInclude(emp => emp.Position)
+            .Include(e => e.Dependents)
+            .Include(e => e.Beneficiaries)
+            .Include(e => e.Utilizations);
+
+    private async Task<BenefitValuation> ResolveValuationAsync(BenefitPolicy policy, Employee employee, DateOnly asOf, decimal? overrideValue)
+    {
+        if (overrideValue.HasValue)
+        {
+            return new BenefitValuation(overrideValue.Value, ResolveTaxableForOverride(policy, overrideValue.Value));
+        }
+
+        var (basic, cashEmoluments) = await GetPayBasesAsync(employee.Id, asOf);
+        BenefitGradeValue? gradeValue = null;
+
+        if (policy.ValuationMethod == BenefitValuationMethod.GradeBased)
+        {
+            gradeValue = await ResolveGradeValueAsync(policy.Id, employee);
+        }
+
+        return GhanaBikValuator.Value(policy, basic, cashEmoluments, gradeValue);
+    }
+
+    private async Task<BenefitGradeValue?> ResolveGradeValueAsync(Guid policyId, Employee employee)
+    {
+        var rows = await _gradeValueRepository
+            .GetQueryable(g => g.BenefitPolicyId == policyId && g.IsActive)
+            .ToListAsync();
+
+        var salaryGradeId = employee.Position?.SalaryGradeId;
+        var staffLevelId = employee.Position?.StaffLevelId;
+
+        return rows.FirstOrDefault(g => salaryGradeId.HasValue && g.SalaryGradeId == salaryGradeId)
+            ?? rows.FirstOrDefault(g => staffLevelId.HasValue && g.StaffLevelId == staffLevelId);
+    }
+
+    /// <summary>
+    /// Resolves the coverage ceiling for an enrollment: the grade/level row's CoverageLimit when the
+    /// policy is grade-based and one applies, otherwise the policy's flat CoverageLimit.
+    /// </summary>
+    private async Task<decimal> ResolveCoverageLimitAsync(BenefitPolicy policy, Employee? employee)
+    {
+        if (employee is not null
+            && (policy.ValuationMethod == BenefitValuationMethod.GradeBased
+                || policy.CalculationBasis == BenefitCalculationBasis.GradeBandTable))
+        {
+            var gradeValue = await ResolveGradeValueAsync(policy.Id, employee);
+            if (gradeValue?.CoverageLimit is { } gradeLimit && gradeLimit > 0m)
+            {
+                return gradeLimit;
+            }
+        }
+
+        return policy.CoverageLimit;
+    }
+
+    /// <summary>Read-only balance computation for list/detail views (does not persist the reset).</summary>
+    private async Task<(decimal Limit, decimal Used, decimal Remaining, DateTime? Start, DateTime? End)> ComputeBalanceReadOnlyAsync(EmployeeBenefitEnrollment e)
+    {
+        var policy = e.BenefitPolicy;
+        if (policy is null)
+        {
+            return (0m, e.UtilizedAmount, 0m, e.CurrentPeriodStart, null);
+        }
+
+        var anchor = e.CurrentPeriodStart ?? e.EffectiveFrom;
+        var (start, end) = ResolvePeriodWindow(policy.LimitPeriod, anchor, DateTime.UtcNow);
+        var used = SumUtilized(e.Utilizations, ToDateOnly(start), ToDateOnly(end));
+        var limit = await ResolveCoverageLimitAsync(policy, e.Employee);
+        return (limit, used, Math.Max(0m, limit - used), start, end);
+    }
+
+    /// <summary>
+    /// Applies the lazy periodic reset and recomputes the denormalized used-amount caches on the
+    /// (tracked) enrollment and its dependents. Returns the resulting balance figures.
+    /// </summary>
+    private async Task<(decimal Limit, decimal Used, decimal Remaining, DateTime? Start, DateTime? End)> ApplyPeriodAndRecomputeAsync(EmployeeBenefitEnrollment e, bool persist)
+    {
+        var policy = e.BenefitPolicy
+            ?? throw new InvalidOperationException("Enrollment policy must be loaded to compute balance.");
+
+        var anchor = e.CurrentPeriodStart ?? e.EffectiveFrom;
+        var (start, end) = ResolvePeriodWindow(policy.LimitPeriod, anchor, DateTime.UtcNow);
+        var startDate = ToDateOnly(start);
+        var endDate = ToDateOnly(end);
+
+        var used = SumUtilized(e.Utilizations, startDate, endDate);
+        var limit = await ResolveCoverageLimitAsync(policy, e.Employee);
+
+        if (persist)
+        {
+            e.CurrentPeriodStart = start ?? e.CurrentPeriodStart;
+            e.UtilizedAmount = used;
+
+            foreach (var dependent in e.Dependents)
+            {
+                dependent.BenefitAmountUsed = SumUtilized(e.Utilizations, startDate, endDate, dependent.EmployeeDependentId);
+            }
+        }
+
+        return (limit, used, Math.Max(0m, limit - used), start, end);
+    }
+
+    /// <summary>Sums Approved/Paid claims within the period window (Reversal returns amount).</summary>
+    private static decimal SumUtilized(IEnumerable<BenefitUtilization>? claims, DateOnly? start, DateOnly? end, Guid? dependentId = null)
+    {
+        if (claims is null)
+        {
+            return 0m;
+        }
+
+        var sum = claims
+            .Where(u => u.Status is BenefitClaimStatus.Approved or BenefitClaimStatus.Paid)
+            .Where(u => !dependentId.HasValue || u.EmployeeDependentId == dependentId)
+            .Where(u => (!start.HasValue || u.ClaimDate >= start.Value) && (!end.HasValue || u.ClaimDate < end.Value))
+            .Sum(u => u.Type == BenefitUtilizationType.Reversal ? -u.Amount : u.Amount);
+
+        return Math.Max(0m, sum);
+    }
+
+    /// <summary>
+    /// Computes the current usage window from the policy's LimitPeriod, anchored at <paramref name="anchor"/>
+    /// and rolled forward to contain <paramref name="asOf"/>. Lifetime returns an open window (no reset).
+    /// </summary>
+    private static (DateTime? Start, DateTime? End) ResolvePeriodWindow(BenefitLimitPeriod period, DateTime anchor, DateTime asOf)
+        => period switch
+        {
+            BenefitLimitPeriod.Lifetime => (null, null),
+            BenefitLimitPeriod.Monthly => RollWindow(anchor, asOf, 1),
+            _ => RollWindow(anchor, asOf, 12)
+        };
+
+    private static (DateTime? Start, DateTime? End) RollWindow(DateTime anchor, DateTime asOf, int months)
+    {
+        var start = anchor;
+        var end = start.AddMonths(months);
+        while (asOf >= end)
+        {
+            start = end;
+            end = start.AddMonths(months);
+        }
+
+        return (start, end);
+    }
+
+    private static DateOnly? ToDateOnly(DateTime? value)
+        => value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
+
+    private static string? DependentName(EmployeeDependent? d)
+    {
+        if (d is null)
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(d.MiddleName)
+            ? $"{d.FirstName} {d.LastName}".Trim()
+            : $"{d.FirstName} {d.MiddleName} {d.LastName}".Trim();
+    }
+
+    private static BenefitUtilizationDto ToUtilizationDto(BenefitUtilization u) => new()
+    {
+        Id = u.Id,
+        EnrollmentId = u.EnrollmentId,
+        EmployeeDependentId = u.EmployeeDependentId,
+        DependentName = DependentName(u.EmployeeDependent),
+        ClaimDate = u.ClaimDate,
+        Amount = u.Amount,
+        Type = u.Type,
+        Status = u.Status,
+        Description = u.Description,
+        ReferenceNumber = u.ReferenceNumber,
+        ApprovedDate = u.ApprovedDate,
+        RejectionReason = u.RejectionReason
+    };
+
+    private async Task<(decimal employer, decimal employee)> ResolveContributionsAsync(BenefitPolicy policy, Employee employee, DateOnly asOf, decimal assessedValue)
+    {
+        // Percentage-based bases need basic / gross pay.
+        decimal basis = 0m;
+        if (policy.CalculationBasis is BenefitCalculationBasis.PercentageOfBasic or BenefitCalculationBasis.PercentageOfGross)
+        {
+            var (basic, gross) = await GetPayBasesAsync(employee.Id, asOf);
+            basis = policy.CalculationBasis == BenefitCalculationBasis.PercentageOfBasic ? basic : gross;
+        }
+
+        decimal employer = policy.CalculationBasis switch
+        {
+            BenefitCalculationBasis.PercentageOfBasic or BenefitCalculationBasis.PercentageOfGross
+                => Math.Round((policy.EmployerContributionRate ?? 0m) / 100m * basis, 2, MidpointRounding.AwayFromZero),
+            _ => policy.EmployerContribution ?? 0m
+        };
+
+        decimal employeeShare = policy.CalculationBasis switch
+        {
+            BenefitCalculationBasis.PercentageOfBasic or BenefitCalculationBasis.PercentageOfGross
+                => Math.Round((policy.EmployeeContributionRate ?? 0m) / 100m * basis, 2, MidpointRounding.AwayFromZero),
+            _ => policy.EmployeeContribution ?? 0m
+        };
+
+        // Honour the responsibility setting for unambiguous all-employer / all-employee cases.
+        switch (policy.ContributionResponsibility)
+        {
+            case BenefitContributionResponsibility.EmployerPaysAll:
+                if (employer == 0m) employer = assessedValue;
+                employeeShare = 0m;
+                break;
+            case BenefitContributionResponsibility.EmployeePaysAll:
+                if (employeeShare == 0m) employeeShare = assessedValue;
+                employer = 0m;
+                break;
+        }
+
+        return (employer, employeeShare);
+    }
+
+    private async Task<(decimal basic, decimal cashEmoluments)> GetPayBasesAsync(Guid employeeId, DateOnly asOf)
+    {
+        try
+        {
+            var basic = await _emolumentService.GetMonthlyBasicPayAsync(employeeId, asOf);
+            var summary = await _emolumentService.GetEmployeeEmolumentSummaryAsync(employeeId, asOf);
+            return (basic, summary.GrossMonthly);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not resolve pay bases for employee {EmployeeId}; defaulting to zero.", employeeId);
+            return (0m, 0m);
+        }
+    }
+
+    private static decimal ResolveTaxableForOverride(BenefitPolicy policy, decimal assessed)
+    {
+        if (!policy.IsTaxable || policy.TaxTreatment == BenefitTaxTreatment.TaxExempt)
+        {
+            return 0m;
+        }
+
+        var taxableBase = policy.TaxExemptThreshold.HasValue
+            ? Math.Max(0m, assessed - policy.TaxExemptThreshold.Value)
+            : assessed;
+
+        return policy.TaxTreatment == BenefitTaxTreatment.PartiallyTaxable
+            ? Math.Round((policy.TaxablePercentage ?? 0m) / 100m * taxableBase, 2, MidpointRounding.AwayFromZero)
+            : taxableBase;
+    }
+
+    private async Task EnsureEligibleAsync(BenefitPolicy policy, Employee employee)
+    {
+        await Task.CompletedTask;
+        if (!IsEligible(policy, employee))
+        {
+            throw new InvalidOperationException("Employee is not eligible for this benefit (service length or probation rule).");
+        }
+    }
+
+    private static bool IsEligible(BenefitPolicy policy, Employee employee)
+    {
+        if (!policy.AvailableDuringProbation && employee.IsOnProbation)
+        {
+            return false;
+        }
+
+        if (policy.MinServiceMonths is > 0 && employee.DateEmployed.HasValue)
+        {
+            var months = MonthsBetween(employee.DateEmployed.Value, DateOnly.FromDateTime(DateTime.UtcNow));
+            if (months < policy.MinServiceMonths.Value)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int MonthsBetween(DateOnly from, DateOnly to)
+        => Math.Max(0, ((to.Year - from.Year) * 12) + to.Month - from.Month - (to.Day < from.Day ? 1 : 0));
+
+    private async Task AddDependentsAsync(EmployeeBenefitEnrollment enrollment, BenefitPolicy policy, IEnumerable<CreateEnrollmentDependentDto> dependents)
+    {
+        foreach (var dep in dependents ?? Enumerable.Empty<CreateEnrollmentDependentDto>())
+        {
+            if (dep is null) continue;
+
+            var entity = new EmployeeDependentBenefit
+            {
+                EmployeeDependentId = dep.EmployeeDependentId,
+                PolicyId = policy.Id,
+                EnrollmentId = enrollment.Id,
+                EnrolledDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                CoverageStartDate = dep.CoverageStartDate,
+                CoverageEndDate = dep.CoverageEndDate,
+                IsActive = true,
+                TenantId = enrollment.TenantId
+            };
+
+            await _dependentBenefitRepository.AddAsync(entity);
+        }
+    }
+
+    private void AddBeneficiaries(EmployeeBenefitEnrollment enrollment, IEnumerable<CreateBenefitBeneficiaryDto> beneficiaries)
+    {
+        foreach (var b in beneficiaries ?? Enumerable.Empty<CreateBenefitBeneficiaryDto>())
+        {
+            if (b is null) continue;
+
+            enrollment.Beneficiaries.Add(new BenefitBeneficiary
+            {
+                EnrollmentId = enrollment.Id,
+                FullName = b.FullName,
+                Relationship = b.Relationship,
+                EmployeeDependentId = b.EmployeeDependentId,
+                PhoneNumber = b.PhoneNumber,
+                Percentage = b.Percentage,
+                IsActive = true,
+                TenantId = enrollment.TenantId
+            });
+        }
+    }
+
+    private static EmployeeBenefitEnrollmentListDto ToListDto(EmployeeBenefitEnrollment e) => new()
+    {
+        Id = e.Id,
+        EmployeeId = e.EmployeeId,
+        EmployeeName = e.Employee?.FullName ?? string.Empty,
+        BenefitPolicyId = e.BenefitPolicyId,
+        BenefitPolicyName = e.BenefitPolicy?.PolicyName ?? string.Empty,
+        Status = e.Status,
+        Source = e.Source,
+        AssessedValue = e.AssessedValue,
+        TaxableValue = e.TaxableValue,
+        Currency = e.Currency,
+        EffectiveFrom = e.EffectiveFrom,
+        EffectiveTo = e.EffectiveTo
+    };
+}
+
+/// <summary>Inline entity→DTO mapping for benefit enrollments.</summary>
+internal static class EmployeeBenefitEnrollmentMappingExtensions
+{
+    public static EmployeeBenefitEnrollmentDto ToDto(this EmployeeBenefitEnrollment e) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        EmployeeId = e.EmployeeId,
+        EmployeeName = e.Employee?.FullName ?? string.Empty,
+        BenefitPolicyId = e.BenefitPolicyId,
+        BenefitPolicyName = e.BenefitPolicy?.PolicyName ?? string.Empty,
+        EnrollmentDate = e.EnrollmentDate,
+        EffectiveFrom = e.EffectiveFrom,
+        EffectiveTo = e.EffectiveTo,
+        Status = e.Status,
+        Source = e.Source,
+        SourcePositionBenefitId = e.SourcePositionBenefitId,
+        AssessedValue = e.AssessedValue,
+        TaxableValue = e.TaxableValue,
+        EmployerContribution = e.EmployerContribution,
+        EmployeeContribution = e.EmployeeContribution,
+        Currency = e.Currency,
+        UtilizedAmount = e.UtilizedAmount,
+        IsValueOverridden = e.IsValueOverridden,
+        ApprovedById = e.ApprovedById,
+        ApprovedDate = e.ApprovedDate,
+        TerminationReason = e.TerminationReason,
+        Notes = e.Notes,
+        Dependents = (e.Dependents ?? new List<EmployeeDependentBenefit>())
+            .Select(d => new EnrollmentDependentDto
+            {
+                Id = d.Id,
+                EmployeeDependentId = d.EmployeeDependentId,
+                PolicyId = d.PolicyId,
+                EnrolledDate = d.EnrolledDate,
+                CoverageStartDate = d.CoverageStartDate,
+                CoverageEndDate = d.CoverageEndDate,
+                IsActive = d.IsActive,
+                BenefitAmountUsed = d.BenefitAmountUsed
+            }).ToList(),
+        Beneficiaries = (e.Beneficiaries ?? new List<BenefitBeneficiary>())
+            .Select(b => new BenefitBeneficiaryDto
+            {
+                Id = b.Id,
+                FullName = b.FullName,
+                Relationship = b.Relationship,
+                EmployeeDependentId = b.EmployeeDependentId,
+                PhoneNumber = b.PhoneNumber,
+                Percentage = b.Percentage,
+                IsActive = b.IsActive
+            }).ToList()
+    };
+}

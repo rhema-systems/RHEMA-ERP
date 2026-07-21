@@ -467,29 +467,20 @@ public class SalaryStructureService :
             sequences[orderedLevelIds[i]] = i + 1;
         }
 
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            var levels = await _salaryLevelRepository
-                .GetQueryable(l => l.TenantId == tenantId && l.SalaryGradeId == gradeId && existingIds.Contains(l.Id))
-                .ToListAsync(cancellationToken);
+        var levels = await _salaryLevelRepository
+            .GetQueryable(l => l.TenantId == tenantId && l.SalaryGradeId == gradeId && existingIds.Contains(l.Id))
+            .ToListAsync(cancellationToken);
 
-            foreach (var level in levels)
+        foreach (var level in levels)
+        {
+            if (sequences.TryGetValue(level.Id, out var sequence))
             {
-                if (sequences.TryGetValue(level.Id, out var sequence))
-                {
-                    level.Sequence = sequence;
-                }
+                level.Sequence = sequence;
             }
+        }
 
-            await _salaryLevelRepository.UpdateRangeAsync(levels);
-            await _unitOfWork.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await _unitOfWork.RollbackAsync(cancellationToken);
-            throw;
-        }
+        await _salaryLevelRepository.UpdateRangeAsync(levels);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Salary levels resequenced for grade: {GradeId}", gradeId);
     }

@@ -48,4 +48,26 @@ public class EmailTemplate : TenantEntity
     /// </summary>
     [MaxLength(50)]
     public string? Category { get; set; }
+
+    // [HR-MODULE-PORT] The two members below were added for the HR module's event-driven
+    // transactional email templating (recruitment). They are ADDITIVE — nullable/defaulted, and no
+    // existing EmailTemplate behaviour or field changed, so current email flows are unaffected.
+    // NOTE: they add two columns to the shared EmailTemplates table (covered by the HR migration).
+    // See HR_MODULE_PORT_PLAN.md -> "Cross-module touchpoints".
+
+    /// <summary>
+    /// Stable event key that lets code resolve "which template do I send for event X"
+    /// (e.g. "ApplicationReceived", "OfferIssued"). Combined with <see cref="Module"/> it uniquely
+    /// identifies a transactional template. Null for ad-hoc/manually authored templates that are not
+    /// wired to a code event.
+    /// </summary>
+    [MaxLength(100)]
+    public string? EventKey { get; set; }
+
+    /// <summary>
+    /// True when this row was created by the system seeder as the shipped default for an
+    /// <see cref="EventKey"/>. HR may edit these; the flag distinguishes them from user-authored
+    /// templates and lets the seeder skip re-creating a default that already exists.
+    /// </summary>
+    public bool IsSystemDefault { get; set; }
 }

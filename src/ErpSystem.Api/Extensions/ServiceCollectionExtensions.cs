@@ -716,6 +716,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             #region HR Services
 
+            // [HR-MODULE-PORT] All services/repositories ported from HRApi are registered here in one
+            // call; the file is generated so re-syncing HR only rewrites HrModuleServiceRegistration.cs.
+            // It is invoked FIRST on purpose: the explicit registrations below (RHEMA's retained
+            // appraisal/performance model, salary mapping and hrdev bank services) are applied after and
+            // therefore win for those interfaces. See HR_MODULE_PORT_PLAN.md.
+            services.AddHrModuleServices();
+
             // HR Services - NOW ENABLED
             services.AddScoped<IEmployeeService, EmployeeService>();
 
@@ -743,13 +750,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<IEmployeeBankService, EmployeeBankService>();
             services.AddScoped<IEmployeeBankBranchService, EmployeeBankBranchService>();
             
-            services.AddScoped<IAppraisalGradeDefinitionService, AppraisalGradeDefinitionService>();
-            services.AddScoped<IKpiDefinitionService, KpiDefinitionService>();
-            services.AddScoped<IAppraisalCriteriaService, AppraisalCriteriaService>();
-            services.AddScoped<IPerformanceAppraisalService, PerformanceAppraisalService>();
             services.AddScoped<IPerformanceImprovementPlanService, PerformanceImprovementPlanService>();
-            services.AddScoped<IPositionCriteriaMappingService, PositionCriteriaMappingService>();
-            services.AddScoped<IEmployeeKpiTargetService, EmployeeKpiTargetService>();
             
             #endregion HR Services
             
@@ -1413,6 +1414,28 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
         {
             services.AddRateLimiter(rateLimiterOptions =>
             {
+                // [HR-MODULE-PORT] Named policies required by the ported HR portal/recruitment
+                // controllers ([EnableRateLimiting("...")]). Without them those endpoints throw
+                // "no such policy exists" at run time. These are ADDITIVE — named policies apply only
+                // to the endpoints that opt in, and do not alter the global limiter below.
+                // NOTE: "AuthPolicy" is NOT defined here — RHEMA already declares it further down.
+
+                // Public career portal — browsing (vacancies, catalogue, tracking)
+                rateLimiterOptions.AddFixedWindowLimiter(policyName: "PublicPortalPolicy", options =>
+                {
+                    options.PermitLimit = 60;
+                    options.Window = TimeSpan.FromMinutes(1);
+                    options.QueueLimit = 5;
+                });
+
+                // Public career portal — application submission (strict, to prevent spam)
+                rateLimiterOptions.AddFixedWindowLimiter(policyName: "PublicApplyPolicy", options =>
+                {
+                    options.PermitLimit = 5;
+                    options.Window = TimeSpan.FromMinutes(10);
+                    options.QueueLimit = 0;
+                });
+
                 // Global limiter applies to every request (external portal included)
                 rateLimiterOptions.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 {

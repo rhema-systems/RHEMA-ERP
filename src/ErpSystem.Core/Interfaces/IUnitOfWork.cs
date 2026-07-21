@@ -47,4 +47,18 @@ public interface IUnitOfWork : IDisposable
     /// Execute an operation within an execution strategy (for SQL Server retry logic)
     /// </summary>
     Task ExecuteInStrategyAsync(Func<Task> operation, CancellationToken cancellationToken = default);
+
+    // [HR-MODULE-PORT] The two members below were added for HR services. They are ADDITIVE — existing
+    // Finance/Inventory/other implementers and callers are unaffected. See HR_MODULE_PORT_PLAN.md.
+
+    /// <summary>
+    /// Execute an operation inside a database transaction under a retrying execution strategy.
+    /// Saves changes and commits on success; rolls back on exception.
+    /// </summary>
+    Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Detach all tracked entities from the change tracker (e.g. between bulk batches).
+    /// </summary>
+    void ClearChangeTracker();
 }

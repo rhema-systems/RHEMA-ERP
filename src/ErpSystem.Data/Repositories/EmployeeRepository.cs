@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Enums;
-using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Data.Repositories
 {
@@ -39,7 +39,6 @@ namespace ErpSystem.Data.Repositories
                 .Include(e => e.LocationLevel)
                 .Include(e => e.Location)
                 .Include(e => e.Country)
-                .Include(e => e.Shift)
                 .Include(e => e.EmergencyContacts)
                 .Include(e => e.Dependents)
                 .Include(e => e.Qualifications)
@@ -52,7 +51,6 @@ namespace ErpSystem.Data.Repositories
         {
             return WithBasicIncludes(query)
                 .Include(e => e.Country)
-                .Include(e => e.Shift)
                 .Include(e => e.LocationLevel)
                 .Include(e => e.Location)
                 .Include(e => e.OrganizationLevel)
@@ -426,6 +424,36 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
+        private async Task<IEnumerable<Employee>> GetEmployeesForMaintenanceAsync()
+        {
+            // Prefer explicit flag, but keep the department-code fallback for backward compatibility.
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e =>
+                    e.IsActive &&
+                    (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&
+                    (e.CanBeAssignedToMaintenance || (e.Department != null && e.Department.Code == "MAINT")))
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync()
+        {
+            return await GetEmployeesForMaintenanceAsync();
+        }
+
+        public async Task<IEnumerable<Employee>> GetAvailableTechniciansAsync()
+        {
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e =>
+                    e.IsActive &&
+                    e.StaffStatus == StaffStatus.Active &&
+                    (e.CanBeAssignedToMaintenance || (e.Department != null && e.Department.Code == "MAINT")))
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
         public async Task<IEnumerable<Employee>> GetEmployeesBySkillAsync(Guid skillId, SkillLevel? minLevel = null)
         {
             var query = WithBasicIncludes(BaseQuery())
@@ -473,93 +501,38 @@ namespace ErpSystem.Data.Repositories
                     .ThenInclude(ph => ph.Position)
                 .FirstOrDefaultAsync(e => e.Id == employeeId);
         }
+    }
 
-        public async Task<IEnumerable<Employee>> GetEmployeesForMaintenanceAsync()
+    public class EmployeeContractDetailRepository
+        : GenericRepository<EmployeeContractDetail>, IEmployeeContractDetailRepository
+    {
+        public EmployeeContractDetailRepository(ApplicationDbContext context) : base(context) { }
+
+        public async Task<IEnumerable<EmployeeContractDetail>> GetByEmployeeAsync(Guid employeeId)
+            => await _dbSet
+                .Where(c => c.EmployeeId == employeeId && !c.IsDeleted)
+                .OrderByDescending(c => c.StartDate)
+                .ToListAsync();
+
+        public async Task<EmployeeContractDetail?> GetActiveContractAsync(Guid employeeId)
+            => await _dbSet
+                .Where(c => c.EmployeeId == employeeId && !c.IsDeleted
+                         && (c.EndDate == null || c.EndDate >= DateOnly.FromDateTime(DateTime.UtcNow)))
+                .OrderByDescending(c => c.StartDate)
+                .FirstOrDefaultAsync();
+
+        public async Task<IEnumerable<EmployeeContractDetail>> GetExpiringContractsAsync(DateTime withinDate)
         {
+            var threshold = DateOnly.FromDateTime(withinDate);
             return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Where(e => e.IsActive &&
-                           !e.IsDeleted &&
-                           (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&
-                           e.Department.DepartmentType == DepartmentType.Maintenance)
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
+                .Where(c => !c.IsDeleted && c.EndDate != null && c.EndDate <= threshold)
                 .ToListAsync();
         }
 
-        public async Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync()
-        {
-            return await GetEmployeesForMaintenanceAsync();
-        }
+        public async Task<EmployeeContractDetail?> GetByContractNumberAsync(string contractNumber)
+            => await _dbSet.FirstOrDefaultAsync(c => c.ContractNumber == contractNumber && !c.IsDeleted);
 
-        public async Task<IEnumerable<Employee>> GetAvailableTechniciansAsync()
-        {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Where(e => e.IsActive &&
-                           !e.IsDeleted &&
-                           e.StaffStatus == StaffStatus.Active &&
-                           e.Department.DepartmentType == DepartmentType.Maintenance)
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
-                .ToListAsync();
-        }
-
-        public async Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId)
-        {
-            // Query ApplicationUser table via the context's IdentityUsers table
-            var context = _context as ApplicationDbContext;
-            if (context == null)
-            {
-                return null;
-            }
-
-            var user = await context.Users.FirstOrDefaultAsync(u => u.Id == applicationUserId);
-            if (user?.EmployeeId == null)
-            {
-                return null;
-            }
-
-            return await GetByIdWithDetailsAsync(user.EmployeeId.Value);
-        }
-
-        public async Task<IEnumerable<Employee>> GetByStationAsync(Guid stationId)
-        {
-            return await _dbSet
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Include(e => e.Manager)
-                .Where(e => e.StationId == stationId && !e.IsDeleted)
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
-                .ToListAsync();
-        }
-
-        public async Task<IEnumerable<Employee>> GetByDivisionAsync(Guid divisionId)
-        {
-            return await _dbSet
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Include(e => e.Manager)
-                .Where(e => e.DivisionId == divisionId && !e.IsDeleted)
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
-                .ToListAsync();
-        }
-
-        public async Task<IEnumerable<Employee>> GetByUnitAsync(Guid unitId)
-        {
-            return await _dbSet
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Include(e => e.Manager)
-                .Where(e => e.UnitId == unitId && !e.IsDeleted)
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
-                .ToListAsync();
-        }
-
+        public async Task<bool> ContractNumberExistsAsync(string contractNumber)
+            => await _dbSet.AnyAsync(c => c.ContractNumber == contractNumber && !c.IsDeleted);
     }
 }

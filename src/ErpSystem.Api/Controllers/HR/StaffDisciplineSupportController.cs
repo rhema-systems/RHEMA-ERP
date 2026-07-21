@@ -1,0 +1,466 @@
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ErpSystem.Api.Controllers.HR;
+
+/// <summary>
+/// Manages the support entities of a disciplinary case:
+/// Action Steps, Witnesses, Documents, Notes, Notifications, and Legal Reviews.
+/// All routes are nested under <c>api/discipline</c>.
+/// </summary>
+[ApiController]
+[Route("api/discipline")]
+[Authorize]
+public class StaffDisciplineSupportController : ControllerBase
+{
+    private readonly IStaffDisciplineActionStepService _actionStepService;
+    private readonly IStaffDisciplineWitnessService _witnessService;
+    private readonly IStaffDisciplineDocumentService _documentService;
+    private readonly IStaffDisciplineNoteService _noteService;
+    private readonly IStaffDisciplineNotificationService _notificationService;
+    private readonly IStaffDisciplineLegalReviewService _legalReviewService;
+    private readonly ICurrentUserService _currentUser;
+
+    public StaffDisciplineSupportController(
+        IStaffDisciplineActionStepService actionStepService,
+        IStaffDisciplineWitnessService witnessService,
+        IStaffDisciplineDocumentService documentService,
+        IStaffDisciplineNoteService noteService,
+        IStaffDisciplineNotificationService notificationService,
+        IStaffDisciplineLegalReviewService legalReviewService,
+        ICurrentUserService currentUser)
+    {
+        _actionStepService = actionStepService;
+        _witnessService = witnessService;
+        _documentService = documentService;
+        _noteService = noteService;
+        _notificationService = notificationService;
+        _legalReviewService = legalReviewService;
+        _currentUser = currentUser;
+    }
+
+    // =========================================================================
+    // ACTION STEPS
+    // =========================================================================
+
+    [HttpGet("cases/{caseId:guid}/action-steps")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineActionStepDto>>> GetActionSteps(Guid caseId)
+        => Ok(await _actionStepService.GetByCaseIdAsync(caseId));
+
+    [HttpGet("cases/{caseId:guid}/action-steps/pending")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineActionStepDto>>> GetPendingActionSteps(Guid caseId)
+        => Ok(await _actionStepService.GetPendingStepsAsync(caseId));
+
+    [HttpGet("action-steps/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineActionStepDto?>> GetActionStepById(Guid id)
+        => Ok(await _actionStepService.GetByIdAsync(id));
+
+    [HttpGet("action-steps/overdue")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineActionStepDto>>> GetOverdueActionSteps()
+        => Ok(await _actionStepService.GetOverdueStepsAsync());
+
+    [HttpGet("action-steps/by-actioned-by/{employeeId:guid}")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineActionStepDto>>> GetActionStepsByActionedBy(Guid employeeId)
+        => Ok(await _actionStepService.GetByActionedByAsync(employeeId));
+
+    [HttpPost("cases/{caseId:guid}/action-steps/initialise")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineActionStepDto>>> InitialiseActionSteps(Guid caseId)
+    {
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        var steps = await _actionStepService.InitialiseFromOffenseProceduresAsync(caseId, tenantId.Value, employeeId.Value);
+        return Ok(steps);
+    }
+
+    [HttpPut("action-steps/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineActionStepDto>> UpdateActionStep(
+        Guid id, [FromBody] UpdateActionStepDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        dto.StepId = id;
+        return Ok(await _actionStepService.UpdateAsync(dto, employeeId.Value));
+    }
+
+    [HttpPost("action-steps/{id:guid}/complete")]
+    public async Task<IActionResult> CompleteActionStep(Guid id, [FromBody] string notes)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        await _actionStepService.CompleteStepAsync(id, notes, employeeId.Value);
+        return Ok(new { message = "Action step completed." });
+    }
+
+    [HttpPost("action-steps/{id:guid}/skip")]
+    public async Task<IActionResult> SkipActionStep(Guid id, [FromBody] string reason)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        await _actionStepService.SkipStepAsync(id, reason, employeeId.Value);
+        return Ok(new { message = "Action step skipped." });
+    }
+
+    // =========================================================================
+    // WITNESSES
+    // =========================================================================
+
+    [HttpGet("cases/{caseId:guid}/witnesses")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineWitnessSummaryDto>>> GetWitnesses(Guid caseId)
+        => Ok(await _witnessService.GetByCaseIdAsync(caseId));
+
+    [HttpGet("cases/{caseId:guid}/witnesses/without-statement")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineWitnessSummaryDto>>> GetWitnessesWithoutStatement(Guid caseId)
+        => Ok(await _witnessService.GetWithoutStatementAsync(caseId));
+
+    [HttpGet("witnesses/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineWitnessDto?>> GetWitnessById(Guid id)
+        => Ok(await _witnessService.GetByIdAsync(id));
+
+    [HttpGet("witnesses/employee/{employeeId:guid}")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineWitnessSummaryDto>>> GetWitnessesByEmployee(Guid employeeId)
+        => Ok(await _witnessService.GetByEmployeeWitnessAsync(employeeId));
+
+    [HttpPost("cases/{caseId:guid}/witnesses")]
+    public async Task<ActionResult<StaffDisciplineWitnessDto>> AddWitness(
+        Guid caseId, [FromBody] CreateStaffDisciplineWitnessDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        dto.DisciplinaryActionId = caseId;
+        var created = await _witnessService.AddAsync(dto, tenantId.Value, employeeId.Value);
+        return CreatedAtAction(nameof(GetWitnessById), new { id = created.Id }, created);
+    }
+
+    [HttpPut("witnesses/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineWitnessDto>> UpdateWitness(
+        Guid id, [FromBody] UpdateStaffDisciplineWitnessDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _witnessService.UpdateAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("witnesses/{id:guid}")]
+    public async Task<IActionResult> DeleteWitness(Guid id)
+    {
+        await _witnessService.DeleteAsync(id);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // DOCUMENTS
+    // =========================================================================
+
+    [HttpGet("cases/{caseId:guid}/documents")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocuments(Guid caseId)
+        => Ok(await _documentService.GetByCaseIdAsync(caseId));
+
+    [HttpGet("cases/{caseId:guid}/documents/scope/{scope}")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocumentsByScope(
+        Guid caseId, DisciplinaryDocumentScope scope)
+        => Ok(await _documentService.GetByScopeAsync(caseId, scope));
+
+    [HttpGet("cases/{caseId:guid}/documents/category/{category}")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocumentsByCategory(
+        Guid caseId, DisciplinaryDocumentCategory category)
+        => Ok(await _documentService.GetByCategoryAsync(caseId, category));
+
+    [HttpGet("documents/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineDocumentDto?>> GetDocumentById(Guid id)
+        => Ok(await _documentService.GetByIdAsync(id));
+
+    [HttpGet("action-steps/{actionStepId:guid}/documents")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocumentsByActionStep(Guid actionStepId)
+        => Ok(await _documentService.GetByActionStepIdAsync(actionStepId));
+
+    [HttpGet("appeals/{appealId:guid}/documents")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocumentsByAppeal(Guid appealId)
+        => Ok(await _documentService.GetByAppealIdAsync(appealId));
+
+    [HttpPost("cases/{caseId:guid}/documents")]
+    public async Task<ActionResult<StaffDisciplineDocumentDto>> AddDocument(
+        Guid caseId, [FromBody] CreateStaffDisciplineDocumentDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        dto.DisciplinaryActionId = caseId;
+        var created = await _documentService.AddAsync(dto, tenantId.Value, employeeId.Value);
+        return CreatedAtAction(nameof(GetDocumentById), new { id = created.Id }, created);
+    }
+
+    [HttpPost("cases/{caseId:guid}/documents/upload")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<ActionResult<StaffDisciplineDocumentDto>> UploadDocument(
+        Guid caseId,
+        [FromForm] IFormFile file,
+        [FromForm] DisciplinaryDocumentScope scope = DisciplinaryDocumentScope.Case,
+        [FromForm] DisciplinaryDocumentCategory category = DisciplinaryDocumentCategory.Evidence,
+        [FromForm] Guid? actionStepId = null,
+        [FromForm] Guid? appealId = null,
+        [FromForm] string? description = null)
+    {
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        if (file is null || file.Length == 0)
+            return BadRequest("No file was provided.");
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var created = await _documentService.UploadAsync(
+                caseId,
+                stream,
+                file.FileName,
+                file.ContentType,
+                scope,
+                category,
+                actionStepId,
+                appealId,
+                description,
+                tenantId.Value,
+                employeeId.Value);
+
+            return CreatedAtAction(nameof(GetDocumentById), new { id = created.Id }, created);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("documents/{id:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid id)
+    {
+        try
+        {
+            var file = await _documentService.OpenFileAsync(id);
+            if (file is null)
+                return NotFound();
+
+            return File(file.Value.Stream, file.Value.ContentType, file.Value.FileName);
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("documents/{id:guid}")]
+    public async Task<IActionResult> DeleteDocument(Guid id)
+    {
+        await _documentService.DeleteAsync(id);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // NOTES
+    // =========================================================================
+
+    [HttpGet("cases/{caseId:guid}/notes")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNoteSummaryDto>>> GetNotes(
+        Guid caseId, [FromQuery] bool includeConfidential = true)
+        => Ok(await _noteService.GetByCaseIdAsync(caseId, includeConfidential));
+
+    [HttpGet("notes/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineNoteDto?>> GetNoteById(Guid id)
+        => Ok(await _noteService.GetByIdAsync(id));
+
+    [HttpGet("notes/by-author/{employeeId:guid}")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNoteSummaryDto>>> GetNotesByAuthor(Guid employeeId)
+        => Ok(await _noteService.GetByAuthorAsync(employeeId));
+
+    [HttpPost("cases/{caseId:guid}/notes")]
+    public async Task<ActionResult<StaffDisciplineNoteDto>> AddNote(
+        Guid caseId, [FromBody] CreateStaffDisciplineNoteDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        dto.DisciplinaryActionId = caseId;
+        var created = await _noteService.AddAsync(dto, tenantId.Value, employeeId.Value);
+        return CreatedAtAction(nameof(GetNoteById), new { id = created.Id }, created);
+    }
+
+    [HttpPut("notes/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineNoteDto>> UpdateNote(
+        Guid id, [FromBody] UpdateStaffDisciplineNoteDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _noteService.UpdateAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("notes/{id:guid}")]
+    public async Task<IActionResult> DeleteNote(Guid id)
+    {
+        await _noteService.DeleteAsync(id);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // NOTIFICATIONS
+    // =========================================================================
+
+    [HttpGet("cases/{caseId:guid}/notifications")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNotificationSummaryDto>>> GetNotifications(Guid caseId)
+        => Ok(await _notificationService.GetByCaseIdAsync(caseId));
+
+    [HttpGet("cases/{caseId:guid}/notifications/unacknowledged")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNotificationSummaryDto>>> GetUnacknowledgedNotifications(Guid caseId)
+        => Ok(await _notificationService.GetUnacknowledgedAsync(caseId));
+
+    [HttpGet("notifications/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineNotificationDto?>> GetNotificationById(Guid id)
+        => Ok(await _notificationService.GetByIdAsync(id));
+
+    [HttpGet("notifications/pending-followup")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNotificationSummaryDto>>> GetNotificationsPendingFollowup(
+        [FromQuery] int daysOld = 3)
+        => Ok(await _notificationService.GetPendingFollowupAsync(daysOld));
+
+    [HttpPost("cases/{caseId:guid}/notifications")]
+    public async Task<ActionResult<StaffDisciplineNotificationDto>> SendNotification(
+        Guid caseId, [FromBody] CreateStaffDisciplineNotificationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        dto.DisciplinaryActionId = caseId;
+        var created = await _notificationService.SendAsync(dto, tenantId.Value, employeeId.Value);
+        return CreatedAtAction(nameof(GetNotificationById), new { id = created.Id }, created);
+    }
+
+    [HttpPost("notifications/{id:guid}/acknowledge")]
+    public async Task<IActionResult> AcknowledgeNotification(Guid id, [FromBody] AcknowledgeNotificationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        dto.NotificationId = id;
+        await _notificationService.AcknowledgeAsync(dto);
+        return Ok(new { message = "Notification acknowledged." });
+    }
+
+    [HttpPost("notifications/{id:guid}/followup")]
+    public async Task<IActionResult> SendFollowupNotification(Guid id, [FromBody] SendFollowupNotificationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        dto.NotificationId = id;
+        await _notificationService.SendFollowupAsync(dto);
+        return Ok(new { message = "Follow-up notification recorded." });
+    }
+
+    // =========================================================================
+    // LEGAL REVIEWS
+    // =========================================================================
+
+    [HttpGet("cases/{caseId:guid}/legal-reviews")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineLegalReviewDto>>> GetLegalReviews(Guid caseId)
+        => Ok(await _legalReviewService.GetByCaseIdAsync(caseId));
+
+    [HttpGet("cases/{caseId:guid}/legal-reviews/total-costs")]
+    public async Task<ActionResult<decimal>> GetTotalLegalCosts(Guid caseId)
+        => Ok(await _legalReviewService.GetTotalLegalCostsForCaseAsync(caseId));
+
+    [HttpGet("legal-reviews/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineLegalReviewDto?>> GetLegalReviewById(Guid id)
+        => Ok(await _legalReviewService.GetByIdAsync(id));
+
+    [HttpGet("legal-reviews/open")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineLegalReviewDto>>> GetOpenLegalReviews()
+        => Ok(await _legalReviewService.GetOpenReviewsAsync());
+
+    [HttpGet("legal-reviews/risk/{minimumRisk}")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineLegalReviewDto>>> GetLegalReviewsByRisk(DisciplineLegalRiskLevel minimumRisk)
+        => Ok(await _legalReviewService.GetByRiskLevelAsync(minimumRisk));
+
+    [HttpGet("legal-reviews/requiring-external-counsel")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplineLegalReviewDto>>> GetRequiringExternalCounsel()
+        => Ok(await _legalReviewService.GetRequiringExternalCounselAsync());
+
+    [HttpPost("cases/{caseId:guid}/legal-reviews")]
+    public async Task<ActionResult<StaffDisciplineLegalReviewDto>> ReferToLegal(
+        Guid caseId, [FromBody] CreateStaffDisciplineLegalReviewDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        dto.DisciplinaryActionId = caseId;
+        var created = await _legalReviewService.ReferAsync(dto, tenantId.Value, employeeId.Value);
+        return CreatedAtAction(nameof(GetLegalReviewById), new { id = created.Id }, created);
+    }
+
+    [HttpPut("legal-reviews/{id:guid}")]
+    public async Task<ActionResult<StaffDisciplineLegalReviewDto>> UpdateLegalReview(
+        Guid id, [FromBody] UpdateStaffDisciplineLegalReviewDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _legalReviewService.UpdateAsync(dto, employeeId.Value));
+    }
+
+    [HttpPost("legal-reviews/{id:guid}/complete")]
+    public async Task<IActionResult> CompleteLegalReview(Guid id)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+
+        await _legalReviewService.CompleteAsync(id, employeeId.Value);
+        return Ok(new { message = "Legal review completed." });
+    }
+
+    [HttpDelete("legal-reviews/{id:guid}")]
+    public async Task<IActionResult> DeleteLegalReview(Guid id)
+    {
+        await _legalReviewService.DeleteAsync(id);
+        return NoContent();
+    }
+}

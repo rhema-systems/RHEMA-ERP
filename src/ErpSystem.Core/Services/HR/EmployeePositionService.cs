@@ -83,6 +83,8 @@ public class EmployeePositionService : IEmployeePositionService
             RequiresLicense = createDto.RequiresLicense,
             StaffLevelId = createDto.StaffLevelId,
             ReportsToPositionId = createDto.ReportsToPositionId,
+            ProbationPeriodMonths = createDto.ProbationPeriodMonths,
+            NoticePeriodMonths = createDto.NoticePeriodMonths,
             IsActive = true
         };
 
@@ -156,12 +158,18 @@ public class EmployeePositionService : IEmployeePositionService
         position.MaximumAge = updateDto.MaximumAge;
         position.StaffLevelId = updateDto.StaffLevelId;
         position.ReportsToPositionId = updateDto.ReportsToPositionId;
+        position.ProbationPeriodMonths = updateDto.ProbationPeriodMonths;
+        position.NoticePeriodMonths = updateDto.NoticePeriodMonths;
         position.IsActive = updateDto.IsActive;
 
         SyncSkillRequirements(position, updateDto.SkillRequirements);
         SyncPositionBenefits(position, updateDto.PositionBenefits);
 
-        await _positionRepository.UpdateAsync(position);
+        // Don't call UpdateAsync (which calls _dbSet.Update) — the entity graph is already
+        // tracked by EF. Calling Update() forces all navigation entities (including newly
+        // Added benefits that have Guid IDs from BaseEntity's constructor) into Modified state,
+        // causing SaveChanges to issue UPDATEs for rows that don't exist yet.
+        position.UpdatedAt = DateTime.UtcNow;
         await _positionRepository.SaveChangesAsync();
         _logger.LogInformation("Employee position updated: {PositionId} ({Code})", position.Id, position.Code);
 
@@ -204,6 +212,8 @@ public class EmployeePositionService : IEmployeePositionService
             SalaryGradeId = position.SalaryGradeId,
             SalaryGradeName = position.SalaryGrade?.Name,
             WorkMode = position.WorkMode,
+            ProbationPeriodMonths = position.ProbationPeriodMonths,
+            NoticePeriodMonths = position.NoticePeriodMonths,
             RequiresCertification = position.RequiresCertification,
             RequiresGuarantor = position.RequiresGuarantor,
             RequiresLicense = position.RequiresLicense,
@@ -240,7 +250,7 @@ public class EmployeePositionService : IEmployeePositionService
         };
     }
 
-    private static void SyncSkillRequirements(EmployeePosition position, ICollection<CreatePositionSkillRequirementDto> desired)
+    private void SyncSkillRequirements(EmployeePosition position, ICollection<CreatePositionSkillRequirementDto> desired)
     {
         desired ??= new List<CreatePositionSkillRequirementDto>();
 
@@ -250,27 +260,38 @@ public class EmployeePositionService : IEmployeePositionService
             .Select(g => g.First())
             .ToList();
 
-        var existing = position.SkillRequirements
-            .Where(x => !x.IsDeleted)
-            .ToDictionary(x => x.SkillId, x => x);
+        // Include soft-deleted entries so we can re-activate them instead of inserting
+        // duplicates (which would violate the unique index on TenantId+PositionId+SkillId).
+        var allBySkillId = position.SkillRequirements
+            .GroupBy(x => x.SkillId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         foreach (var req in desiredDistinct)
         {
-            if (existing.TryGetValue(req.SkillId, out var entity))
+            if (allBySkillId.TryGetValue(req.SkillId, out var entity))
             {
+                // Re-activate if previously soft-deleted, then update values.
+                entity.IsDeleted = false;
+                entity.DeletedAt = null;
                 entity.RequiredLevel = req.RequiredLevel;
                 entity.IsRequired = req.IsRequired;
                 entity.Priority = req.Priority;
             }
             else
             {
-                position.SkillRequirements.Add(new PositionSkillRequirement
+                // Truly new — set FK explicitly and track via the repository to guarantee
+                // EntityState.Added. Adding to the nav-collection alone is not safe here
+                // because EF infers Unchanged (not Added) for non-default Guid keys when the
+                // parent is already Modified, which later causes a zero-row UPDATE.
+                var newReq = new PositionSkillRequirement
                 {
+                    PositionId = position.Id,
                     SkillId = req.SkillId,
                     RequiredLevel = req.RequiredLevel,
                     IsRequired = req.IsRequired,
                     Priority = req.Priority
-                });
+                };
+                _positionRepository.TrackSkillRequirement(newReq);
             }
         }
 
@@ -285,7 +306,7 @@ public class EmployeePositionService : IEmployeePositionService
         }
     }
 
-    private static void SyncPositionBenefits(EmployeePosition position, ICollection<CreateEmployeePositionBenefitDto> desired)
+    private void SyncPositionBenefits(EmployeePosition position, ICollection<CreateEmployeePositionBenefitDto> desired)
     {
         desired ??= new List<CreateEmployeePositionBenefitDto>();
 
@@ -295,25 +316,36 @@ public class EmployeePositionService : IEmployeePositionService
             .Select(g => g.First())
             .ToList();
 
-        var existing = position.PositionBenefits
-            .Where(x => !x.IsDeleted)
-            .ToDictionary(x => x.PolicyId, x => x);
+        // Include soft-deleted entries so we can re-activate them instead of inserting
+        // duplicates (which would violate the unique index on TenantId+PositionId+PolicyId).
+        var allByPolicyId = position.PositionBenefits
+            .GroupBy(x => x.PolicyId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         foreach (var ben in desiredDistinct)
         {
-            if (existing.TryGetValue(ben.PolicyId, out var entity))
+            if (allByPolicyId.TryGetValue(ben.PolicyId, out var entity))
             {
+                // Re-activate if previously soft-deleted, then update values.
+                entity.IsDeleted = false;
+                entity.DeletedAt = null;
                 entity.ExpiryDate = ben.ExpiryDate;
                 entity.PositionAmount = ben.PositionAmount;
             }
             else
             {
-                position.PositionBenefits.Add(new EmployeePositionBenefit
+                // Truly new — set FK explicitly and track via the repository to guarantee
+                // EntityState.Added. Adding to the nav-collection alone is not safe here
+                // because EF infers Unchanged (not Added) for non-default Guid keys when the
+                // parent is already Modified, which later causes a zero-row UPDATE.
+                var newBenefit = new EmployeePositionBenefit
                 {
+                    PositionId = position.Id,
                     PolicyId = ben.PolicyId,
                     ExpiryDate = ben.ExpiryDate,
                     PositionAmount = ben.PositionAmount
-                });
+                };
+                _positionRepository.TrackBenefit(newBenefit);
             }
         }
 

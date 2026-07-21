@@ -147,7 +147,10 @@ public class HRDataSeeder
                     Title = pos.Title,
                     Code = pos.Code,
                     Level = pos.Level,
-                    DepartmentId = pos.DeptId,
+                    // [HR-MODULE-PORT] EmployeePosition no longer has `DepartmentId`; the HR module port
+                    // anchors positions to the org structure via the REQUIRED OrganizationUnitId +
+                    // OrganizationLevelId. This legacy seeder predates that model and is superseded by
+                    // HRApi's HRFullDataSeeder (to be ported). Left unset until org seeding is wired up.
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = "System"

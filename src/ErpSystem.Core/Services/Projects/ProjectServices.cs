@@ -6122,12 +6122,18 @@ public partial class ProjectService : IProjectService
             return new Dictionary<Guid, ResourceLeaveMetrics>();
         }
 
+        // [HR-MODULE-PORT] LeaveRequest.StartDate/EndDate are now DateOnly (previously DateTime) after the
+        // HR module port. The DateTime period bounds are converted to DateOnly for the DB query below, and
+        // the leave dates are converted back to DateTime for the in-memory overlap/capacity calculation.
+        // Query logic and results are unchanged.
+        var periodStartDate = DateOnly.FromDateTime(periodStart);
+        var periodEndDate = DateOnly.FromDateTime(periodEnd);
         var approvedLeaves = await _unitOfWork.Repository<LeaveRequest>().FindAsync(x =>
             x.TenantId == _currentUserProvider.TenantId
             && ids.Contains(x.EmployeeId)
             && x.Status == LeaveStatus.Approved
-            && x.StartDate <= periodEnd
-            && x.EndDate >= periodStart);
+            && x.StartDate <= periodEndDate
+            && x.EndDate >= periodStartDate);
 
         return approvedLeaves
             .GroupBy(x => x.EmployeeId)
@@ -6137,8 +6143,10 @@ public partial class ProjectService : IProjectService
                 {
                     var approvedLeaveHours = group.Sum(x =>
                     {
-                        var overlapStart = x.StartDate > periodStart ? x.StartDate : periodStart;
-                        var overlapEnd = x.EndDate < periodEnd ? x.EndDate : periodEnd;
+                        var leaveStart = x.StartDate.ToDateTime(TimeOnly.MinValue);
+                        var leaveEnd = x.EndDate.ToDateTime(TimeOnly.MinValue);
+                        var overlapStart = leaveStart > periodStart ? leaveStart : periodStart;
+                        var overlapEnd = leaveEnd < periodEnd ? leaveEnd : periodEnd;
                         return overlapEnd < overlapStart ? 0m : GetCapacityHours(overlapStart, overlapEnd);
                     });
                     return new ResourceLeaveMetrics(
