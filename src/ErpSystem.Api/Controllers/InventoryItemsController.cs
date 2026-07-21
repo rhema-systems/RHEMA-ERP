@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +37,7 @@ public class InventoryItemsController : ControllerBase
     private readonly IUnitOfMeasureScheduleRepository _uomScheduleRepository;
     private readonly IMapper _mapper;
     private readonly ILogger<InventoryItemsController> _logger;
+    private readonly IProcurementMasterDataChangeService? _masterDataChanges;
 
     public InventoryItemsController(
         ICurrentUserProvider currentUserProvider,
@@ -51,7 +53,8 @@ public class InventoryItemsController : ControllerBase
         IItemUnitOfMeasureRepository itemUnitOfMeasureRepository,
         IUnitOfMeasureScheduleRepository uomScheduleRepository,
         IMapper mapper,
-        ILogger<InventoryItemsController> logger)
+        ILogger<InventoryItemsController> logger,
+        IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _currentUserProvider = currentUserProvider;
         _inventoryItemRepository = inventoryItemRepository;
@@ -67,6 +70,7 @@ public class InventoryItemsController : ControllerBase
         _uomScheduleRepository = uomScheduleRepository;
         _mapper = mapper;
         _logger = logger;
+        _masterDataChanges = masterDataChanges;
     }
 
     /// <summary>
@@ -318,6 +322,8 @@ public class InventoryItemsController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "InventoryItem.Update");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
@@ -365,6 +371,8 @@ public class InventoryItemsController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "InventoryItem.Delete");
+            if (protection is not null) return protection;
             var item = await _inventoryItemRepository.GetByIdAsync(id);
             if (item == null)
             {
@@ -1032,6 +1040,22 @@ public class InventoryItemsController : ControllerBase
     /// Falls back to the seeded default tenant for authenticated requests that
     /// do not carry a tenant claim.
     /// </summary>
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    {
+        if (_masterDataChanges is null) return null;
+        var decision = await _masterDataChanges.CheckDirectMutationAsync(
+            new[] { ProcurementMasterDataResourceType.InventoryItem }, id, action,
+            HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+        return decision.Allowed ? null : Conflict(new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Staged inventory-item change required",
+            Detail = decision.Message,
+            Instance = HttpContext.Request.Path,
+            Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
+        });
+    }
+
     private Guid GetTenantId()
     {
         var tenantId = _currentUserProvider.TenantId;

@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,17 +21,20 @@ public class SuppliersController : ControllerBase
     private readonly ISupplierContactRepository _supplierContactRepository;
     private readonly ISupplierItemCatalogRepository _supplierItemCatalogRepository;
     private readonly ILogger<SuppliersController> _logger;
+    private readonly IProcurementMasterDataChangeService? _masterDataChanges;
 
     public SuppliersController(
         ISupplierRepository supplierRepository,
         ISupplierContactRepository supplierContactRepository,
         ISupplierItemCatalogRepository supplierItemCatalogRepository,
-        ILogger<SuppliersController> logger)
+        ILogger<SuppliersController> logger,
+        IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _supplierRepository = supplierRepository;
         _supplierContactRepository = supplierContactRepository;
         _supplierItemCatalogRepository = supplierItemCatalogRepository;
         _logger = logger;
+        _masterDataChanges = masterDataChanges;
     }
 
     /// <summary>
@@ -258,6 +262,8 @@ public class SuppliersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "LegacySupplier.Update");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
@@ -324,6 +330,8 @@ public class SuppliersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "LegacySupplier.Delete");
+            if (protection is not null) return protection;
             var supplier = await _supplierRepository.GetSupplierByIdAsync(id);
             if (supplier == null)
             {
@@ -356,6 +364,8 @@ public class SuppliersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "LegacySupplier.Status");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
@@ -645,4 +655,19 @@ public class SuppliersController : ControllerBase
     }
 
     #endregion
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    {
+        if (_masterDataChanges is null) return null;
+        var decision = await _masterDataChanges.CheckDirectMutationAsync(
+            new[] { ProcurementMasterDataResourceType.SupplierProfile, ProcurementMasterDataResourceType.SupplierTaxDetails },
+            id, action, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+        return decision.Allowed ? null : Conflict(new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Staged supplier change required",
+            Detail = decision.Message,
+            Instance = HttpContext.Request.Path,
+            Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
+        });
+    }
 }

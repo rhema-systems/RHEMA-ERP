@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -15,13 +16,16 @@ public class ProcurementSettingsController : ControllerBase
 {
     private readonly IProcurementSettingsService _settingsService;
     private readonly ILogger<ProcurementSettingsController> _logger;
+    private readonly IProcurementMasterDataChangeService? _masterDataChanges;
 
     public ProcurementSettingsController(
         IProcurementSettingsService settingsService,
-        ILogger<ProcurementSettingsController> logger)
+        ILogger<ProcurementSettingsController> logger,
+        IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _settingsService = settingsService;
         _logger = logger;
+        _masterDataChanges = masterDataChanges;
     }
 
     /// <summary>
@@ -50,6 +54,21 @@ public class ProcurementSettingsController : ControllerBase
     {
         try
         {
+            if (_masterDataChanges is not null)
+            {
+                var decision = await _masterDataChanges.CheckDirectMutationAsync(
+                    new[] { ProcurementMasterDataResourceType.ProcurementPolicySensitive }, null,
+                    "ProcurementSettings.Update", HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+                if (!decision.Allowed)
+                    return Conflict(new ProblemDetails
+                    {
+                        Status = StatusCodes.Status409Conflict,
+                        Title = "Staged procurement-settings change required",
+                        Detail = decision.Message,
+                        Instance = HttpContext.Request.Path,
+                        Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
+                    });
+            }
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);

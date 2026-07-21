@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 
@@ -16,17 +18,20 @@ public class WarehousesController : ControllerBase
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<WarehousesController> _logger;
+    private readonly IProcurementMasterDataChangeService? _masterDataChanges;
 
     public WarehousesController(
         IWarehouseRepository warehouseRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
-        ILogger<WarehousesController> logger)
+        ILogger<WarehousesController> logger,
+        IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _warehouseRepository = warehouseRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _masterDataChanges = masterDataChanges;
     }
 
     /// <summary>
@@ -150,6 +155,8 @@ public class WarehousesController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "Warehouse.Update");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
@@ -204,6 +211,8 @@ public class WarehousesController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "Warehouse.Delete");
+            if (protection is not null) return protection;
             var warehouse = await _warehouseRepository.GetByIdAsync(id);
             if (warehouse == null)
                 return NotFound($"Warehouse with ID {id} not found");
@@ -222,6 +231,22 @@ public class WarehousesController : ControllerBase
             _logger.LogError(ex, "Error deleting warehouse {Id}", id);
             return StatusCode(500, "An error occurred while deleting the warehouse");
         }
+    }
+
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    {
+        if (_masterDataChanges is null) return null;
+        var decision = await _masterDataChanges.CheckDirectMutationAsync(
+            new[] { ProcurementMasterDataResourceType.Warehouse }, id, action,
+            HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+        return decision.Allowed ? null : Conflict(new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Staged warehouse change required",
+            Detail = decision.Message,
+            Instance = HttpContext.Request.Path,
+            Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
+        });
     }
 
     private static WarehouseDto MapToDto(Warehouse entity)

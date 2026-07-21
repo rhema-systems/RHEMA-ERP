@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,17 +17,20 @@ public class BusinessPartnersController : ControllerBase
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowService _workflowService;
     private readonly ILogger<BusinessPartnersController> _logger;
+    private readonly IProcurementMasterDataChangeService? _masterDataChanges;
 
     public BusinessPartnersController(
         IBusinessPartnerService partnerService,
         ICurrentUserProvider currentUserProvider,
         IWorkflowService workflowService,
-        ILogger<BusinessPartnersController> logger)
+        ILogger<BusinessPartnersController> logger,
+        IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _partnerService = partnerService;
         _currentUserProvider = currentUserProvider;
         _workflowService = workflowService;
         _logger = logger;
+        _masterDataChanges = masterDataChanges;
     }
 
     /// <summary>
@@ -255,6 +259,8 @@ public class BusinessPartnersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "BusinessPartner.Update");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
@@ -282,6 +288,8 @@ public class BusinessPartnersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "BusinessPartner.Delete");
+            if (protection is not null) return protection;
             await _partnerService.DeleteAsync(id);
             return NoContent();
         }
@@ -587,6 +595,22 @@ public class BusinessPartnersController : ControllerBase
             _logger.LogError(ex, "Error downloading document {DocumentId} for business partner {PartnerId}", documentId, id);
             return StatusCode(500, "An error occurred while downloading the document");
         }
+    }
+
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    {
+        if (_masterDataChanges is null) return null;
+        var decision = await _masterDataChanges.CheckDirectMutationAsync(
+            new[] { ProcurementMasterDataResourceType.SupplierProfile, ProcurementMasterDataResourceType.SupplierBankDetails, ProcurementMasterDataResourceType.SupplierTaxDetails },
+            id, action, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+        return decision.Allowed ? null : Conflict(new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Staged supplier change required",
+            Detail = decision.Message,
+            Instance = HttpContext.Request.Path,
+            Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
+        });
     }
 }
 

@@ -128,6 +128,12 @@ public class UnitOfWork : IUnitOfWork
         await strategy.ExecuteAsync(operation);
     }
 
+    public async Task<T> ExecuteInStrategyAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(operation);
+    }
+
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposed && disposing)

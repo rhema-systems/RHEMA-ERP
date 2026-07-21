@@ -231,7 +231,7 @@ function WorkflowAdministrationPageInner() {
       setLoading(true);
       const result = await workflowApiService.getWorkflowDefinitions({
         page: 1,
-        pageSize: 10,
+        pageSize: 40,
         searchTerm: searchQuery || undefined,
         entityType: entityTypeFilter && entityTypeFilter !== 'all' ? entityTypeFilter : undefined,
         isActive:

@@ -29,6 +29,13 @@
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\Procurement\BusinessPartnersControllerContactRouteTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementConfigurationProfilesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementComplianceDecisionsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementPolicySetsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSodControlsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementAccessControlsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementControlEventsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementMasterDataChangesControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
