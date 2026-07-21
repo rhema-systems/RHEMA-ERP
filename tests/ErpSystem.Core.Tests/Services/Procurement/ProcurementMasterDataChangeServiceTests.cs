@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -154,6 +155,81 @@ public sealed class ProcurementMasterDataChangeServiceTests
     }
 
     [Fact]
+    public async Task CompletedSharedWorkflowCannotBeSynchronizedAsARejection()
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddActivePolicyAsync();
+        fixture.Switch(fixture.MakerUserId, "TDC_PROCUREMENT_OFFICER");
+        var draft = await fixture.Service.SaveDraftAsync(null, ChangeRequest(fixture.PartnerId), "trace-workflow-create");
+        await fixture.SetRequestRowVersionAsync(draft.Id);
+        var submitted = await fixture.Service.SubmitAsync(draft.Id, new ProcurementMasterDataChangeLifecycleRequest
+        {
+            RowVersion = fixture.RowVersion,
+            Comment = "Submit to shared workflow"
+        }, "trace-workflow-submit");
+        var workflowDefinitionId = Guid.NewGuid();
+        var workflowInstanceId = Guid.NewGuid();
+        var request = await fixture.Context.ProcurementMasterDataChangeRequests.SingleAsync(item => item.Id == submitted.Id);
+        request.WorkflowDefinitionId = workflowDefinitionId;
+        request.WorkflowInstanceId = workflowInstanceId;
+        fixture.Context.WorkflowInstances.Add(new WorkflowInstance
+        {
+            Id = workflowInstanceId,
+            TenantId = fixture.TenantId,
+            WorkflowDefinitionId = workflowDefinitionId,
+            EntityId = submitted.Id,
+            EntityTypeId = Guid.NewGuid(),
+            InitiatedById = fixture.MakerUserId,
+            Status = WorkflowInstanceStatus.Completed
+        });
+        await fixture.Context.SaveChangesAsync();
+        fixture.Switch(fixture.CheckerUserId, "TDC_HEAD_OF_PROCUREMENT");
+
+        var action = () => fixture.Service.RejectAsync(submitted.Id, new ProcurementMasterDataChangeDecisionRequest
+        {
+            RowVersion = fixture.RowVersion,
+            Comment = "Contradict the approved workflow"
+        }, "trace-workflow-reject");
+
+        await action.Should().ThrowAsync<ProcurementMasterDataChangeConflictException>()
+            .WithMessage("*Reject or cancel the configured shared workflow*");
+        request.Status.Should().Be(ProcurementMasterDataChangeStatus.PendingApproval);
+    }
+
+    [Fact]
+    public async Task FuturePolicyActivationKeepsCurrentProtectionEffectiveUntilCutover()
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddActivePolicyAsync();
+        var current = await fixture.Context.ProcurementMasterDataControlPolicies.SingleAsync();
+        var futureFrom = DateTime.UtcNow.AddDays(30);
+        fixture.Switch(fixture.MakerUserId, "SuperAdmin");
+        var replacementRequest = PolicyRequest();
+        replacementRequest.EffectiveFromUtc = futureFrom;
+        var draft = await fixture.Service.SavePolicyAsync(null, replacementRequest, "trace-future-policy-create");
+        await fixture.SetPolicyRowVersionAsync(draft.Id);
+
+        var replacement = await fixture.Service.ActivatePolicyAsync(draft.Id, new ProcurementMasterDataPolicyLifecycleRequest
+        {
+            RowVersion = fixture.RowVersion,
+            Reason = "Approved future control-policy cutover"
+        }, "trace-future-policy-activate");
+
+        current = await fixture.Context.ProcurementMasterDataControlPolicies.SingleAsync(item => item.Id == current.Id);
+        current.Status.Should().Be(ProcurementMasterDataPolicyStatus.Active);
+        current.EffectiveToUtc.Should().Be(futureFrom.AddTicks(-1));
+        replacement.Status.Should().Be(ProcurementMasterDataPolicyStatus.Active);
+        replacement.EffectiveFromUtc.Should().Be(futureFrom);
+
+        fixture.Switch(fixture.MakerUserId, "TDC_PROCUREMENT_OFFICER");
+        var protection = await fixture.Service.CheckDirectMutationAsync(
+            new[] { ProcurementMasterDataResourceType.SupplierProfile }, fixture.PartnerId,
+            "BusinessPartner.Update", "trace-current-policy-protection");
+        protection.Allowed.Should().BeFalse();
+        protection.PolicyId.Should().Be(current.Id);
+    }
+
+    [Fact]
     public async Task SearchAndDetailNeverCrossTenantBoundary()
     {
         await using var fixture = new Fixture();
@@ -277,6 +353,13 @@ public sealed class ProcurementMasterDataChangeServiceTests
         {
             var request = await Context.ProcurementMasterDataChangeRequests.SingleAsync(item => item.Id == id);
             request.RowVersion = new byte[] { 1, 2, 3, 4 };
+            await Context.SaveChangesAsync();
+        }
+
+        public async Task SetPolicyRowVersionAsync(Guid id)
+        {
+            var policy = await Context.ProcurementMasterDataControlPolicies.SingleAsync(item => item.Id == id);
+            policy.RowVersion = new byte[] { 1, 2, 3, 4 };
             await Context.SaveChangesAsync();
         }
 

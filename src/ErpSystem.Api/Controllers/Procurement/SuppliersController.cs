@@ -194,6 +194,8 @@ public class SuppliersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(null, "LegacySupplier.Create");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
@@ -655,7 +657,7 @@ public class SuppliersController : ControllerBase
     }
 
     #endregion
-    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid? id, string action)
     {
         if (_masterDataChanges is null) return null;
         var decision = await _masterDataChanges.CheckDirectMutationAsync(

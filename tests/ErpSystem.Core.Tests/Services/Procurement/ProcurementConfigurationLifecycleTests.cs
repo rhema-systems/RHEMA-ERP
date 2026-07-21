@@ -268,6 +268,59 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
+    public async Task FutureDatedReplacementKeepsCurrentProfileEffectiveUntilCutover()
+    {
+        await using var fixture = new ServiceFixture("SuperAdmin");
+        var now = DateTime.UtcNow;
+        var currentFrom = now.AddDays(-30);
+        var replacementFrom = now.AddDays(30);
+        var effectiveTo = now.AddDays(90);
+        var first = await fixture.Service.CreateProfileAsync(new CreateProcurementConfigurationProfileRequest
+        {
+            ProfileCode = "FUTURE-CONFIG",
+            Name = "Future configuration cutover",
+            EffectiveFrom = currentFrom,
+            EffectiveTo = effectiveTo,
+            IsDefault = true
+        }, "create-current-config-cutover");
+        await PrepareForPublicationAsync(fixture.Service, first.Id, currentFrom, effectiveTo);
+        first = await fixture.Service.GetProfileAsync(first.Id);
+        var publishedCurrent = await fixture.Service.PublishProfileAsync(first.Id,
+            new ProcurementConfigurationLifecycleRequest { RowVersion = first.RowVersion, Reason = "Publish current configuration" },
+            "publish-current-config-cutover");
+
+        var replacement = await fixture.Service.CloneDraftAsync(publishedCurrent.Id,
+            new CloneProcurementConfigurationProfileRequest { ChangeSummary = "Future configuration replacement" },
+            "clone-future-config-cutover");
+        replacement = await fixture.Service.UpdateProfileAsync(replacement.Id,
+            new UpdateProcurementConfigurationProfileRequest
+            {
+                Name = replacement.Name,
+                EffectiveFrom = replacementFrom,
+                EffectiveTo = effectiveTo,
+                IsDefault = replacement.IsDefault,
+                ChangeSummary = replacement.ChangeSummary,
+                RowVersion = replacement.RowVersion,
+                Reason = "Set future configuration period"
+            }, "date-future-config-cutover");
+        await PrepareForPublicationAsync(fixture.Service, replacement.Id, replacementFrom, effectiveTo);
+        replacement = await fixture.Service.GetProfileAsync(replacement.Id);
+        var publishedReplacement = await fixture.Service.PublishProfileAsync(replacement.Id,
+            new ProcurementConfigurationLifecycleRequest { RowVersion = replacement.RowVersion, Reason = "Schedule future configuration" },
+            "publish-future-config-cutover");
+
+        var currentAfterPublication = await fixture.Service.GetProfileAsync(publishedCurrent.Id);
+        currentAfterPublication.LifecycleStatus.Should().Be(ProcurementConfigurationProfileStatus.Published);
+        currentAfterPublication.EffectiveTo.Should().Be(replacementFrom.AddTicks(-1));
+        publishedReplacement.LifecycleStatus.Should().Be(ProcurementConfigurationProfileStatus.Published);
+        (await fixture.Service.GetEffectiveProfileAsync(publishedCurrent.ProfileCode, now))?.Id.Should().Be(publishedCurrent.Id);
+        (await fixture.Service.GetEffectiveProfileAsync(publishedCurrent.ProfileCode, replacementFrom.AddTicks(1)))?.Id
+            .Should().Be(publishedReplacement.Id);
+        (await fixture.Service.GetHistoryAsync(publishedCurrent.Id)).Should().Contain(item =>
+            item.Action == "ScheduleSupersession" && item.CorrelationId == "publish-future-config-cutover");
+    }
+
+    [Fact]
     public async Task CloneDraftAdvancesPastSoftDeletedVersionsWithoutTreatingThemAsActiveDrafts()
     {
         await using var fixture = new ServiceFixture("SuperAdmin");

@@ -40825,9 +40825,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "ProfileCode", "Version")
                         .IsUnique();
 
-                    b.HasIndex("TenantId", "ProfileKey", "LifecycleStatus")
-                        .IsUnique()
-                        .HasFilter("[LifecycleStatus] = 1 AND [IsDeleted] = 0");
+                    b.HasIndex("TenantId", "ProfileKey", "LifecycleStatus");
 
                     b.HasIndex("TenantId", "ProfileKey", "Version")
                         .IsUnique();
@@ -41597,9 +41595,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkflowDefinitionId");
 
-                    b.HasIndex("TenantId", "ResourceType", "Status")
-                        .IsUnique()
-                        .HasFilter("[Status] = 1 AND [IsDeleted] = 0");
+                    b.HasIndex("TenantId", "ResourceType", "Status");
 
                     b.HasIndex("TenantId", "ResourceType", "Version")
                         .IsUnique();
@@ -42906,9 +42902,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "LifecycleStatus", "EffectiveFrom");
 
-                    b.HasIndex("TenantId", "PolicyKey", "LifecycleStatus")
-                        .IsUnique()
-                        .HasFilter("[LifecycleStatus] = 1 AND [IsDeleted] = 0");
+                    b.HasIndex("TenantId", "PolicyKey", "LifecycleStatus");
 
                     b.HasIndex("TenantId", "PolicyKey", "Version")
                         .IsUnique();

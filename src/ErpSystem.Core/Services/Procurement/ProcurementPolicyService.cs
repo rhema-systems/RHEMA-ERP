@@ -308,15 +308,33 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             try
             {
                 var now = DateTime.UtcNow;
+                var publishesInFuture = policySet.EffectiveFrom > now;
                 var previous = await PolicySets.GetQueryable(item =>
                         item.TenantId == _currentUser.TenantId &&
                         item.PolicyKey == policySet.PolicyKey &&
                         item.Id != policySet.Id &&
                         item.LifecycleStatus == ProcurementPolicyLifecycleStatus.Published)
                     .ToListAsync(cancellationToken);
+                if (publishesInFuture && previous.Any(item => item.EffectiveFrom > now))
+                    throw new ProcurementPolicyConflictException(
+                        "A future replacement is already Published for this policy family. Retire it before scheduling another replacement.");
                 foreach (var prior in previous)
                 {
                     var priorBefore = PolicySnapshot(prior);
+                    var isCurrentlyEffective = prior.EffectiveFrom <= now &&
+                        (!prior.EffectiveTo.HasValue || prior.EffectiveTo.Value >= now);
+                    if (publishesInFuture && isCurrentlyEffective)
+                    {
+                        if (!prior.EffectiveTo.HasValue || prior.EffectiveTo.Value >= policySet.EffectiveFrom)
+                            prior.EffectiveTo = policySet.EffectiveFrom.AddTicks(-1);
+                        Touch(prior);
+                        await PolicySets.UpdateAsync(prior);
+                        await AddRevisionAsync(prior.Id, null, null, "ScheduleSupersession", "Succeeded", correlationId,
+                            $"Remains Published until version {policySet.Version} becomes effective at {policySet.EffectiveFrom:O}.",
+                            priorBefore, PolicySnapshot(prior));
+                        continue;
+                    }
+
                     prior.LifecycleStatus = ProcurementPolicyLifecycleStatus.Retired;
                     prior.RetiredAt = now;
                     prior.RetiredById = _currentUser.UserId;

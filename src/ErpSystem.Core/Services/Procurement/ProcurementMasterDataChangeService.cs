@@ -183,8 +183,25 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                     item.ResourceType == entity.ResourceType && item.Status == ProcurementMasterDataPolicyStatus.Active && item.Id != entity.Id)
                 .ToListAsync(cancellationToken);
             var now = DateTime.UtcNow;
+            var activatesInFuture = entity.EffectiveFromUtc > now;
+            if (activatesInFuture && previous.Any(item => item.EffectiveFromUtc > now))
+                throw new ProcurementMasterDataChangeConflictException(
+                    "A future replacement is already Active for this master-data policy. Retire it before scheduling another replacement.");
             foreach (var item in previous)
             {
+                var isCurrentlyEffective = item.EffectiveFromUtc <= now &&
+                    (!item.EffectiveToUtc.HasValue || item.EffectiveToUtc.Value >= now);
+                if (activatesInFuture && isCurrentlyEffective)
+                {
+                    if (!item.EffectiveToUtc.HasValue || item.EffectiveToUtc.Value >= entity.EffectiveFromUtc)
+                        item.EffectiveToUtc = entity.EffectiveFromUtc.AddTicks(-1);
+                    item.UpdatedAt = now;
+                    item.UpdatedBy = _currentUser.Username;
+                    item.LastModifiedById = _currentUser.UserId;
+                    await Policies.UpdateAsync(item);
+                    continue;
+                }
+
                 item.Status = ProcurementMasterDataPolicyStatus.Retired;
                 item.EffectiveToUtc = item.EffectiveToUtc.HasValue && item.EffectiveToUtc.Value < now ? item.EffectiveToUtc : now;
                 item.RetiredAtUtc = now;
@@ -872,7 +889,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             ?? throw new ProcurementMasterDataChangeConflictException("The linked shared workflow instance was not found in the current tenant.");
         if (approving && instance.Status != WorkflowInstanceStatus.Completed)
             throw new ProcurementMasterDataChangeConflictException("Complete the configured shared workflow before synchronizing approval to this change request.");
-        if (!approving && instance.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed or WorkflowInstanceStatus.Completed))
+        if (!approving && instance.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed))
             throw new ProcurementMasterDataChangeConflictException("Reject or cancel the configured shared workflow before synchronizing rejection to this change request.");
     }
 

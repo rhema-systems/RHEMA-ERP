@@ -286,6 +286,8 @@ public class InventoryItemsController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(null, "InventoryItem.Create");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
@@ -1040,7 +1042,7 @@ public class InventoryItemsController : ControllerBase
     /// Falls back to the seeded default tenant for authenticated requests that
     /// do not carry a tenant claim.
     /// </summary>
-    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid? id, string action)
     {
         if (_masterDataChanges is null) return null;
         var decision = await _masterDataChanges.CheckDirectMutationAsync(

@@ -129,6 +129,8 @@ public class UnitsOfMeasureController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(null, "UnitOfMeasure.Create");
+            if (protection is not null) return protection;
             var tenantId = _currentUserProvider.TenantId;
             if (tenantId == Guid.Empty)
             {
@@ -325,7 +327,7 @@ public class UnitsOfMeasureController : ControllerBase
         }
     }
 
-    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid? id, string action)
     {
         if (_masterDataChanges is null) return null;
         var decision = await _masterDataChanges.CheckDirectMutationAsync(

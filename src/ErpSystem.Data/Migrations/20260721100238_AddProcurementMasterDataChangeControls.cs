@@ -380,7 +380,8 @@ namespace ErpSystem.Data.Migrations
                         WHERE i.Status <> d.Status AND NOT (
                             (d.Status = 0 AND i.Status IN (1, 5, 6)) OR
                             (d.Status = 1 AND i.Status IN (2, 3, 5, 6)) OR
-                            (d.Status = 2 AND i.Status IN (4, 6))))
+                            (d.Status = 2 AND i.Status IN (4, 6)) OR
+                            (d.Status = 6 AND i.Status = 5)))
                         THROW 51015, 'Invalid procurement master-data change-request lifecycle transition.', 1;
                 END
                 """);

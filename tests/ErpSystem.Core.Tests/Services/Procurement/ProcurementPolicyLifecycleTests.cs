@@ -151,6 +151,51 @@ public sealed class ProcurementPolicyServiceTests
     }
 
     [Fact]
+    public async Task FutureDatedReplacementKeepsCurrentPolicyEffectiveUntilCutover()
+    {
+        await using var fixture = new ServiceFixture("SuperAdmin");
+        var now = DateTime.UtcNow;
+        var currentFrom = now.AddDays(-30);
+        var replacementFrom = now.AddDays(30);
+        var effectiveTo = now.AddDays(90);
+        var source = await fixture.AddSourceConfigurationAsync();
+        var draft = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id, "FUTURE-CUTOVER"), "create-current-cutover");
+        await fixture.AddValidSodRuleAsync(draft.Id);
+        draft = await fixture.Service.GetPolicySetAsync(draft.Id);
+        var currentUpdate = UpdateFrom(draft);
+        currentUpdate.EffectiveFrom = currentFrom;
+        currentUpdate.EffectiveTo = effectiveTo;
+        draft = await fixture.Service.UpdatePolicySetAsync(draft.Id, currentUpdate, "date-current-cutover");
+        await SetRulePeriodsAsync(fixture.Context, draft.Id, currentFrom, effectiveTo);
+        draft = await fixture.Service.GetPolicySetAsync(draft.Id);
+        var publishedCurrent = await fixture.Service.PublishPolicySetAsync(draft.Id,
+            new ProcurementPolicyLifecycleRequest { RowVersion = draft.RowVersion, Reason = "Publish current policy" },
+            "publish-current-cutover");
+
+        var replacement = await fixture.Service.CloneDraftAsync(publishedCurrent.Id,
+            new CloneProcurementPolicySetRequest { ChangeSummary = "Future replacement" }, "clone-future-cutover");
+        var replacementUpdate = UpdateFrom(replacement);
+        replacementUpdate.EffectiveFrom = replacementFrom;
+        replacementUpdate.EffectiveTo = effectiveTo;
+        replacement = await fixture.Service.UpdatePolicySetAsync(replacement.Id, replacementUpdate, "date-future-cutover");
+        await SetRulePeriodsAsync(fixture.Context, replacement.Id, replacementFrom, effectiveTo);
+        replacement = await fixture.Service.GetPolicySetAsync(replacement.Id);
+        var publishedReplacement = await fixture.Service.PublishPolicySetAsync(replacement.Id,
+            new ProcurementPolicyLifecycleRequest { RowVersion = replacement.RowVersion, Reason = "Schedule future replacement" },
+            "publish-future-cutover");
+
+        var currentAfterPublication = await fixture.Service.GetPolicySetAsync(publishedCurrent.Id);
+        currentAfterPublication.LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Published);
+        currentAfterPublication.EffectiveTo.Should().Be(replacementFrom.AddTicks(-1));
+        publishedReplacement.LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Published);
+        (await fixture.Service.GetEffectivePolicySetAsync(publishedCurrent.Code, now))?.Id.Should().Be(publishedCurrent.Id);
+        (await fixture.Service.GetEffectivePolicySetAsync(publishedCurrent.Code, replacementFrom.AddTicks(1)))?.Id
+            .Should().Be(publishedReplacement.Id);
+        (await fixture.Service.GetHistoryAsync(publishedCurrent.Id)).Should().Contain(item =>
+            item.Action == "ScheduleSupersession" && item.CorrelationId == "publish-future-cutover");
+    }
+
+    [Fact]
     public async Task CloneDraftAdvancesPastSoftDeletedVersionsWithoutTreatingThemAsActiveDrafts()
     {
         await using var fixture = new ServiceFixture("SuperAdmin");
@@ -379,6 +424,29 @@ public sealed class ProcurementPolicyServiceTests
         IsDefault = policy.IsDefault,
         RowVersion = policy.RowVersion
     };
+
+    private static async Task SetRulePeriodsAsync(
+        ApplicationDbContext context,
+        Guid policySetId,
+        DateTime effectiveFrom,
+        DateTime effectiveTo)
+    {
+        foreach (var item in await context.ProcurementPolicyCategoryRules.Where(item => item.PolicySetId == policySetId).ToListAsync())
+        { item.EffectiveFrom = effectiveFrom; item.EffectiveTo = effectiveTo; }
+        foreach (var item in await context.ProcurementPolicyMethodRules.Where(item => item.PolicySetId == policySetId).ToListAsync())
+        { item.EffectiveFrom = effectiveFrom; item.EffectiveTo = effectiveTo; }
+        foreach (var item in await context.ProcurementPolicyThresholdRules.Where(item => item.PolicySetId == policySetId).ToListAsync())
+        { item.EffectiveFrom = effectiveFrom; item.EffectiveTo = effectiveTo; }
+        foreach (var item in await context.ProcurementPolicyAuthorityRules.Where(item => item.PolicySetId == policySetId).ToListAsync())
+        { item.EffectiveFrom = effectiveFrom; item.EffectiveTo = effectiveTo; }
+        foreach (var item in await context.ProcurementPolicyEvidenceRules.Where(item => item.PolicySetId == policySetId).ToListAsync())
+        { item.EffectiveFrom = effectiveFrom; item.EffectiveTo = effectiveTo; }
+        foreach (var item in await context.ProcurementPolicyExceptionRules.Where(item => item.PolicySetId == policySetId).ToListAsync())
+        { item.EffectiveFrom = effectiveFrom; item.EffectiveTo = effectiveTo; }
+        foreach (var item in await context.ProcurementPolicySodRules.Where(item => item.PolicySetId == policySetId).ToListAsync())
+        { item.EffectiveFrom = effectiveFrom; item.EffectiveTo = effectiveTo; }
+        await context.SaveChangesAsync();
+    }
 
     private static SaveProcurementPolicySodRuleValue SodValue(
         string initiator,

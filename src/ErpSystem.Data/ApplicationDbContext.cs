@@ -8805,9 +8805,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasIndex(item => new { item.TenantId, item.ProfileKey, item.Version }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.ProfileCode, item.Version }).IsUnique();
-            entity.HasIndex(item => new { item.TenantId, item.ProfileKey, item.LifecycleStatus })
-                .IsUnique()
-                .HasFilter("[LifecycleStatus] = 1 AND [IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.ProfileKey, item.LifecycleStatus });
             entity.HasIndex(item => new { item.TenantId, item.LifecycleStatus, item.EffectiveFrom });
             entity.ToTable(table =>
             {
@@ -8890,8 +8888,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasIndex(item => new { item.TenantId, item.PolicyKey, item.Version }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.Code, item.Version }).IsUnique();
-            entity.HasIndex(item => new { item.TenantId, item.PolicyKey, item.LifecycleStatus })
-                .IsUnique().HasFilter("[LifecycleStatus] = 1 AND [IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.PolicyKey, item.LifecycleStatus });
             entity.HasIndex(item => new { item.TenantId, item.LifecycleStatus, item.EffectiveFrom });
             entity.HasIndex(item => new { item.TenantId, item.SourceConfigurationProfileId });
             entity.ToTable(table =>
@@ -9095,8 +9092,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasIndex(item => new { item.TenantId, item.ResourceType, item.Version }).IsUnique();
-            entity.HasIndex(item => new { item.TenantId, item.ResourceType, item.Status })
-                .IsUnique().HasFilter("[Status] = 1 AND [IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.ResourceType, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.Status, item.EffectiveFromUtc });
             entity.ToTable("ProcurementMasterDataControlPolicies", table =>
             {

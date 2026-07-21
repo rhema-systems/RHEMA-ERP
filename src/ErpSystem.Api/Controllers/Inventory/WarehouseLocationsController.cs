@@ -91,6 +91,8 @@ public class WarehouseLocationsController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(null, "WarehouseLocation.Create");
+            if (protection is not null) return protection;
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
@@ -535,7 +537,7 @@ public class WarehouseLocationsController : ControllerBase
         }
     }
 
-    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid id, string action)
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid? id, string action)
     {
         if (_masterDataChanges is null) return null;
         var decision = await _masterDataChanges.CheckDirectMutationAsync(

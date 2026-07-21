@@ -325,16 +325,34 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             try
             {
                 var now = DateTime.UtcNow;
+                var publishesInFuture = profile.EffectiveFrom > now;
                 var priorPublished = await Profiles.GetQueryable(item =>
                         item.TenantId == _currentUser.TenantId &&
                         item.ProfileKey == profile.ProfileKey &&
                         item.Id != profile.Id &&
                         item.LifecycleStatus == ProcurementConfigurationProfileStatus.Published)
                     .ToListAsync(cancellationToken);
+                if (publishesInFuture && priorPublished.Any(item => item.EffectiveFrom > now))
+                    throw new ProcurementConfigurationConflictException(
+                        "A future replacement is already Published for this configuration family. Retire it before scheduling another replacement.");
 
                 foreach (var prior in priorPublished)
                 {
                     var priorBefore = ProfileSnapshot(prior);
+                    var isCurrentlyEffective = prior.EffectiveFrom <= now &&
+                        (!prior.EffectiveTo.HasValue || prior.EffectiveTo.Value >= now);
+                    if (publishesInFuture && isCurrentlyEffective)
+                    {
+                        if (!prior.EffectiveTo.HasValue || prior.EffectiveTo.Value >= profile.EffectiveFrom)
+                            prior.EffectiveTo = profile.EffectiveFrom.AddTicks(-1);
+                        SetModified(prior);
+                        await Profiles.UpdateAsync(prior);
+                        await AddRevisionAsync(prior.Id, null, "ScheduleSupersession", "Succeeded", correlationId,
+                            $"Remains Published until version {profile.Version} becomes effective at {profile.EffectiveFrom:O}.",
+                            priorBefore, ProfileSnapshot(prior));
+                        continue;
+                    }
+
                     prior.LifecycleStatus = ProcurementConfigurationProfileStatus.Retired;
                     prior.RetiredAt = now;
                     prior.RetiredById = _currentUser.UserId;

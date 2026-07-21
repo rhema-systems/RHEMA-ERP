@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using ErpSystem.Api.Controllers.Procurement;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -101,6 +102,53 @@ public sealed class ProcurementMasterDataChangesControllerTests
         invalid.Value.Should().BeAssignableTo<ValidationProblemDetails>().Which.Extensions["correlationId"].Should().Be("trace-master-data");
     }
 
+    [Fact]
+    public async Task ProtectedMasterDataCreateEndpointsRequireStagedChange()
+    {
+        var service = new Mock<IProcurementMasterDataChangeService>();
+        service.Setup(item => item.CheckDirectMutationAsync(
+                It.IsAny<IReadOnlyCollection<ProcurementMasterDataResourceType>>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementMasterDataDirectMutationDecisionDto
+            {
+                Allowed = false,
+                Code = "STAGED_CHANGE_REQUIRED",
+                Message = "Protected master data must use a staged change request.",
+                PolicyId = Guid.NewGuid(),
+                CorrelationId = "direct-create"
+            });
+        using var factory = CreateDirectMutationFactory(service);
+        using var client = factory.CreateClient();
+        var endpoints = new (string Route, ProcurementMasterDataResourceType[] ResourceTypes, string SourceReference)[]
+        {
+            ("/api/InventoryItems", new[] { ProcurementMasterDataResourceType.InventoryItem }, "InventoryItem.Create"),
+            ("/api/inventory/warehouses", new[] { ProcurementMasterDataResourceType.Warehouse }, "Warehouse.Create"),
+            ("/api/inventory/warehouse-locations", new[] { ProcurementMasterDataResourceType.WarehouseLocation }, "WarehouseLocation.Create"),
+            ("/api/inventory/units-of-measure", new[] { ProcurementMasterDataResourceType.UnitOfMeasure }, "UnitOfMeasure.Create"),
+            ("/api/Suppliers", new[] { ProcurementMasterDataResourceType.SupplierProfile, ProcurementMasterDataResourceType.SupplierTaxDetails }, "LegacySupplier.Create"),
+            ("/api/procurement/business-partners", new[] { ProcurementMasterDataResourceType.SupplierProfile, ProcurementMasterDataResourceType.SupplierBankDetails, ProcurementMasterDataResourceType.SupplierTaxDetails }, "BusinessPartner.Create")
+        };
+
+        foreach (var endpoint in endpoints)
+        {
+            using var response = await client.PostAsync(
+                endpoint.Route,
+                new StringContent("{}", Encoding.UTF8, "application/json"));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict, endpoint.Route);
+            service.Verify(item => item.CheckDirectMutationAsync(
+                    It.Is<IReadOnlyCollection<ProcurementMasterDataResourceType>>(types => types.SequenceEqual(endpoint.ResourceTypes)),
+                    It.Is<Guid?>(targetId => targetId == null),
+                    endpoint.SourceReference,
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+    }
+
     private static ProcurementMasterDataChangesController Controller(Mock<IProcurementMasterDataChangeService> service, string traceIdentifier) =>
         new(service.Object)
         {
@@ -122,6 +170,26 @@ public sealed class ProcurementMasterDataChangesControllerTests
                 services.RemoveAll<IProcurementMasterDataChangeService>();
                 services.AddSingleton<IPolicyEvaluator>(new PolicyTestEvaluator(mode));
                 services.AddSingleton(service.Object);
+            });
+        });
+    }
+
+    private static WebApplicationFactory<Program> CreateDirectMutationFactory(
+        Mock<IProcurementMasterDataChangeService> service)
+    {
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IHostedService>();
+                services.RemoveAll<IPolicyEvaluator>();
+                services.RemoveAll<IProcurementMasterDataChangeService>();
+                services.Configure<ApiBehaviorOptions>(options => options.SuppressModelStateInvalidFilter = true);
+                services.AddSingleton<IPolicyEvaluator>(new PolicyTestEvaluator(PolicyAuthorizationMode.Success));
+                services.AddSingleton(service.Object);
+                services.AddSingleton(Mock.Of<ISupplierContactRepository>());
+                services.AddSingleton(Mock.Of<ISupplierItemCatalogRepository>());
             });
         });
     }
