@@ -268,6 +268,35 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
+    public async Task CloneDraftAdvancesPastSoftDeletedVersionsWithoutTreatingThemAsActiveDrafts()
+    {
+        await using var fixture = new ServiceFixture("SuperAdmin");
+        var first = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-soft-delete-version");
+        await PrepareForPublicationAsync(fixture.Service, first.Id,
+            new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 12, 31, 23, 59, 59, DateTimeKind.Utc));
+        first = await fixture.Service.GetProfileAsync(first.Id);
+        var published = await fixture.Service.PublishProfileAsync(first.Id,
+            new ProcurementConfigurationLifecycleRequest { RowVersion = first.RowVersion, Reason = "Publish clone source" },
+            "publish-soft-delete-version");
+        var deletedDraft = await fixture.Service.CloneDraftAsync(published.Id,
+            new CloneProcurementConfigurationProfileRequest { ChangeSummary = "Discarded version" },
+            "clone-soft-delete-version-2");
+        await fixture.Service.DeleteDraftAsync(deletedDraft.Id,
+            new ProcurementConfigurationLifecycleRequest { RowVersion = deletedDraft.RowVersion, Reason = "Discard draft" },
+            "delete-soft-delete-version-2");
+
+        var nextDraft = await fixture.Service.CloneDraftAsync(published.Id,
+            new CloneProcurementConfigurationProfileRequest { ChangeSummary = "Replacement version" },
+            "clone-soft-delete-version-3");
+
+        nextDraft.Version.Should().Be(3);
+        nextDraft.SupersedesProfileId.Should().Be(published.Id);
+        (await fixture.Context.ProcurementConfigurationProfiles.IgnoreQueryFilters()
+            .SingleAsync(item => item.Id == deletedDraft.Id)).IsDeleted.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task DraftDeletionIsBlockedByEvidence_AndEligibleDeletionIsAudited()
     {
         await using var fixture = new ServiceFixture("TenantAdmin");

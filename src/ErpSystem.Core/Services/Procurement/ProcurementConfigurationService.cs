@@ -409,10 +409,10 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
         if (source.LifecycleStatus == ProcurementConfigurationProfileStatus.Draft)
             throw new ProcurementConfigurationConflictException("The selected profile is already a draft.");
 
-        var versions = await Profiles.GetQueryable(item =>
+        var versions = await Profiles.GetQueryableIncludingDeleted(item =>
                 item.TenantId == _currentUser.TenantId && item.ProfileKey == source.ProfileKey)
             .ToListAsync(cancellationToken);
-        if (versions.Any(item => item.LifecycleStatus == ProcurementConfigurationProfileStatus.Draft))
+        if (versions.Any(item => !item.IsDeleted && item.LifecycleStatus == ProcurementConfigurationProfileStatus.Draft))
             throw new ProcurementConfigurationConflictException("This profile family already has an editable draft.");
 
         var sourceDecisions = await Decisions.GetQueryable(item =>
