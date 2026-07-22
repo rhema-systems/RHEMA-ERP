@@ -256,6 +256,11 @@ public sealed class DocumentManagementController : ControllerBase
         [FromBody] UpsertGeneratedDocumentTemplateRequest request,
         CancellationToken cancellationToken)
     {
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
         if (string.IsNullOrWhiteSpace(templateCode))
         {
             return BadRequest(new { success = false, message = "Template code is required." });
@@ -661,6 +666,11 @@ public sealed class DocumentManagementController : ControllerBase
             ?? "Unreferenced case", 140);
         var generatedSourceReference = $"{sourceRecord} / {template.TemplateCode}";
         var sourceModule = TrimOrDefault(request.SourceModule, template.Module);
+        if (!CanUseSourceModuleForDms(sourceModule))
+        {
+            return Forbid();
+        }
+
         var sourceLabel = string.IsNullOrWhiteSpace(request.SourceLabel)
             ? template.SourceLabel
             : request.SourceLabel.Trim();
@@ -728,6 +738,11 @@ public sealed class DocumentManagementController : ControllerBase
         }
         else
         {
+            if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+            {
+                return Forbid();
+            }
+
             record.Title = title;
             record.SourceLabel = sourceLabel;
             record.RepositoryStatus = "Linked";
@@ -986,6 +1001,14 @@ public sealed class DocumentManagementController : ControllerBase
 
         var tenantId = GetTenantId();
         var now = DateTime.UtcNow;
+        var requestedAccessProfile = string.IsNullOrWhiteSpace(request.AccessProfile)
+            ? "Module restricted"
+            : request.AccessProfile.Trim();
+        if (!await CanAssignAccessProfileAsync(tenantId, requestedAccessProfile, cancellationToken))
+        {
+            return Forbid();
+        }
+
         var record = new CentralDocumentRecord
         {
             TenantId = tenantId,
@@ -1008,7 +1031,7 @@ public sealed class DocumentManagementController : ControllerBase
             VersionStatus = request.VersionStatus ?? "Draft",
             AnnotationStatus = request.AnnotationStatus ?? "Not required",
             CommentStatus = request.CommentStatus ?? "No comments",
-            AccessProfile = request.AccessProfile ?? "Module restricted",
+            AccessProfile = requestedAccessProfile,
             RetentionStatus = request.RetentionStatus ?? "Current",
             LifecycleStatus = request.LifecycleStatus ?? "Active",
             EffectiveDate = request.EffectiveDate,
@@ -1096,6 +1119,18 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
 
+        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var requestedAccessProfile = TrimOrDefault(request.AccessProfile, "Module restricted");
+        if (!string.Equals(requestedAccessProfile, record.AccessProfile, StringComparison.OrdinalIgnoreCase)
+            && !await CanAssignAccessProfileAsync(tenantId, requestedAccessProfile, cancellationToken))
+        {
+            return Forbid();
+        }
+
         record.MetadataTemplateCode = TrimToNull(request.MetadataTemplateCode);
         record.RepositoryStatus = TrimOrDefault(request.RepositoryStatus, "Not linked");
         record.RepositoryPath = TrimToNull(request.RepositoryPath);
@@ -1104,7 +1139,7 @@ public sealed class DocumentManagementController : ControllerBase
         record.VersionStatus = TrimOrDefault(request.VersionStatus, "Draft");
         record.AnnotationStatus = TrimOrDefault(request.AnnotationStatus, "Not required");
         record.CommentStatus = TrimOrDefault(request.CommentStatus, "No comments");
-        record.AccessProfile = TrimOrDefault(request.AccessProfile, "Module restricted");
+        record.AccessProfile = requestedAccessProfile;
         record.RetentionStatus = TrimOrDefault(request.RetentionStatus, "Current");
         record.LifecycleStatus = TrimOrDefault(request.LifecycleStatus, "Active");
         record.EffectiveDate = request.EffectiveDate;
@@ -1133,6 +1168,11 @@ public sealed class DocumentManagementController : ControllerBase
         if (record is null)
         {
             return NotFound(new { success = false, message = "DMS document record was not found." });
+        }
+
+        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+        {
+            return Forbid();
         }
 
         var now = DateTime.UtcNow;
@@ -1692,6 +1732,12 @@ public sealed class DocumentManagementController : ControllerBase
         var tenantId = GetTenantId();
         var now = DateTime.UtcNow;
         var sourceReference = TrimToNull(request.SourceRecordReference);
+        var requestedAccessProfile = TrimToNull(request.AccessProfile);
+        if (!CanUseSourceModuleForDms(request.SourceModule))
+        {
+            return Forbid();
+        }
+
         var record = await _db.CentralDocumentRecords
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && !item.IsDeleted
@@ -1701,6 +1747,13 @@ public sealed class DocumentManagementController : ControllerBase
 
         if (record is null)
         {
+            var newAccessProfile = requestedAccessProfile ?? "Module restricted";
+            if (!string.Equals(newAccessProfile, "Module restricted", StringComparison.OrdinalIgnoreCase)
+                && !await CanAssignAccessProfileAsync(tenantId, newAccessProfile, cancellationToken))
+            {
+                return Forbid();
+            }
+
             record = new CentralDocumentRecord
             {
                 TenantId = tenantId,
@@ -1718,7 +1771,7 @@ public sealed class DocumentManagementController : ControllerBase
                 VersionStatus = "Draft",
                 AnnotationStatus = "Not required",
                 CommentStatus = "No comments",
-                AccessProfile = string.IsNullOrWhiteSpace(request.AccessProfile) ? "Module restricted" : request.AccessProfile.Trim(),
+                AccessProfile = newAccessProfile,
                 RetentionStatus = "Current",
                 LifecycleStatus = "Draft",
                 Notes = TrimToNull(request.Notes),
@@ -1730,11 +1783,23 @@ public sealed class DocumentManagementController : ControllerBase
         }
         else
         {
+            if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+            {
+                return Forbid();
+            }
+
+            if (!string.IsNullOrWhiteSpace(requestedAccessProfile)
+                && !string.Equals(requestedAccessProfile, record.AccessProfile, StringComparison.OrdinalIgnoreCase)
+                && !await CanAssignAccessProfileAsync(tenantId, requestedAccessProfile, cancellationToken))
+            {
+                return Forbid();
+            }
+
             record.Title = request.Title.Trim();
             record.SourceLabel = string.IsNullOrWhiteSpace(request.SourceLabel) ? record.SourceLabel : request.SourceLabel.Trim();
             record.SourceEntityType = TrimToNull(request.SourceEntityType) ?? record.SourceEntityType;
             record.MetadataTemplateCode = TrimToNull(request.MetadataTemplateCode) ?? record.MetadataTemplateCode;
-            record.AccessProfile = TrimToNull(request.AccessProfile) ?? record.AccessProfile;
+            record.AccessProfile = requestedAccessProfile ?? record.AccessProfile;
             record.Notes = TrimToNull(request.Notes) ?? record.Notes;
             record.UpdatedAt = now;
             record.UpdatedBy = _currentUserService.UserName ?? "System";
@@ -1989,6 +2054,11 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpPost("metadata-templates")]
     public async Task<IActionResult> CreateMetadataTemplate([FromBody] UpsertMetadataTemplateRequest request, CancellationToken cancellationToken)
     {
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
         if (string.IsNullOrWhiteSpace(request.Module) || string.IsNullOrWhiteSpace(request.DocumentType) || string.IsNullOrWhiteSpace(request.TemplateCode))
         {
             return BadRequest(new { success = false, message = "Module, document type, and template code are required." });
@@ -2066,6 +2136,11 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpPost("retention-policies")]
     public async Task<IActionResult> CreateRetentionPolicy([FromBody] UpsertRetentionPolicyRequest request, CancellationToken cancellationToken)
     {
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
         if (string.IsNullOrWhiteSpace(request.PolicyCode) || string.IsNullOrWhiteSpace(request.Name))
         {
             return BadRequest(new { success = false, message = "Policy code and name are required." });
@@ -3421,6 +3496,52 @@ public sealed class DocumentManagementController : ControllerBase
 
     private bool HasAnyRole(params string[] roles)
         => roles.Any(role => !string.IsNullOrWhiteSpace(role) && _currentUserService.IsInRole(role));
+
+    private bool CanUseSourceModuleForDms(string? sourceModule)
+    {
+        if (IsDmsAccessAdministrator())
+        {
+            return true;
+        }
+
+        var source = sourceModule ?? string.Empty;
+        if (source.Contains("Estate", StringComparison.OrdinalIgnoreCase)
+            || source.Contains("Facilities", StringComparison.OrdinalIgnoreCase)
+            || source.Contains("Facility", StringComparison.OrdinalIgnoreCase)
+            || source.Contains("Property", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasAnyRole(
+                "Estate Officer",
+                "Estate Manager",
+                "Land Registry Officer",
+                "Survey Officer",
+                "Facilities Officer",
+                "Facilities Manager",
+                "Property Manager");
+        }
+
+        if (source.Contains("Finance", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasAnyRole("Finance Officer", "Finance Manager", "Accounts Payable", "Accounts Receivable");
+        }
+
+        if (source.Contains("Legal", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasAnyRole("Legal Officer", "Legal Manager", "Head of Legal");
+        }
+
+        if (source.Contains("Planning", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasAnyRole("Planning Officer", "Planning Manager");
+        }
+
+        if (source.Contains("Project", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasAnyRole("Project Manager", "Project Officer", "PMO");
+        }
+
+        return false;
+    }
 
     private bool IsDmsAccessAdministrator()
         => _currentUserService.IsInRole("SuperAdmin")

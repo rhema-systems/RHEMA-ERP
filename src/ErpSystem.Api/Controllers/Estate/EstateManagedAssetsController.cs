@@ -63,6 +63,11 @@ public sealed class EstateManagedAssetsController : ControllerBase
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer")]
     public async Task<IActionResult> CreateManualLand([FromBody] CreateManualExistingLandDto request)
     {
+        if (request.IsReadyForProjectManagement && !CanMarkReadyForProjectManagement())
+        {
+            return Forbid();
+        }
+
         try
         {
             var asset = await _managedAssetService.CreateManualExistingLandAsync(request);
@@ -75,9 +80,14 @@ public sealed class EstateManagedAssetsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/ready-for-project-management")]
-    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Project Manager")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Land Registry Officer")]
     public async Task<IActionResult> MarkReadyForProjectManagement(Guid id)
     {
+        if (!CanMarkReadyForProjectManagement())
+        {
+            return Forbid();
+        }
+
         try
         {
             var asset = await _managedAssetService.MarkReadyForProjectManagementAsync(id);
@@ -93,6 +103,11 @@ public sealed class EstateManagedAssetsController : ControllerBase
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
     public async Task<IActionResult> UpdateLandDemarcation(Guid id, [FromBody] UpdateEstateManagedLandDemarcationDto request)
     {
+        if (request.IsReadyForProjectManagement && !CanMarkReadyForProjectManagement())
+        {
+            return Forbid();
+        }
+
         try
         {
             var asset = await _managedAssetService.UpdateLandDemarcationAsync(id, request);
@@ -336,11 +351,19 @@ public sealed class EstateManagedAssetsController : ControllerBase
     private Guid? GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;
 
+    private bool CanMarkReadyForProjectManagement()
+        => _currentUserService.IsInRole("admin")
+            || _currentUserService.IsInRole("Admin")
+            || _currentUserService.IsInRole("SystemAdmin")
+            || _currentUserService.IsInRole("SuperAdmin")
+            || _currentUserService.IsInRole("TenantAdmin")
+            || _currentUserService.IsInRole("Estate Manager")
+            || _currentUserService.IsInRole("Land Registry Officer");
+
     private async Task<string> NextDocumentReferenceAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var count = await _db.CentralDocumentRecords
-            .CountAsync(item => item.TenantId == tenantId, cancellationToken);
-        return $"DMS-{DateTime.UtcNow:yyyy}-{count + 1:000000}";
+        await Task.CompletedTask;
+        return $"DMS-{DateTime.UtcNow:yyyy}-{Guid.NewGuid():N}"[..21].ToUpperInvariant();
     }
 
     private async Task<CentralDocumentMetadataTemplate?> ResolveMetadataTemplateAsync(

@@ -166,9 +166,8 @@ public sealed class FacilitiesBillingDocumentsController : ControllerBase
 
     private async Task<string> NextDocumentReferenceAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var count = await _db.CentralDocumentRecords
-            .CountAsync(item => item.TenantId == tenantId, cancellationToken);
-        return $"DMS-{DateTime.UtcNow:yyyy}-{count + 1:000000}";
+        await Task.CompletedTask;
+        return $"DMS-{DateTime.UtcNow:yyyy}-{Guid.NewGuid():N}"[..21].ToUpperInvariant();
     }
 
     private async Task<CentralDocumentMetadataTemplate?> ResolveMetadataTemplateAsync(
