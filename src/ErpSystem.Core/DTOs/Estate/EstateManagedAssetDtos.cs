@@ -143,6 +143,25 @@ public class CreateManualExistingLandDto
     public List<ExistingLandOwnerDto> OwnershipHistory { get; set; } = [];
 }
 
+public class UpdateEstateManagedLandDemarcationDto
+{
+    public string CadastreDescription { get; set; } = string.Empty;
+    public string Region { get; set; } = string.Empty;
+    public string District { get; set; } = string.Empty;
+    public string Town { get; set; } = string.Empty;
+    public decimal AreaValue { get; set; }
+    public string AreaUnit { get; set; } = string.Empty;
+    public decimal? AreaSquareMeters { get; set; }
+    public string SurveyorName { get; set; } = string.Empty;
+    public DateTime? SurveyDate { get; set; }
+    public string SurveyPlanNumber { get; set; } = string.Empty;
+    public string MapSheetNumber { get; set; } = string.Empty;
+    public int BeaconCount { get; set; }
+    public string BoundaryCoordinates { get; set; } = string.Empty;
+    public bool BoundaryVerified { get; set; }
+    public bool IsReadyForProjectManagement { get; set; }
+}
+
 public class EstateManagedAssetQuery
 {
     public EstateManagedAssetType? AssetType { get; set; }

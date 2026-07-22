@@ -1,6 +1,8 @@
 using System.Text.Json;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Services.Projects;
@@ -244,6 +246,7 @@ public partial class ProjectService
 
     private async Task<ProjectDevelopmentProfile> UpsertDevelopmentProfileEntityAsync(Project project, UpsertProjectDevelopmentProfileDto dto)
     {
+        dto.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.LandReference);
         var repository = _unitOfWork.Repository<ProjectDevelopmentProfile>();
         var profile = await repository.FirstOrDefaultAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId);
         if (profile == null)
@@ -271,6 +274,39 @@ public partial class ProjectService
         project.DevelopmentProfile = profile;
         return profile;
     }
+
+    private async Task<string?> ResolveReadyProjectLandReferenceAsync(string? landReference)
+    {
+        var normalizedReference = TrimOrNull(landReference);
+        if (normalizedReference == null)
+        {
+            return null;
+        }
+
+        var readyLandAssets = await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(asset =>
+            asset.TenantId == _currentUserProvider.TenantId
+            && !asset.IsDeleted
+            && asset.AssetType == EstateManagedAssetType.Land
+            && asset.Status == EstateManagedAssetStatus.LandBank
+            && asset.IsReadyForProjectManagement);
+
+        var matchedAsset = readyLandAssets.FirstOrDefault(asset =>
+            MatchesLandReference(asset.AssetCode, normalizedReference)
+            || MatchesLandReference(asset.ProjectCode, normalizedReference)
+            || MatchesLandReference(asset.Name, normalizedReference)
+            || MatchesLandReference(asset.Id.ToString(), normalizedReference));
+
+        if (matchedAsset == null)
+        {
+            throw new InvalidOperationException("Project land reference must be a finished demarcated land asset marked ready for project management.");
+        }
+
+        return TrimOrNull(matchedAsset.ProjectCode) ?? matchedAsset.AssetCode.Trim();
+    }
+
+    private static bool MatchesLandReference(string? candidate, string reference)
+        => !string.IsNullOrWhiteSpace(candidate)
+            && string.Equals(candidate.Trim(), reference, StringComparison.OrdinalIgnoreCase);
 
     private async Task<bool> SeedProjectPhasesFromTemplateAsync(Project project, JsonElement rootElement)
     {

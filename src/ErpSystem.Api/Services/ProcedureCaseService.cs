@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Procedures;
@@ -25,6 +26,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private readonly IPropertyManagementProcedureCatalogService _propertyManagementCatalog;
     private readonly IPlanningProcedureCatalogService _planningCatalog;
     private readonly IWorkflowEngine _workflowEngine;
+    private readonly INotificationService _notificationService;
 
     public ProcedureCaseService(
         ApplicationDbContext db,
@@ -34,7 +36,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         IFacilitiesProcedureCatalogService facilitiesCatalog,
         IPropertyManagementProcedureCatalogService propertyManagementCatalog,
         IPlanningProcedureCatalogService planningCatalog,
-        IWorkflowEngine workflowEngine)
+        IWorkflowEngine workflowEngine,
+        INotificationService notificationService)
     {
         _db = db;
         _currentUser = currentUser;
@@ -44,6 +47,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _propertyManagementCatalog = propertyManagementCatalog;
         _planningCatalog = planningCatalog;
         _workflowEngine = workflowEngine;
+        _notificationService = notificationService;
     }
 
     public async Task<IReadOnlyList<ProcedureCaseSummaryDto>> GetCasesAsync(string? module, string? entityType, bool mineOnly)
@@ -374,6 +378,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var now = DateTime.UtcNow;
 
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Completed stage", procedureCase.CurrentStageName, request.Notes));
+        var completedStageName = procedureCase.CurrentStageName;
 
         if (procedureCase.WorkflowInstanceId.HasValue)
         {
@@ -394,6 +399,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             }
 
             await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, procedureCase.WorkflowInstanceId.Value, userId, request.Notes);
+            var syncedCase = (await LoadCaseAsync(id, asTracking: false))!;
+            await NotifyEstateProcedureHandoffsAsync(syncedCase, completedStageName, syncedCase.CurrentStageName, userId, tenantId);
             return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
         }
 
@@ -433,8 +440,168 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
         await _db.SaveChangesAsync();
 
+        var updatedCase = (await LoadCaseAsync(id, asTracking: false))!;
+        await NotifyEstateProcedureHandoffsAsync(updatedCase, completedStageName, nextStage?.Name, userId, tenantId);
+
         return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
     }
+
+    private async Task NotifyEstateProcedureHandoffsAsync(
+        ProcedureCase procedureCase,
+        string completedStageName,
+        string? nextStageName,
+        Guid userId,
+        Guid tenantId)
+    {
+        if (!string.Equals(procedureCase.Module, "Estate", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var handoffs = BuildEstateHandoffs(procedureCase, completedStageName, nextStageName);
+        if (handoffs.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var handoff in handoffs)
+        {
+            var sourceReference = FirstNonBlank(procedureCase.ReferenceNumber, procedureCase.Title, procedureCase.Id.ToString()) ?? procedureCase.Id.ToString();
+            var sourceLabel = $"Source: Estate -> {handoff.TargetModule}";
+            var actionUrl = $"/estate/{Uri.EscapeDataString(procedureCase.EntityType)}?caseId={procedureCase.Id}";
+            var message = $"{procedureCase.Title} reached '{handoff.TriggerStage}'. {handoff.Reason}";
+
+            await RoleNotificationDispatcher.NotifyRolesAsync(
+                _db,
+                _notificationService,
+                tenantId,
+                userId,
+                handoff.Roles,
+                $"Estate handoff to {handoff.TargetModule}",
+                message,
+                "estate.procedure.handoff",
+                "ProcedureCase",
+                procedureCase.Id,
+                actionUrl,
+                new Dictionary<string, object>
+                {
+                    ["sourceLabel"] = sourceLabel,
+                    ["sourceModule"] = "Estate",
+                    ["sourceEntityType"] = procedureCase.EntityType,
+                    ["sourceRecordReference"] = sourceReference,
+                    ["handoffTargetModule"] = handoff.TargetModule,
+                    ["handoffReason"] = handoff.Reason,
+                    ["completedStage"] = completedStageName,
+                    ["nextStage"] = nextStageName ?? string.Empty,
+                    ["applicantName"] = procedureCase.ApplicantName ?? string.Empty,
+                    ["propertyNumber"] = FieldValue(procedureCase, "propertyNumber") ?? string.Empty,
+                    ["financeReference"] = FieldValue(procedureCase, "financeReference") ?? string.Empty,
+                    ["legalReference"] = FieldValue(procedureCase, "legalReference") ?? string.Empty,
+                    ["planningReference"] = FieldValue(procedureCase, "planningReference") ?? string.Empty,
+                    ["dmsFolderReference"] = FieldValue(procedureCase, "dmsFolderReference") ?? string.Empty
+                },
+                CancellationToken.None);
+
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                userId,
+                procedureCase.Id,
+                "Handoff notified",
+                handoff.TriggerStage,
+                $"{sourceLabel}: {handoff.Reason}"));
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
+    private static IReadOnlyList<EstateProcedureHandoff> BuildEstateHandoffs(
+        ProcedureCase procedureCase,
+        string completedStageName,
+        string? nextStageName)
+    {
+        var stageText = $"{completedStageName} {nextStageName}".ToLowerInvariant();
+        var handoffs = new List<EstateProcedureHandoff>();
+
+        // Handoffs are notifications plus audit entries only; target teams retain ownership of their module records.
+        if (ContainsAny(stageText, "arrears", "payment", "invoice", "fee", "fees", "rent", "premium", "lmf", "ground rent", "revenue", "receipt", "debtor", "rate revision", "outstanding", "payment book"))
+        {
+            handoffs.Add(new(
+                "Finance / Revenue",
+                ["Finance Officer", "Finance Analyst", "Estate Manager"],
+                "Finance must confirm receipting, arrears, invoice, statement, premium, rent, or fee outcome.",
+                FirstNonBlank(nextStageName, completedStageName) ?? completedStageName));
+        }
+
+        if (ContainsAny(stageText, "legal", "deed", "assignment", "mortgage", "execution", "registered", "variation", "route legal"))
+        {
+            handoffs.Add(new(
+                "Legal",
+                ["Legal Officer", "Legal Manager", "Estate Manager"],
+                "Legal must review, draft, execute, register, detach, or return the Estate instrument reference.",
+                FirstNonBlank(nextStageName, completedStageName) ?? completedStageName));
+        }
+
+        if (ContainsAny(stageText, "planning", "cadastral", "site", "layout", "inspection", "development", "change-of-use", "site plan", "plot number"))
+        {
+            handoffs.Add(new(
+                "Planning / Development",
+                ["Planning Officer", "Assigned Planning Officer", "Survey Officer", "Development Officer", "Estate Manager"],
+                "Planning, Development, or Survey must provide site, layout, cadastral, permit, inspection, or planning confirmation.",
+                FirstNonBlank(nextStageName, completedStageName) ?? completedStageName));
+        }
+
+        if (ContainsAny(stageText, "land bank", "project management", "project handoff", "ready for project", "demarcation"))
+        {
+            handoffs.Add(new(
+                "Project Management",
+                ["Project Manager", "Estate Manager"],
+                "Project Management must review the Estate land bank or project-readiness reference.",
+                FirstNonBlank(nextStageName, completedStageName) ?? completedStageName));
+        }
+
+        if (procedureCase.EntityType is "EstateServicedPlotAllocation" or "EstateHousingHomeOwnership"
+            && ContainsAny(stageText, "offer", "right of entry", "rent card", "update records", "close", "dispatch"))
+        {
+            handoffs.Add(new(
+                "Estate / Property Management",
+                ["Property Manager", "Property Officer", "Property Records Officer", "Estate Manager"],
+                "Property Management must receive the allocation, occupancy, HOS, rent-card, or records update reference.",
+                FirstNonBlank(nextStageName, completedStageName) ?? completedStageName));
+        }
+
+        if (ContainsAny(stageText, "facilities", "maintenance", "repair", "service charge", "common area"))
+        {
+            handoffs.Add(new(
+                "Estate / Facilities and Maintenance",
+                ["Facilities Manager", "Facilities Officer", "Maintenance Manager", "Maintenance Officer", "Estate Manager"],
+                "Facilities or Maintenance must pick up the Estate service, maintenance, service charge, or operational reference.",
+                FirstNonBlank(nextStageName, completedStageName) ?? completedStageName));
+        }
+
+        if (ContainsAny(stageText, "document", "dms", "dispatch", "offer", "right of entry", "proposal", "certified", "search report", "notice", "letter", "rent card", "report", "records", "ledger", "register"))
+        {
+            handoffs.Add(new(
+                "Central DMS / Records",
+                ["Records Officer", "Land Registry Officer", "Document Control Officer", "Estate Officer", "Estate Manager"],
+                "Central DMS or Estate Records must index, version, dispatch, annotate, or retain the generated Estate document reference.",
+                FirstNonBlank(nextStageName, completedStageName) ?? completedStageName));
+        }
+
+        return handoffs
+            .GroupBy(item => item.TargetModule, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static bool ContainsAny(string value, params string[] tokens)
+        => tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
+
+    private static string? FieldValue(ProcedureCase procedureCase, string key) =>
+        procedureCase.Fields.FirstOrDefault(field =>
+            string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase))?.Value;
+
+    private static string? FirstNonBlank(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
     private async Task<ProcedureCase?> LoadCaseAsync(Guid id, bool asTracking)
     {
@@ -609,37 +776,446 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .ToList();
     }
 
-    private static IReadOnlyList<FieldSeed> BuildEstateFieldSeeds(EstateProcedureCatalogItem procedure) =>
-    [
-        new("referenceNumber", "Reference number", "text", null),
-        new("procedureType", "Procedure", "text", [procedure.Title]),
-        new("applicantName", "Applicant / lessee / client name", "text", null),
-        new("propertyNumber", "Property / plot / house number", "text", null),
-        new("fileReference", "Estate file reference", "text", null),
-        new("schedule", "Estate schedule", "select", ["Registry", "Records", "Serviced Plots", "Lands / Partially Serviced", "Housing", "Traditional Lands", "Regularisation", "Facilities"]),
-        new("location", "Location / community", "text", null),
-        new("sourceDepartment", "Source department", "text", null),
-        new("receivedDate", "Received date", "date", null),
-        new("assignedOfficer", "Assigned Estate officer", "text", null),
-        new("arrearsStatus", "Arrears status", "select", ["Not checked", "No arrears", "Arrears exist", "Waiver / exception approved"]),
-        new("feeReference", "Fee / invoice / receipt reference", "text", null),
-        new("legalReference", "Legal reference", "text", null),
-        new("financeReference", "Finance reference", "text", null),
-        new("planningReference", "Planning / site plan reference", "text", null),
-        new("dmsFolderReference", "DMS folder reference", "text", null)
-    ];
+    private static IReadOnlyList<FieldSeed> BuildEstateFieldSeeds(EstateProcedureCatalogItem procedure)
+    {
+        var fields = new List<FieldSeed>
+        {
+            new("referenceNumber", "Reference number", "text", null),
+            new("procedureType", "Procedure", "text", [procedure.Title]),
+            new("applicantName", "Applicant / lessee / client name", "text", null),
+            new("propertyNumber", "Property / plot / house number", "text", null),
+            new("fileReference", "Estate file reference", "text", null),
+            new("schedule", "Estate schedule", "select", ["Registry", "Records", "Serviced Plots", "Lands / Partially Serviced", "Housing", "Traditional Lands", "Regularisation", "Facilities"]),
+            new("location", "Location / community", "text", null),
+            new("sourceDepartment", "Source department", "text", null),
+            new("sourceLabel", "Source label", "text", null),
+            new("sourceSystem", "Source system", "text", null),
+            new("sourceWorkspace", "Source workspace", "text", null),
+            new("receivedDate", "Received date", "date", null),
+            new("assignedOfficer", "Assigned Estate officer", "text", null),
+            new("arrearsStatus", "Arrears status", "select", ["Not checked", "No arrears", "Arrears exist", "Waiver / exception approved"]),
+            new("feeReference", "Fee / invoice / receipt reference", "text", null),
+            new("legalReference", "Legal reference", "text", null),
+            new("financeReference", "Finance reference", "text", null),
+            new("planningReference", "Planning / site plan reference", "text", null),
+            new("dmsFolderReference", "DMS folder reference", "text", null)
+        };
 
-    private static IReadOnlyList<DocumentSeed> BuildEstateDocumentSeeds(EstateProcedureCatalogItem procedure) =>
-    [
-        new("Application letter / request form", "Applicant / Registry", true),
-        new("Property file extract", "Estate Registry / Records", true),
-        new("Ownership, tenancy, lease, or allocation evidence", "Applicant / Estate Records", true),
-        new("Revenue / arrears / payment confirmation", "Finance / Revenue", false),
-        new("Site plan, cadastral plan, layout, or inspection evidence", "Planning / Development / Estate", false),
-        new("Approval, recommendation, or routing note", "HOE / EM / EO", true),
-        new($"{procedure.Title} output", "Estate Department", true),
-        new("Central DMS reference", "Document Mngt", false)
-    ];
+        // Estate manual controls stay in Estate; linked teams receive source/reference fields without changing their modules.
+        if (string.Equals(procedure.EntityType, "EstateRegistrySecretariat", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("intakeType", "Intake type", "select", ["Incoming file", "Outgoing letter", "Form purchase", "Typing request", "Client pickup", "Internal dispatch"]),
+                new("registryBook", "Registry book", "select", ["General notebook", "Regularization notebook", "Kpone notebook", "Letters book", "Forms purchase book", "Movement register"]),
+                new("formType", "Form type", "select", ["Estate Transfer Form", "House Ownership Scheme Form", "Rental Unit Form", "Other"]),
+                new("receiptNumber", "Receipt number", "text", null),
+                new("fileComingFrom", "File coming from", "text", null),
+                new("referredOfficer", "Referred officer", "text", null),
+                new("typingOutputType", "Typing / letter output type", "select", ["Notification letter", "Offer Letter", "Right of Entry", "Demand Letter", "Rate Revision Letter", "Lease Request", "Invoice", "Other"]),
+                new("dispatchDate", "Dispatch date", "date", null),
+                new("clientUpdate", "Client update", "textarea", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateRecordsManagement", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("recordActionType", "Record action type", "select", ["Estate register update", "HOS ledger update", "Rent register update", "Transfer amendment", "Agency notification", "Building permit ownership verification", "Invitation / mediation letter"]),
+                new("registerReference", "Register / ledger reference", "text", null),
+                new("oldLesseeName", "Previous lessee / tenant name", "text", null),
+                new("newLesseeName", "New lessee / tenant name", "text", null),
+                new("addressOnRecord", "Address on record", "text", null),
+                new("buildingPermitReference", "Building permit reference", "text", null),
+                new("ownershipVerificationStatus", "Ownership verification status", "select", ["Not checked", "Matches records", "Mismatch found", "Returned for correction"]),
+                new("indebtednessStatus", "Indebtedness status", "select", ["Not checked", "No indebtedness", "Indebted", "Revenue confirmation pending"]),
+                new("agencyNotifications", "Agency notifications", "textarea", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateInspection", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("inspectionType", "Inspection type", "select", ["Site report", "Substantial development check", "Tenancy compliance", "Boundary / neighbourhood check", "Encroachment / non-compliance", "Handover / return"]),
+                new("inspectionDate", "Inspection date", "date", null),
+                new("inspectionOfficer", "Inspection officer", "text", null),
+                new("neighbourhoodDetails", "Neighbourhood details", "textarea", null),
+                new("developmentStatus", "Development status", "select", ["Not checked", "Vacant", "Undeveloped", "Partially developed", "Substantially developed", "Completed", "Occupied", "Encroached"]),
+                new("complianceObservation", "Compliance observation", "textarea", null),
+                new("photoEvidenceReference", "Photo evidence reference", "text", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateSearchApplication", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("searchPurpose", "Search purpose", "text", null),
+                new("searchPeriod", "Search period / scope", "text", null),
+                new("searchFeeReceipt", "Search fee receipt", "text", null),
+                new("searchReportReference", "Search report reference", "text", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateCertifiedTrueCopy", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("documentToCertify", "Document to certify", "select", ["Offer Letter", "Right of Entry", "Lease", "Rent Card", "Allocation Letter", "Other"]),
+                new("originalDocumentReference", "Original document reference", "text", null),
+                new("certificationFeeReceipt", "Certification fee receipt", "text", null),
+                new("certificationDate", "Certification date", "date", null)
+            ]);
+        }
+
+        // Estate manual sections 5.3 and 7.3 require Estate to calculate LMF and Ground Rent before Finance receipting.
+        if (HasLandFeeDetermination(procedure.EntityType))
+        {
+            fields.AddRange([
+                new("landUse", "Land use", "select", ["Residential", "Commercial", "Institutional", "Industrial", "Agro Industrial", "Fuel Station", "Mixed Use", "Other"]),
+                new("plotSizeAcres", "Plot size (acres)", "number", null),
+                new("plotSizeHectares", "Plot size (hectares)", "number", null),
+                new("lmfRatePerAcre", "LMF rate per acre", "currency", null),
+                new("landManagementFeePayable", "Land Management Fee payable", "currency", null),
+                new("groundRentRatePerAcre", "Ground Rent rate per acre", "currency", null),
+                new("groundRentComputed", "Ground Rent computed", "currency", null),
+                new("groundRentPayable", "Ground Rent payable", "currency", null),
+                new("paymentDeadline", "Payment deadline", "date", null),
+                new("offerExpiryDate", "Offer expiry date", "date", null),
+                new("leaseTermYears", "Lease term (years)", "number", null),
+                new("dateOfTenancy", "Date of tenancy", "date", null),
+                new("acceptanceDate", "Acceptance date", "date", null),
+                new("proposalLetterReference", "Proposal letter reference", "text", null),
+                new("offerLetterReference", "Offer letter reference", "text", null),
+                new("rightOfEntryReference", "Right of Entry reference", "text", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateTransfer", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(procedure.EntityType, "EstateAssignment", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(procedure.EntityType, "EstateJointOwnership", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("transferorName", "Transferor / assignor / existing lessee", "text", null),
+                new("transfereeName", "Transferee / assignee / incoming party", "text", null),
+                new("considerationAmount", "Consideration amount", "currency", null),
+                new("transferFeePayable", "Transfer / assignment fee payable", "currency", null),
+                new("executionStatus", "Execution status", "select", ["Not started", "Prepared", "Signed", "Registered", "Records updated"])
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateMortgageConsent", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("mortgageConsentType", "Mortgage consent type", "select", ["Consent to Mortgage", "Mortgage in Principle"]),
+                new("mortgageeName", "Mortgagee / financial institution", "text", null),
+                new("draftDeedReference", "Draft deed / mortgage document reference", "text", null),
+                new("developmentStatus", "Development status", "select", ["Not checked", "Undeveloped", "Partially developed", "Substantially developed", "Completed"]),
+                new("consentDecision", "Consent decision", "select", ["Pending", "Approved", "Returned", "Rejected"])
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateLeasePreparation", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("developmentStatus", "Development status", "select", ["Not checked", "Undeveloped", "Partially developed", "Substantially developed", "Completed"]),
+                new("buildingPermitReference", "Building permit reference", "text", null),
+                new("leasePreparationFee", "Lease preparation fee", "currency", null),
+                new("cadastralInvoiceReference", "Cadastral invoice reference", "text", null),
+                new("leaseRequestFormReference", "Lease request form reference", "text", null),
+                new("registeredLeaseReference", "Registered lease reference", "text", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateLeaseRenewal", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("existingLeaseExpiryDate", "Existing lease expiry date", "date", null),
+                new("yearsToExpiry", "Years to expiry", "number", null),
+                new("developmentStatus", "Development proposal / status", "text", null),
+                new("renewalPremium", "Renewal premium", "currency", null),
+                new("improvedGroundRent", "Improved Ground Rent", "currency", null),
+                new("committeeDecision", "LRTC decision", "select", ["Pending", "Approved", "Returned", "Rejected"])
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateAdditionalLand", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("adjoiningPlotNumber", "Adjoining plot number", "text", null),
+                new("additionalLandSizeAcres", "Additional land size (acres)", "number", null),
+                new("availabilityStatus", "Availability status", "select", ["Not checked", "Available", "Unavailable", "Disputed", "Requires layout revision"]),
+                new("recommendation", "Estate recommendation", "textarea", null),
+                new("approvalDecision", "Approval decision", "select", ["Pending", "Approved", "Returned", "Rejected"])
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateLayoutRevision", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("existingLayoutReference", "Existing layout reference", "text", null),
+                new("proposedLayoutReference", "Proposed layout reference", "text", null),
+                new("revisionReason", "Revision reason", "textarea", null),
+                new("planningComment", "Planning comment", "textarea", null),
+                new("mdApprovalReference", "MD approval reference", "text", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateChangeOfUse", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("existingUse", "Existing use", "select", ["Residential", "Commercial", "Institutional", "Industrial", "Agro Industrial", "Fuel Station", "Mixed Use", "Other"]),
+                new("newUse", "New use", "select", ["Residential", "Commercial", "Institutional", "Industrial", "Agro Industrial", "Fuel Station", "Mixed Use", "Other"]),
+                new("plotSizeAcres", "Plot size (acres)", "number", null),
+                new("existingLmfRatePerAcre", "Existing-use LMF rate per acre", "currency", null),
+                new("newLmfRatePerAcre", "New-use LMF rate per acre", "currency", null),
+                new("changeOfUseFeePayable", "Change-of-use fee payable", "currency", null),
+                new("groundRentLossPresentValue", "Present value of Ground Rent loss", "currency", null),
+                new("administrativeFeePayable", "Administrative fee payable", "currency", null),
+                new("newGroundRentRatePerAcre", "New Ground Rent rate per acre", "currency", null),
+                new("newGroundRentPayable", "New Ground Rent payable", "currency", null),
+                new("changeOfUseDecision", "Change-of-use decision", "select", ["Pending", "Approved", "Returned", "Rejected"])
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateReminderRateRevision", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("noticeType", "Notice type", "select", ["Proposal reminder", "Rate revision notice", "Ground rent arrears demand"]),
+                new("originalProposalReference", "Original proposal reference", "text", null),
+                new("outstandingAmount", "Outstanding amount", "currency", null),
+                new("revisedAmountPayable", "Revised amount payable", "currency", null),
+                new("noticeDate", "Notice date", "date", null),
+                new("dispatchReference", "Dispatch reference", "text", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateRecordAmendment", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("oldAddress", "Previous address", "text", null),
+                new("newAddress", "New address", "text", null),
+                new("declarationReference", "Statutory declaration reference", "text", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateTenancyRegularisation", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("regularisationApproach", "Regularisation approach", "select", ["Direct approach", "Indirect approach"]),
+                new("planLayoutStatus", "Planning layout status", "select", ["Not checked", "Satisfies approved layout", "Requires planning review", "Rejected"]),
+                new("invitationLetterReference", "Invitation letter reference", "text", null),
+                new("interviewDate", "Interview date", "date", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateServicedPlotAllocation", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("applicationFormReference", "Application form reference", "text", null),
+                new("allocationReference", "Allocation reference", "text", null),
+                new("depositReceiptNumber", "Deposit receipt number", "text", null),
+                new("paymentConfirmationReference", "Payment confirmation reference", "text", null),
+                new("allocationType", "Allocation type", "select", ["Serviced plot", "HOS unit", "Substitution", "Reallocation"]),
+                new("allocationDecision", "Allocation decision", "select", ["Pending", "Approved", "Returned", "Rejected"]),
+                new("paymentBookReference", "Payment book reference", "text", null),
+                new("offerLetterReference", "Offer Letter reference", "text", null),
+                new("acceptanceDate", "Acceptance date", "date", null),
+                new("rightOfEntryIssuedDate", "Right of Entry issued date", "date", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateHousingHomeOwnership", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("housingRequestType", "Housing request type", "select", ["Recognition of tenancy", "Rental transfer", "Conversion to HOS", "Purchase completion", "Rental offer", "Lease request"]),
+                new("houseType", "House type", "text", null),
+                new("unitNumber", "Unit / house number", "text", null),
+                new("declarationReference", "Statutory declaration reference", "text", null),
+                new("rentCardNumber", "Rent card number", "text", null),
+                new("rentRegisterReference", "Rent register reference", "text", null),
+                new("sellingPrice", "Selling price", "currency", null),
+                new("paymentCompletionStatus", "Payment completion status", "select", ["Not checked", "Deposit paid", "Arrears cleared", "Full selling price paid", "Payment incomplete"]),
+                new("dateOfTenancy", "Date of tenancy", "date", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateTraditionalLands", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("traditionalCouncil", "Traditional Council / Stool", "select", ["Tema Manhean", "Nungua", "Kpone", "Other"]),
+                new("allocationLetterReference", "Traditional allocation letter reference", "text", null),
+                new("sitePlanReference", "Traditional site plan reference", "text", null),
+                new("priorAllocationStatus", "Prior allocation status", "select", ["Not checked", "No prior allocation", "Prior allocation found", "Disputed", "Undefined signatories"]),
+                new("rejectionReason", "Rejection reason", "textarea", null)
+            ]);
+        }
+
+        if (string.Equals(procedure.EntityType, "EstateReportingControls", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                new("reportType", "Report type", "select", ["Quarterly productivity", "Rent roll", "Debtor list", "Allocation report", "Transfer and assignment report", "Lease and mortgage report", "Control exception register", "Board summary"]),
+                new("reportingPeriod", "Reporting period", "text", null),
+                new("applicationsReceived", "Applications received", "number", null),
+                new("applicationsProcessed", "Applications processed", "number", null),
+                new("expectedRevenue", "Expected revenue", "currency", null),
+                new("paymentsReceived", "Payments received", "currency", null),
+                new("debtorCount", "Debtor count", "number", null),
+                new("exceptionSummary", "Exception summary", "textarea", null),
+                new("reportRecipient", "Report recipient", "text", null)
+            ]);
+        }
+
+        return fields;
+    }
+
+    private static IReadOnlyList<DocumentSeed> BuildEstateDocumentSeeds(EstateProcedureCatalogItem procedure)
+    {
+        var documents = new List<DocumentSeed>
+        {
+            new("Application letter / request form", "Applicant / Registry", true),
+            new("Property file extract", "Estate Registry / Records", true),
+            new("Ownership, tenancy, lease, or allocation evidence", "Applicant / Estate Records", true),
+            new("Revenue / arrears / payment confirmation", "Finance / Revenue", false),
+            new("Site plan, cadastral plan, layout, or inspection evidence", "Planning / Development / Estate", false),
+            new("Approval, recommendation, or routing note", "HOE / EM / EO", true),
+            new($"{procedure.Title} output", "Estate Department", true),
+            new("Central DMS reference", "Document Mngt", false)
+        };
+
+        // These document seeds mirror Estate-owned procedure evidence; linked teams keep ownership of their source modules.
+        documents.AddRange(procedure.EntityType switch
+        {
+            "EstateRegistrySecretariat" => [
+                new("Incoming notebook / registry entry", "Estate Registry", true),
+                new("Forms purchase receipt", "Estate Registry / Revenue", false),
+                new("Letters book or dispatch entry", "Estate Registry", true),
+                new("File movement trace", "Estate Registry", true),
+                new("Typed letter or notice", "Estate Registry", false)
+            ],
+            "EstateRecordsManagement" => [
+                new("Estate register or ledger extract", "Estate Records", true),
+                new("Revenue and Development consistency check", "Estate Records / Revenue / Development", true),
+                new("Building permit ownership verification form", "Development / Estate Records", false),
+                new("Agency notification letter", "Estate Records", false),
+                new("Records amendment evidence", "Estate Records", true)
+            ],
+            "EstateInspection" => [
+                new("Inspection request", "Estate / Linked Department", true),
+                new("Site inspection report", "Estate Inspection", true),
+                new("Photo evidence", "Estate Inspection", false),
+                new("Compliance or development observation", "Estate Inspection", true)
+            ],
+            "EstateSearchApplication" => [
+                new("Search application form", "Applicant / Registry", true),
+                new("Search fee receipt", "Revenue", false),
+                new("Search report", "Estate Records", true)
+            ],
+            "EstateCertifiedTrueCopy" => [
+                new("Certified copy application", "Applicant / Registry", true),
+                new("Certification fee receipt", "Revenue", false),
+                new("Certified True Copy draft", "Estate Records", true),
+                new("Certification approval", "HOE", true)
+            ],
+            "EstateLeasePreparation" => [
+                new("Building permit confirmation", "Building Inspectorate / Development", true),
+                new("Substantial development site report", "Estate / Development", true),
+                new("Lease request form to Legal", "Estate / Legal", true),
+                new("Registered lease copy for detachment", "Legal / Lands Commission", false)
+            ],
+            "EstateMortgageConsent" => [
+                new("Consent to mortgage / mortgage in principle application", "Applicant", true),
+                new("Draft deed or mortgage document", "Applicant / Legal", true),
+                new("Development and arrears verification", "Estate / Finance Revenue", true),
+                new("Mortgage consent response", "Estate Department", true)
+            ],
+            "EstateAdditionalLand" => [
+                new("Additional land application", "Applicant", true),
+                new("Adjoining plot verification", "Estate Records", true),
+                new("Inspection and availability report", "Estate / Planning", true),
+                new("Approval recommendation", "HOE / MD", true),
+                new("Offer or refusal letter", "Estate Department", true)
+            ],
+            "EstateLayoutRevision" => [
+                new("Layout revision request", "Applicant / Estate", true),
+                new("Existing and proposed layout plans", "Planning / Development", true),
+                new("Layout revision letter", "Estate Department", true),
+                new("MD signed approval", "MD / HOE", true)
+            ],
+            "EstateChangeOfUse" => [
+                new("Change-of-use application", "Applicant", true),
+                new("Site inspection report", "Estate / Planning", true),
+                new("Change-of-use fee calculation", "Estate Department", true),
+                new("Approval or refusal letter", "HOE / MD", true),
+                new("Payment confirmation", "Finance / Revenue", false)
+            ],
+            "EstateReminderRateRevision" => [
+                new("Unpaid proposal / arrears schedule", "Estate / Revenue", true),
+                new("Reminder or rate revision notice", "Estate Department", true),
+                new("Signed notice approval", "HOE / MD", true),
+                new("Dispatch evidence", "Registry", true)
+            ],
+            "EstateLeaseRenewal" => [
+                new("Lease renewal application", "Applicant", true),
+                new("Lease Renewal Technical Committee approval", "LRTC", true),
+                new("Renewal invoice / demand letter", "Estate / Finance Revenue", true),
+                new("Deed of Variation draft", "Estate / Legal", true)
+            ],
+            "EstateServicedPlotAllocation" => [
+                new("Completed application form", "Applicant / Marketing", true),
+                new("Deposit receipt", "Revenue / Marketing", true),
+                new("Allocation approval", "MD / Estate", true),
+                new("Offer Letter", "Estate Serviced Plots", true),
+                new("Right of Entry", "Estate Serviced Plots", true),
+                new("Payment book update evidence", "Revenue / Estate Records", true)
+            ],
+            "EstateLandsPartiallyServiced" => [
+                new("Proposal Letter with LMF and Ground Rent", "Estate Lands / Partially Serviced", true),
+                new("Offer Letter", "Estate Lands / Partially Serviced", true),
+                new("Right of Entry", "Estate Lands / Partially Serviced", true)
+            ],
+            "EstateHousingHomeOwnership" => [
+                new("Recognition or HOS application", "Applicant / Housing", true),
+                new("Rental Transfer Form", "Housing Section", false),
+                new("Rent Card", "Housing / MD", false),
+                new("HOS Offer Letter", "Housing Section", true),
+                new("Payment completion evidence", "Revenue / Housing", false),
+                new("Lease request for purchased house", "Housing / Legal", false)
+            ],
+            "EstateTraditionalLands" => [
+                new("Traditional Council allocation letter", "Traditional Council", true),
+                new("Traditional Council site plan", "Traditional Council / Planning", true),
+                new("Proposal Letter with LMF and Ground Rent", "Estate Traditional Lands", true),
+                new("Offer Letter", "Estate Traditional Lands", true),
+                new("Right of Entry", "Estate Traditional Lands", true)
+            ],
+            "EstateTenancyRegularisation" => [
+                new("Invitation letter", "Estate Regularisation", true),
+                new("Regularisation requirements pack", "Applicant", true),
+                new("Planning plot-number confirmation", "Planning Section", true),
+                new("Committee vetting approval", "Estate Regularisation Committee", true),
+                new("Proposal Letter with LMF and Ground Rent", "Estate Regularisation", true),
+                new("Offer Letter", "Estate Regularisation", true),
+                new("Right of Entry", "Estate Regularisation", true)
+            ],
+            "EstateReportingControls" => [
+                new("Quarterly productivity report", "Estate Schedules", true),
+                new("Rent roll", "Housing / Estate Records", false),
+                new("Debtor list", "Revenue / Estate", false),
+                new("Allocation and expected revenue report", "Estate Schedules", true),
+                new("Control exception register", "Estate Management", true),
+                new("Approved report pack", "HOE / Estate Managers", true)
+            ],
+            _ => []
+        });
+
+        return documents
+            .GroupBy(item => $"{item.RequiredFrom}|{item.Name}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static bool HasLandFeeDetermination(string entityType) =>
+        string.Equals(entityType, "EstateLandsPartiallyServiced", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(entityType, "EstateTraditionalLands", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(entityType, "EstateTenancyRegularisation", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> EstateStageNames(string entityType) =>
         entityType switch
@@ -653,7 +1229,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "EstateJointOwnership" => ["Receive addition request", "Verify lease and ownership", "Check arrears and consent", "Route cadastral or legal action", "Prepare deed or variation", "Update records", "Dispatch confirmation"],
             "EstateTransfer" => ["Receive transfer request", "Verify parties and property", "Calculate fees and arrears", "Approve transfer instruction", "Route Legal execution", "Update records", "Dispatch completion"],
             "EstateAssignment" => ["Receive assignment request", "Check consent and draft deed", "Verify arrears and development status", "Approve assignment instruction", "Route Legal registration", "Detach and update records", "Dispatch completion"],
+            "EstateMortgageConsent" => ["Receive mortgage consent request", "Verify arrears and development status", "Review draft deed or mortgage in principle", "Approve consent instruction", "Route Legal if required", "Dispatch consent response"],
             "EstateLeasePreparation" => ["Receive lease request", "Verify development and property status", "Confirm cadastral requirements", "Prepare invoice instruction", "Confirm payment", "Route Legal preparation", "Update records", "Dispatch lease"],
+            "EstateAdditionalLand" => ["Receive additional land application", "Verify adjoining property records", "Conduct inspection and availability check", "Calculate fees and prepare recommendation", "Approve application", "Prepare offer and update records"],
+            "EstateLayoutRevision" => ["Receive layout revision request", "Review planning and site implications", "Prepare layout revision letter", "Approve and sign revision", "Dispatch and update records"],
+            "EstateChangeOfUse" => ["Receive change-of-use application", "Verify current use and arrears", "Inspect site and review planning", "Calculate change-of-use fee", "Approve change-of-use request", "Dispatch decision and update records"],
+            "EstateReminderRateRevision" => ["Identify unpaid proposal or arrears cases", "Validate revised rates and balances", "Prepare reminder or rate revision notice", "Approve and sign notice", "Dispatch and record follow-up"],
             "EstateLeaseRenewal" => ["Receive renewal request", "Verify renewal requirements", "Check arrears and term threshold", "Route committee review", "Prepare invoice instruction", "Approve renewal", "Route Legal renewal", "Close renewal"],
             "EstateServicedPlotAllocation" => ["Receive allocation request", "Compile allocation list", "Approve allocation", "Update payment book", "Prepare offer letter", "Prepare right of entry", "Dispatch documents", "Report allocation"],
             "EstateLandsPartiallyServiced" => ["Receive application", "Assess land use and plot details", "Calculate LMF and ground rent", "Prepare proposal letter", "Confirm acceptance and payment", "Prepare offer and right of entry", "Report schedule"],
@@ -1060,4 +1641,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private sealed record FieldSeed(string Key, string Label, string FieldType, IReadOnlyList<string>? Options);
 
     private sealed record DocumentSeed(string Name, string? RequiredFrom, bool IsMandatory);
+
+    private sealed record EstateProcedureHandoff(
+        string TargetModule,
+        IReadOnlyList<string> Roles,
+        string Reason,
+        string TriggerStage);
 }

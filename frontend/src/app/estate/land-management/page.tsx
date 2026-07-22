@@ -31,10 +31,19 @@ import {
   EstateManagedAssetSourceType,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
+import {
+  estateAcquisitionService,
+  type LandAcquisitionItem,
+} from '@/services/estate-acquisition.service';
 import ExistingLandDialog from './ExistingLandDialog';
+import DemarcateLandDialog from './DemarcateLandDialog';
 import LandDocumentsPanel from './LandDocumentsPanel';
 
 const LandBankMap = dynamic(() => import('./LandBankMap'), { ssr: false });
+
+type LandManagementRecord =
+  | { key: string; type: 'asset'; asset: EstateManagedAsset }
+  | { key: string; type: 'acquisition'; acquisition: LandAcquisitionItem };
 
 function formatArea(value?: number) {
   if (value == null) return 'Not recorded';
@@ -59,6 +68,31 @@ function sourceLabel(sourceType: EstateManagedAssetSourceType) {
 
 function hasBoundary(asset?: EstateManagedAsset) {
   return Boolean(asset?.boundaryCoordinates?.trim());
+}
+
+function acquisitionMatches(item: LandAcquisitionItem, query?: string) {
+  const normalized = query?.trim().toLowerCase();
+  if (!normalized) return true;
+  return [
+    item.projectReference,
+    item.location,
+    item.currentStage,
+    item.status,
+    item.intendedUse,
+    item.ownerName,
+    item.acquisitionType,
+  ]
+    .filter(Boolean)
+    .some((value) => `${value}`.toLowerCase().includes(normalized));
+}
+
+function acquisitionDemarcationHref(item: LandAcquisitionItem) {
+  const stage = item.stageOrder >= 2 ? 2 : item.stageOrder;
+  return `/estate/land-acquisition?acquisitionId=${encodeURIComponent(item.id)}&stage=${stage}`;
+}
+
+function acquisitionHasDemarcation(item: LandAcquisitionItem) {
+  return item.stageOrder >= 2;
 }
 
 function StatCard({
@@ -106,45 +140,132 @@ function DetailRow({
 
 export default function EstateLandManagementPage() {
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
+    []
+  );
+  const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [existingLandOpen, setExistingLandOpen] = React.useState(false);
-  const [markingReady, setMarkingReady] = React.useState(false);
-
-  const selected = React.useMemo(
-    () => assets.find((asset) => asset.id === selectedId) || assets[0],
-    [assets, selectedId]
+  const [demarcationAsset, setDemarcationAsset] =
+    React.useState<EstateManagedAsset | null>(null);
+  const [markingReadyKey, setMarkingReadyKey] = React.useState<string | null>(
+    null
   );
 
-  const loadLandBank = React.useCallback(async (query?: string) => {
+  const records = React.useMemo<LandManagementRecord[]>(() => {
+    const publishedAcquisitionIds = new Set(
+      assets
+        .map((asset) => asset.landAcquisitionId)
+        .filter((id): id is string => Boolean(id))
+    );
+    return [
+      ...assets.map((asset) => ({
+        key: `asset:${asset.id}`,
+        type: 'asset' as const,
+        asset,
+      })),
+      ...acquisitions
+        .filter((item) => !publishedAcquisitionIds.has(item.id))
+        .map((acquisition) => ({
+          key: `acquisition:${acquisition.id}`,
+          type: 'acquisition' as const,
+          acquisition,
+        })),
+    ];
+  }, [acquisitions, assets]);
+
+  const selected = React.useMemo(
+    () => records.find((record) => record.key === selectedKey) || records[0],
+    [records, selectedKey]
+  );
+
+  const loadLandRecords = React.useCallback(async (query?: string) => {
     setIsLoading(true);
     try {
-      const data = await estateLandManagementService.getLandBank(query);
+      const [data, acquisitionBoard] = await Promise.all([
+        estateLandManagementService.getLandBank(query),
+        estateAcquisitionService.getAcquisitionWorkflowBoard().catch(() => ({
+          stages: [],
+        })),
+      ]);
+      const acquisitionItems = acquisitionBoard.stages
+        .flatMap((stage) => stage.items)
+        .filter((item) => acquisitionMatches(item, query));
       setAssets(data);
-      setSelectedId((current) =>
-        current && data.some((asset) => asset.id === current)
+      setAcquisitions(acquisitionItems);
+      const nextKeys = [
+        ...data.map((asset) => `asset:${asset.id}`),
+        ...acquisitionItems.map((item) => `acquisition:${item.id}`),
+      ];
+      setSelectedKey((current) =>
+        current && nextKeys.includes(current)
           ? current
-          : (data[0]?.id ?? null)
+          : (nextKeys[0] ?? null)
       );
     } catch (error) {
-      console.error('Failed to load land bank', error);
-      toast.error('Unable to load land bank records');
+      console.error('Failed to load land records', error);
+      toast.error('Unable to load land management records');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   React.useEffect(() => {
-    void loadLandBank();
-  }, [loadLandBank]);
+    void loadLandRecords();
+  }, [loadLandRecords]);
 
-  const acquisitionCount = assets.filter(
-    (asset) => asset.sourceType === EstateManagedAssetSourceType.LandAcquisition
+  const acquisitionCount = records.filter(
+    (record) =>
+      record.type === 'acquisition' ||
+      record.asset.sourceType === EstateManagedAssetSourceType.LandAcquisition
   ).length;
-  const verifiedCount = assets.filter(
-    (asset) => asset.boundaryVerified || hasBoundary(asset)
+  const verifiedCount = records.filter(
+    (record) =>
+      record.type === 'asset'
+        ? record.asset.boundaryVerified || hasBoundary(record.asset)
+        : acquisitionHasDemarcation(record.acquisition)
   ).length;
+
+  const markAssetProjectReady = async (asset: EstateManagedAsset) => {
+    const key = `asset:${asset.id}`;
+    try {
+      setMarkingReadyKey(key);
+      await estateLandManagementService.markReadyForProjectManagement(asset.id);
+      toast.success('Whole land is demarcated and ready for project management.');
+      await loadLandRecords(search);
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to make land ready.');
+    } finally {
+      setMarkingReadyKey(null);
+    }
+  };
+
+  const markAcquisitionProjectReady = async (item: LandAcquisitionItem) => {
+    const key = `acquisition:${item.id}`;
+    try {
+      setMarkingReadyKey(key);
+      const result =
+        await estateAcquisitionService.markReadyForProjectManagement(item.id);
+      if (!result.success) {
+        throw new Error(result.message || 'Unable to publish land.');
+      }
+      toast.success(
+        result.message || 'Whole land is demarcated and ready for project management.'
+      );
+      await loadLandRecords(search);
+      if (result.asset?.id) {
+        setSelectedKey(`asset:${result.asset.id}`);
+      }
+    } catch (error: any) {
+      toast.error(
+        error?.message ||
+          'Demarcate the whole land boundary before making it ready for project management.'
+      );
+    } finally {
+      setMarkingReadyKey(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -214,7 +335,7 @@ export default function EstateLandManagementPage() {
               className="flex gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                void loadLandBank(search);
+                void loadLandRecords(search);
               }}
             >
               <div className="relative flex-1">
@@ -222,7 +343,7 @@ export default function EstateLandManagementPage() {
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search land bank"
+                  placeholder="Search land bank or acquisition"
                   className="pl-9"
                 />
               </div>
@@ -244,20 +365,37 @@ export default function EstateLandManagementPage() {
                 </div>
               ) : null}
 
-              {!isLoading && assets.length === 0 ? (
+              {!isLoading && records.length === 0 ? (
                 <div className="rounded-md border py-12 text-center text-sm text-muted-foreground">
-                  No demarcated land has been pushed to the land bank yet.
+                  No land bank or acquisition record matched your search.
                 </div>
               ) : null}
 
               {!isLoading &&
-                assets.map((asset) => {
-                  const active = selected?.id === asset.id;
+                records.map((record) => {
+                  const active = selected?.key === record.key;
+                  const title =
+                    record.type === 'asset'
+                      ? record.asset.name
+                      : record.acquisition.projectReference;
+                  const subtitle =
+                    record.type === 'asset'
+                      ? record.asset.assetCode
+                      : record.acquisition.currentStage;
+                  const location =
+                    record.type === 'asset'
+                      ? record.asset.location
+                      : record.acquisition.location;
+                  const verified =
+                    record.type === 'asset'
+                      ? record.asset.boundaryVerified ||
+                        hasBoundary(record.asset)
+                      : acquisitionHasDemarcation(record.acquisition);
                   return (
                     <button
-                      key={asset.id}
+                      key={record.key}
                       type="button"
-                      onClick={() => setSelectedId(asset.id)}
+                      onClick={() => setSelectedKey(record.key)}
                       className={`w-full rounded-md border p-3 text-left transition-colors ${
                         active
                           ? 'border-teal-600 bg-teal-50 text-teal-950 dark:bg-teal-950/30 dark:text-teal-100'
@@ -267,22 +405,26 @@ export default function EstateLandManagementPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold">
-                            {asset.name}
+                            {title}
                           </p>
                           <p className="mt-1 truncate text-xs text-muted-foreground">
-                            {asset.assetCode}
+                            {subtitle}
                           </p>
                         </div>
-                        {asset.boundaryVerified || hasBoundary(asset) ? (
+                        {verified ? (
                           <Badge variant="secondary" className="shrink-0">
                             Verified
+                          </Badge>
+                        ) : record.type === 'acquisition' ? (
+                          <Badge variant="outline" className="shrink-0">
+                            Acquisition
                           </Badge>
                         ) : null}
                       </div>
                       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                         <MapPin className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">
-                          {asset.location || 'Location not recorded'}
+                          {location || 'Location not recorded'}
                         </span>
                       </div>
                     </button>
@@ -297,121 +439,173 @@ export default function EstateLandManagementPage() {
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
                 <CardTitle className="text-lg">
-                  {selected?.name || 'Select a land bank record'}
+                  {selected?.type === 'asset'
+                    ? selected.asset.name
+                    : selected?.acquisition.projectReference ||
+                      'Select a land record'}
                 </CardTitle>
                 <CardDescription className="mt-1">
-                  {selected
-                    ? `${selected.assetCode} - ${sourceLabel(selected.sourceType)}`
+                  {selected?.type === 'asset'
+                    ? `${selected.asset.assetCode} - ${sourceLabel(selected.asset.sourceType)}`
+                    : selected?.type === 'acquisition'
+                      ? `${selected.acquisition.currentStage} - ${selected.acquisition.status}`
                     : 'Project management can pull from records shown here.'}
                 </CardDescription>
               </div>
-              {selected?.isReadyForProjectManagement ? (
-                <Button asChild variant="outline">
-                  <Link href="/development/projects">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Project Pull Ready
-                  </Link>
-                </Button>
-              ) : selected ? (
-                <Button
-                  variant="outline"
-                  disabled={markingReady}
-                  onClick={async () => {
-                    try {
-                      setMarkingReady(true);
-                      await estateLandManagementService.markReadyForProjectManagement(
-                        selected.id
-                      );
-                      toast.success('Land is ready for project management.');
-                      await loadLandBank(search);
-                    } catch (error: any) {
-                      toast.error(
-                        error?.message || 'Unable to make land ready.'
-                      );
-                    } finally {
-                      setMarkingReady(false);
+              {selected?.type === 'acquisition' ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant="outline">
+                    <Link
+                      href={acquisitionDemarcationHref(selected.acquisition)}
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      {acquisitionHasDemarcation(selected.acquisition)
+                        ? 'Review Demarcation'
+                        : 'Demarcate'}
+                    </Link>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={
+                      !acquisitionHasDemarcation(selected.acquisition) ||
+                      markingReadyKey === `acquisition:${selected.acquisition.id}`
                     }
-                  }}
-                >
-                  {markingReady ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    onClick={() =>
+                      void markAcquisitionProjectReady(selected.acquisition)
+                    }
+                    title={
+                      acquisitionHasDemarcation(selected.acquisition)
+                        ? undefined
+                        : 'Complete cadastral demarcation before marking this land ready for Project Management.'
+                    }
+                  >
+                    {markingReadyKey ===
+                    `acquisition:${selected.acquisition.id}` ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Building2 className="mr-2 h-4 w-4" />
+                    )}
+                    Mark Demarcated & Ready
+                  </Button>
+                </div>
+              ) : selected?.type === 'asset' ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setDemarcationAsset(selected.asset)}
+                  >
+                    <MapPin className="mr-2 h-4 w-4" />
+                    {hasBoundary(selected.asset) ? 'Re-demarcate' : 'Demarcate'}
+                  </Button>
+                  {selected.asset.isReadyForProjectManagement ? (
+                    <Button asChild variant="outline">
+                      <Link href="/development/projects">
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        Project Pull Ready
+                      </Link>
+                    </Button>
                   ) : (
-                    <Building2 className="mr-2 h-4 w-4" />
+                    <Button
+                      variant="outline"
+                      disabled={
+                        !(selected.asset.boundaryVerified || hasBoundary(selected.asset)) ||
+                        markingReadyKey === `asset:${selected.asset.id}`
+                      }
+                      onClick={() => void markAssetProjectReady(selected.asset)}
+                      title={
+                        selected.asset.boundaryVerified || hasBoundary(selected.asset)
+                          ? undefined
+                          : 'Record and verify the whole land boundary before Project Management can access it.'
+                      }
+                    >
+                      {markingReadyKey === `asset:${selected.asset.id}` ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Building2 className="mr-2 h-4 w-4" />
+                      )}
+                      Mark Demarcated & Ready
+                    </Button>
                   )}
-                  Mark Project Ready
-                </Button>
+                </div>
+              ) : selected ? (
+                null
               ) : null}
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            {selected ? (
+            {selected?.type === 'asset' ? (
               <>
                 <LandBankMap
-                  boundaryCoordinates={selected.boundaryCoordinates}
+                  boundaryCoordinates={selected.asset.boundaryCoordinates}
                 />
 
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  <DetailRow label="Location" value={selected.location} />
+                  <DetailRow label="Location" value={selected.asset.location} />
                   <DetailRow
                     label="Area"
-                    value={formatArea(selected.areaSquareMeters)}
+                    value={formatArea(selected.asset.areaSquareMeters)}
                   />
                   <DetailRow
                     label="Valuation"
                     value={formatMoney(
-                      selected.valuationAmount,
-                      selected.currency
+                      selected.asset.valuationAmount,
+                      selected.asset.currency
                     )}
                   />
-                  <DetailRow label="Purpose" value={selected.purpose} />
+                  <DetailRow label="Purpose" value={selected.asset.purpose} />
                   <DetailRow
                     label="Zoning"
-                    value={selected.zoningClassification}
+                    value={selected.asset.zoningClassification}
                   />
                   <DetailRow
                     label="Planning status"
-                    value={selected.planningComplianceStatus}
+                    value={selected.asset.planningComplianceStatus}
                   />
                   <DetailRow
                     label="GIS layer"
-                    value={selected.gisLayerReference}
+                    value={selected.asset.gisLayerReference}
                   />
                   <DetailRow
                     label="Survey plan"
-                    value={selected.surveyPlanNumber}
+                    value={selected.asset.surveyPlanNumber}
                   />
                   <DetailRow
                     label="Map sheet"
-                    value={selected.mapSheetNumber}
+                    value={selected.asset.mapSheetNumber}
                   />
-                  <DetailRow label="Surveyor" value={selected.surveyorName} />
+                  <DetailRow
+                    label="Surveyor"
+                    value={selected.asset.surveyorName}
+                  />
                   <DetailRow
                     label="Survey date"
                     value={
-                      selected.surveyDate
-                        ? new Date(selected.surveyDate).toLocaleDateString()
+                      selected.asset.surveyDate
+                        ? new Date(
+                            selected.asset.surveyDate
+                          ).toLocaleDateString()
                         : undefined
                     }
                   />
                   <DetailRow
                     label="Region / District"
-                    value={[selected.region, selected.district]
+                    value={[selected.asset.region, selected.asset.district]
                       .filter(Boolean)
                       .join(' / ')}
                   />
                   <DetailRow
                     label="Beacon count"
-                    value={selected.beaconCount?.toString()}
+                    value={selected.asset.beaconCount?.toString()}
                   />
                 </div>
 
-                {selected.ownershipHistory?.length ? (
+                {selected.asset.ownershipHistory?.length ? (
                   <div className="overflow-hidden rounded-md border bg-background">
                     <div className="border-b px-4 py-3">
                       <p className="text-sm font-semibold">Ownership History</p>
                     </div>
                     <div className="divide-y">
-                      {selected.ownershipHistory.map((owner, index) => (
+                      {selected.asset.ownershipHistory.map((owner, index) => (
                         <div
                           key={`${owner.ownerName}-${index}`}
                           className="grid gap-2 px-4 py-3 text-sm md:grid-cols-4"
@@ -430,17 +624,106 @@ export default function EstateLandManagementPage() {
                   </div>
                 ) : null}
 
-                <LandDocumentsPanel assetId={selected.id} />
+                <LandDocumentsPanel assetId={selected.asset.id} />
 
-                {selected.notes ? (
+                {selected.asset.notes ? (
                   <div className="rounded-md border bg-background p-4">
                     <p className="text-sm font-semibold">Notes</p>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {selected.notes}
+                      {selected.asset.notes}
                     </p>
                   </div>
                 ) : null}
               </>
+            ) : selected?.type === 'acquisition' ? (
+              <div className="space-y-5">
+                <div className="rounded-md border bg-background p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold">
+                        Acquisition land record
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Open this record to complete or review cadastral
+                        demarcation before it is pushed to the land bank.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild variant="outline">
+                        <Link
+                          href={acquisitionDemarcationHref(
+                            selected.acquisition
+                          )}
+                        >
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          {acquisitionHasDemarcation(selected.acquisition)
+                            ? 'Review Demarcation'
+                            : 'Demarcate'}
+                        </Link>
+                      </Button>
+                      <Button
+                        disabled={
+                          !acquisitionHasDemarcation(selected.acquisition) ||
+                          markingReadyKey ===
+                            `acquisition:${selected.acquisition.id}`
+                        }
+                        onClick={() =>
+                          void markAcquisitionProjectReady(
+                            selected.acquisition
+                          )
+                        }
+                      >
+                        {markingReadyKey ===
+                        `acquisition:${selected.acquisition.id}` ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Building2 className="mr-2 h-4 w-4" />
+                        )}
+                        Mark Demarcated & Ready
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <DetailRow
+                    label="Project reference"
+                    value={selected.acquisition.projectReference}
+                  />
+                  <DetailRow
+                    label="Location"
+                    value={selected.acquisition.location}
+                  />
+                  <DetailRow
+                    label="Current stage"
+                    value={selected.acquisition.currentStage}
+                  />
+                  <DetailRow
+                    label="Status"
+                    value={selected.acquisition.status}
+                  />
+                  <DetailRow
+                    label="Intended use"
+                    value={selected.acquisition.intendedUse}
+                  />
+                  <DetailRow
+                    label="Estimated size"
+                    value={selected.acquisition.estimatedSize}
+                  />
+                  <DetailRow
+                    label="Documents"
+                    value={selected.acquisition.documents.toString()}
+                  />
+                  <DetailRow
+                    label="Stage inputs"
+                    value={
+                      selected.acquisition.stageInputsComplete
+                        ? 'Complete'
+                        : `${selected.acquisition.missingInputs.length} missing`
+                    }
+                  />
+                </div>
+              </div>
             ) : (
               <div className="rounded-md border py-16 text-center text-sm text-muted-foreground">
                 Select a land bank record to view its demarcation and planning
@@ -454,8 +737,19 @@ export default function EstateLandManagementPage() {
         open={existingLandOpen}
         onOpenChange={setExistingLandOpen}
         onCreated={async (asset) => {
-          await loadLandBank(search);
-          setSelectedId(asset.id);
+          await loadLandRecords(search);
+          setSelectedKey(`asset:${asset.id}`);
+        }}
+      />
+      <DemarcateLandDialog
+        asset={demarcationAsset}
+        open={Boolean(demarcationAsset)}
+        onOpenChange={(open) => {
+          if (!open) setDemarcationAsset(null);
+        }}
+        onSaved={async (asset) => {
+          await loadLandRecords(search);
+          setSelectedKey(`asset:${asset.id}`);
         }}
       />
     </div>

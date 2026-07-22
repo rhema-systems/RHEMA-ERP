@@ -188,7 +188,9 @@ export function WorkflowApprovalActions({
     effectiveStepType === WorkflowStepType.Manual ||
     normalizedStepType === 'manual' ||
     normalizedStepType === '0';
-  const canShowApprovalActions = approveRejectEnabledByStatus && (!hasKnownStepType || isCurrentApprovalStep);
+  const canShowApprovalActions =
+    approveRejectEnabledByStatus &&
+    (isCurrentApprovalStep || (!loadWorkflowSummary && !hasKnownStepType));
   const effectiveCanApprove =
     effectiveCanApproveFlag === undefined ? canShowApprovalActions : canShowApprovalActions && effectiveCanApproveFlag;
   const normalizedStatus = (status || '').trim().toLowerCase().replace(/\s+/g, '');

@@ -619,6 +619,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["location"] = request.Location,
             ["locationDetail"] = request.Location,
             ["sourceLabel"] = definition.Module == "Facilities" ? "Source: External Portal -> Estate / Facilities" : "Source: External Portal -> Estate",
+            ["sourceSystem"] = "External Portal",
+            ["sourceWorkspace"] = "Estate Services",
             ["contactReference"] = contact,
             ["notes"] = request.Description,
             ["issueDescription"] = request.Description,
@@ -632,7 +634,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["issueType"] = request.Category,
             ["complaintCategory"] = request.Category,
             ["targetDate"] = request.TargetDate?.ToString("yyyy-MM-dd"),
-            ["schedule"] = "Facilities",
+            ["schedule"] = ResolveEstateSchedule(definition),
             ["procedureType"] = definition.Title
         };
 
@@ -647,14 +649,38 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         return values;
     }
 
+    private static string ResolveEstateSchedule(ExternalEstateRequestDefinition definition)
+        => definition.EntityType switch
+        {
+            "EstateFacilityMaintenance" or "EstateFacilityComplaint" => "Facilities",
+            "EstateSearchApplication" or "EstateCertifiedTrueCopy" or "EstateRecordAmendment" => "Records",
+            "EstateServicedPlotAllocation" => "Serviced Plots",
+            "EstateLandsPartiallyServiced" or "EstateAdditionalLand" or "EstateChangeOfUse" or "EstateTransfer" or "EstateAssignment" or "EstateMortgageConsent" or "EstateLeasePreparation" or "EstateLeaseRenewal" => "Lands / Partially Serviced",
+            "EstateHousingHomeOwnership" => "Housing",
+            "EstateTraditionalLands" => "Traditional Lands",
+            "EstateTenancyRegularisation" => "Regularisation",
+            _ => definition.Category
+        };
+
     private static readonly ExternalEstateRequestDefinition[] ExternalRequestDefinitions =
     [
         new("maintenance", "Maintenance Request", "Facilities", "EstateFacilityMaintenance", "Maintenance"),
         new("complaint", "Facilities Complaint", "Facilities", "EstateFacilityComplaint", "Complaint"),
-        new("changeOfUse", "Change of Use / Record Amendment", "Estate", "EstateRecordAmendment", "Estate records"),
-        new("certifiedTrueCopy", "Certified True Copy", "Estate", "EstateCertifiedTrueCopy", "Estate records"),
         new("searchApplication", "Search Application", "Estate", "EstateSearchApplication", "Estate records"),
+        new("changeAddress", "Change of Address", "Estate", "EstateRecordAmendment", "Estate records"),
+        new("certifiedTrueCopy", "Certified True Copy", "Estate", "EstateCertifiedTrueCopy", "Estate records"),
+        new("jointOwnership", "Joint Ownership / Addition of Name", "Estate", "EstateJointOwnership", "Ownership"),
+        new("transfer", "Transfer / Portion Transfer", "Estate", "EstateTransfer", "Transfer"),
+        new("assignment", "Assignment Consent", "Estate", "EstateAssignment", "Assignment"),
+        new("mortgageConsent", "Consent to Mortgage / Mortgage in Principle", "Estate", "EstateMortgageConsent", "Mortgage"),
+        new("leaseDocument", "Lease Document Preparation", "Estate", "EstateLeasePreparation", "Lease"),
+        new("additionalLand", "Additional Land Application", "Estate", "EstateAdditionalLand", "Allocation"),
+        new("changeOfUse", "Change of Land Use", "Estate", "EstateChangeOfUse", "Land use"),
         new("leaseRenewal", "Lease Renewal", "Estate", "EstateLeaseRenewal", "Lease"),
+        new("landApplication", "Land / Partially Serviced Plot Application", "Estate", "EstateLandsPartiallyServiced", "Allocation"),
+        new("traditionalLand", "Traditional Land Documentation", "Estate", "EstateTraditionalLands", "Traditional Lands"),
+        new("tenancyRecognition", "Recognition of Tenancy", "Estate", "EstateHousingHomeOwnership", "Housing"),
+        new("hosConversion", "Conversion of Rental Unit to HOS", "Estate", "EstateHousingHomeOwnership", "Housing"),
         new("regularisation", "Tenancy Regularisation", "Estate", "EstateTenancyRegularisation", "Regularisation"),
         new("rightOfEntry", "Right of Entry / Allocation Follow-up", "Estate", "EstateServicedPlotAllocation", "Allocation")
     ];

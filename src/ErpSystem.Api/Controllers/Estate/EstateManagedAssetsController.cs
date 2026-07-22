@@ -89,6 +89,21 @@ public sealed class EstateManagedAssetsController : ControllerBase
         }
     }
 
+    [HttpPatch("{id:guid}/demarcation")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> UpdateLandDemarcation(Guid id, [FromBody] UpdateEstateManagedLandDemarcationDto request)
+    {
+        try
+        {
+            var asset = await _managedAssetService.UpdateLandDemarcationAsync(id, request);
+            return Ok(new { success = true, data = asset, message = "Land demarcation updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
     [HttpPatch("{id:guid}/external-listing")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager")]
     public async Task<IActionResult> UpdateExternalListing(Guid id, [FromBody] UpdateEstateManagedAssetListingDto request)

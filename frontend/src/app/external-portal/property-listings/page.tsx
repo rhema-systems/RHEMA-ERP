@@ -3,17 +3,25 @@
 import React from 'react';
 import {
   Building2,
+  CalendarDays,
+  CheckCircle2,
+  FileText,
+  Filter,
   Home,
   ImageIcon,
   Loader2,
   MapPin,
+  Phone,
+  Ruler,
   Search,
   Send,
+  UserRound,
 } from 'lucide-react';
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -27,29 +35,76 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   externalEstateListingsService,
   type ExternalEstateListing,
+  type ExternalListingRequest,
 } from '@/services/external-estate-listings.service';
+
+type ListingIntent = 'Sale' | 'Rent';
 
 function formatMoney(value?: number | null, currency = 'GHS') {
   if (value == null) return 'Price on request';
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency,
+    maximumFractionDigits: 0,
   }).format(value);
 }
 
 function listingTypeLabel(value: string) {
   if (value === 'SaleAndRent') return 'Sale and rent';
+  if (value === 'Sale') return 'For sale';
+  if (value === 'Rent') return 'For rent';
   return value;
 }
 
+function availableIntents(listing?: ExternalEstateListing | null): ListingIntent[] {
+  if (!listing) return [];
+  if (listing.externalListingType === 'SaleAndRent') return ['Rent', 'Sale'];
+  return listing.externalListingType === 'Sale' ? ['Sale'] : ['Rent'];
+}
+
+function defaultIntent(listing?: ExternalEstateListing | null): ListingIntent {
+  return listing?.externalListingType === 'Sale' ? 'Sale' : 'Rent';
+}
+
 function areaLabel(listing: ExternalEstateListing) {
-  if (listing.areaSquareMeters)
+  if (listing.areaSquareMeters) {
     return `${listing.areaSquareMeters.toLocaleString(undefined, {
       maximumFractionDigits: 2,
     })} sqm`;
-  if (listing.areaValue && listing.areaUnit)
+  }
+
+  if (listing.areaValue && listing.areaUnit) {
     return `${listing.areaValue.toLocaleString()} ${listing.areaUnit}`;
+  }
+
   return 'Area not recorded';
+}
+
+function locationLabel(listing: ExternalEstateListing) {
+  return (
+    listing.location ||
+    [listing.town, listing.district, listing.region].filter(Boolean).join(', ') ||
+    'Location not recorded'
+  );
+}
+
+function formatPublishedDate(value?: string | null) {
+  if (!value) return 'Publication date not recorded';
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(value));
+}
+
+function listingFallbackImage(listing: ExternalEstateListing) {
+  const assetType = String(listing.assetType).toLowerCase();
+  const unitType = String(listing.unitType ?? '').toLowerCase();
+  if (assetType === '0' || assetType === 'land' || unitType.includes('land')) {
+    return '/images/estate/listing-land-fallback.png';
+  }
+
+  return '/images/estate/listing-apartment-fallback.png';
 }
 
 function ListingImage({ listing }: { listing: ExternalEstateListing }) {
@@ -61,9 +116,7 @@ function ListingImage({ listing }: { listing: ExternalEstateListing }) {
 
     const load = async () => {
       try {
-        const blob = await externalEstateListingsService.getListingImage(
-          listing
-        );
+        const blob = await externalEstateListingsService.getListingImage(listing);
         if (!blob || !active) return;
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
@@ -82,8 +135,15 @@ function ListingImage({ listing }: { listing: ExternalEstateListing }) {
 
   if (!imageUrl) {
     return (
-      <div className="flex aspect-[4/3] items-center justify-center bg-slate-100 text-slate-400">
-        <ImageIcon className="h-10 w-10" />
+      <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
+        <img
+          src={listingFallbackImage(listing)}
+          alt=""
+          className="h-full w-full object-cover"
+        />
+        <div className="absolute right-3 top-3 rounded-md bg-white/90 p-2 text-slate-500 shadow-sm">
+          <ImageIcon className="h-4 w-4" />
+        </div>
       </div>
     );
   }
@@ -97,24 +157,48 @@ function ListingImage({ listing }: { listing: ExternalEstateListing }) {
   );
 }
 
+function ListingStat({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-md border bg-white p-3">
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+      <div className="min-w-0">
+        <div className="text-xs text-slate-500">{label}</div>
+        <div className="truncate text-sm font-medium text-slate-900">{value}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function ExternalPropertyListingsPage() {
   const [listings, setListings] = React.useState<ExternalEstateListing[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [location, setLocation] = React.useState('');
   const [listingType, setListingType] = React.useState('all');
+  const [requestIntent, setRequestIntent] = React.useState<ListingIntent>('Rent');
   const [applicantName, setApplicantName] = React.useState('');
   const [contact, setContact] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [notice, setNotice] = React.useState<string | null>(null);
+  const [createdRequest, setCreatedRequest] =
+    React.useState<ExternalListingRequest | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const selected = React.useMemo(
     () => listings.find((listing) => listing.id === selectedId) || listings[0],
     [listings, selectedId]
   );
+
+  const requestOptions = React.useMemo(() => availableIntents(selected), [selected]);
 
   const loadListings = React.useCallback(async () => {
     setIsLoading(true);
@@ -130,7 +214,7 @@ export default function ExternalPropertyListingsPage() {
       setSelectedId((current) =>
         current && data.some((listing) => listing.id === current)
           ? current
-          : (data[0]?.id ?? null)
+          : data[0]?.id ?? null
       );
     } catch {
       setError('Could not load property listings.');
@@ -143,25 +227,34 @@ export default function ExternalPropertyListingsPage() {
     void loadListings();
   }, [loadListings]);
 
+  React.useEffect(() => {
+    setRequestIntent(defaultIntent(selected));
+    setCreatedRequest(null);
+  }, [selected?.id, selected?.externalListingType]);
+
   const submitRequest = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected) return;
 
+    if (!applicantName.trim() || !contact.trim()) {
+      setError('Enter your name and contact before submitting the request.');
+      return;
+    }
+
     setIsSubmitting(true);
-    setNotice(null);
+    setCreatedRequest(null);
     setError(null);
     try {
       const created = await externalEstateListingsService.createRequest(
         selected.id,
         {
-          requestType:
-            selected.externalListingType === 'Sale' ? 'Sale' : 'Rent',
-          applicantName,
-          contact,
-          message,
+          requestType: requestIntent,
+          applicantName: applicantName.trim(),
+          contact: contact.trim(),
+          message: message.trim(),
         }
       );
-      setNotice(`Request ${created.referenceNumber || created.title} submitted.`);
+      setCreatedRequest(created);
       setMessage('');
     } catch {
       setError('Could not submit request for this listing.');
@@ -177,6 +270,9 @@ export default function ExternalPropertyListingsPage() {
           <h1 className="text-2xl font-semibold text-slate-900">
             Property Listings
           </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Browse available estate units and submit a sale or rent request.
+          </p>
         </div>
         <Badge variant="outline" className="w-fit">
           {isLoading ? (
@@ -197,7 +293,7 @@ export default function ExternalPropertyListingsPage() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search land, apartment, building"
+              placeholder="Search apartment, unit, land"
               className="pl-9"
             />
           </div>
@@ -212,12 +308,13 @@ export default function ExternalPropertyListingsPage() {
           </div>
           <Select value={listingType} onValueChange={setListingType}>
             <SelectTrigger>
+              <Filter className="mr-2 h-4 w-4 text-slate-500" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="Sale">Sale</SelectItem>
-              <SelectItem value="Rent">Rent</SelectItem>
+              <SelectItem value="all">All listings</SelectItem>
+              <SelectItem value="Sale">For sale</SelectItem>
+              <SelectItem value="Rent">For rent</SelectItem>
             </SelectContent>
           </Select>
           <Button onClick={() => void loadListings()}>
@@ -228,14 +325,21 @@ export default function ExternalPropertyListingsPage() {
       </Card>
 
       {error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>Request not completed</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       ) : null}
-      {notice ? (
-        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          {notice}
-        </div>
+
+      {createdRequest ? (
+        <Alert className="border-green-200 bg-green-50 text-green-800">
+          <CheckCircle2 className="h-4 w-4 text-green-700" />
+          <AlertTitle>Request submitted</AlertTitle>
+          <AlertDescription>
+            {createdRequest.referenceNumber || createdRequest.title} is now in{' '}
+            {createdRequest.currentStageName}.
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -281,9 +385,7 @@ export default function ExternalPropertyListingsPage() {
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <MapPin className="h-4 w-4 shrink-0" />
-                    <span className="truncate">
-                      {listing.location || 'Location not recorded'}
-                    </span>
+                    <span className="truncate">{locationLabel(listing)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="font-semibold text-slate-900">
@@ -301,20 +403,23 @@ export default function ExternalPropertyListingsPage() {
         </div>
 
         <Card className="h-fit">
-          <CardContent className="space-y-5 p-5">
+          <CardHeader>
+            <CardTitle className="text-base">Customer request</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
             {selected ? (
               <>
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-slate-50">
-                      {selected.externalListingType === 'Sale' ? (
+                      {requestIntent === 'Sale' ? (
                         <Building2 className="h-5 w-5 text-blue-700" />
                       ) : (
                         <Home className="h-5 w-5 text-blue-700" />
                       )}
                     </div>
-                    <div>
-                      <h2 className="font-semibold text-slate-900">
+                    <div className="min-w-0">
+                      <h2 className="truncate font-semibold text-slate-900">
                         {selected.name}
                       </h2>
                       <p className="mt-1 text-sm text-slate-500">
@@ -322,16 +427,34 @@ export default function ExternalPropertyListingsPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="grid gap-2 text-sm text-slate-600">
-                    <div>{selected.location || 'Location not recorded'}</div>
-                    <div>
+
+                  <div className="grid gap-2">
+                    <ListingStat
+                      icon={MapPin}
+                      label="Location"
+                      value={locationLabel(selected)}
+                    />
+                    <ListingStat icon={Ruler} label="Area" value={areaLabel(selected)} />
+                    <ListingStat
+                      icon={CalendarDays}
+                      label="Published"
+                      value={formatPublishedDate(selected.externalPublishedAt)}
+                    />
+                  </div>
+
+                  <div className="rounded-md bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">Listed price</div>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
                       {formatMoney(
                         selected.externalListingPrice,
                         selected.externalListingCurrency
                       )}
                     </div>
-                    <div>{areaLabel(selected)}</div>
+                    <div className="mt-1 text-sm text-slate-500">
+                      {listingTypeLabel(selected.externalListingType)}
+                    </div>
                   </div>
+
                   {selected.externalListingNotes ? (
                     <p className="text-sm leading-6 text-slate-600">
                       {selected.externalListingNotes}
@@ -341,20 +464,48 @@ export default function ExternalPropertyListingsPage() {
 
                 <form className="space-y-4" onSubmit={submitRequest}>
                   <div className="space-y-2">
-                    <Label>Name</Label>
-                    <Input
-                      value={applicantName}
-                      onChange={(event) =>
-                        setApplicantName(event.target.value)
-                      }
-                    />
+                    <Label>Request type</Label>
+                    <Select
+                      value={requestIntent}
+                      onValueChange={(value) => setRequestIntent(value as ListingIntent)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {requestOptions.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {option === 'Sale'
+                              ? 'Buy this property'
+                              : 'Rent this property'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Contact</Label>
-                    <Input
-                      value={contact}
-                      onChange={(event) => setContact(event.target.value)}
-                    />
+                    <Label>Name</Label>
+                    <div className="relative">
+                      <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={applicantName}
+                        onChange={(event) => setApplicantName(event.target.value)}
+                        className="pl-9"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Phone or email</Label>
+                    <div className="relative">
+                      <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={contact}
+                        onChange={(event) => setContact(event.target.value)}
+                        className="pl-9"
+                        required
+                      />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label>Message</Label>
@@ -362,6 +513,7 @@ export default function ExternalPropertyListingsPage() {
                       className="min-h-[120px]"
                       value={message}
                       onChange={(event) => setMessage(event.target.value)}
+                      placeholder="Preferred viewing time, financing, lease period, or other notes."
                     />
                   </div>
                   <Button className="w-full" disabled={isSubmitting}>
@@ -370,13 +522,14 @@ export default function ExternalPropertyListingsPage() {
                     ) : (
                       <Send className="mr-2 h-4 w-4" />
                     )}
-                    Place request
+                    Submit request
                   </Button>
                 </form>
               </>
             ) : (
               <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">
-                Select a listing.
+                <FileText className="mx-auto mb-3 h-8 w-8 text-slate-400" />
+                Select a listing to submit a request.
               </div>
             )}
           </CardContent>

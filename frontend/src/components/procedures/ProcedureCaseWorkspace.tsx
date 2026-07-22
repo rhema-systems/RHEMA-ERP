@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import React from 'react';
+import { useSearchParams } from 'next/navigation';
 import { BookTemplate, CheckCircle2, ExternalLink, Eye, FileText, FileUp, Loader2, PenLine, Plus, Save, Send, ShieldCheck, Truck } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -39,7 +40,43 @@ interface ProcedureCaseWorkspaceProps {
   defaultTitle: string;
 }
 
+const LAND_FEE_ENTITY_TYPES = new Set([
+  'EstateLandsPartiallyServiced',
+  'EstateTraditionalLands',
+  'EstateTenancyRegularisation',
+]);
+
+const CHANGE_OF_USE_ENTITY_TYPES = new Set(['EstateChangeOfUse']);
+
+const CALCULATED_PROCEDURE_FIELD_KEYS = new Set([
+  'plotSizeHectares',
+  'landManagementFeePayable',
+  'groundRentComputed',
+  'groundRentPayable',
+  'changeOfUseFeePayable',
+  'newGroundRentPayable',
+]);
+
+const parseAmount = (value?: string | null): number | null => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value.replace(/[^\d.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const formatCalculatedAmount = (value: number | null, decimals = 2): string => {
+  if (value === null || !Number.isFinite(value)) {
+    return '';
+  }
+
+  return value.toFixed(decimals);
+};
+
 export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: ProcedureCaseWorkspaceProps) {
+  const searchParams = useSearchParams();
+  const requestedCaseId = searchParams.get('caseId');
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
   const [selectedCase, setSelectedCase] = React.useState<ProcedureCaseDetail | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -84,8 +121,14 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     try {
       const data = await procedureCaseService.listCases(module, entityType);
       setCases(data);
-      if (!selectedCase && data.length > 0) {
-        const detail = await procedureCaseService.getCase(data[0].id);
+
+      // Notifications and handoff links pass caseId so reviewers land on the exact Estate procedure case.
+      const targetCaseId = requestedCaseId && data.some((item) => item.id === requestedCaseId)
+        ? requestedCaseId
+        : data[0]?.id;
+
+      if (targetCaseId && selectedCase?.id !== targetCaseId) {
+        const detail = await procedureCaseService.getCase(targetCaseId);
         setSelectedCase(detail);
       }
     } catch (err) {
@@ -93,7 +136,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     } finally {
       setIsLoading(false);
     }
-  }, [entityType, module, selectedCase]);
+  }, [entityType, module, requestedCaseId, selectedCase?.id]);
 
   React.useEffect(() => {
     void loadCases();
@@ -127,6 +170,72 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       mounted = false;
     };
   }, [module]);
+
+  React.useEffect(() => {
+    if (!selectedCase || (!LAND_FEE_ENTITY_TYPES.has(entityType) && !CHANGE_OF_USE_ENTITY_TYPES.has(entityType))) {
+      return;
+    }
+
+    setSelectedCase((current) => {
+      if (!current || current.id !== selectedCase.id) {
+        return current;
+      }
+
+      const values = new Map(current.fields.map((field) => [field.key, field.value ?? '']));
+      const plotSizeAcres = parseAmount(values.get('plotSizeAcres'));
+      const lmfRatePerAcre = parseAmount(values.get('lmfRatePerAcre'));
+      const groundRentRatePerAcre = parseAmount(values.get('groundRentRatePerAcre'));
+      const existingLmfRatePerAcre = parseAmount(values.get('existingLmfRatePerAcre'));
+      const newLmfRatePerAcre = parseAmount(values.get('newLmfRatePerAcre'));
+      const newGroundRentRatePerAcre = parseAmount(values.get('newGroundRentRatePerAcre'));
+
+      const calculatedValues = new Map<string, string>();
+      const plotSizeHectares = plotSizeAcres === null ? null : plotSizeAcres * 0.40468564224;
+      calculatedValues.set('plotSizeHectares', formatCalculatedAmount(plotSizeHectares, 4));
+
+      // Estate manuals require these calculations before proposal letters are generated and sent for payment.
+      const landManagementFee = plotSizeAcres !== null && lmfRatePerAcre !== null
+        ? plotSizeAcres * lmfRatePerAcre
+        : null;
+      calculatedValues.set('landManagementFeePayable', formatCalculatedAmount(landManagementFee));
+
+      const groundRentComputed = plotSizeAcres !== null && groundRentRatePerAcre !== null
+        ? plotSizeAcres * groundRentRatePerAcre
+        : null;
+      calculatedValues.set('groundRentComputed', formatCalculatedAmount(groundRentComputed, 3));
+      calculatedValues.set(
+        'groundRentPayable',
+        formatCalculatedAmount(groundRentComputed === null ? null : Math.ceil(groundRentComputed))
+      );
+
+      const changeOfUseFee = plotSizeAcres !== null && existingLmfRatePerAcre !== null && newLmfRatePerAcre !== null
+        ? Math.max((newLmfRatePerAcre - existingLmfRatePerAcre) * plotSizeAcres, 0)
+        : null;
+      calculatedValues.set('changeOfUseFeePayable', formatCalculatedAmount(changeOfUseFee));
+
+      const newGroundRent = plotSizeAcres !== null && newGroundRentRatePerAcre !== null
+        ? plotSizeAcres * newGroundRentRatePerAcre
+        : null;
+      calculatedValues.set('newGroundRentPayable', formatCalculatedAmount(newGroundRent === null ? null : Math.ceil(newGroundRent)));
+
+      let changed = false;
+      const fields = current.fields.map((field) => {
+        if (!calculatedValues.has(field.key)) {
+          return field;
+        }
+
+        const value = calculatedValues.get(field.key) ?? '';
+        if ((field.value ?? '') === value) {
+          return field;
+        }
+
+        changed = true;
+        return { ...field, value };
+      });
+
+      return changed ? { ...current, fields } : current;
+    });
+  }, [entityType, selectedCase]);
 
   const selectCase = async (id: string) => {
     setIsSaving(true);
@@ -285,6 +394,21 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
         ];
       })
     );
+    const mergeValueByKey = new Map(selectedCase.fields.map((field) => [field.key, field.value ?? '']));
+    const setMergeAlias = (alias: string, ...keys: string[]) => {
+      const value = keys.map((key) => mergeValueByKey.get(key)).find((item) => item);
+      if (value) {
+        mergeValues[alias] = value;
+      }
+    };
+
+    setMergeAlias('ApplicantName', 'applicantName');
+    setMergeAlias('PropertyNumber', 'propertyNumber');
+    setMergeAlias('LandUse', 'landUse');
+    setMergeAlias('Premium', 'landManagementFeePayable', 'renewalPremium', 'transferFeePayable');
+    setMergeAlias('GroundRent', 'groundRentPayable', 'improvedGroundRent');
+    setMergeAlias('OfferExpiryDate', 'offerExpiryDate', 'paymentDeadline');
+    setMergeAlias('CaseReference', 'referenceNumber', 'fileReference');
 
     setIsGeneratingDocument(true);
     setError(null);
@@ -373,7 +497,8 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
   };
 
   const renderField = (field: ProcedureCaseDetail['fields'][number]) => {
-    const isDisabled = !selectedCase?.canEditCurrentStage;
+    const isCalculated = CALCULATED_PROCEDURE_FIELD_KEYS.has(field.key);
+    const isDisabled = !selectedCase?.canEditCurrentStage || isCalculated;
     const fieldType = field.fieldType.toLowerCase();
 
     if (fieldType === 'select' && field.options?.length) {
@@ -413,10 +538,11 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     return (
       <Input
         key={field.id}
-        type={fieldType === 'date' ? 'date' : 'text'}
+        type={fieldType === 'date' ? 'date' : fieldType === 'number' || fieldType === 'currency' ? 'number' : 'text'}
         placeholder={field.label}
         value={field.value ?? ''}
         disabled={isDisabled}
+        step={fieldType === 'currency' || fieldType === 'number' ? '0.01' : undefined}
         onChange={(event) => updateFieldValue(field.key, event.target.value)}
       />
     );

@@ -92,6 +92,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.MapSheetNumber = TrimOrNull(handoff.MapSheetNumber);
         asset.AssetType = EstateManagedAssetType.Land;
         asset.Status = EstateManagedAssetStatus.LandBank;
+        asset.ProjectCode = handoff.ProjectReference.Trim();
+        asset.ProjectTitle = FirstNonBlank(handoff.ParcelIdentifier, handoff.Name, handoff.ProjectReference);
         asset.AreaSquareMeters = handoff.AreaSquareMeters;
         asset.ValuationAmount = handoff.ValuationAmount;
         asset.Currency = string.IsNullOrWhiteSpace(handoff.Currency) ? "GHS" : handoff.Currency.Trim().ToUpperInvariant();
@@ -250,6 +252,49 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             IsAvailableForSale = false
         };
         await repository.AddAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+        return MapToDto(asset);
+    }
+
+    public async Task<EstateManagedAssetDto> UpdateLandDemarcationAsync(Guid assetId, UpdateEstateManagedLandDemarcationDto request)
+    {
+        var required = new[] { request.CadastreDescription, request.Region, request.District, request.Town,
+            request.AreaUnit, request.SurveyorName, request.SurveyPlanNumber, request.MapSheetNumber, request.BoundaryCoordinates };
+        if (required.Any(string.IsNullOrWhiteSpace) || request.AreaValue <= 0 || request.BeaconCount < 3)
+        {
+            throw new InvalidOperationException("Complete the cadastral, beacon, and survey fields before saving demarcation.");
+        }
+
+        if (request.IsReadyForProjectManagement && !request.BoundaryVerified)
+        {
+            throw new InvalidOperationException("Verify the cadastral boundary before making the land ready for project management.");
+        }
+
+        var repository = _unitOfWork.Repository<EstateManagedAsset>();
+        var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&
+            item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted && item.AssetType == EstateManagedAssetType.Land);
+        if (asset == null) throw new InvalidOperationException("Land asset was not found.");
+
+        asset.CadastreDescription = request.CadastreDescription.Trim();
+        asset.Region = request.Region.Trim();
+        asset.District = request.District.Trim();
+        asset.Town = request.Town.Trim();
+        asset.AreaValue = request.AreaValue;
+        asset.AreaUnit = request.AreaUnit.Trim();
+        asset.AreaSquareMeters = request.AreaSquareMeters > 0 ? request.AreaSquareMeters : asset.AreaSquareMeters;
+        asset.SurveyorName = request.SurveyorName.Trim();
+        asset.SurveyDate = request.SurveyDate ?? asset.SurveyDate;
+        asset.SurveyPlanNumber = request.SurveyPlanNumber.Trim();
+        asset.MapSheetNumber = request.MapSheetNumber.Trim();
+        asset.BeaconCount = request.BeaconCount;
+        asset.BoundaryCoordinates = request.BoundaryCoordinates.Trim();
+        asset.BoundaryVerified = request.BoundaryVerified;
+        asset.IsReadyForProjectManagement = request.IsReadyForProjectManagement;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserProvider.Username;
+        asset.LastModifiedById = _currentUserProvider.UserId;
+
+        await repository.UpdateAsync(asset);
         await _unitOfWork.SaveChangesAsync();
         return MapToDto(asset);
     }

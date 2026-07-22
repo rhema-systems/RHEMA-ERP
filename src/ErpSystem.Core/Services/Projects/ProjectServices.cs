@@ -322,6 +322,10 @@ public partial class ProjectService : IProjectService
 
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
+        if (dto.DevelopmentProfile != null)
+        {
+            dto.DevelopmentProfile.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.DevelopmentProfile.LandReference);
+        }
 
         var project = new Project
         {
@@ -408,6 +412,11 @@ public partial class ProjectService : IProjectService
         await ValidatePortfolioProgramAsync(dto.PortfolioId, dto.ProgramId);
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
+        if (dto.DevelopmentProfile != null)
+        {
+            dto.DevelopmentProfile.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.DevelopmentProfile.LandReference);
+        }
+
         project.Title = dto.Title.Trim();
         project.Summary = dto.Summary;
         project.BusinessCase = dto.BusinessCase;

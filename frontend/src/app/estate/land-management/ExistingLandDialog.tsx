@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import dynamic from 'next/dynamic';
 import { FilePlus2, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -23,6 +24,8 @@ type FormState = Record<string, string>;
 type Beacon = { beacon: string; northing: string; easting: string; bearing: string; distance: string };
 type PendingDocument = { file: File; documentType: string; documentName: string };
 
+const LandBankMap = dynamic(() => import('./LandBankMap'), { ssr: false });
+
 const initialForm: FormState = {
   assetCode: '', name: '', description: '', location: '', purpose: '', zoningClassification: '',
   planningComplianceStatus: '', cadastreDescription: '', region: '', district: '', town: '',
@@ -44,6 +47,27 @@ function RequiredLabel({ children }: { children: React.ReactNode }) {
   return <Label>{children} <span className="text-destructive">*</span></Label>;
 }
 
+function boundaryCoordinatesFromBeacons(beacons: Beacon[]) {
+  const points = beacons
+    .map((item) => {
+      const northing = Number(item.northing);
+      const easting = Number(item.easting);
+      if (!Number.isFinite(northing) || !Number.isFinite(easting)) return null;
+
+      const distance = Number(item.distance);
+      return {
+        beacon: item.beacon.trim() || 'Beacon',
+        northing,
+        easting,
+        bearing: item.bearing.trim(),
+        distance: Number.isFinite(distance) ? distance : undefined,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  return points.length >= 3 ? JSON.stringify(points) : undefined;
+}
+
 export default function ExistingLandDialog({
   open,
   onOpenChange,
@@ -60,6 +84,10 @@ export default function ExistingLandDialog({
   const [boundaryVerified, setBoundaryVerified] = React.useState(false);
   const [ready, setReady] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const boundaryPreviewCoordinates = React.useMemo(
+    () => boundaryCoordinatesFromBeacons(beacons),
+    [beacons]
+  );
 
   const setValue = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const reset = () => {
@@ -142,6 +170,7 @@ export default function ExistingLandDialog({
                 <tbody className="divide-y">{beacons.map((beacon, index) => <tr key={index}>{(['beacon', 'northing', 'easting', 'bearing', 'distance'] as const).map((key) => <td key={key} className="p-2"><Input type={['northing', 'easting', 'distance'].includes(key) ? 'number' : 'text'} value={beacon[key]} onChange={(event) => setBeacons((current) => current.map((item, row) => row === index ? { ...item, [key]: event.target.value } : item))} /></td>)}</tr>)}</tbody>
               </table>
             </div>
+            <LandBankMap boundaryCoordinates={boundaryPreviewCoordinates} />
             <div className="flex flex-wrap gap-5">
               <label className="flex items-center gap-2 text-sm"><Checkbox checked={boundaryVerified} onCheckedChange={(checked) => setBoundaryVerified(checked === true)} /> Boundary verified</label>
               <label className="flex items-center gap-2 text-sm"><Checkbox checked={ready} onCheckedChange={(checked) => setReady(checked === true)} /> Ready for Project Management</label>

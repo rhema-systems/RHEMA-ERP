@@ -156,6 +156,10 @@ public
 frontend/public/*
 !frontend/public/icon-192.png
 !frontend/public/icon-512.png
+!frontend/public/images/
+!frontend/public/images/estate/
+!frontend/public/images/estate/listing-apartment-fallback.png
+!frontend/public/images/estate/listing-land-fallback.png
 !frontend/public/login.svg
 !frontend/public/manifest.json
 !frontend/public/sw.js

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowRight,
   BadgeCheck,
@@ -80,6 +80,7 @@ import {
   type LandAcquisitionItem,
   type LandAcquisitionSummary,
   type LandAcquisitionStage,
+  type LandAcquisitionStageDocumentRequirement,
 } from '@/services/estate-acquisition.service';
 
 const CadastralMapPanel = dynamic(() => import('./CadastralMapPanel'), {
@@ -90,6 +91,8 @@ const ProcedurePdfViewer = dynamic(
   () => import('@/components/procedures/ProcedurePdfViewer'),
   { ssr: false }
 );
+
+const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 10, 12]);
 
 type FieldType = 'text' | 'date' | 'textarea' | 'select' | 'check';
 
@@ -111,6 +114,7 @@ type PendingAcquisitionDocument = {
   file: File;
   documentType: string;
   documentName: string;
+  requirementId?: string;
 };
 
 const stageIcons: Record<
@@ -1131,7 +1135,18 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
     WORKSPACE_FIELDS[kind].map((config) => [config.key, config.label])
   );
   labels.set('vendorId', 'Linked Vendor / Owner');
+  labels.set('stageDocuments', 'Stage Documents');
   return keys.map((key) => labels.get(key) || key);
+}
+
+function completedWorkflowActionLabel(action: string) {
+  if (action.startsWith('Submit for ')) {
+    return action.replace('Submit for ', 'Submitted for ');
+  }
+  if (action.startsWith('Submit ')) {
+    return action.replace('Submit ', 'Submitted ');
+  }
+  return action;
 }
 
 function useAcquisitionBoard() {
@@ -1161,6 +1176,7 @@ function useAcquisitionBoard() {
 
 export default function LandAcquisitionPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { hasAnyRole } = useAuth();
   const { stages, loading, reload } = useAcquisitionBoard();
   const [selectedStageId, setSelectedStageId] = React.useState(0);
@@ -1179,6 +1195,10 @@ export default function LandAcquisitionPage() {
     null
   );
   const [query, setQuery] = React.useState('');
+  const [stageDocumentRequirements, setStageDocumentRequirements] =
+    React.useState<Record<number, LandAcquisitionStageDocumentRequirement[]>>(
+      {}
+    );
 
   const selectedStage =
     stages.find((stage) => stage.id === selectedStageId) || stages[0];
@@ -1233,13 +1253,33 @@ export default function LandAcquisitionPage() {
     'WorkflowAdmin',
   ]);
   const canCreateAcquisition = stages.some((stage) => stage.order === 0);
+  const requestedAcquisitionId = searchParams.get('acquisitionId');
+  const requestedStage = searchParams.get('stage');
+  const openedFromRouteRef = React.useRef<string | null>(null);
 
-  const openWorkspace = async (item: LandAcquisitionItem) => {
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const requirements =
+          await estateAcquisitionService.getActiveWorkflowDocumentRequirements();
+        if (mounted) setStageDocumentRequirements(requirements);
+      } catch (error) {
+        console.error(error);
+        if (mounted) setStageDocumentRequirements({});
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const openWorkspaceAtStage = async (
+    item: LandAcquisitionItem,
+    stage: LandAcquisitionStage
+  ) => {
     setDraftItem(null);
-    const stage =
-      stages.find((candidate) => candidate.order === item.stageOrder) ||
-      selectedStage;
-    if (!stage) return;
     setSelectedStageId(stage.id);
     setSelectedItemId(item.id);
     const defaults = defaultsFor(stage.workspaceKind, item);
@@ -1256,6 +1296,36 @@ export default function LandAcquisitionPage() {
     }
     setWorkspaceOpen(true);
   };
+
+  const openWorkspace = async (item: LandAcquisitionItem) => {
+    const stage =
+      stages.find((candidate) => candidate.order === item.stageOrder) ||
+      selectedStage;
+    if (!stage) return;
+    await openWorkspaceAtStage(item, stage);
+  };
+
+  React.useEffect(() => {
+    if (!requestedAcquisitionId || loading || stages.length === 0) return;
+    const routeKey = `${requestedAcquisitionId}:${requestedStage || ''}`;
+    if (openedFromRouteRef.current === routeKey) return;
+
+    const item = allItems.find((candidate) => candidate.id === requestedAcquisitionId);
+    if (!item) {
+      setQuery(requestedAcquisitionId);
+      return;
+    }
+
+    const parsedStage = requestedStage ? Number(requestedStage) : item.stageOrder;
+    const targetStage =
+      stages.find((stage) => stage.order === parsedStage || stage.id === parsedStage) ||
+      stages.find((stage) => stage.order === item.stageOrder);
+    if (!targetStage) return;
+
+    openedFromRouteRef.current = routeKey;
+    setQuery(item.projectReference);
+    void openWorkspaceAtStage(item, targetStage);
+  }, [allItems, loading, requestedAcquisitionId, requestedStage, stages]);
 
   const openNewAcquisition = () => {
     const stage =
@@ -1302,6 +1372,15 @@ export default function LandAcquisitionPage() {
       });
       if (!result.success)
         throw new Error(result.message || 'Workflow action failed.');
+      const returnedItem = result.item;
+      const nextStage =
+        returnedItem &&
+        stages.find((candidate) => candidate.order === returnedItem.stageOrder);
+      if (nextStage && returnedItem) {
+        // Keep the land acquisition board focused on the stage returned by the workflow engine after handoff.
+        setSelectedStageId(nextStage.id);
+        setSelectedItemId(returnedItem.id);
+      }
       await reload();
     } catch (error) {
       console.error(error);
@@ -1561,6 +1640,11 @@ export default function LandAcquisitionPage() {
           }}
           item={(draftItem || selectedItem) as LandAcquisitionItem}
           stage={selectedStage}
+          documentRequirements={
+            stageDocumentRequirements[selectedStage.id] ||
+            stageDocumentRequirements[selectedStage.order] ||
+            []
+          }
           values={workspaceValues}
           onChange={setWorkspaceValues}
           onSave={saveWorkspace}
@@ -1729,6 +1813,10 @@ function AcquisitionDetail({
   const forwardActionReason = item.stageInputsComplete
     ? undefined
     : `Complete all stage inputs first: ${missingLabels.slice(0, 4).join(', ')}${missingLabels.length > 4 ? ` and ${missingLabels.length - 4} more` : ''}.`;
+  const workflowActionDescription =
+    item.stageOrder > stage.order
+      ? completedWorkflowActionLabel(stage.primaryAction)
+      : stage.primaryAction;
 
   const openSummary = async () => {
     setSummaryOpen(true);
@@ -1879,7 +1967,7 @@ function AcquisitionDetail({
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Workflow Actions</CardTitle>
-              <CardDescription>{stage.primaryAction}</CardDescription>
+              <CardDescription>{workflowActionDescription}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {!item.stageInputsComplete && (
@@ -1896,13 +1984,15 @@ function AcquisitionDetail({
                 status={item.status}
                 showStepBadge
                 currentStepName={stage.title}
+                loadWorkflowSummary
                 canSubmit={
                   item.status === 'Draft' ||
                   (item.status === 'Rejected' && item.stageOrder === 0)
                 }
                 canApproveReject={
-                  item.status === 'Pending Approval' ||
-                  item.status === 'Submitted'
+                  ACQUISITION_APPROVAL_STAGE_IDS.has(stage.id) &&
+                  (item.status === 'Pending Approval' ||
+                    item.status === 'Submitted')
                 }
                 forwardActionsDisabled={!item.stageInputsComplete}
                 forwardActionsDisabledReason={forwardActionReason}
@@ -2045,6 +2135,7 @@ function WorkspaceDialog({
   onOpenChange,
   item,
   stage,
+  documentRequirements,
   values,
   onChange,
   onSave,
@@ -2054,6 +2145,7 @@ function WorkspaceDialog({
   onOpenChange: (open: boolean) => void;
   item: LandAcquisitionItem;
   stage: LandAcquisitionStage;
+  documentRequirements: LandAcquisitionStageDocumentRequirement[];
   values: Record<string, string | boolean>;
   onChange: (values: Record<string, string | boolean>) => void;
   onSave: (pendingDocuments?: PendingAcquisitionDocument[]) => Promise<void>;
@@ -2067,6 +2159,7 @@ function WorkspaceDialog({
     []
   );
   const [loadingDocuments, setLoadingDocuments] = React.useState(false);
+  const [uploadingDocuments, setUploadingDocuments] = React.useState(false);
   const [pendingDocuments, setPendingDocuments] = React.useState<
     PendingAcquisitionDocument[]
   >([]);
@@ -2195,6 +2288,73 @@ function WorkspaceDialog({
     }
   };
 
+  const attachDocument = async (pendingDocument: PendingAcquisitionDocument) => {
+    if (!item.id) {
+      setPendingDocuments((current) => [
+        ...current.filter(
+          (document) =>
+            !pendingDocument.requirementId ||
+            document.requirementId !== pendingDocument.requirementId
+        ),
+        pendingDocument,
+      ]);
+      return;
+    }
+
+    try {
+      setUploadingDocuments(true);
+      const uploaded = await estateAcquisitionService.uploadDocument(
+        item.id,
+        stage.id,
+        pendingDocument.file,
+        pendingDocument.documentType,
+        pendingDocument.documentName
+      );
+      setDocuments((current) => [
+        uploaded,
+        ...current.filter(
+          (document) =>
+            pendingDocument.requirementId == null ||
+            !matchesRequirement(document, {
+              id: pendingDocument.requirementId,
+              requirementKey: pendingDocument.requirementId,
+              documentName: pendingDocument.documentName,
+              documentType: pendingDocument.documentType,
+              isRequired: true,
+            })
+        ),
+      ]);
+      toast.success('Document uploaded.');
+    } catch (error) {
+      console.error(error);
+      toast.error('Unable to upload document.');
+    } finally {
+      setUploadingDocuments(false);
+    }
+  };
+
+  const normalizeDocumentValue = (value?: string) =>
+    (value || '').trim().toLowerCase();
+  const matchesRequirement = (
+    document: Pick<LandAcquisitionDocument, 'documentName' | 'documentType'>,
+    requirement: LandAcquisitionStageDocumentRequirement
+  ) =>
+    normalizeDocumentValue(document.documentName) ===
+      normalizeDocumentValue(requirement.documentName) ||
+    (!!document.documentType &&
+      !!requirement.documentType &&
+      normalizeDocumentValue(document.documentType) ===
+        normalizeDocumentValue(requirement.documentType));
+  const hasRequirements = documentRequirements.length > 0;
+  const unclassifiedDocuments = hasRequirements
+    ? documents.filter(
+        (document) =>
+          !documentRequirements.some((requirement) =>
+            matchesRequirement(document, requirement)
+          )
+      )
+    : documents;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-5xl overflow-hidden p-0">
@@ -2229,33 +2389,36 @@ function WorkspaceDialog({
                     Stage documents
                   </h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Attach files that support this procedure stage.
+                    Attach the configured documents required for this procedure stage.
                   </p>
                 </div>
-                <Button variant="outline" size="sm" asChild>
-                  <label>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Add Files
-                    <input
-                      className="sr-only"
-                      type="file"
-                      multiple
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt"
-                      onChange={(event) => {
-                        const files = Array.from(event.target.files || []);
-                        setPendingDocuments((current) => [
-                          ...current,
-                          ...files.map((file) => ({
-                            file,
-                            documentType: stage.title,
-                            documentName: file.name,
-                          })),
-                        ]);
-                        event.currentTarget.value = '';
-                      }}
-                    />
-                  </label>
-                </Button>
+                {!hasRequirements && (
+                  <Button variant="outline" size="sm" asChild>
+                    <label>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Add Files
+                      <input
+                        className="sr-only"
+                        type="file"
+                        multiple
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt"
+                        onChange={(event) => {
+                          const files = Array.from(event.target.files || []);
+                          void Promise.all(
+                            files.map((file) =>
+                              attachDocument({
+                                file,
+                                documentType: stage.title,
+                                documentName: file.name,
+                              })
+                            )
+                          );
+                          event.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
+                  </Button>
+                )}
               </div>
               <div className="space-y-2">
                 {loadingDocuments && (
@@ -2265,13 +2428,156 @@ function WorkspaceDialog({
                   </div>
                 )}
                 {!loadingDocuments &&
-                  documents.length === 0 &&
+                  !hasRequirements &&
+                  unclassifiedDocuments.length === 0 &&
                   pendingDocuments.length === 0 && (
                     <p className="text-sm text-muted-foreground">
                       No documents attached for this stage.
                     </p>
                   )}
-                {documents.map((document) => (
+                {hasRequirements &&
+                  documentRequirements.map((requirement) => {
+                    const attached = documents.filter((document) =>
+                      matchesRequirement(document, requirement)
+                    );
+                    const pending = pendingDocuments.filter(
+                      (document) => document.requirementId === requirement.id
+                    );
+                    const complete = attached.length > 0 || pending.length > 0;
+
+                    return (
+                      <div
+                        key={requirement.id}
+                        className="rounded-md border px-3 py-3 text-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <p className="font-medium">
+                                {requirement.documentName}
+                                {requirement.isRequired && (
+                                  <span className="text-destructive"> *</span>
+                                )}
+                              </p>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {requirement.documentType || 'Document'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={complete ? 'secondary' : 'outline'}>
+                              {complete ? 'Attached' : 'Pending'}
+                            </Badge>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={uploadingDocuments}
+                              asChild
+                            >
+                              <label>
+                                <Upload className="mr-2 h-4 w-4" />
+                                Upload
+                                <input
+                                  className="sr-only"
+                                  type="file"
+                                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt"
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    if (!file) return;
+                                    void attachDocument({
+                                        file,
+                                        requirementId: requirement.id,
+                                        documentType:
+                                          requirement.documentType ||
+                                          stage.title,
+                                        documentName:
+                                          requirement.documentName,
+                                    });
+                                    event.currentTarget.value = '';
+                                  }}
+                                />
+                              </label>
+                            </Button>
+                          </div>
+                        </div>
+                        {[...attached, ...pending].length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {attached.map((document) => (
+                              <div
+                                key={document.id}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">
+                                    {document.fileName}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {document.uploadedBy || 'System'}
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() =>
+                                      void openDocument(document, true)
+                                    }
+                                  >
+                                    <Eye className="mr-1 h-4 w-4" />
+                                    View
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() =>
+                                      void openDocument(document, false)
+                                    }
+                                  >
+                                    <Download className="mr-1 h-4 w-4" />
+                                    Download
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                            {pending.map((document) => (
+                              <div
+                                key={`${document.file.name}-${requirement.id}`}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">
+                                    {document.file.name}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Ready to save
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    setPendingDocuments((current) =>
+                                      current.filter(
+                                        (item) =>
+                                          item.requirementId !== requirement.id
+                                      )
+                                    )
+                                  }
+                                >
+                                  <Ban className="mr-1 h-4 w-4" />
+                                  Remove
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                {unclassifiedDocuments.map((document) => (
                   <div
                     key={document.id}
                     className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
@@ -2310,7 +2616,9 @@ function WorkspaceDialog({
                     </div>
                   </div>
                 ))}
-                {pendingDocuments.map((document, index) => (
+                {pendingDocuments
+                  .filter((document) => !hasRequirements || !document.requirementId)
+                  .map((document, index) => (
                   <div
                     key={`${document.file.name}-${index}`}
                     className="grid gap-2 rounded-md border border-dashed p-3 md:grid-cols-[1fr_180px_auto]"

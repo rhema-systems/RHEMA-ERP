@@ -4,7 +4,9 @@ import { workflowApiService } from './workflow-api.service';
 import {
   WorkflowApprovalType,
   WorkflowAssignmentType,
+  type WorkflowDocumentRequirementDto,
   WorkflowFieldType,
+  type WorkflowQualityCheckDto,
   WorkflowRejectionHandling,
   WorkflowStepType,
 } from '@/types/workflow';
@@ -119,6 +121,14 @@ export interface LandAcquisitionDocument {
   uploadedBy?: string;
 }
 
+export interface LandAcquisitionStageDocumentRequirement {
+  id: string;
+  requirementKey: string;
+  documentName: string;
+  documentType?: string;
+  isRequired: boolean;
+}
+
 export interface EstateManagedAsset {
   id: string;
   assetCode: string;
@@ -139,6 +149,7 @@ interface MaybeApiResponse<T> {
   success?: boolean;
   data?: T;
   stages?: LandAcquisitionStage[];
+  item?: LandAcquisitionItem;
   message?: string;
 }
 
@@ -629,14 +640,16 @@ export class EstateAcquisitionService {
     };
   }
 
-  async runWorkflowAction(payload: LandAcquisitionActionPayload): Promise<{ success: boolean; message?: string }> {
-    const response = await apiService.post<MaybeApiResponse<{ success: boolean; message?: string }>>(
+  async runWorkflowAction(payload: LandAcquisitionActionPayload): Promise<{ success: boolean; message?: string; item?: LandAcquisitionItem }> {
+    const response = await apiService.post<MaybeApiResponse<{ success: boolean; message?: string; item?: LandAcquisitionItem }>>(
       '/estate/land-acquisitions/workflow-action',
       payload
     );
+    const source = response.data ?? response;
     return {
       success: response.success !== false,
       message: response.message || (payload.actionType === 'primary' ? 'Workflow action completed.' : 'Acquisition returned.'),
+      item: source.item,
     };
   }
 
@@ -685,6 +698,86 @@ export class EstateAcquisitionService {
       `/estate/land-acquisitions/${acquisitionId}/documents`
     );
     return response.data || [];
+  }
+
+  async getActiveWorkflowDocumentRequirements(): Promise<Record<number, LandAcquisitionStageDocumentRequirement[]>> {
+    const catalogRequirements = ACQUISITION_STAGES.reduce<Record<number, LandAcquisitionStageDocumentRequirement[]>>((acc, stage) => {
+      const requirements = requirementsFor(stage).documents.map((item, index) => ({
+        id: `${stage.workspaceKind}-${item.key || index + 1}`,
+        requirementKey: item.key || `${stage.workspaceKind}-document-${index + 1}`,
+        documentName: item.name,
+        documentType: item.type,
+        isRequired: true,
+      }));
+
+      if (requirements.length > 0) {
+        acc[stage.id] = requirements;
+      }
+
+      return acc;
+    }, {});
+
+    try {
+      const definitions = await workflowApiService.getWorkflowDefinitions({
+        page: 1,
+        pageSize: 5,
+        sortBy: 'CreatedAt',
+        sortDescending: true,
+        entityType: 'LandAcquisition',
+        isActive: true,
+      });
+
+      const definition =
+        definitions.data.find((item) => item.isActive && item.entityType === 'LandAcquisition') ||
+        definitions.data[0];
+
+      if (!definition) return catalogRequirements;
+
+      const detail = await workflowApiService.getWorkflowDefinition(definition.id);
+      const workflowRequirements = (detail.steps || []).reduce<Record<number, LandAcquisitionStageDocumentRequirement[]>>(
+        (acc, step) => {
+          const taskRequirements = (step.configuration?.taskConfig?.documentRequirements || [])
+            .filter((item: WorkflowDocumentRequirementDto) => item.documentName?.trim() || item.requirementKey?.trim())
+            .map((item: WorkflowDocumentRequirementDto, index: number) => ({
+              id: item.id || `${step.id}-document-${index + 1}`,
+              requirementKey: item.requirementKey?.trim() || `${step.id}-document-${index + 1}`,
+              documentName: item.documentName?.trim() || `Document ${index + 1}`,
+              documentType: item.documentType?.trim() || undefined,
+              isRequired: item.isRequired !== false,
+            }));
+          const qualityRequirements = (step.configuration?.qualityConfig?.qualityChecks || [])
+            .filter((item: WorkflowQualityCheckDto) => item.requiresDocument && (item.documentName?.trim() || item.name?.trim()))
+            .map((item: WorkflowQualityCheckDto, index: number) => ({
+              id: item.id || `${step.id}-check-document-${index + 1}`,
+              requirementKey: item.id || `${step.id}-check-document-${index + 1}`,
+              documentName: item.documentName?.trim() || item.name.trim(),
+              documentType: item.documentType?.trim() || undefined,
+              isRequired: item.isRequired !== false,
+            }));
+          const requirements = [...taskRequirements, ...qualityRequirements]
+            .filter((item, index, all) =>
+              all.findIndex((candidate) =>
+                candidate.documentName.toLowerCase() === item.documentName.toLowerCase()
+              ) === index
+            );
+
+          if (requirements.length > 0) {
+            acc[step.order - 1] = requirements;
+            acc[step.order] = requirements;
+          }
+
+          return acc;
+        },
+        {}
+      );
+
+      return {
+        ...catalogRequirements,
+        ...workflowRequirements,
+      };
+    } catch {
+      return catalogRequirements;
+    }
   }
 
   async uploadDocument(acquisitionId: string, procedureId: number, file: File, documentType: string, documentName?: string): Promise<LandAcquisitionDocument> {

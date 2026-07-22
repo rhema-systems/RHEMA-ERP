@@ -2,8 +2,10 @@ using System.Globalization;
 using System.Text.Json;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.DTOs.Estate;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
@@ -39,6 +41,7 @@ public class LandAcquisitionsController : ControllerBase
         [14] = ["registryOffice", "registrationNumber", "volume", "folio", "registrationDate", "isRegistered", "documentName", "registrationNotes"],
         [15] = ["assetCode", "assetNumber", "parcelIdentifier", "registrationNumber", "ownerName", "assetLocation", "assetCategory", "size", "sizeUnit", "assetStatus", "purpose", "zoningClassification", "ownershipVerification", "capitalizationValue", "glAccount", "custodian", "assetNotes"]
     };
+    private static readonly ISet<int> StagesRequiringDocuments = new HashSet<int>(RequiredStageInputs.Keys);
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
@@ -77,10 +80,11 @@ public class LandAcquisitionsController : ControllerBase
             .ToListAsync(cancellationToken);
 
         var isAdministrator = IsWorkflowAdministrator();
+        var userId = GetUserId();
         var visibleByStage = new Dictionary<int, List<LandAcquisition>>();
         foreach (var acquisition in acquisitions)
         {
-            if (await CanAccessStageAsync(acquisition, acquisition.StageOrder, userId: GetUserId(), isAdministrator))
+            if (await CanViewStageAsync(acquisition, acquisition.StageOrder, userId, isAdministrator))
             {
                 if (!visibleByStage.TryGetValue(acquisition.StageOrder, out var visible))
                 {
@@ -196,8 +200,8 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
-        if (procedureId != acquisition.StageOrder ||
-            !await CanAccessStageAsync(acquisition, procedureId, GetUserId(), IsWorkflowAdministrator()))
+        if (procedureId > acquisition.StageOrder ||
+            !await CanViewStageAsync(acquisition, procedureId, GetUserId(), IsWorkflowAdministrator()))
         {
             return Forbid();
         }
@@ -240,7 +244,7 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
-        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
+        if (!await CanViewStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
         {
             return Forbid();
         }
@@ -279,7 +283,7 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
-        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
+        if (!await CanViewStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
         {
             return Forbid();
         }
@@ -321,8 +325,14 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
-        if (procedureId != acquisition.StageOrder ||
-            !await CanAccessStageAsync(acquisition, procedureId, GetUserId(), IsWorkflowAdministrator()))
+        var userId = GetUserId();
+        var isAdministrator = IsWorkflowAdministrator();
+        var canUploadCurrentStage = procedureId == acquisition.StageOrder &&
+            await CanAccessStageAsync(acquisition, procedureId, userId, isAdministrator);
+        // Completed-stage uploads let the estate originator recover stage evidence after workflow handoff without granting access to future stages.
+        var canUploadCompletedStage = procedureId < acquisition.StageOrder &&
+            await CanViewStageAsync(acquisition, procedureId, userId, isAdministrator);
+        if (procedureId > acquisition.StageOrder || (!canUploadCurrentStage && !canUploadCompletedStage))
         {
             return Forbid();
         }
@@ -338,14 +348,13 @@ public class LandAcquisitionsController : ControllerBase
             FilePath = filePath,
             DocumentType = string.IsNullOrWhiteSpace(documentType) ? "Other" : documentType.Trim(),
             Procedure = (AcquisitionProcedure)procedureId,
-            CreatedById = GetUserId(),
+            CreatedById = userId,
             CreatedBy = _currentUserService.UserName,
             CreatedAt = DateTime.UtcNow
         };
 
-        acquisition.Documents.Add(document);
-        acquisition.UpdatedAt = DateTime.UtcNow;
-        acquisition.LastModifiedById = GetUserId();
+        // Add the stage document directly; updating the parent acquisition is not required for document counts and can conflict with workflow handoff writes.
+        _context.Set<LandAcquisitionDocument>().Add(document);
         await _context.SaveChangesAsync(cancellationToken);
 
         return Ok(new { success = true, data = ToDocumentDto(document), message = "Land acquisition document uploaded." });
@@ -364,7 +373,7 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
-        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
+        if (!await CanViewStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
         {
             return Forbid();
         }
@@ -470,6 +479,7 @@ public class LandAcquisitionsController : ControllerBase
         try
         {
             WorkflowIntegrationResult result;
+            var advancedInitialSubmission = false;
             if (IsInitialSubmission(acquisition, request))
             {
                 result = await _workflowIntegrationService.SubmitAsync(WorkflowEntityType, acquisition.Id);
@@ -481,6 +491,7 @@ public class LandAcquisitionsController : ControllerBase
                 acquisition.SubmittedAt = DateTime.UtcNow;
                 acquisition.SubmittedById = userId;
                 acquisition.Status = LandAcquisitionStatus.PendingApproval;
+                advancedInitialSubmission = await AdvanceInitialSubmissionToSuitabilityAsync(acquisition, result.ExecutionResult.WorkflowInstanceId, userId, request.Comments, cancellationToken);
             }
             else
             {
@@ -490,6 +501,8 @@ public class LandAcquisitionsController : ControllerBase
                 {
                     return Forbid();
                 }
+
+                await StoreWorkflowStepEvidenceAsync(acquisition, userId, cancellationToken);
 
                 result = await _workflowIntegrationService.ProcessApprovalAsync(
                     WorkflowEntityType,
@@ -505,7 +518,10 @@ public class LandAcquisitionsController : ControllerBase
             }
 
             ApplyWorkflowOutcome(acquisition, result.Outcome, request, userId);
-            await SyncStageFromWorkflowAsync(acquisition, result.Outcome, cancellationToken);
+            if (!advancedInitialSubmission)
+            {
+                await SyncStageFromWorkflowAsync(acquisition, result.Outcome, cancellationToken);
+            }
 
             acquisition.LastModifiedById = userId;
             acquisition.UpdatedAt = DateTime.UtcNow;
@@ -890,6 +906,12 @@ public class LandAcquisitionsController : ControllerBase
             .Where(key => !values.TryGetValue(key, out var value) || !HasInputValue(value))
             .ToList();
 
+        if (StagesRequiringDocuments.Contains(procedureId) &&
+            acquisition.Documents.All(document => document.IsDeleted || (int)document.Procedure != procedureId))
+        {
+            missing.Add("stageDocuments");
+        }
+
         if (procedureId == (int)AcquisitionProcedure.OwnershipClassification &&
             values.TryGetValue("isCurrentOwner", out var currentOwnerValue) &&
             currentOwnerValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
@@ -957,20 +979,317 @@ public class LandAcquisitionsController : ControllerBase
         return await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, acquisition.Id, userId);
     }
 
+    private async Task<bool> CanViewStageAsync(
+        LandAcquisition acquisition,
+        int stageOrder,
+        Guid userId,
+        bool isAdministrator)
+    {
+        if (isAdministrator) return true;
+        if (acquisition.CreatedById == userId ||
+            acquisition.SubmittedById == userId ||
+            acquisition.LastModifiedById == userId)
+        {
+            return true;
+        }
+
+        var stage = StageDefinitions.FirstOrDefault(candidate => candidate.Order == stageOrder);
+        if (stage == null) return false;
+        if (stageOrder == 0) return HasRole(stage.RequiredRole);
+        if (userId == Guid.Empty) return false;
+
+        // Board visibility is broader than approval authority so originators can track handoffs while approver-only actions stay locked down elsewhere.
+        return await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, acquisition.Id, userId);
+    }
+
+    private async Task StoreWorkflowStepEvidenceAsync(
+        LandAcquisition acquisition,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        if (!acquisition.WorkflowInstanceId.HasValue)
+        {
+            return;
+        }
+
+        var stepInstance = await _context.WorkflowStepInstances
+            .Include(step => step.WorkflowStep)
+            .Where(step => step.WorkflowInstanceId == acquisition.WorkflowInstanceId.Value &&
+                step.WorkflowStepId == step.WorkflowInstance!.CurrentStepId &&
+                (step.Status == WorkflowStepInstanceStatus.Pending || step.Status == WorkflowStepInstanceStatus.InProgress))
+            .OrderByDescending(step => step.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var stepConfig = ReadWorkflowStepConfiguration(stepInstance?.WorkflowStep?.Configuration);
+        if (stepInstance == null || stepConfig == null)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var qualityResponses = stepConfig.QualityConfig?.QualityChecks?
+            .Where(check => !string.IsNullOrWhiteSpace(check.Name))
+            .Select(check => new WorkflowApprovalChecklistResponseDto
+            {
+                Id = check.Id,
+                Name = check.Name,
+                IsSatisfied = true,
+                Notes = "Satisfied from Estate/Facility land acquisition stage workspace.",
+                CompletedById = userId,
+                CompletedByName = _currentUserService.UserName,
+                CompletedAt = now
+            })
+            .ToList() ?? [];
+
+        var stageDocuments = acquisition.Documents
+            .Where(document => !document.IsDeleted && (int)document.Procedure == acquisition.StageOrder)
+            .OrderByDescending(document => document.CreatedAt)
+            .ToList();
+        var documentRequirements = ReadWorkflowDocumentRequirements(stepConfig.TaskConfig);
+        var taskAttachments = documentRequirements
+            .Select((requirement, index) =>
+            {
+                var document = stageDocuments.FirstOrDefault(candidate =>
+                        !string.IsNullOrWhiteSpace(requirement.DocumentType) &&
+                        string.Equals(candidate.DocumentType, requirement.DocumentType, StringComparison.OrdinalIgnoreCase)) ??
+                    stageDocuments.ElementAtOrDefault(Math.Min(index, Math.Max(stageDocuments.Count - 1, 0)));
+
+                if (document == null)
+                {
+                    return null;
+                }
+
+                return new WorkflowTaskAttachmentDto
+                {
+                    Id = document.Id.ToString("N"),
+                    RequirementKey = requirement.RequirementKey,
+                    DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? document.DocumentType : requirement.DocumentType,
+                    DocumentName = requirement.DocumentName,
+                    FileName = document.FileName,
+                    FilePath = document.FilePath,
+                    ContentType = "application/octet-stream",
+                    FileSizeBytes = 0,
+                    UploadedAt = document.CreatedAt,
+                    UploadedById = document.CreatedById ?? userId,
+                    UploadedByName = document.CreatedBy ?? _currentUserService.UserName
+                };
+            })
+            .Where(attachment => attachment != null)
+            .Cast<WorkflowTaskAttachmentDto>()
+            .ToList();
+
+        if (qualityResponses.Count == 0 && taskAttachments.Count == 0)
+        {
+            return;
+        }
+
+        // Workflow task/checklist evidence is configured outside the acquisition form, so completed stage data is bridged here before approval.
+        stepInstance.ResultData = MergeWorkflowStepResultData(stepInstance.ResultData, new
+        {
+            approvalChecklistResponses = qualityResponses,
+            workflowTaskAttachments = taskAttachments
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static WorkflowStepConfigurationDto? ReadWorkflowStepConfiguration(string? configurationJson)
+    {
+        if (string.IsNullOrWhiteSpace(configurationJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<WorkflowDocumentRequirementDto> ReadWorkflowDocumentRequirements(WorkflowTaskConfigDto? taskConfig)
+    {
+        if (taskConfig == null)
+        {
+            return [];
+        }
+
+        var configured = taskConfig.DocumentRequirements?
+            .Where(requirement =>
+                requirement.IsRequired &&
+                (!string.IsNullOrWhiteSpace(requirement.DocumentName) ||
+                 !string.IsNullOrWhiteSpace(requirement.RequirementKey)))
+            .Select((requirement, index) => new WorkflowDocumentRequirementDto
+            {
+                Id = string.IsNullOrWhiteSpace(requirement.Id) ? $"document-{index + 1}" : requirement.Id,
+                RequirementKey = string.IsNullOrWhiteSpace(requirement.RequirementKey)
+                    ? BuildWorkflowRequirementKey(requirement.DocumentName, index)
+                    : requirement.RequirementKey.Trim(),
+                DocumentName = string.IsNullOrWhiteSpace(requirement.DocumentName)
+                    ? $"Document {index + 1}"
+                    : requirement.DocumentName.Trim(),
+                DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? null : requirement.DocumentType.Trim(),
+                IsRequired = requirement.IsRequired
+            })
+            .ToList() ?? [];
+
+        if (configured.Count > 0)
+        {
+            return configured;
+        }
+
+        if (taskConfig.RequiresDocument ||
+            string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(taskConfig.DocumentName))
+        {
+            return
+            [
+                new WorkflowDocumentRequirementDto
+                {
+                    Id = "document-1",
+                    RequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey)
+                        ? BuildWorkflowRequirementKey(taskConfig.DocumentName, 0)
+                        : taskConfig.DocumentRequirementKey.Trim(),
+                    DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
+                        ? "Required document"
+                        : taskConfig.DocumentName.Trim(),
+                    IsRequired = true
+                }
+            ];
+        }
+
+        return [];
+    }
+
+    private static string BuildWorkflowRequirementKey(string? value, int index)
+    {
+        var source = string.IsNullOrWhiteSpace(value) ? $"document-{index + 1}" : value.Trim().ToLowerInvariant();
+        var chars = source.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray();
+        var key = new string(chars).Trim('-');
+        while (key.Contains("--", StringComparison.Ordinal))
+        {
+            key = key.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        return string.IsNullOrWhiteSpace(key) ? $"document-{index + 1}" : key;
+    }
+
+    private static string MergeWorkflowStepResultData(string? existingResultData, object payload)
+    {
+        var incomingJson = JsonSerializer.Serialize(payload);
+        if (string.IsNullOrWhiteSpace(existingResultData))
+        {
+            return incomingJson;
+        }
+
+        try
+        {
+            using var existingDocument = JsonDocument.Parse(existingResultData);
+            using var incomingDocument = JsonDocument.Parse(incomingJson);
+            if (existingDocument.RootElement.ValueKind != JsonValueKind.Object ||
+                incomingDocument.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return incomingJson;
+            }
+
+            var merged = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in existingDocument.RootElement.EnumerateObject())
+            {
+                merged[property.Name] = property.Value.Clone();
+            }
+
+            foreach (var property in incomingDocument.RootElement.EnumerateObject())
+            {
+                merged[property.Name] = property.Value.Clone();
+            }
+
+            return JsonSerializer.Serialize(merged);
+        }
+        catch (JsonException)
+        {
+            return incomingJson;
+        }
+    }
+
     private T Child<T>(T child, LandAcquisition acquisition) where T : TenantEntity
     {
         child.TenantId = acquisition.TenantId;
-        if (child is LandPhysicalAssessment physical) physical.LandAcquisition = acquisition;
-        if (child is CadastralSurvey survey) acquisition.CadastralSurveys.Add(survey);
-        if (child is OwnershipHistory owner) acquisition.OwnershipHistories.Add(owner);
-        if (child is NegotiationOffer offer) acquisition.NegotiationOffers.Add(offer);
-        if (child is LandAgreement agreement) agreement.LandAcquisition = acquisition;
-        if (child is LandInstrument instrument) instrument.LandAcquisition = acquisition;
-        if (child is StatutoryConsent consent) consent.LandAcquisition = acquisition;
-        if (child is StampDutyAssessment assessment) assessment.LandAcquisition = acquisition;
-        if (child is StampDutyPayment payment) payment.LandAcquisition = acquisition;
-        if (child is LandRegistration registration) acquisition.Registrations.Add(registration);
-        if (child is LandAsset asset) acquisition.LandAssets.Add(asset);
+        // Stage workspaces add acquisition child records as users progress; set the FK explicitly so EF does not rely on navigation fix-up during workflow handoffs.
+        if (child is LandPhysicalAssessment physical)
+        {
+            physical.LandAcquisitionId = acquisition.Id;
+            physical.LandAcquisition = acquisition;
+            acquisition.PhysicalAssessment = physical;
+            _context.Set<LandPhysicalAssessment>().Add(physical);
+        }
+        if (child is CadastralSurvey survey)
+        {
+            survey.LandAcquisitionId = acquisition.Id;
+            acquisition.CadastralSurveys.Add(survey);
+            _context.Set<CadastralSurvey>().Add(survey);
+        }
+        if (child is OwnershipHistory owner)
+        {
+            owner.LandAcquisitionId = acquisition.Id;
+            acquisition.OwnershipHistories.Add(owner);
+            _context.Set<OwnershipHistory>().Add(owner);
+        }
+        if (child is NegotiationOffer offer)
+        {
+            offer.LandAcquisitionId = acquisition.Id;
+            acquisition.NegotiationOffers.Add(offer);
+            _context.Set<NegotiationOffer>().Add(offer);
+        }
+        if (child is LandAgreement agreement)
+        {
+            agreement.LandAcquisitionId = acquisition.Id;
+            agreement.LandAcquisition = acquisition;
+            acquisition.Agreement = agreement;
+            _context.Set<LandAgreement>().Add(agreement);
+        }
+        if (child is LandInstrument instrument)
+        {
+            instrument.LandAcquisitionId = acquisition.Id;
+            instrument.LandAcquisition = acquisition;
+            acquisition.LandInstrument = instrument;
+            _context.Set<LandInstrument>().Add(instrument);
+        }
+        if (child is StatutoryConsent consent)
+        {
+            consent.LandAcquisitionId = acquisition.Id;
+            consent.LandAcquisition = acquisition;
+            acquisition.StatutoryConsent = consent;
+            _context.Set<StatutoryConsent>().Add(consent);
+        }
+        if (child is StampDutyAssessment assessment)
+        {
+            assessment.LandAcquisitionId = acquisition.Id;
+            assessment.LandAcquisition = acquisition;
+            acquisition.StampDutyAssessment = assessment;
+            _context.Set<StampDutyAssessment>().Add(assessment);
+        }
+        if (child is StampDutyPayment payment)
+        {
+            payment.LandAcquisitionId = acquisition.Id;
+            payment.LandAcquisition = acquisition;
+            acquisition.StampDutyPayment = payment;
+            _context.Set<StampDutyPayment>().Add(payment);
+        }
+        if (child is LandRegistration registration)
+        {
+            registration.LandAcquisitionId = acquisition.Id;
+            acquisition.Registrations.Add(registration);
+            _context.Set<LandRegistration>().Add(registration);
+        }
+        if (child is LandAsset asset)
+        {
+            asset.LandAcquisitionId = acquisition.Id;
+            acquisition.LandAssets.Add(asset);
+            _context.Set<LandAsset>().Add(asset);
+        }
         return child;
     }
 
@@ -981,6 +1300,117 @@ public class LandAcquisitionsController : ControllerBase
 
     private static bool IsReject(string? actionType)
         => string.Equals(actionType, "reject", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<bool> AdvanceInitialSubmissionToSuitabilityAsync(
+        LandAcquisition acquisition,
+        Guid? workflowInstanceId,
+        Guid userId,
+        string? comments,
+        CancellationToken cancellationToken)
+    {
+        if (!workflowInstanceId.HasValue)
+        {
+            return false;
+        }
+
+        var instance = await _context.WorkflowInstances
+            .FirstOrDefaultAsync(item => item.Id == workflowInstanceId.Value, cancellationToken);
+        if (instance == null)
+        {
+            return false;
+        }
+
+        var firstStepIds = await _context.WorkflowSteps
+            .Where(step => step.WorkflowDefinitionId == instance.WorkflowDefinitionId && step.Order == 1)
+            .Select(step => step.Id)
+            .ToListAsync(cancellationToken);
+        var suitabilityStep = await _context.WorkflowSteps
+            .Where(step =>
+                step.WorkflowDefinitionId == instance.WorkflowDefinitionId &&
+                step.Order == 2 &&
+                !step.IsDeleted)
+            .OrderByDescending(step => step.StepType == WorkflowStepType.Approval)
+            .ThenByDescending(step => step.RequiredRole != null)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (firstStepIds.Count == 0 || suitabilityStep == null)
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        // Republished acquisition definitions can leave archived duplicate rows; close by procedure order so the order-1 task cannot trap the live instance.
+        var firstStepInstances = await _context.WorkflowStepInstances
+            .Where(stepInstance =>
+                stepInstance.WorkflowInstanceId == instance.Id &&
+                firstStepIds.Contains(stepInstance.WorkflowStepId) &&
+                !stepInstance.IsDeleted &&
+                stepInstance.Status != WorkflowStepInstanceStatus.Completed)
+            .ToListAsync(cancellationToken);
+
+        foreach (var stepInstance in firstStepInstances)
+        {
+            stepInstance.Status = WorkflowStepInstanceStatus.Completed;
+            stepInstance.CompletedDate = now;
+            stepInstance.Comments = comments;
+            stepInstance.LastModifiedById = userId;
+            stepInstance.UpdatedAt = now;
+        }
+
+        var suitabilityStepInstance = await _context.WorkflowStepInstances
+            .FirstOrDefaultAsync(stepInstance =>
+                stepInstance.WorkflowInstanceId == instance.Id &&
+                stepInstance.WorkflowStepId == suitabilityStep.Id &&
+                !stepInstance.IsDeleted &&
+                stepInstance.Status != WorkflowStepInstanceStatus.Completed,
+                cancellationToken);
+
+        if (suitabilityStepInstance == null)
+        {
+            suitabilityStepInstance = new WorkflowStepInstance
+            {
+                WorkflowInstanceId = instance.Id,
+                WorkflowStepId = suitabilityStep.Id,
+                Status = WorkflowStepInstanceStatus.Pending,
+                CreatedDate = now,
+                TenantId = acquisition.TenantId,
+                CreatedById = userId,
+                CreatedAt = now,
+            };
+            _context.WorkflowStepInstances.Add(suitabilityStepInstance);
+        }
+
+        var suitabilityApproverRole = string.IsNullOrWhiteSpace(suitabilityStep.RequiredRole)
+            ? StageDefinitions[1].RequiredRole
+            : suitabilityStep.RequiredRole;
+
+        if (!await _context.WorkflowApprovals.AnyAsync(approval =>
+                approval.StepInstanceId == suitabilityStepInstance.Id &&
+                approval.Status == WorkflowApprovalStatus.Pending,
+                cancellationToken))
+        {
+            _context.WorkflowApprovals.Add(new WorkflowApproval
+            {
+                StepInstanceId = suitabilityStepInstance.Id,
+                ApproverRole = suitabilityApproverRole,
+                Status = WorkflowApprovalStatus.Pending,
+                RequestedDate = now,
+                TenantId = acquisition.TenantId,
+                CreatedById = userId,
+                CreatedAt = now,
+            });
+        }
+
+        instance.CurrentStepId = suitabilityStep.Id;
+        instance.Status = WorkflowInstanceStatus.InProgress;
+        instance.LastModifiedById = userId;
+        instance.UpdatedAt = now;
+
+        acquisition.WorkflowInstanceId = instance.Id;
+        acquisition.StageOrder = 1;
+        acquisition.CurrentStage = AcquisitionProcedure.SuitabilityApproval;
+        return true;
+    }
 
     private static void ApplyWorkflowOutcome(
         LandAcquisition acquisition,

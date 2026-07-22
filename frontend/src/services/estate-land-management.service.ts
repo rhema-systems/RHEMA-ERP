@@ -53,6 +53,9 @@ export interface EstateManagedAsset {
   status: EstateManagedAssetStatus;
   sourceType: EstateManagedAssetSourceType;
   landAcquisitionId?: string;
+  projectCode?: string;
+  projectTitle?: string;
+  projectUnitCode?: string;
   areaSquareMeters?: number;
   valuationAmount?: number;
   currency: string;
@@ -110,6 +113,24 @@ export interface CreateManualExistingLand {
   notes: string;
   isReadyForProjectManagement: boolean;
   ownershipHistory: ExistingLandOwner[];
+}
+
+export interface UpdateEstateManagedLandDemarcation {
+  cadastreDescription: string;
+  region: string;
+  district: string;
+  town: string;
+  areaValue: number;
+  areaUnit: string;
+  areaSquareMeters?: number;
+  surveyorName: string;
+  surveyDate?: string;
+  surveyPlanNumber: string;
+  mapSheetNumber: string;
+  beaconCount: number;
+  boundaryCoordinates: string;
+  boundaryVerified: boolean;
+  isReadyForProjectManagement: boolean;
 }
 
 export interface EstateManagedAssetDocument {
@@ -175,19 +196,62 @@ export interface EstateManagedAssetQuery {
   take?: number;
 }
 
+const assetTypeNames: Record<EstateManagedAssetType, string> = {
+  [EstateManagedAssetType.Land]: 'Land',
+  [EstateManagedAssetType.Property]: 'Property',
+  [EstateManagedAssetType.Facility]: 'Facility',
+};
+
+const assetStatusNames: Record<EstateManagedAssetStatus, string> = {
+  [EstateManagedAssetStatus.LandBank]: 'LandBank',
+  [EstateManagedAssetStatus.UnderDevelopment]: 'UnderDevelopment',
+  [EstateManagedAssetStatus.Available]: 'Available',
+  [EstateManagedAssetStatus.Reserved]: 'Reserved',
+  [EstateManagedAssetStatus.Leased]: 'Leased',
+  [EstateManagedAssetStatus.Occupied]: 'Occupied',
+  [EstateManagedAssetStatus.Sold]: 'Sold',
+  [EstateManagedAssetStatus.Retired]: 'Retired',
+};
+
+const enumMatches = <T extends number>(
+  actual: T | string | null | undefined,
+  expected: T | undefined,
+  names: Record<T, string>
+) => {
+  if (expected === undefined) return true;
+  if (actual === expected) return true;
+  return String(actual).toLowerCase() === names[expected].toLowerCase();
+};
+
+const assetMatchesQuery = (
+  asset: EstateManagedAsset,
+  query: EstateManagedAssetQuery
+) =>
+  enumMatches(asset.assetType, query.assetType, assetTypeNames) &&
+  enumMatches(asset.status, query.status, assetStatusNames) &&
+  (query.availableForLease === undefined ||
+    asset.isAvailableForLease === query.availableForLease) &&
+  (query.availableForSale === undefined ||
+    asset.isAvailableForSale === query.availableForSale);
+
 export class EstateLandManagementService {
   async getLandBank(search?: string): Promise<EstateManagedAsset[]> {
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets',
       {
-        assetType: EstateManagedAssetType.Land,
-        status: EstateManagedAssetStatus.LandBank,
         search: search || undefined,
         take: 250,
       }
     );
 
-    return Array.isArray(response.data) ? response.data : [];
+    return Array.isArray(response.data)
+      ? response.data.filter((asset) =>
+          assetMatchesQuery(asset, {
+            assetType: EstateManagedAssetType.Land,
+            status: EstateManagedAssetStatus.LandBank,
+          })
+        )
+      : [];
   }
 
   async getManagedAssets(
@@ -196,16 +260,14 @@ export class EstateLandManagementService {
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets',
       {
-        assetType: query.assetType,
-        status: query.status,
         search: query.search || undefined,
-        availableForLease: query.availableForLease,
-        availableForSale: query.availableForSale,
         take: query.take || 250,
       }
     );
 
-    return Array.isArray(response.data) ? response.data : [];
+    return Array.isArray(response.data)
+      ? response.data.filter((asset) => assetMatchesQuery(asset, query))
+      : [];
   }
 
   async updateExternalListing(
@@ -250,6 +312,20 @@ export class EstateLandManagementService {
       throw new Error(
         response.message || 'Unable to make land ready for project management.'
       );
+    return response.data;
+  }
+
+  async updateLandDemarcation(
+    assetId: string,
+    payload: UpdateEstateManagedLandDemarcation
+  ): Promise<EstateManagedAsset> {
+    const response = await apiService.patch<{
+      success?: boolean;
+      data?: EstateManagedAsset;
+      message?: string;
+    }>(`/estate/managed-assets/${assetId}/demarcation`, payload);
+    if (!response.data)
+      throw new Error(response.message || 'Unable to update land demarcation.');
     return response.data;
   }
 

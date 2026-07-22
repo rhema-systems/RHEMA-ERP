@@ -947,12 +947,10 @@ public sealed class DocumentManagementController : ControllerBase
         {
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
-
         if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
         {
             return Forbid();
         }
-
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValues = await GetMetadataValuesAsync(tenantId, record.Id, cancellationToken);
         var accessRules = await GetActiveAccessRulesAsync(tenantId, cancellationToken);
@@ -2180,6 +2178,53 @@ public sealed class DocumentManagementController : ControllerBase
             Source: Estate / Facility -> Central DMS
             """),
         Template(
+            "EST-RATE-REVISION",
+            "Rate Revision Notice",
+            "Rate Revision - {{ApplicantName}}",
+            "EST-REG-FILE",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "OriginalAmount", "RevisedAmount", "EffectiveDate", "PaymentDeadline"],
+            """
+            {{Today}}
+
+            {{ApplicantName}}
+
+            RATE REVISION NOTICE
+
+            Please be informed that the rate payable for {{PropertyNumber}} under Estate reference {{CaseReference}} has been revised.
+
+            Original amount: {{OriginalAmount}}
+            Revised amount: {{RevisedAmount}}
+            Effective date: {{EffectiveDate}}
+            Payment deadline: {{PaymentDeadline}}
+
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
+            "EST-GR-DEMAND",
+            "Ground Rent Arrears Demand Letter",
+            "Ground Rent Demand - {{ApplicantName}}",
+            "EST-REG-FILE",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "OutstandingAmount", "GroundRent", "PaymentDeadline"],
+            """
+            {{Today}}
+
+            {{ApplicantName}}
+
+            GROUND RENT ARREARS DEMAND
+
+            Our records show outstanding ground rent for {{PropertyNumber}} under Estate reference {{CaseReference}}.
+
+            Ground rent payable: {{GroundRent}}
+            Outstanding amount: {{OutstandingAmount}}
+            Payment deadline: {{PaymentDeadline}}
+
+            Please settle the arrears or contact the Estate Section for reconciliation.
+
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
             "EST-CTC",
             "Certified True Copy",
             "Certified True Copy - {{PropertyNumber}}",
@@ -2279,6 +2324,47 @@ public sealed class DocumentManagementController : ControllerBase
 
             Lease purpose: {{LeasePurpose}}
             Required documents: {{RequiredDocuments}}
+
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
+            "EST-RENT-CARD",
+            "Rent Card",
+            "Rent Card - {{ApplicantName}}",
+            "EST-ALLOC-ROE",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "HouseType", "RentCardNumber", "DateOfTenancy", "GroundRent"],
+            """
+            RENT CARD
+
+            Tenant / purchaser: {{ApplicantName}}
+            Property / unit: {{PropertyNumber}}
+            House type: {{HouseType}}
+            Rent card number: {{RentCardNumber}}
+            Date of tenancy: {{DateOfTenancy}}
+            Ground rent: {{GroundRent}}
+            Estate reference: {{CaseReference}}
+
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
+            "EST-COMPLETION",
+            "Completion Letter",
+            "Completion Letter - {{ApplicantName}}",
+            "EST-ALLOC-ROE",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "CompletionBasis", "EffectiveDate", "RequiredNextAction"],
+            """
+            {{Today}}
+
+            {{ApplicantName}}
+
+            COMPLETION LETTER
+
+            The Estate Section confirms completion of {{CompletionBasis}} for {{PropertyNumber}} under reference {{CaseReference}}.
+
+            Effective date: {{EffectiveDate}}
+            Required next action: {{RequiredNextAction}}
 
             Prepared by: {{PreparedBy}}
             Source: Estate / Facility -> Central DMS
@@ -3212,7 +3298,7 @@ public sealed class DocumentManagementController : ControllerBase
                 && rule.AccessProfile == accessProfile)
             .ToListAsync(cancellationToken);
 
-        // Only users with upload rights may move a record into a protected profile.
+        // Do not let non-admin users reclassify a protected document into an access profile with no active rules.
         return rules.Count > 0
             && rules.Any(rule => rule.CanUpload
                 && (string.IsNullOrWhiteSpace(rule.RoleName)
